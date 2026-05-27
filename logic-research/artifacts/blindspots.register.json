@@ -1,0 +1,132 @@
+{
+  "std": "LW-RS/1",
+  "artifact": "blindspots.register",
+  "title": "Blindspots Register — what the world-map cannot currently see",
+  "generated": "2026-05-27T01:15:00Z",
+  "by": "opus",
+  "purpose": "Honest meta-layer required by PROTOCOL: log the extra-context search trail and where the map is blind (source-tier limits, source disagreements, modeled-not-measured figures, ungrounded gaps, process risks) so confidence is never read without its caveat. Mirrors notes/blindspots.jsonl (kind=blindspot); this file is the structured, groupable register.",
+  "severity_scale": {"l": "minor / not load-bearing", "m": "could mislead a claim or a non-critical decision", "h": "threatens a core decision or a P0/P1 directive if wrong"},
+  "status_scale": ["open", "mitigated", "closed", "unresolvable-by-research"],
+  "blindspots": [
+    {
+      "id": "wm-bs-cloud-share-drift",
+      "layer": "cloud",
+      "blindspot": "Synergy Q3 2025 (63% big-three; 29/20/13) vs CRN Q4 2025 (~68%; ~28/21/15) disagree — likely different metric/quarter, unreconciled.",
+      "queries_run": ["cloud infrastructure market share Q4 2025 AWS Azure Google Synergy Research percent"],
+      "surfaced": "Anchored map on Synergy Q3 (scraped); noted CRN Q4 as newer/possibly-different-metric.",
+      "caveat": "One analyst firm, one quarter; metric definitions not reconciled; no Canalys/IDC triangulation.",
+      "severity": "m",
+      "threatens": ["wm-cl-c-share", "world-map concentration narrative"],
+      "verify_to_close": "Pull Canalys + IDC quarterly tracker, reconcile CIS vs total-enterprise-spend definitions, fix the map on one quarter+metric.",
+      "status": "open"
+    },
+    {
+      "id": "wm-bs-egress-singlesource",
+      "layer": "cloud",
+      "blindspot": "Egress/storage per-GB rates ($0.09 AWS, $0.0085 OCI, hot $0.018-0.023) from one FinOps vendor blog, not official pricing pages.",
+      "queries_run": ["AWS Azure Google Cloud data egress pricing per GB 2025 comparison USD"],
+      "surfaced": "Corroborated across search snippets (CloudBolt, emma.ms) but not primary-verified.",
+      "caveat": "Tertiary source; regional/tiered exceptions not captured.",
+      "severity": "m",
+      "threatens": ["wm-cl-c-egress", "wm-cl-oh-egress-residency"],
+      "verify_to_close": "Scrape AWS, OCI, Azure, GCP official egress + object-storage pricing pages directly.",
+      "status": "open"
+    },
+    {
+      "id": "wm-bs-apirates-aggregator",
+      "layer": "cloud",
+      "blindspot": "Cloud LLM per-token rates from a third-party aggregator (April 2026 snapshot), not provider pages; rates drift monthly.",
+      "queries_run": ["LLM API pricing per million tokens 2026 GPT Claude Gemini input output cost comparison"],
+      "surfaced": "Coherent rate card; flagged hr:m for drift.",
+      "caveat": "Secondary aggregator; no fact-check vs OpenAI/Anthropic/Google pricing pages; likely stale within weeks.",
+      "severity": "m",
+      "threatens": ["wm-cl-c-apirates", "wm-cl-ad-hybrid-router cost model"],
+      "verify_to_close": "Scrape the three providers' pricing pages; wire the router cost model to a live-rate feed instead of a snapshot.",
+      "status": "open"
+    },
+    {
+      "id": "wm-bs-crossover-modeled",
+      "layer": "cloud",
+      "blindspot": "Inference crossover ($7.15/1M local vs $6.90/1M OpenAI) is a TCO MODEL on 50M-tok/day datacenter hardware, not measured, not consumer-device.",
+      "queries_run": ["on-device LLM inference cost vs cloud API price per million tokens 2025 Apple Neural Engine local"],
+      "surfaced": "Directional crossover + sensitivities (EU power 2x; refresh +$130-200k); flagged op:1 + hr:m.",
+      "caveat": "Modeled, single source, datacenter-scale — wrong granularity for our consumer-device router.",
+      "severity": "h",
+      "threatens": ["wm-cl-c-crossover", "dc-cloud-1", "dc-cloud-2", "wm-cl-ad-hybrid-router"],
+      "verify_to_close": "Replace with a measured/consumer-device TCO once the on-device curve is grounded.",
+      "status": "open"
+    },
+    {
+      "id": "wm-bs-ondevice-consumer-curve",
+      "layer": "cloud",
+      "blindspot": "No grounded data on real on-device inference throughput/cost for a baseline consumer device (Apple Neural Engine / M-series / NPU) at our token mix.",
+      "queries_run": [],
+      "surfaced": "Deferred this pass; sitepoint covers datacenter GPUs only.",
+      "caveat": "Highest-leverage unknown for the hybrid-router directive; router cost model is theoretical until closed.",
+      "severity": "h",
+      "threatens": ["wm-cl-ad-hybrid-router", "dc-cloud-2"],
+      "verify_to_close": "Benchmark Core ML / MLX / Ollama on M-series + a mid Android NPU for our token profile; emit measured $/token.",
+      "status": "open"
+    },
+    {
+      "id": "wm-bs-apple-pcc-terms",
+      "layer": "cloud",
+      "blindspot": "Apple Private Cloud Compute + Apple/Google on-device foundation-model third-party access terms ungrounded — premise of the dc-cloud-3 inference-gate claim.",
+      "queries_run": [],
+      "surfaced": "Flagged as gap wm-cl-g-apple-pcc; distinctive claim dc-cloud-3 kept at low confidence 0.48.",
+      "caveat": "Distinctive claim rests on an unverified premise.",
+      "severity": "m",
+      "threatens": ["dc-cloud-3", "wm-cl-g-apple-pcc"],
+      "verify_to_close": "Scrape Apple Foundation Models framework + Private Cloud Compute terms and Android AICore/Gemini Nano third-party terms.",
+      "status": "open"
+    },
+    {
+      "id": "wm-bs-cost-decline-tertiary",
+      "layer": "cloud",
+      "blindspot": "'10x/yr inference cost decline' is community/Reddit-sourced (tertiary), directional only.",
+      "queries_run": [],
+      "surfaced": "Capped c:0.50 st:T; not load-bearing.",
+      "caveat": "Primary (a16z/blog) not pulled; ordinal hint only.",
+      "severity": "l",
+      "threatens": ["wm-cl-c-decline"],
+      "verify_to_close": "Pull the primary cost-decline analysis if this becomes load-bearing.",
+      "status": "open"
+    },
+    {
+      "id": "wm-bs-single-source-grounding",
+      "layer": "meta",
+      "blindspot": "Most facts rest on one source per claim; few carry 2+ independent primary sources — wide but thinly triangulated map; correlated source error would pass uncaught.",
+      "queries_run": [],
+      "surfaced": "Observed reconciling notes/*; distribution + regulation best-grounded, cloud + SmartScreen-tertiary weakest.",
+      "caveat": "PROTOCOL principle 7 (base rates/triangulation) under-applied at the sweep tier; dialectic (T9) meant to catch it but only run on a subset.",
+      "severity": "m",
+      "threatens": ["whole world-map calibration"],
+      "verify_to_close": "Run T9 dialectic on all op:1 claims; require a 2nd independent source for any claim feeding a P0 directive.",
+      "status": "open"
+    },
+    {
+      "id": "wm-bs-stale-handoff",
+      "layer": "meta",
+      "blindspot": "HANDOFF.md drifted out of sync (claimed 'NOT STARTED' while T1-T7 + partial T8-T13 existed). Docs and data have no freshness/owner link.",
+      "queries_run": [],
+      "surfaced": "Reconciled manually from git + files; HANDOFF refreshed this pass.",
+      "caveat": "Future instance could trust a stale cold-start doc over the actual artifacts.",
+      "severity": "m",
+      "threatens": ["onboarding of the next processor instance"],
+      "verify_to_close": "Add a 'last-reconciled' stamp to HANDOFF and/or generate the status section from notes/claims automatically.",
+      "status": "mitigated"
+    },
+    {
+      "id": "wm-bs-euai-highrisk-unsettled",
+      "layer": "regulation",
+      "blindspot": "Whether mainstream OS AI features are Annex III high-risk under AI Act Art.6 is genuinely unsettled in law (pending delegated acts) — dc-reg-2 rests on an open question.",
+      "queries_run": [],
+      "surfaced": "Primary law text grounded; classification is forward-looking; flagged gap.",
+      "caveat": "Honest unresolved — cannot be closed by scraping, only by Commission action over time.",
+      "severity": "m",
+      "threatens": ["dc-reg-2", "EU launch scope/timing"],
+      "verify_to_close": "Track Commission delegated acts + harmonised guidance on high-risk classification through 2026.",
+      "status": "unresolvable-by-research"
+    }
+  ]
+}

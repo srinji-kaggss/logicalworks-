@@ -1,0 +1,14 @@
+# OS Spec — directive backlog (compiled by Q13; human promotes to GitHub issues)
+
+Status lifecycle: proposed → accepted → built → reversed (falsifier fired).
+
+| id | target | recommendation | priority | status | falsifier |
+|----|--------|----------------|----------|--------|-----------|
+| wm-arch-apple-local-residency | sovereignty | Implement local-first, peer-to-peer data replication protocols (CRDTs over local network transports) in Canvas OS to bypass Apple's hardware-bound iCloud locks and avoid CTC taxes by routing commerce off-store. | P0 | proposed | Apple permits zero-tax alternative web distribution channels that support arbitrary non-iCloud real-time database synchronizations natively. |
+| wm-arch-google-intent-router | ml | Deploy an on-device local intent router in Canvas OS that intercepts user queries at the browser/OS hook level and distributes them dynamically across local LLMs, privacy-preserving APIs, or local caches, bypassing Google's Chrome defaults and ad-supported SERPs. | P0 | proposed | Google introduces in-context ad units in Chrome's native LLM layer that consistently outperform local routing engines on cost and user experience. |
+| wm-arch-msft-sovereign-agent | sovereignty | Provide a decentralized, federated identity layer (e.g. self-sovereign DIDs) and local-first data residency scopes to allow open-source agent swarms to run directly on corporate datastores without requiring Microsoft Entra ID or M365 Copilot cloud-auth bundling. | P1 | proposed | Microsoft implements mandatory tenant-level compliance locks that block all external agent access to datastores unless authenticated through an active M365 paid seat. |
+| wm-arch-gov-modular-storage | sovereignty | Implement modular data residency adapters in Canvas OS that enforce strictly domestic or local-only storage partitions based on the user's IP/GPS geolocation. | P0 | proposed | Global data residency regulations are harmonized, legalizing unrestricted cross-border cloud transit of personal credit records. |
+| wm-arch-id-cable-relay | protocol | Implement a local network caBLE/Hybrid WebSocket relay server within the OS layer to intercept FIDO cross-device flows and run them over peer-to-peer encrypted channels, removing Google and Apple tunnel server dependency. | P1 | proposed | Relying party browsers enforce strict certificate pinning for native FIDO tunnel endpoints, blocking local socket redirection. |
+| wm-arch-id-eudi-client | sovereignty | Integrate a native OpenID4VCI and OpenID4VP protocol client into the OS sovereignty layer to support the storage and cryptographic presentation of SD-JWT VC format digital credentials (such as the EU PID). | P1 | proposed | EU digital wallets are restricted by regulation to runs on hardware verified exclusively by Apple/Google HSM attestations. |
+
+

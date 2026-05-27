@@ -1,0 +1,82 @@
+[
+  {
+    "std": "LW-RS/1",
+    "id": "dc-eco-1",
+    "topic": "ecosystems",
+    "model": "claude-sonnet-thinking",
+    "claim": "Messaging is not a cause of super-app success — it is one of two viable high-frequency control points. Alipay (1.3B users, full mini-program OS-layer, zero messaging) is the definitive refutation of the messaging-causation thesis that the field has been pattern-matching from WeChat alone.",
+    "type": "contrarian",
+    "basis": ["wm-eco-alipay-nomsg", "wm-eco-baserate", "wm-eco-wechat-dual"],
+    "sources": [
+      {"url": "https://medium.com/@sanguit/why-your-super-app-strategy-will-most-likely-fail-920623bb67ed", "date": "2026-05-27"},
+      {"url": "https://market.us/report/super-apps-market/", "date": "2026-05-27"},
+      {"url": "https://pmc.ncbi.nlm.nih.gov/articles/PMC10907532/", "date": "2026-05-27"}
+    ],
+    "confidence": 0.78,
+    "provenance": "elicited",
+    "why_distinctive": "The industry broadly talks about 'WeChat proved messaging is the entry point.' Alipay proves it isn't. This stake in the ground kills a dominant heuristic that is actively misleading product strategy decisions in the West.",
+    "falsifier": "A rigorous cross-case regression (n>20 super-app attempts) showing messaging-present correlates with OS-layer success at p<0.05, controlling for market context, would restore the messaging hypothesis.",
+    "verify": "Pull the full Kranenburg & Ziggers (2023) super-app taxonomy from PMC10907532 and extract cases by: (1) messaging present at launch Y/N, (2) OS-layer achieved Y/N. Run Fisher's exact test. If messaging-present cases show significantly higher OS-layer rates, reject this claim.",
+    "human_input": [
+      {
+        "by": "ai_drafted",
+        "stance": "nuance",
+        "note": "Director would likely qualify: messaging isn't the cause but it accelerates daily-frequency habit formation faster than payments alone — Alipay's path was slower and required Alibaba's e-commerce ecosystem as a substitute flywheel. The real variable is 'daily-frequency anchor' not 'messaging specifically.'",
+        "ts": "2026-05-27T00:16:41Z"
+      }
+    ]
+  },
+  {
+    "std": "LW-RS/1",
+    "id": "dc-eco-2",
+    "topic": "ecosystems",
+    "model": "claude-sonnet-thinking",
+    "claim": "The true failure mode of super-app ambitions is not technical complexity but single-point regulatory exposure: a payment licence, a data sovereignty order, or a sanctions regime can collapse the entire control point in a single regulatory action. 3 of 9 studied cases (Paytm, LINE, Yandex) demonstrate this — and all three failures were exogenous to product quality.",
+    "type": "synthesis",
+    "basis": ["wm-eco-reg-risk", "wm-eco-paytm-fail", "wm-eco-line-sov", "wm-eco-yandex-geop"],
+    "sources": [
+      {"url": "https://www.msn.com/en-in/news/insight/rbi-cancels-paytm-payments-bank-licence-seeks-winding-up/gm-GM78A572B8", "date": "2026-05-27"},
+      {"url": "https://www.theregister.com/security/2024/03/06/japan-orders-line-and-naver-to-disentangle-their-tech/1420673", "date": "2026-05-27"},
+      {"url": "https://nebius.com/newsroom/ynv-announces-successful-completion-of-the-divestment-of-its-russia-based-businesses", "date": "2026-05-27"}
+    ],
+    "confidence": 0.82,
+    "provenance": "elicited",
+    "why_distinctive": "Super-app analysis focuses almost entirely on product flywheel and network effects. This claim surfaces that regulatory concentration risk is equally or more likely to be the terminal cause of failure — and it is systematically underweighted in super-app strategy frameworks.",
+    "falsifier": "A super-app that survived a payments-licence revocation or data sovereignty order without losing >30% of its MAU within 12 months would significantly weaken this claim.",
+    "verify": "Survey all payment-licence actions by major regulators (RBI, MAS, PBoC, EU) against consumer super-apps since 2020. Tally: how many apps with OS-layer ambitions received enforcement actions? What was MAU trajectory 12mo post-action? Dataset: central bank enforcement registers + app store MAU data.",
+    "human_input": [
+      {
+        "by": "ai_drafted",
+        "stance": "extend",
+        "note": "Director would likely push further: this regulatory fragility means the OS-layer is only durable if it is the regulator's preferred outcome — i.e., the app is domestically owned, data-sovereign, and considered nationally strategic (see WeChat, Alipay under CCP structure). The corollary: western super-apps will never achieve the same durability because western regulators are adversarial rather than enabling.",
+        "ts": "2026-05-27T00:16:41Z"
+      }
+    ]
+  },
+  {
+    "std": "LW-RS/1",
+    "id": "dc-eco-3",
+    "topic": "ecosystems",
+    "model": "claude-sonnet-thinking",
+    "claim": "Grab ($3.37B FY2025 revenue, +20% YoY) and GoTo (narrowing losses, record GTV FY2024) demonstrate that you can build a highly profitable regional services business on a super-app chassis without ever achieving OS-layer status. The 'glorified app bundle' outcome is commercially viable — the OS-layer is a stretch goal, not a prerequisite for returns.",
+    "type": "implication",
+    "basis": ["wm-eco-grab-partial", "wm-eco-goto-partial"],
+    "sources": [
+      {"url": "https://www.reddit.com/r/malaysia/comments/1rzh8wv/", "date": "2026-05-27"},
+      {"url": "https://www.gotocompany.com/en/news/press/goto-group-beats-guidance-with-record-results-as-it-reports-2024-fourth-quarter-and-full-year-earnings", "date": "2026-05-27"}
+    ],
+    "confidence": 0.72,
+    "provenance": "elicited",
+    "why_distinctive": "Strategy discussions frame OS-layer as the only worthy destination. This claim argues the 'bundle' outcome is a defensible commercial end state — shifting the strategic question from 'how do we become an OS' to 'what is the minimum control-point needed for durable margins.'",
+    "falsifier": "If Grab or GoTo are displaced from their local-services verticals by a competitor that does achieve OS-layer status (full payment primacy), the bundle outcome would be shown to be a temporary rather than durable position.",
+    "verify": "Track Grab and GoTo adjusted EBITDA margins quarterly 2025-2027. If margins hold or improve without GrabPay/GoPay crossing 40% primary-wallet share, the 'commercially viable bundle' thesis holds. If they compress under OS-layer competitor pressure, the thesis fails.",
+    "human_input": [
+      {
+        "by": "ai_drafted",
+        "stance": "refine",
+        "note": "Director would likely qualify: the bundle is commercially viable only in markets without a true OS-layer incumbent. The moment WeChat or an equivalent enters a market, the bundle player is structurally squeezed. So the viability is market-dependent, not universal.",
+        "ts": "2026-05-27T00:16:41Z"
+      }
+    ]
+  }
+]

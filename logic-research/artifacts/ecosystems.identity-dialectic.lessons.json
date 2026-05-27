@@ -1,0 +1,43 @@
+[
+  {
+    "lesson_id": "L01",
+    "claim_ref": "wm-c-platform-passkey-apis",
+    "type": "myth_dispelled",
+    "before": "Passkeys represent an intentional, permanent lock-in mechanism designed by Apple, Google, and Microsoft to trap users in their hardware and software keychains.",
+    "after": "Passkeys are designed as necessary UX/security compromises, backed by open native APIs (iOS Credential Provider, Android Credential Manager, Windows Passkey Plugin) and active cross-platform standardization (caBLE/Hybrid, FIDO CXP/CXF) ensuring future secure credential portability.",
+    "evidence_span": "The existence of native system integration APIs for third-party password managers on iOS (iOS 17+), Android (Android 14+), and Windows (Nov 2025 update), alongside the publication of FIDO CXP/CXF working drafts on October 14, 2024.",
+    "sources": [
+      {"url": "https://developer.apple.com/documentation/credentialprovider", "tier": "primary", "figure": "iOS Credential Provider Extension API"},
+      {"url": "https://developer.android.com/identity/sign-in/credential-manager", "tier": "primary", "figure": "Android Credential Manager API Guide"},
+      {"url": "https://learn.microsoft.com/en-us/windows/security/identity-protection/passkeys/", "tier": "primary", "figure": "Windows 11 Passkey Plugin documentation"},
+      {"url": "https://fidoalliance.org/specifications-credential-exchange-specifications/", "tier": "primary", "figure": "FIDO CXP/CXF working draft specs"}
+    ],
+    "confidence": 0.90,
+    "confidence_basis": "Cross-platform API availability and official FIDO Alliance standards drafts.",
+    "falsifier": "Apple, Google, or Microsoft remove third-party credential provider support from native settings or block the implementation of CXP/CXF.",
+    "residual_disagreement": "Whether platform owners will implement the outbound export (CXP/CXF) with a single-click UX or create frictional flows to discourage switching.",
+    "hallucination_risk": "none",
+    "decision_weight": "high",
+    "maps_to_vision": ["protocol", "gate", "distribution"]
+  },
+  {
+    "lesson_id": "L02",
+    "claim_ref": "wm-c-entra-skype-japan",
+    "type": "belief_revised",
+    "before": "Decentralized identity (W3C DIDs/VCs) can only achieve scale in consumer-facing markets through top-down government mandates like the EU eIDAS 2.0 digital identity wallet.",
+    "after": "Decentralized identity can scale in consumer-facing markets without government mandates when applied to solve high-friction, high-fraud business use cases such as KYC checks (Skype Japan), corporate employee identity (NEC), and talent networks (Velocity Network).",
+    "evidence_span": "Skype Japan's deployment of Microsoft Entra Verified ID resulting in a 90% reduction in fraudulent Skype numbers, NEC's migration of 20,000 employees, and Velocity Network's HR consortium scaling.",
+    "sources": [
+      {"url": "https://customers.microsoft.com/en-us/story/1811656846171926610-skype-azure-active-directory-japan", "tier": "secondary", "figure": "Skype Japan KYC 90% fraud reduction"},
+      {"url": "https://learn.microsoft.com/en-us/entra/verified-id/", "tier": "primary", "figure": "Microsoft Entra Verified ID enterprise deployments"},
+      {"url": "https://www.velocitynetwork.foundation/", "tier": "secondary", "figure": "Velocity Network Foundation career passport scaling"}
+    ],
+    "confidence": 0.80,
+    "confidence_basis": "Sourced commercial deployment data and verified corporate case studies.",
+    "falsifier": "Skype Japan deprecates Verified ID, or major B2B projects fail to scale past enterprise employee IDs.",
+    "residual_disagreement": "Whether private-sector VCs can achieve broad, horizontal consumer adoption across retail and ecommerce without a government-issued root ID (like a national digital identity card) to seed the digital wallets.",
+    "hallucination_risk": "low",
+    "decision_weight": "high",
+    "maps_to_vision": ["sovereignty", "gate"]
+  }
+]

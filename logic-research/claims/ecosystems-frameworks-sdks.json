@@ -1,0 +1,83 @@
+{
+  "std": "LW-RS/1",
+  "claims": [
+    {
+      "id": "dc-fs-1",
+      "topic": "frameworks-sdks",
+      "model": "copilot",
+      "claim": "By default, competitive SDK ecosystems will converge on workload identity/OIDC and make long-lived API keys a legacy compatibility mode.",
+      "type": "prediction",
+      "basis": ["wm-c-fs-identity", "wm-fs-sdks"],
+      "sources": [
+        {"url": "https://github.com/openai/openai-node", "date": "2026-05-26"},
+        {"url": "https://github.com/anthropics/anthropic-sdk-typescript", "date": "2026-05-26"},
+        {"url": "https://github.com/Azure/azure-sdk-for-js", "date": "2026-05-26"}
+      ],
+      "confidence": 0.78,
+      "provenance": "elicited",
+      "why_distinctive": "It reframes auth strategy as an ecosystem trajectory rather than provider-specific feature checklists.",
+      "falsifier": "Primary providers formally reassert API-key-first production guidance and remove federation pathways from default docs/tooling.",
+      "verify": "Track top-level auth guidance in official SDK docs/release notes across four quarters and classify default examples.",
+      "human_input": [
+        {
+          "by": "ai_drafted",
+          "stance": "nuance",
+          "note": "Treat this as directionally strong but rollout-speed variable; multi-cloud operational maturity will determine adoption pace more than SDK capability alone.",
+          "ts": "2026-05-26T23:45:00Z"
+        }
+      ]
+    },
+    {
+      "id": "dc-fs-2",
+      "topic": "frameworks-sdks",
+      "model": "copilot",
+      "claim": "In SDK-heavy systems, release governance discipline now contributes more to reliability than adding bespoke abstraction layers over SDKs.",
+      "type": "synthesis",
+      "basis": ["wm-c-fs-defaults-risk", "wm-l-fs-upgrade-discipline"],
+      "sources": [
+        {"url": "https://github.com/stripe/stripe-node", "date": "2026-05-26"},
+        {"url": "https://github.com/supabase/supabase-js", "date": "2026-05-26"},
+        {"url": "https://firebase.google.com/support/release-notes/js", "date": "2026-05-26"}
+      ],
+      "confidence": 0.8,
+      "provenance": "elicited",
+      "why_distinctive": "It shifts reliability investment from code abstraction effort to version-policy and rollout controls.",
+      "falsifier": "Organizations with weak release governance but heavy custom wrappers consistently outperform teams with strong governance and minimal wrappers.",
+      "verify": "Compare incident and rollback rates across teams with different governance-vs-wrapper investment profiles.",
+      "human_input": [
+        {
+          "by": "ai_drafted",
+          "stance": "refine",
+          "note": "Wrappers still matter for domain boundaries, but they should not substitute for dependency governance, changelog triage, and controlled rollout lanes.",
+          "ts": "2026-05-26T23:45:00Z"
+        }
+      ]
+    },
+    {
+      "id": "dc-fs-3",
+      "topic": "frameworks-sdks",
+      "model": "copilot",
+      "claim": "The winning developer teams in 2026 will be those that formalize framework runtime directives as policy artifacts, not those that rely on tribal memory and ad-hoc review.",
+      "type": "implication",
+      "basis": ["wm-c-fs-explicit-runtime", "wm-a-fs-runtime-policy"],
+      "sources": [
+        {"url": "https://nextjs.org/docs/app/getting-started/caching", "date": "2026-05-26"},
+        {"url": "https://nuxt.com/docs/4.x/getting-started/data-fetching", "date": "2026-05-26"},
+        {"url": "https://docs.astro.build/en/concepts/islands/", "date": "2026-05-26"}
+      ],
+      "confidence": 0.82,
+      "provenance": "elicited",
+      "why_distinctive": "It treats runtime directives as governance primitives and predicts execution advantage from policy codification.",
+      "falsifier": "High-change teams without formal runtime-policy codification maintain equal defect and delivery outcomes over multiple release cycles.",
+      "verify": "Measure boundary-defect density and lead time across teams before and after codifying runtime-directive policy gates.",
+      "human_input": [
+        {
+          "by": "ai_drafted",
+          "stance": "extend",
+          "note": "Apply this first to high-blast-radius surfaces (cache invalidation, hydration, webhook handling) before broad policy expansion.",
+          "ts": "2026-05-26T23:45:00Z"
+        }
+      ]
+    }
+  ]
+}

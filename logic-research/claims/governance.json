@@ -1,0 +1,65 @@
+{
+  "std": "LW-RS/1",
+  "claims": [
+    {
+      "id": "dc-gov-1",
+      "topic": "governance",
+      "model": "gemini",
+      "claim": "National security data residency mandates (exemplified by Japan's MIC guidance on LINE/Naver) will force multi-national super-app platforms to divide into legally and infrastructurally distinct regional entities, permanently fragmenting global consumer cloud economies of scale.",
+      "type": "prediction",
+      "basis": [
+        "wm-gov-jp-mic",
+        "wm-claim-mic-lycorp-sep"
+      ],
+      "sources": [
+        {
+          "url": "https://www.lycorp.co.jp/en/news/2024/20240701_report/",
+          "date": "2026-05-26"
+        }
+      ],
+      "confidence": 0.75,
+      "provenance": "elicited",
+      "why_distinctive": "It forecasts that geopolitical security concerns will override economic efficiency, forcing the system-level dissolution of unified cross-border database integrations for consumer platforms.",
+      "falsifier": "Eurasian and Asian telecom gatekeepers successfully maintain unified cross-border user database backends under a single corporate group without local-first system separations.",
+      "verify": "Verify whether LY Corporation continues its system separation from Naver Cloud and if other regional players in APAC implement duplicate infrastructure rather than shared platforms.",
+      "human_input": [
+        {
+          "by": "ai_drafted",
+          "stance": "nuance",
+          "note": "The director might highlight that this fragmentation creates a market opportunity for Canvas OS to sell federated compliance adapters that act as a translation layer between these isolated systems.",
+          "ts": "2026-05-26T23:40:00Z"
+        }
+      ]
+    },
+    {
+      "id": "dc-gov-2",
+      "topic": "governance",
+      "model": "gemini",
+      "claim": "South Korea's PIPC enforcement actions against Kakao Pay signal the closure of stealth credit-score data exchanges, rendering centralized user-scoring SaaS loops illegal unless user profiles and telemetry calculations are handled entirely in local-first client sandboxes.",
+      "type": "interpretation",
+      "basis": [
+        "wm-gov-kr-pipa",
+        "wm-claim-pipc-kakao-pay"
+      ],
+      "sources": [
+        {
+          "url": "https://www.dataguidance.com/news/south-korea-pipc-fines-kakao-pay-and-apple-violating",
+          "date": "2026-05-26"
+        }
+      ],
+      "confidence": 0.75,
+      "provenance": "elicited",
+      "why_distinctive": "It asserts that PII-based credit-scoring and credit-risk modeling (e.g. Alipay NSF score calculation models) cannot legally survive in centralized clouds, making local-first client-side scoring engines a regulatory necessity rather than a design choice.",
+      "falsifier": "South Korean regulators relax consent guidelines to allow anonymized credit telemetry to be sent to centralized cloud platforms without explicit individual opt-in.",
+      "verify": "Audit South Korea PIPC rulings on credit data transmission to check if anonymized cloud transfers are exempted from consent requirements.",
+      "human_input": [
+        {
+          "by": "ai_drafted",
+          "stance": "refine",
+          "note": "The director will likely emphasize that zero-knowledge proofs (ZKPs) should be deployed in Canvas OS's sovereignty layer to prove credit scoring metrics to third-party gateways without exposing raw PII records.",
+          "ts": "2026-05-26T23:40:00Z"
+        }
+      ]
+    }
+  ]
+}

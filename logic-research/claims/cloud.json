@@ -1,0 +1,64 @@
+{
+  "std": "LW-RS/1",
+  "claims": [
+    {
+      "id": "dc-cloud-1",
+      "topic": "cloud",
+      "model": "opus",
+      "claim": "For an AI-native OS-layer, the big three's 63% compute concentration plus per-GB egress tax make hyperscaler-native architecture a liability to route around, not a platform to adopt. The cheapest robust posture is local-first inference + data residency, with cheap cloud APIs ($0.10/1M input tier) as burst capacity and frontier cloud reserved for hard reasoning - exactly inverting the default startup instinct to build cloud-native and optimise later.",
+      "type": "synthesis",
+      "basis": ["wm-cl-c-share", "wm-cl-c-egress", "wm-cl-c-crossover", "wm-cl-oh-hybrid-router", "wm-cl-oh-egress-residency"],
+      "sources": [
+        {"url": "https://www.srgresearch.com/articles/cloud-market-share-trends-big-three-together-hold-63-while-oracle-and-the-neoclouds-inch-higher", "date": "2026-05-27"},
+        {"url": "https://www.finout.io/blog/cloud-storage-pricing-comparison", "date": "2026-05-27"}
+      ],
+      "confidence": 0.62,
+      "provenance": "elicited",
+      "why_distinctive": "Inverts the conventional cloud-native default: treats hyperscaler gravity (concentration + egress lock-in) as the thing the wedge exploits, and frames local-first as the cost-optimal AND sovereignty-optimal base case rather than a niche privacy play.",
+      "falsifier": "A grounded TCO for our actual workload shows cloud-native total cost (including egress and frontier calls) beating local-first + burst by a clear margin at our realistic volume.",
+      "verify": "Build the wm-ad-hybrid-router cost model with live pecollective/provider rates + measured on-device $/token for a baseline device, then run our projected token mix through it and compare against an all-cloud baseline.",
+      "human_input": [
+        {"by": "ai_drafted", "stance": "nuance", "note": "Director would likely frame this as: 'we are a plugin to the internet, not a tenant of it - the cloud is a metered utility we arbitrage, and owning the data-residency boundary is the point, with cost parity a bonus not the driver.'", "ts": "2026-05-27T01:00:00Z"}
+      ]
+    },
+    {
+      "id": "dc-cloud-2",
+      "topic": "cloud",
+      "model": "opus",
+      "claim": "Open-weight cloud APIs at ~$1.97/1M tokens undercutting both frontier cloud and owned hardware ($7.15/1M heavy-tier) will, by ~2027, kill the 'own GPUs to save money' case for all but privacy-, latency-, or sovereignty-bound workloads. The durable reason to run on-device will be control, not price - so our on-device story must be sold on sovereignty, never on cost.",
+      "type": "prediction",
+      "basis": ["wm-cl-c-crossover", "wm-cl-c-apirates", "wm-cl-c-decline", "wm-cl-ondevice"],
+      "sources": [
+        {"url": "https://www.sitepoint.com/local-llms-vs-cloud-api-cost-analysis-2026/", "date": "2026-05-27"},
+        {"url": "https://pecollective.com/blog/llm-api-pricing-comparison/", "date": "2026-05-27"}
+      ],
+      "confidence": 0.5,
+      "provenance": "elicited",
+      "why_distinctive": "Most local-LLM advocacy leans on a cost argument; this claims the cost argument is evaporating under open-weight API competition and the ~10x/yr decline, and that betting our wedge's on-device pitch on price is a trap.",
+      "falsifier": "Open-weight API pricing stalls or rises while frontier-capability open weights stop appearing, so owned hardware remains the cheapest path to capable inference past 2027.",
+      "verify": "Track open-weight hosted API $/1M (e.g. Together, Fireworks, DeepInfra) vs owned-hardware amortised $/1M quarterly through 2026-2027; watch whether the gap holds at ~3-4x.",
+      "human_input": [
+        {"by": "ai_drafted", "stance": "nuance", "note": "Director would likely qualify: 'agreed price is a losing pitch - but on-device is non-negotiable for us because the tape and user data must never leave the boundary; we run local because sovereignty is the product, and we let the cheap APIs do the commodity work.'", "ts": "2026-05-27T01:00:00Z"}
+      ]
+    },
+    {
+      "id": "dc-cloud-3",
+      "topic": "cloud",
+      "model": "opus",
+      "claim": "The next compute moat is not price but bundling at the inference layer: Apple (Private Cloud Compute + on-device foundation models) and Google (Gemini Nano in-OS) can subsidise first-party local inference while metering or rate-limiting third-party access to the same NPU/PCC, recreating the app-store gate one layer down. An OS-layer that depends on platform-provided on-device models inherits a new chokepoint.",
+      "type": "implication",
+      "basis": ["wm-cl-g-apple-pcc", "wm-cl-ondevice", "wm-cl-oh-hybrid-router"],
+      "sources": [
+        {"url": "https://www.sitepoint.com/local-llms-vs-cloud-api-cost-analysis-2026/", "date": "2026-05-27"}
+      ],
+      "confidence": 0.48,
+      "provenance": "elicited",
+      "why_distinctive": "Reframes 'on-device AI' from a democratising force into a potential new gatekeeping surface, and warns that our hybrid router must ship its own bundled weights rather than lean on Apple/Google foundation-model APIs.",
+      "falsifier": "Apple and Google expose on-device/PCC foundation-model inference to third-party apps on equal, unmetered terms with first-party apps and keep it that way.",
+      "verify": "Read Apple Foundation Models framework + Private Cloud Compute terms and Android AICore/Gemini Nano access terms for third-party rate limits, attestation requirements, and first-party carve-outs.",
+      "human_input": [
+        {"by": "ai_drafted", "stance": "nuance", "note": "Director would likely frame: 'this is the app-store fight again - so we carry our own model weights and our own router; never let the inference primitive be something Apple or Google can throttle. Independence at the model layer is the same sovereignty principle as independence at the distribution layer.'", "ts": "2026-05-27T01:00:00Z"}
+      ]
+    }
+  ]
+}

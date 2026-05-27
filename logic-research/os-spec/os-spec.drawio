@@ -1,0 +1,95 @@
+<mxfile host="app.diagrams.net" type="device">
+  <!-- COMPILED ARTIFACT. Do not hand-edit cells the compiler owns; re-run Q13 to regenerate.
+       Cell-id convention: os.<layer> = our OS layer; w.<pingId> = world node; h.<pingId> = os_hook;
+       d.<pingId> = arch_directive. Tabs below are seeded skeletons showing the format + mapping. -->
+  <diagram name="us↔world ERD" id="erd">
+    <mxGraphModel dx="1024" dy="720" grid="1" gridSize="10" guides="1" tooltips="1" connect="1" arrows="1" fold="1" page="1" pageScale="1" pageWidth="1169" pageHeight="826" math="0" shadow="0">
+      <root>
+        <mxCell id="0"/>
+        <mxCell id="1" parent="0"/>
+        <mxCell id="us" value="Logical Works OS (us)" style="rounded=1;fillColor=#ECFDF5;strokeColor=#047857;verticalAlign=top;fontStyle=1;align=center" vertex="1" parent="1"><mxGeometry x="40" y="40" width="300" height="360" as="geometry"/></mxCell>
+        <mxCell id="os.protocol" value="protocol — canvas-protocol envelopes" style="rounded=1;fillColor=#FBFAF6;strokeColor=#0F172A" vertex="1" parent="us"><mxGeometry x="20" y="36" width="260" height="34" as="geometry"/></mxCell>
+        <mxCell id="os.gate" value="gate — handoff allow/deny/escalate" style="rounded=1;fillColor=#FBFAF6;strokeColor=#0F172A" vertex="1" parent="us"><mxGeometry x="20" y="78" width="260" height="34" as="geometry"/></mxCell>
+        <mxCell id="os.tape" value="tape — append-only event log" style="rounded=1;fillColor=#FBFAF6;strokeColor=#0F172A" vertex="1" parent="us"><mxGeometry x="20" y="120" width="260" height="34" as="geometry"/></mxCell>
+        <mxCell id="os.widget" value="widget — zones (caller/record/…)" style="rounded=1;fillColor=#FBFAF6;strokeColor=#0F172A" vertex="1" parent="us"><mxGeometry x="20" y="162" width="260" height="34" as="geometry"/></mxCell>
+        <mxCell id="os.ml" value="ml — prediction / orchestration" style="rounded=1;fillColor=#FBFAF6;strokeColor=#0F172A" vertex="1" parent="us"><mxGeometry x="20" y="204" width="260" height="34" as="geometry"/></mxCell>
+        <mxCell id="os.sovereignty" value="sovereignty — E2EE, user-owned compute" style="rounded=1;fillColor=#FBFAF6;strokeColor=#0F172A" vertex="1" parent="us"><mxGeometry x="20" y="246" width="260" height="34" as="geometry"/></mxCell>
+        <mxCell id="os.distribution" value="distribution — extension/native/web" style="rounded=1;fillColor=#FBFAF6;strokeColor=#0F172A" vertex="1" parent="us"><mxGeometry x="20" y="288" width="260" height="34" as="geometry"/></mxCell>
+        <mxCell id="world" value="World (compiled from `node` pings, grouped by layer)" style="rounded=1;fillColor=#F1F5F9;strokeColor=#64748B;verticalAlign=top;fontStyle=1;align=center" vertex="1" parent="1"><mxGeometry x="720" y="40" width="380" height="540" as="geometry"/></mxCell>
+        <mxCell id="w.EXAMPLE-appstores" value="App stores — Apple / Google [distribution]" style="rounded=1;fillColor=#FFFFFF;strokeColor=#64748B" vertex="1" parent="world"><mxGeometry x="20" y="40" width="340" height="34" as="geometry"/></mxCell>
+        <mxCell id="w.EXAMPLE-cloud" value="Hyperscalers — AWS/Azure/GCP [cloud]" style="rounded=1;fillColor=#FFFFFF;strokeColor=#64748B" vertex="1" parent="world"><mxGeometry x="20" y="86" width="340" height="34" as="geometry"/></mxCell>
+        <mxCell id="w.EXAMPLE-idp" value="IdPs — Google/Apple/Microsoft [identity]" style="rounded=1;fillColor=#FFFFFF;strokeColor=#64748B" vertex="1" parent="world"><mxGeometry x="20" y="132" width="340" height="34" as="geometry"/></mxCell>
+        <mxCell id="w.EXAMPLE-gap" value="? unverified — needs a research pass" style="rounded=1;dashed=1;fillColor=none;strokeColor=#94A3B8;fontStyle=2" vertex="1" parent="world"><mxGeometry x="20" y="178" width="340" height="34" as="geometry"/></mxCell>
+        <mxCell id="h.EXAMPLE-1" value="gated by (os_hook)" style="endArrow=block;strokeColor=#047857;fontColor=#047857" edge="1" parent="1" source="os.distribution" target="w.EXAMPLE-appstores"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="h.EXAMPLE-2" value="depends_on" style="endArrow=open;strokeColor=#0F172A" edge="1" parent="1" source="os.tape" target="w.EXAMPLE-cloud"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="h.EXAMPLE-3" value="depends_on" style="endArrow=open;strokeColor=#0F172A" edge="1" parent="1" source="os.sovereignty" target="w.EXAMPLE-idp"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="legend.erd" value="Legend: green=us · grey=world · dashed=unverified(gap) · edge label=relation/os_hook touchpoint" style="text;align=left;fontSize=11;fontColor=#64748B" vertex="1" parent="1"><mxGeometry x="40" y="420" width="660" height="20" as="geometry"/></mxCell>
+      </root>
+    </mxGraphModel>
+  </diagram>
+  <diagram name="architecture" id="arch">
+    <mxGraphModel dx="1024" dy="720" grid="1" gridSize="10" guides="1" tooltips="1" connect="1" arrows="1" fold="1" page="1" pageScale="1" pageWidth="1169" pageHeight="826" math="0" shadow="0">
+      <root>
+        <mxCell id="0"/>
+        <mxCell id="1" parent="0"/>
+        <mxCell id="a.intent" value="IntentEnvelope (user)" style="rounded=1;fillColor=#FBFAF6;strokeColor=#0F172A" vertex="1" parent="1"><mxGeometry x="60" y="80" width="180" height="44" as="geometry"/></mxCell>
+        <mxCell id="a.signal" value="SignalEnvelope (widget/system/ml)" style="rounded=1;fillColor=#FBFAF6;strokeColor=#0F172A" vertex="1" parent="1"><mxGeometry x="300" y="80" width="220" height="44" as="geometry"/></mxCell>
+        <mxCell id="a.gate" value="gate — allow / deny / escalate" style="rounded=1;fillColor=#ECFDF5;strokeColor=#047857" vertex="1" parent="1"><mxGeometry x="580" y="80" width="200" height="44" as="geometry"/></mxCell>
+        <mxCell id="a.tape" value="tape — append-only event log" style="rounded=1;fillColor=#FBFAF6;strokeColor=#0F172A" vertex="1" parent="1"><mxGeometry x="580" y="170" width="200" height="44" as="geometry"/></mxCell>
+        <mxCell id="a.widget" value="widget host — zones" style="rounded=1;fillColor=#FBFAF6;strokeColor=#0F172A" vertex="1" parent="1"><mxGeometry x="840" y="80" width="180" height="44" as="geometry"/></mxCell>
+        <mxCell id="a.ml" value="ml — PredictionEnvelope" style="rounded=1;fillColor=#FBFAF6;strokeColor=#0F172A;dashed=1" vertex="1" parent="1"><mxGeometry x="300" y="170" width="220" height="44" as="geometry"/></mxCell>
+        <mxCell id="a.e1" style="endArrow=block;strokeColor=#0F172A" edge="1" parent="1" source="a.intent" target="a.signal"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="a.e2" style="endArrow=block;strokeColor=#047857" edge="1" parent="1" source="a.signal" target="a.gate"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="a.e3" value="passed" style="endArrow=block;strokeColor=#047857" edge="1" parent="1" source="a.gate" target="a.widget"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="a.e4" value="logged" style="endArrow=open;strokeColor=#0F172A" edge="1" parent="1" source="a.gate" target="a.tape"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="a.e5" style="endArrow=open;dashed=1;strokeColor=#64748B" edge="1" parent="1" source="a.ml" target="a.signal"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="d.EXAMPLE-directive" value="DIRECTIVE d.EXAMPLE: ship extension install path [target=distribution] — status: proposed" style="rounded=1;fillColor=#FEF3C7;strokeColor=#B45309;fontStyle=2;align=left" vertex="1" parent="1"><mxGeometry x="60" y="280" width="700" height="34" as="geometry"/></mxCell>
+        <mxCell id="legend.arch" value="Fill: amber=proposed · light-green=accepted · solid-green=built · dashed=unverified/inferred" style="text;align=left;fontSize=11;fontColor=#64748B" vertex="1" parent="1"><mxGeometry x="60" y="330" width="700" height="20" as="geometry"/></mxCell>
+      </root>
+    </mxGraphModel>
+  </diagram>
+  <diagram name="compliance scopes" id="comp">
+    <mxGraphModel dx="1024" dy="720" grid="1" gridSize="10" guides="1" tooltips="1" connect="1" arrows="1" fold="1" page="1" pageScale="1" pageWidth="1169" pageHeight="826" math="0" shadow="0">
+      <root>
+        <mxCell id="0"/>
+        <mxCell id="1" parent="0"/>
+        <mxCell id="c.gdpr" value="GDPR / PIPEDA (personal data)" style="rounded=1;fillColor=#FEF2F2;strokeColor=#B91C1C" vertex="1" parent="1"><mxGeometry x="60" y="60" width="200" height="40" as="geometry"/></mxCell>
+        <mxCell id="c.dma" value="EU DMA (gatekeeper/interop)" style="rounded=1;fillColor=#FEF2F2;strokeColor=#B91C1C" vertex="1" parent="1"><mxGeometry x="60" y="140" width="200" height="40" as="geometry"/></mxCell>
+        <mxCell id="c.aiact" value="EU AI Act (risk tiers)" style="rounded=1;fillColor=#FEF2F2;strokeColor=#B91C1C" vertex="1" parent="1"><mxGeometry x="60" y="220" width="200" height="40" as="geometry"/></mxCell>
+        <mxCell id="cs.tape" value="tape (PII at rest, audit)" style="rounded=1;fillColor=#FBFAF6;strokeColor=#0F172A" vertex="1" parent="1"><mxGeometry x="520" y="60" width="200" height="40" as="geometry"/></mxCell>
+        <mxCell id="cs.sov" value="sovereignty (E2EE, data residency)" style="rounded=1;fillColor=#FBFAF6;strokeColor=#0F172A" vertex="1" parent="1"><mxGeometry x="520" y="140" width="200" height="40" as="geometry"/></mxCell>
+        <mxCell id="cs.ml" value="ml (automated decisions)" style="rounded=1;fillColor=#FBFAF6;strokeColor=#0F172A" vertex="1" parent="1"><mxGeometry x="520" y="220" width="200" height="40" as="geometry"/></mxCell>
+        <mxCell id="ce.1" value="lawful basis + DSAR + erasure" style="endArrow=block;strokeColor=#B91C1C" edge="1" parent="1" source="c.gdpr" target="cs.tape"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="ce.2" value="data residency / E2EE" style="endArrow=block;strokeColor=#B91C1C" edge="1" parent="1" source="c.gdpr" target="cs.sov"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="ce.3" value="interop / no self-preference" style="endArrow=block;strokeColor=#B91C1C" edge="1" parent="1" source="c.dma" target="cs.sov"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="ce.4" value="transparency + human oversight" style="endArrow=block;strokeColor=#B91C1C" edge="1" parent="1" source="c.aiact" target="cs.ml"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="legend.comp" value="Left=regime (node, layer=regulation) · Right=OS layer touched · edge=obligation (from a sourced claim)" style="text;align=left;fontSize=11;fontColor=#64748B" vertex="1" parent="1"><mxGeometry x="60" y="300" width="760" height="20" as="geometry"/></mxCell>
+      </root>
+    </mxGraphModel>
+  </diagram>
+  <diagram name="compute requirements" id="cmp">
+    <mxGraphModel dx="1024" dy="720" grid="1" gridSize="10" guides="1" tooltips="1" connect="1" arrows="1" fold="1" page="1" pageScale="1" pageWidth="1169" pageHeight="826" math="0" shadow="0">
+      <root>
+        <mxCell id="0"/>
+        <mxCell id="1" parent="0"/>
+        <mxCell id="t.h0" value="component" style="rounded=0;fillColor=#0F172A;fontColor=#FFFFFF;fontStyle=1" vertex="1" parent="1"><mxGeometry x="40" y="40" width="180" height="30" as="geometry"/></mxCell>
+        <mxCell id="t.h1" value="placement" style="rounded=0;fillColor=#0F172A;fontColor=#FFFFFF;fontStyle=1" vertex="1" parent="1"><mxGeometry x="220" y="40" width="160" height="30" as="geometry"/></mxCell>
+        <mxCell id="t.h2" value="workload" style="rounded=0;fillColor=#0F172A;fontColor=#FFFFFF;fontStyle=1" vertex="1" parent="1"><mxGeometry x="380" y="40" width="260" height="30" as="geometry"/></mxCell>
+        <mxCell id="t.h3" value="scaling driver" style="rounded=0;fillColor=#0F172A;fontColor=#FFFFFF;fontStyle=1" vertex="1" parent="1"><mxGeometry x="640" y="40" width="240" height="30" as="geometry"/></mxCell>
+        <mxCell id="t.r1c0" value="gate" style="rounded=0;fillColor=#FBFAF6;strokeColor=#0F172A" vertex="1" parent="1"><mxGeometry x="40" y="70" width="180" height="30" as="geometry"/></mxCell>
+        <mxCell id="t.r1c1" value="on-device + edge" style="rounded=0;fillColor=#FFFFFF;strokeColor=#0F172A" vertex="1" parent="1"><mxGeometry x="220" y="70" width="160" height="30" as="geometry"/></mxCell>
+        <mxCell id="t.r1c2" value="policy eval per action (low-latency)" style="rounded=0;fillColor=#FFFFFF;strokeColor=#0F172A" vertex="1" parent="1"><mxGeometry x="380" y="70" width="260" height="30" as="geometry"/></mxCell>
+        <mxCell id="t.r1c3" value="actions/sec per session" style="rounded=0;fillColor=#FFFFFF;strokeColor=#0F172A" vertex="1" parent="1"><mxGeometry x="640" y="70" width="240" height="30" as="geometry"/></mxCell>
+        <mxCell id="t.r2c0" value="ml" style="rounded=0;fillColor=#FBFAF6;strokeColor=#0F172A" vertex="1" parent="1"><mxGeometry x="40" y="100" width="180" height="30" as="geometry"/></mxCell>
+        <mxCell id="t.r2c1" value="hybrid (on-device small / cloud large)" style="rounded=0;fillColor=#FFFFFF;strokeColor=#0F172A" vertex="1" parent="1"><mxGeometry x="220" y="100" width="160" height="30" as="geometry"/></mxCell>
+        <mxCell id="t.r2c2" value="inference per signal; reward bootstrap" style="rounded=0;fillColor=#FFFFFF;strokeColor=#0F172A" vertex="1" parent="1"><mxGeometry x="380" y="100" width="260" height="30" as="geometry"/></mxCell>
+        <mxCell id="t.r2c3" value="signals/sec; model size; cost/inference" style="rounded=0;fillColor=#FFFFFF;strokeColor=#0F172A" vertex="1" parent="1"><mxGeometry x="640" y="100" width="240" height="30" as="geometry"/></mxCell>
+        <mxCell id="t.r3c0" value="tape" style="rounded=0;fillColor=#FBFAF6;strokeColor=#0F172A" vertex="1" parent="1"><mxGeometry x="40" y="130" width="180" height="30" as="geometry"/></mxCell>
+        <mxCell id="t.r3c1" value="cloud (user-region)" style="rounded=0;fillColor=#FFFFFF;strokeColor=#0F172A" vertex="1" parent="1"><mxGeometry x="220" y="130" width="160" height="30" as="geometry"/></mxCell>
+        <mxCell id="t.r3c2" value="append-only writes + CQRS read models" style="rounded=0;fillColor=#FFFFFF;strokeColor=#0F172A" vertex="1" parent="1"><mxGeometry x="380" y="130" width="260" height="30" as="geometry"/></mxCell>
+        <mxCell id="t.r3c3" value="events/sec; retention; storage $/GB" style="rounded=0;fillColor=#FFFFFF;strokeColor=#0F172A" vertex="1" parent="1"><mxGeometry x="640" y="130" width="240" height="30" as="geometry"/></mxCell>
+        <mxCell id="legend.cmp" value="Rows compiled from os_hook/claim compute hints. Dashed = unverified estimate (provenance: elicited)." style="text;align=left;fontSize=11;fontColor=#64748B" vertex="1" parent="1"><mxGeometry x="40" y="180" width="840" height="20" as="geometry"/></mxCell>
+      </root>
+    </mxGraphModel>
+  </diagram>
+</mxfile>

@@ -1,0 +1,103 @@
+[
+  {
+    "lesson_id": "L01",
+    "claim_ref": "dc-fs-1",
+    "type": "belief_revised",
+    "before": "API keys are sufficient as the default integration posture across major SDKs.",
+    "after": "Workload identity and OIDC federation are becoming the production-default posture where available.",
+    "evidence_span": "Recent SDK and platform docs across OpenAI, Anthropic, Azure, and AWS emphasize keyless/cloud identity patterns.",
+    "sources": [
+      {"url": "https://github.com/openai/openai-node", "tier": "primary", "figure": "v6.39.0 package and docs context"},
+      {"url": "https://github.com/anthropics/anthropic-sdk-typescript", "tier": "primary", "figure": "v0.98.x package and docs context"},
+      {"url": "https://github.com/Azure/azure-sdk-for-js", "tier": "primary", "figure": "DefaultAzureCredential guidance"},
+      {"url": "https://github.com/aws/aws-sdk-js-v3", "tier": "primary", "figure": "runtime/package management guidance"}
+    ],
+    "confidence": 0.83,
+    "confidence_basis": "Primary-source docs and release guidance converging on same auth direction.",
+    "falsifier": "Major providers reverse guidance and re-center long-lived API keys as preferred production defaults.",
+    "residual_disagreement": null,
+    "hallucination_risk": "low — direct primary docs and repositories",
+    "decision_weight": "high",
+    "maps_to_vision": ["protocol", "sovereignty"]
+  },
+  {
+    "lesson_id": "L02",
+    "claim_ref": "dc-fs-2",
+    "type": "myth_dispelled",
+    "before": "Semver alone is enough to safely automate upgrades in SDK-heavy codebases.",
+    "after": "Behavior and typing shifts can still produce production risk; pinned lanes and staged rollouts are required.",
+    "evidence_span": "Multiple SDK ecosystems document caveats around defaults, types, and upgrade behavior.",
+    "sources": [
+      {"url": "https://github.com/stripe/stripe-node", "tier": "primary", "figure": "Type/version caveats in README"},
+      {"url": "https://firebase.google.com/support/release-notes/js", "tier": "primary", "figure": "release behavior changes"},
+      {"url": "https://github.com/supabase/supabase-js", "tier": "primary", "figure": "CHANGELOG operational caveats"}
+    ],
+    "confidence": 0.82,
+    "confidence_basis": "Cross-vendor consistency in caveat patterns, with explicit provider documentation.",
+    "falsifier": "Critical SDKs maintain strict no-surprise behavior across several release cycles with no meaningful caveat notes.",
+    "residual_disagreement": "Exact strictness varies by vendor and package family.",
+    "hallucination_risk": "low",
+    "decision_weight": "high",
+    "maps_to_vision": ["gate", "distribution"]
+  },
+  {
+    "lesson_id": "L03",
+    "claim_ref": "dc-fs-3",
+    "type": "belief_confirmed",
+    "before": "Runtime correctness in modern web stacks depends mostly on component code quality.",
+    "after": "Runtime correctness depends equally or more on explicit framework directives and boundaries.",
+    "evidence_span": "Next.js cache/runtime directives, Nuxt data-fetching rules, and Astro hydration directives define correctness and perf outcomes.",
+    "sources": [
+      {"url": "https://nextjs.org/docs/app/getting-started/caching", "tier": "primary", "figure": "use cache guidance"},
+      {"url": "https://nuxt.com/docs/4.x/getting-started/data-fetching", "tier": "primary", "figure": "double-fetch hydration warning"},
+      {"url": "https://docs.astro.build/en/concepts/islands/", "tier": "primary", "figure": "client directives and server islands"}
+    ],
+    "confidence": 0.87,
+    "confidence_basis": "Official framework guidance directly maps to common production defects.",
+    "falsifier": "Framework teams deprecate these directives and return to primarily implicit behavior.",
+    "residual_disagreement": null,
+    "hallucination_risk": "none",
+    "decision_weight": "high",
+    "maps_to_vision": ["protocol", "ml"]
+  },
+  {
+    "lesson_id": "L04",
+    "claim_ref": "dc-fs-4",
+    "type": "belief_revised",
+    "before": "Cross-platform mobile selection is mainly about developer productivity and team familiarity.",
+    "after": "Migration readiness and architecture transition risk are co-equal selection criteria.",
+    "evidence_span": "RN/Expo architecture transitions and Flutter renderer evolution changed upgrade risk profiles.",
+    "sources": [
+      {"url": "https://reactnative.dev/blog/2025/06/12/react-native-0.80", "tier": "primary", "figure": "RN 0.80 architecture notes"},
+      {"url": "https://docs.expo.dev/guides/new-architecture/", "tier": "primary", "figure": "Expo New Architecture progression"},
+      {"url": "https://docs.flutter.dev/perf/impeller", "tier": "primary", "figure": "Impeller rollout and constraints"}
+    ],
+    "confidence": 0.8,
+    "confidence_basis": "Architecture transitions create recurring compatibility and delivery friction.",
+    "falsifier": "Large mobile framework upgrades consistently deliver without compatibility lag for ecosystem packages.",
+    "residual_disagreement": "Risk severity varies by app-native dependency footprint.",
+    "hallucination_risk": "low",
+    "decision_weight": "medium",
+    "maps_to_vision": ["distribution"]
+  },
+  {
+    "lesson_id": "L05",
+    "claim_ref": "dc-fs-5",
+    "type": "open_question",
+    "before": "Platform lock-in is always the dominant risk in choosing framework/SDK stacks.",
+    "after": "Operational ambiguity in defaults/upgrades can be equally damaging even in open-source stacks.",
+    "evidence_span": "Incidents often derive from implicit retries/caching/version shifts, not just hosting or vendor lock-in.",
+    "sources": [
+      {"url": "https://nextjs.org/docs/app/getting-started/caching", "tier": "primary", "figure": "explicit caching model shift"},
+      {"url": "https://github.com/openai/openai-node", "tier": "primary", "figure": "timeout/retry defaults context"},
+      {"url": "https://github.com/supabase/supabase-js", "tier": "primary", "figure": "realtime listener caveat patterns"}
+    ],
+    "confidence": 0.74,
+    "confidence_basis": "Pattern emerges across ecosystems; quantitative incident-rate comparison still incomplete.",
+    "falsifier": "Operational incidents remain overwhelmingly attributable to lock-in constraints rather than default behavior ambiguity.",
+    "residual_disagreement": "Need incident dataset across multiple organizations to settle impact weighting.",
+    "hallucination_risk": "medium — comparative weighting not fully measured",
+    "decision_weight": "medium",
+    "maps_to_vision": ["gate", "ml"]
+  }
+]

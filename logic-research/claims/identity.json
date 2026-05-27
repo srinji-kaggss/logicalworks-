@@ -1,0 +1,130 @@
+{
+  "std": "LW-RS/1",
+  "claims": [
+    {
+      "id": "dc-id-1",
+      "topic": "identity",
+      "model": "gemini",
+      "claim": "The centralization of FIDO passkey sync and backup in OS-level platform keychains (iCloud Keychain and Google Password Manager) functions as a strategic lock-in mechanism under the guise of an open standard, creating a massive biometric/identity custody silo that raises the cost of switching hardware/operating systems.",
+      "type": "contrarian",
+      "basis": [
+        "wm-id-webauthn-fido2",
+        "wm-c-passkey-scale",
+        "wm-g-platform-cxp-compliance"
+      ],
+      "sources": [
+        {
+          "url": "https://fidoalliance.org/specifications-credential-exchange-specifications/",
+          "date": "2026-05-26"
+        }
+      ],
+      "confidence": 0.7,
+      "provenance": "elicited",
+      "why_distinctive": "It reframes FIDO passkeys from a pure security/usability success story into a platform lock-in tool, exposing how secure enclaves are used to prevent credentials from leaving proprietary OS enclaves.",
+      "falsifier": "Apple and Google implement native, single-click export of passkeys from iCloud Keychain and Google Password Manager using the FIDO CXP/CXF specifications.",
+      "verify": "Verify Apple iOS and Android developer release logs for native CXP/CXF export support in their default credential managers.",
+      "human_input": [
+        {
+          "by": "ai_drafted",
+          "stance": "nuance",
+          "note": "The director would qualify this by noting that because users are highly resistant to entering credentials manually, this lock-in forces our OS to build custom extensions that intercept the browser's navigator.credentials calls to divert authentication to our own enclave store.",
+          "ts": "2026-05-26T23:42:00Z"
+        }
+      ]
+    },
+    {
+      "id": "dc-id-2",
+      "topic": "identity",
+      "model": "gemini",
+      "claim": "Decentralized identity (W3C DIDs and VCs) will not achieve mainstream consumer web adoption through grassroots user-initiated wallets or web3 initiatives, but will scale entirely via top-down state mandates (such as the EU Digital Identity Wallet under eIDAS 2.0) that legally compel commercial services to accept them.",
+      "type": "prediction",
+      "basis": [
+        "wm-id-decentralized-did-vc",
+        "wm-id-eudi-wallet",
+        "wm-c-eudi-wallet-mandate"
+      ],
+      "sources": [
+        {
+          "url": "https://commission.europa.eu/topics/digital-economy-and-society/european-digital-identity_en",
+          "date": "2026-05-26"
+        }
+      ],
+      "confidence": 0.75,
+      "provenance": "elicited",
+      "why_distinctive": "It shifts focus from standard consumer-driven or decentralized web3 wallet paradigms, asserting that legal mandate is the sole viable path to solve the zero-start adoption problem for cryptographic credentials.",
+      "falsifier": "A major global ecommerce provider (e.g. Shopify or Amazon) adopts W3C DIDs and Verifiable Credentials for authentication without legal compulsion, reaching over 1.0e7 active users.",
+      "verify": "Audit eIDAS 2.0 wallet transaction logs and integration rates among European commercial entities after the December 2026 mandate.",
+      "human_input": [
+        {
+          "by": "ai_drafted",
+          "stance": "nuance",
+          "note": "The director would emphasize that eIDAS 2.0 wallet compatibility gives our OS layer a legally protected identity integration path in Europe, allowing users to host official credentials without being blocked by App Store policies.",
+          "ts": "2026-05-26T23:42:00Z"
+        }
+      ]
+    },
+    {
+      "id": "dc-id-3",
+      "topic": "identity",
+      "model": "gemini",
+      "claim": "Platform-synced passkeys are not designed for hardware lock-in, but are necessary cryptographic compromises to prevent identity credential loss while keeping private keys isolated in hardware enclaves, with platforms actively cooperating via FIDO CXP/CXF drafts and native APIs to enable secure cross-provider credential portability.",
+      "type": "synthesis",
+      "basis": [
+        "wm-id-ios-cred-prov",
+        "wm-id-android-cred-mgr",
+        "wm-id-windows-passkey-plugin",
+        "wm-id-fido-cxp-cxf"
+      ],
+      "sources": [
+        {
+          "url": "https://fidoalliance.org/specifications-credential-exchange-specifications/",
+          "date": "2026-05-26"
+        }
+      ],
+      "confidence": 0.80,
+      "provenance": "elicited",
+      "why_distinctive": "It refutes the lock-in narrative by documenting the structural APIs and standardizations showing platforms opening up enclaves to allow third-party credential migration.",
+      "falsifier": "Operating system updates remove third-party credential provider support or refuse to implement CXP/CXF for outbound migration.",
+      "verify": "Audit iOS, Android, and Windows Settings to ensure third-party credential provider settings remain available and functional.",
+      "human_input": [
+        {
+          "by": "ai_drafted",
+          "stance": "nuance",
+          "note": "The director would note that while the cryptographic interfaces are open, the platforms still control the default credential sheet UX, meaning they can introduce friction for third-party options to favor their native keychains.",
+          "ts": "2026-05-26T23:55:00Z"
+        }
+      ]
+    },
+    {
+      "id": "dc-id-4",
+      "topic": "identity",
+      "model": "gemini",
+      "claim": "W3C Verifiable Credentials and decentralized identity can achieve commercial viability and mainstream adoption without government mandates by targeting high-fraud consumer touchpoints like KYC validation (such as Skype Japan reducing number fraud by 90%) and enterprise credentialing (NEC, Velocity Network).",
+      "type": "prediction",
+      "basis": [
+        "wm-id-entra-verified-id",
+        "wm-id-velocity-network",
+        "wm-c-entra-skype-japan"
+      ],
+      "sources": [
+        {
+          "url": "https://customers.microsoft.com/en-us/story/1811656846171926610-skype-azure-active-directory-japan",
+          "date": "2026-05-26"
+        }
+      ],
+      "confidence": 0.80,
+      "provenance": "elicited",
+      "why_distinctive": "It counters the view that DIDs/VCs are solely regulatory compliance mechanisms by proving they solve high-impact, private-sector fraud and operational friction problems.",
+      "falsifier": "Skype Japan deprecates Verified ID, or major B2B projects fail to scale past enterprise employee IDs.",
+      "verify": "Track Microsoft's customer case studies and public telemetry on Entra Verified ID transactions and active users.",
+      "human_input": [
+        {
+          "by": "ai_drafted",
+          "stance": "nuance",
+          "note": "The director would highlight that private-sector adoption operates on a ROI basis (fraud reduction vs integration cost), meaning VCs must deliver immediate financial savings to compete with centralized SSO.",
+          "ts": "2026-05-26T23:55:00Z"
+        }
+      ]
+    }
+  ]
+}

@@ -1,0 +1,44 @@
+{
+  "std": "LW-RS/1",
+  "claims": [
+    {
+      "id": "dc-reg-1",
+      "topic": "regulation",
+      "model": "opus",
+      "claim": "The regulatory map is asymmetrically favourable to an AI-native OS-layer: DMA Art.6(4) forces gatekeepers to open third-party app stores and Art.5(7) bans forced in-app payment, while GDPR Art.25 (privacy-by-design) and Art.44 (transfer minimisation) reward exactly the local-first/data-residency architecture the cloud layer already prescribes. Compliance and competitive wedge point the same direction - sovereignty-by-architecture is both the legal-safe and the gatekeeper-bypass posture.",
+      "type": "synthesis",
+      "basis": ["wm-reg-c-dma-consent-and-store-choice", "wm-reg-c-gdpr-lawfulness-design-security-transfer", "wm-reg-e-dma-gates-os", "wm-reg-e-gdpr-gates-os"],
+      "sources": [
+        {"url": "https://eur-lex.europa.eu/eli/reg/2022/1925/oj", "date": "2026-05-26"},
+        {"url": "https://eur-lex.europa.eu/eli/reg/2016/679/oj", "date": "2026-05-26"}
+      ],
+      "confidence": 0.6,
+      "provenance": "elicited",
+      "why_distinctive": "Most teams treat GDPR/DMA as a compliance tax; this argues the same rules that gate incumbents are a tailwind for a local-first OS-layer, so the architecture chosen for cost/sovereignty also minimises regulatory surface - one decision, three wins.",
+      "falsifier": "Gatekeepers successfully invoke DMA Art.6(4) security/integrity exceptions broadly enough to neutralise third-party distribution, AND regulators read GDPR to require cloud-side processing (e.g. mandated server-side logging) that defeats local-first.",
+      "verify": "Track European Commission DMA non-compliance decisions and Art.6(4) security-exception rulings (2025-2026) plus EDPB guidance on on-device vs cloud processing; check whether Art.6(4) is being read narrowly.",
+      "human_input": [
+        {"by": "ai_drafted", "stance": "nuance", "note": "Director would likely frame: 'the law is moving our way in the EU - design for the strictest regime (GDPR + DMA) and the rest of the world is downhill; sovereignty-by-architecture means we are compliant by construction, not by bolt-on.'", "ts": "2026-05-27T01:00:00Z"}
+      ]
+    },
+    {
+      "id": "dc-reg-2",
+      "topic": "regulation",
+      "model": "opus",
+      "claim": "The binding regulatory risk for an OS-resident AI is not privacy law but the EU AI Act Art.6/Annex III high-risk boundary: if common assistant features (e.g. those touching employment, education, essential services, or biometric inference) get classified high-risk, Art.26 obligations (human oversight, logging, monitoring, FRIA) become shipping blockers in the EU - a heavier constraint than GDPR consent UX. Scope and timing risk lives here, not in CCPA/PIPEDA.",
+      "type": "prediction",
+      "basis": ["wm-reg-c-eu-ai-act-risk-and-transparency", "wm-reg-gap-euai-highrisk-boundary-for-os-ai", "wm-reg-eu-ai-act"],
+      "sources": [
+        {"url": "https://eur-lex.europa.eu/eli/reg/2024/1689/oj", "date": "2026-05-26"}
+      ],
+      "confidence": 0.55,
+      "provenance": "elicited",
+      "why_distinctive": "Redirects attention from the well-trodden privacy-compliance story to the under-modelled AI Act high-risk classification as the actual gating constraint on EU feature scope and launch timing.",
+      "falsifier": "Delegated acts / guidance classify mainstream OS AI-assistant features as non-high-risk so only Art.50 transparency applies, removing the Art.26 operational burden.",
+      "verify": "Read AI Act Annex III categories + Art.6(1)-(2) against a concrete Canvas OS feature list; track Commission delegated acts and harmonised guidance on high-risk classification through 2026.",
+      "human_input": [
+        {"by": "ai_drafted", "stance": "nuance", "note": "Director would likely qualify: 'we keep an Annex III feature map per release - anything that could be read as high-risk ships behind oversight+logging from day one, or ships outside the EU first. Treat the AI Act boundary as a launch-gating design input, not a legal afterthought.'", "ts": "2026-05-27T01:00:00Z"}
+      ]
+    }
+  ]
+}

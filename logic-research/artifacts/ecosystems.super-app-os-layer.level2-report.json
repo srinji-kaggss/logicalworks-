@@ -1,0 +1,196 @@
+{
+  "artifact": "ecosystems.super-app-os-layer",
+  "artifact_path": "/Users/srinji/logic-research/artifacts/ecosystems.super-app-os-layer.md",
+  "review_version": "3.0.0",
+  "prerequisite": "Level 1 passed (structural RAC format validated)",
+  "reviewer_model": "kimi",
+  "overall": {
+    "grade": "Accept",
+    "mean_score": 4.0,
+    "one_line_summary": "Strong empirical grounding across 7 ecosystems with actionable Canvas implications, but causal overreach on messaging-as-entry-point and limited explicit exploration of negative cases weaken epistemic ceiling.",
+    "strengths_summary": [
+      "Evidence relevance is high: every major claim is backed by primary sources (IR filings, securities reports, NDSS 2025, PIPC examinations)",
+      "Scale calibration is honest about data weaknesses (non-English sources, profitability fragility, causality vs correlation)",
+      "Build-now tasks are directly actionable and traceable to observed failure modes"
+    ],
+    "weaknesses_summary": [
+      "C01 (messaging entry point drives super-app success) cites correlational evidence but implies causation without isolating alternatives",
+      "Exploration tree lacks explicit dead-end documentation — no rejected strategies or failed mini-program competitors are analyzed",
+      "Falsification criteria for governance predictions are vague and not independently testable"
+    ]
+  },
+  "dimensions": {
+    "D1_evidence_relevance": {
+      "score": 4,
+      "strengths": [
+        "Every ecosystem dimension in the MAP table is sourced to a primary document (IR filings, SEC-style securities reports, academic papers, regulatory examinations)",
+        "Claim C02 (fulfillment platform creates moats) is substantively supported by Grab's three-layer architecture and global optimization metrics",
+        "Claim C03 (payment rails are mandatory lock-in) is supported by Alipay TPS data, WeChat Pay integration, and Ant Group's forced financial separation"
+      ],
+      "weaknesses": [
+        "C01 (messaging entry point → super-app success) is supported by WeChat and Kakao penetration stats, but LINE also has messaging dominance yet faces crisis, and WhatsApp (messaging dominant) never became a super-app. The evidence shows correlation, not causation.",
+        "C05 (agentic AI replaces mini-programs) is extrapolated from Kakao's 2025 announcements (Kanana, PlayMCP) but these are pre-launch or early-stage. No operational evidence exists yet."
+      ],
+      "suggestions": [
+        "Add a 'contrarian evidence' subsection under C01 noting WhatsApp's failure to horizontalize and LINE's stagnation despite messaging dominance",
+        "Reframe C05 as a directional hypothesis with explicit confidence discount (e.g., 'early signals suggest...' rather than 'the next generation uses...')"
+      ]
+    },
+    "D2_falsifiability_quality": {
+      "score": 3,
+      "strengths": [
+        "The SKEPTICISM section explicitly lists what could invalidate the map — a strong falsifiability signal",
+        "Mitigation strategies are paired with each invalidation scenario"
+      ],
+      "weaknesses": [
+        "No explicit falsification criteria are stated for the core governance predictions (e.g., 'Canvas will avoid Ant Group's fate'). What observable event would falsify this?",
+        "The claim 'the governance wall is where projects live or die' is vague. A falsifiable version would specify: 'If a super-app with >100M users and embedded lending avoids regulatory intervention for >5 years, this claim is falsified.'",
+        "Build-now priorities lack success/failure metrics. What would convince us that 'agentic runtime security model' was built wrong?"
+      ],
+      "suggestions": [
+        "Append a Falsification Criteria table to the RAC with specific, measurable thresholds for each major claim",
+        "For each Build-Now task, define a 'failure mode' — what observable outcome would indicate the task was misconceived?"
+      ]
+    },
+    "D3_scope_calibration": {
+      "score": 4,
+      "strengths": [
+        "Explicit acknowledgment of data weaknesses: non-English sources, profitability fragility, causality vs correlation, recency bias",
+        "The MAP table scopes each ecosystem by dimension rather than making universal claims",
+        "Confidence is honestly calibrated at 0.88 — not overstated"
+      ],
+      "weaknesses": [
+        "The claim 'Every single one has hit a governance crisis at scale' is strong. Grab's 'crisis' is profitability fragility, which is not a governance crisis per se. Yandex's crisis is geopolitical isolation, which is partly by design. The scope of 'governance crisis' is stretched to fit the narrative.",
+        "The 'agentic AI difference' section extrapolates from Kakao's 2025 announcements to a general industry shift. This is a scope leap from one company's product roadmap to a sector-level prediction."
+      ],
+      "suggestions": [
+        "Disaggregate 'governance crisis' into sub-types (regulatory, security, geopolitical, financial) and note which ecosystems experienced which",
+        "Scope C05 explicitly to 'early-stage signals from Kakao and anticipated architecture shifts' rather than industry consensus"
+      ]
+    },
+    "D4_argument_coherence": {
+      "score": 4,
+      "strengths": [
+        "Clear logical arc: MAP (what exists) → SCALE & CONSTRAINTS (how it works and breaks) → TOUCHES US (implications for Canvas) → BUILD-NOW (actionable tasks)",
+        "Each Build-Now task traces directly to an observed failure mode (e.g., financial separation traces to Ant Group's annihilation)",
+        "The ML-FEED JSON faithfully replicates the narrative in machine-executable form"
+      ],
+      "weaknesses": [
+        "The transition from 'TOUCHES US — What We Should Copy' to 'What We Should Avoid' is clear, but there is no explicit reconciliation of tensions. For example, 'own the entry point' and 'distributed governance' may conflict — concentrated ownership often enables rapid entry-point capture.",
+        "The claim that 'payment rails are mandatory' is supported by 5/7 ecosystems, but Jio and Yandex do not have dominant payment rails yet. JioPay is growing but not yet at Alipay scale. The narrative glosses over this exception."
+      ],
+      "suggestions": [
+        "Add a 'Tensions and Trade-offs' subsection under TOUCHES US that explicitly reconciles conflicting recommendations",
+        "Address Jio and Yandex payment exceptions directly — are they counterexamples or early-stage confirmations?"
+      ]
+    },
+    "D5_exploration_integrity": {
+      "score": 3,
+      "strengths": [
+        "Failures are documented: Alipay IPO cancellation, LINE data breach, Kakao data sharing, Grab profitability fragility, Yandex geopolitical isolation",
+        "The SKEPTICISM section acts as an honesty signal by listing invalidation scenarios"
+      ],
+      "weaknesses": [
+        "No exploration tree documents the research process itself. What alternative hypotheses were considered? For example, was 'browser-based PWA layer' considered as an alternative to mini-programs? Was 'decentralized identity' considered as an alternative to centralized super-apps?",
+        "Dead ends are described but not as part of a structured exploration. The MAP table presents all 7 ecosystems as successes-with-flaws, but none are framed as 'this strategy was tried and abandoned.' In reality, many super-app attempts failed completely (e.g., Facebook's ecosystem play, Amazon's messaging attempts).",
+        "The artifact reads as a post-hoc synthesis rather than a documented exploration. There is no evidence of 'we considered X but rejected it because Y.'"
+      ],
+      "suggestions": [
+        "Add an 'Exploration Tree' appendix documenting at least 3 alternative hypotheses that were considered and rejected (e.g., PWA layer, decentralized identity, standalone app strategy)",
+        "Include a 'Failed Super-Apps' subsection — Facebook Home, Amazon Fire Phone, Xiaomi's early ecosystem attempts — to calibrate success bias"
+      ]
+    },
+    "D6_methodological_rigor": {
+      "score": 4,
+      "strengths": [
+        "Baseline comparisons across ecosystems are implicit in the MAP table's dimensional structure",
+        "Ablation of mechanisms is present: mini-programs vs fulfillment platforms vs vertical bundling vs sovereign forks are treated as distinct mechanisms with different outcomes",
+        "Evidence spans regulatory, financial, technical, and security dimensions — multi-modal grounding"
+      ],
+      "weaknesses": [
+        "No explicit statistical reporting. Claims like 'every single one has hit a governance crisis' are based on n=7 case studies without confidence intervals or representativeness analysis.",
+        "Metric-claim alignment is sometimes loose. '256K TPS' (Alipay) is a throughput metric, but the claim it supports is 'payment rails are infrastructure.' TPS alone does not prove infrastructural lock-in; user switching-cost data would be stronger.",
+        "Reproducibility signals are moderate. Sources are listed but not with DOIs or permanent URLs. Some links (e.g., Kakao IR presentations) may be ephemeral."
+      ],
+      "suggestions": [
+        "Add a 'Methods' appendix explaining the case-selection criteria (why these 7? why not Gojek, PhonePe, MercadoLibre?)",
+        "For throughput/scale metrics, pair with user-behavior metrics (switching costs, retention, cross-vertical usage) to strengthen infrastructural claims",
+        "Archive all source URLs via Wayback Machine or equivalent to ensure reproducibility"
+      ]
+    }
+  },
+  "findings": [
+    {
+      "finding_id": "F01",
+      "dimension": "D1_evidence_relevance",
+      "severity": "major",
+      "target_file": "ecosystems.super-app-os-layer.md",
+      "target_entity": "C01",
+      "evidence_span": "Messaging is the highest-retention entry point (WeChat, Kakao, LINE).",
+      "observation": "C01 asserts messaging drives super-app success, but LINE has messaging dominance yet faces crisis, and WhatsApp never horizontalized.",
+      "reasoning": "The evidence supports correlation between messaging dominance and super-app formation, but does not isolate messaging as the causal factor. Corporate strategy, regulatory environment, and local competition are confounding variables.",
+      "suggestion": "Add a contrarian evidence note under C01: WhatsApp's failure to horizontalize and LINE's stagnation despite messaging dominance. Reframe as 'messaging is a necessary but insufficient condition.'"
+    },
+    {
+      "finding_id": "F02",
+      "dimension": "D3_scope_calibration",
+      "severity": "major",
+      "target_file": "ecosystems.super-app-os-layer.md",
+      "target_entity": "C04",
+      "evidence_span": "Every single one has hit a governance crisis at scale",
+      "observation": "Grab's 'crisis' is profitability fragility, not governance. Yandex's geopolitical isolation is partly by design. The term 'governance crisis' is stretched to fit 7 cases.",
+      "reasoning": "Over-universalizing failure modes weakens the predictive power of the framework. If 'governance crisis' means anything from 'data breach' to 'low margins,' it becomes non-actionable.",
+      "suggestion": "Disaggregate 'governance crisis' into regulatory, security, financial-sustainability, and geopolitical sub-types. Map each ecosystem to its actual crisis type."
+    },
+    {
+      "finding_id": "F03",
+      "dimension": "D2_falsifiability",
+      "severity": "major",
+      "target_file": "ecosystems.super-app-os-layer.md",
+      "target_entity": "BUILD-NOW",
+      "evidence_span": "P0: Design agentic runtime security model",
+      "observation": "Build-now tasks lack explicit falsification criteria or failure-mode definitions.",
+      "reasoning": "Without defined failure modes, build-now tasks become unfalsifiable. The team cannot know if the task was misconceived until it's too late.",
+      "suggestion": "Append a failure-mode column to the BUILD-NOW table: 'This task fails if...' with specific observable thresholds."
+    },
+    {
+      "finding_id": "F04",
+      "dimension": "D5_exploration_integrity",
+      "severity": "major",
+      "target_file": "ecosystems.super-app-os-layer.md",
+      "target_entity": "SKEPTICISM",
+      "evidence_span": "What Could Invalidate This Map",
+      "observation": "SKEPTICISM lists invalidation scenarios but the artifact lacks a documented exploration tree showing rejected hypotheses.",
+      "reasoning": "Honest skepticism requires showing what was considered and rejected, not just what could invalidate the final conclusion. The absence of an exploration tree suggests post-hoc justification.",
+      "suggestion": "Add an 'Exploration Tree' appendix with at least 3 rejected alternative hypotheses (e.g., PWA layer, decentralized identity, standalone app strategy) and the reasoning for rejection."
+    },
+    {
+      "finding_id": "F05",
+      "dimension": "D6_methodological_rigor",
+      "severity": "minor",
+      "target_file": "ecosystems.super-app-os-layer.md",
+      "target_entity": "MAP_table",
+      "evidence_span": "256K TPS",
+      "observation": "Throughput metrics are used to support infrastructural lock-in claims, but throughput alone does not prove user switching costs.",
+      "reasoning": "Methodological rigor requires metrics that directly measure the claimed phenomenon. TPS measures technical capacity, not behavioral lock-in.",
+      "suggestion": "Pair technical metrics with behavioral metrics (e.g., 'users with >3 linked financial accounts have <5% annual churn') where available."
+    },
+    {
+      "finding_id": "F06",
+      "dimension": "D4_argument_coherence",
+      "severity": "minor",
+      "target_file": "ecosystems.super-app-os-layer.md",
+      "target_entity": "TOUCHES_US",
+      "evidence_span": "What We Should Copy... What We Should Avoid",
+      "observation": "Copy and Avoid lists contain tensions that are not explicitly reconciled (e.g., 'own the entry point' vs 'distributed governance').",
+      "reasoning": "Concentrated ownership often enables rapid entry-point capture. The artifact does not address how to achieve both simultaneously.",
+      "suggestion": "Add a 'Tensions and Trade-offs' subsection that explicitly reconciles conflicting recommendations."
+    }
+  ],
+  "questions_for_authors": [
+    "What case-selection criteria were used? Why were Gojek, PhonePe, MercadoLibre, or Gojek excluded?",
+    "What is the inter-source agreement on Ant Group's 2024 valuation ($78.5B vs $102.7B)? Which estimate is more reliable?",
+    "Is there primary-source evidence (not press releases) for Kakao's Kanana on-device AI performance claims?",
+    "How does the governance model for Canvas plan to reconcile rapid entry-point capture with distributed governance, given that these are structurally in tension?"
+  ]
+}

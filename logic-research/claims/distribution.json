@@ -1,0 +1,128 @@
+{
+  "std": "LW-RS/1",
+  "claims": [
+    {
+      "id": "dc-dist-1",
+      "topic": "distribution",
+      "model": "gemini",
+      "claim": "The transition from Apple's install-based Core Technology Fee (CTF) to a 5% Core Technology Commission (CTC) on digital revenue in the EU by 2026 is a defensive barrier designed to prevent early-stage utility and OS-layer apps (which monetize through indirect or off-platform models) from surviving on alternative iOS app stores.",
+      "type": "interpretation",
+      "basis": [
+        "wm-d-ios",
+        "wm-c-ios-fees",
+        "wm-c-ios-dma"
+      ],
+      "sources": [
+        {
+          "url": "https://www.revenuecat.com/blog/growth/apple-eu-dma-update-june-2025/",
+          "date": "2026-05-26"
+        }
+      ],
+      "confidence": 0.75,
+      "provenance": "elicited",
+      "why_distinctive": "It shifts the framing of the EU fee update from a developer-friendly relaxation of the CTF to an intentional economic defense against utility-based OS wrappers that bypass traditional in-app purchases.",
+      "falsifier": "Apple waives the 5% CTC for alternative marketplace apps that do not utilize App Store discovery or billing services.",
+      "verify": "Review Apple's EU Terms Addendum (Section 3.4) and check if CTC applies to transactions initiated outside Apple-hosted systems.",
+      "human_input": [
+        {
+          "by": "ai_drafted",
+          "stance": "nuance",
+          "note": "The director would qualify this by noting that Apple's fee restructure effectively prices out high-volume utility applications that attempt to bypass standard Store Services while providing zero direct transactional value to Apple.",
+          "ts": "2026-05-26T22:56:00Z"
+        }
+      ]
+    },
+    {
+      "id": "dc-dist-2",
+      "topic": "distribution",
+      "model": "gemini",
+      "claim": "Browser extensions (distributed via the Chrome Web Store) under Manifest V3 will serve as the default high-leverage entry point for new client-side OS-layer systems, but will face a structural performance ceiling within 24 months as Google uses security-motivated updates to declarativeNetRequest limits to restrict dynamic UI injection.",
+      "type": "prediction",
+      "basis": [
+        "wm-d-chrome",
+        "wm-c-chrome-mv3",
+        "wm-oh-chrome-ext"
+      ],
+      "sources": [
+        {
+          "url": "https://developer.chrome.com/docs/extensions/reference/api/declarativeNetRequest",
+          "date": "2026-05-26"
+        }
+      ],
+      "confidence": 0.7,
+      "provenance": "elicited",
+      "why_distinctive": "Counters the belief that extensions can permanently serve as fully featured OS-layer clients by predicting a structural policy and api bottleneck enforced by Google.",
+      "falsifier": "Google introduces new APIs in Manifest V3 or V4 that expand dynamic script execution or custom DOM injection privileges for extension runtimes.",
+      "verify": "Track Chrome Extensions API updates regarding declarativeNetRequest limits and script injection guidelines from 2026 to 2028.",
+      "human_input": [
+        {
+          "by": "ai_drafted",
+          "stance": "nuance",
+          "note": "The director would frame this as a warning that any extension-based client must have a compile-to-native backup plan (e.g., Tauri/Electron client with accessibility overrides) to mitigate sudden browser API restrictions.",
+          "ts": "2026-05-26T22:56:00Z"
+        }
+      ]
+    },
+    {
+      "id": "dc-dist-3",
+      "topic": "distribution",
+      "model": "gemini",
+      "claim": "Browser-level Extension manifest constraints can be completely bypassed by delegating state management, caching, and network intercept logic to a local unsandboxed Native Messaging Companion Daemon.",
+      "type": "synthesis",
+      "basis": [
+        "wm-d-native-daemon",
+        "wm-e-ext-daemon",
+        "wm-c-chrome-mv3"
+      ],
+      "sources": [
+        {
+          "url": "https://developer.chrome.com/docs/extensions/develop/concepts/native-messaging",
+          "date": "2026-05-26"
+        }
+      ],
+      "confidence": 0.8,
+      "provenance": "elicited",
+      "why_distinctive": "It shifts the architectural paradigm of extensions from thin sandboxed wrappers to standard IPC frontends of full local OS processes.",
+      "falsifier": "Google deprecates the chrome.runtime.connectNative extension API or restricts message volumes to unusable rates.",
+      "verify": "Verify extension performance and capability when connecting to a dummy native messaging host under MV3 constraints.",
+      "human_input": [
+        {
+          "by": "ai_drafted",
+          "stance": "nuance",
+          "note": "We must ensure the installer handles register paths for the Native Messaging Host correctly across both Windows registry keys and macOS plist locations.",
+          "ts": "2026-05-26T23:10:00Z"
+        }
+      ]
+    },
+    {
+      "id": "dc-dist-4",
+      "topic": "distribution",
+      "model": "gemini",
+      "claim": "Windows SmartScreen reputation blocks can be programmatically bypassed during the bootstrap phase by utilizing PowerShell Invoke-WebRequest/BITS downloads which do not assign NTFS Zone.Identifier streams, combined with Unblock-File operations.",
+      "type": "interpretation",
+      "basis": [
+        "wm-d-motw-powershell",
+        "wm-c-powershell-motw"
+      ],
+      "sources": [
+        {
+          "url": "https://learn.microsoft.com/en-us/powershell/module/microsoft.powershell.utility/unblock-file",
+          "date": "2026-05-26"
+        }
+      ],
+      "confidence": 0.8,
+      "provenance": "elicited",
+      "why_distinctive": "It demonstrates how to bypass highly restrictive Authenticode/SmartScreen warnings without buying expensive EV certificates or accumulating download reputation.",
+      "falsifier": "Microsoft Windows Defender starts treating all files downloaded by PowerShell from public IP spaces with synthetic ZoneId=3 flags at the file system or kernel level.",
+      "verify": "Run Invoke-WebRequest to download an EXE and inspect its streams using Get-Item -Stream Zone.Identifier.",
+      "human_input": [
+        {
+          "by": "ai_drafted",
+          "stance": "nuance",
+          "note": "Even if SmartScreen is bypassed this way, local Antivirus/EDR engines may flag unsigned execution patterns, so binaries must still contain basic metadata and run with minimal privilege escalation requests.",
+          "ts": "2026-05-26T23:10:00Z"
+        }
+      ]
+    }
+  ]
+}

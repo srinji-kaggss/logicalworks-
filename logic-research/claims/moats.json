@@ -1,0 +1,65 @@
+{
+  "std": "LW-RS/1",
+  "claims": [
+    {
+      "id": "dc-moat-1",
+      "topic": "moats",
+      "model": "gemini",
+      "claim": "Apple's 5% Core Technology Commission (CTC) transition in the EU represents a strategic pivot from gating runtime execution to taxing raw transactional access, setting a precedent that will render traditional app marketplaces secondary to protocol-level commerce gateways.",
+      "type": "interpretation",
+      "basis": [
+        "wm-moat-apple-reg",
+        "wm-claim-apple-ctc"
+      ],
+      "sources": [
+        {
+          "url": "https://developer.apple.com/news/?id=awedznci",
+          "date": "2026-05-26"
+        }
+      ],
+      "confidence": 0.75,
+      "provenance": "elicited",
+      "why_distinctive": "It reframes Apple's compliance with the DMA not as a defeat, but as a proactive monetization shift from storefront curation (App Store) to device usage tax (CTC) which will apply to all alternate channels.",
+      "falsifier": "Regulatory bodies (like the European Commission) rule the 5% CTC illegal under the DMA, forcing Apple to charge 0% on external distribution without synthetic commission gates.",
+      "verify": "Examine whether alternative app marketplaces in the EU successfully maintain their businesses while paying Apple the 5% CTC on all transactions.",
+      "human_input": [
+        {
+          "by": "ai_drafted",
+          "stance": "nuance",
+          "note": "The director might emphasize that if the CTC survives regulatory scrutiny, Apple will successfully maintain its rent-extraction model even if Chrome or other third-party browser engines replace Safari's rendering stack.",
+          "ts": "2026-05-26T23:10:00Z"
+        }
+      ]
+    },
+    {
+      "id": "dc-moat-2",
+      "topic": "moats",
+      "model": "gemini",
+      "claim": "The federal ban on Google's exclusive search default agreements will trigger a rapid fragmentation of user search traffic, driving users to browser-level and OS-level LLM local routers that dynamically select search providers based on intent rather than default placement.",
+      "type": "prediction",
+      "basis": [
+        "wm-moat-google-reg",
+        "wm-claim-google-remedies"
+      ],
+      "sources": [
+        {
+          "url": "https://techcrunch.com/2025/09/02/google-avoids-breakup-but-has-to-give-up-exclusive-search-deals-in-antitrust-trial/",
+          "date": "2026-05-26"
+        }
+      ],
+      "confidence": 0.75,
+      "provenance": "elicited",
+      "why_distinctive": "It predicts that the loss of exclusive search defaults won't just benefit alternative traditional search engines (like Bing or DuckDuckGo), but will instead accelerate the shift toward local client-side intent routing engines.",
+      "falsifier": "Apple default search settings remain pointed to Google voluntarily without any financial transaction, maintaining Google's Safari search market share above 80%.",
+      "verify": "Monitor the market share of Google referrals on iOS devices 12 months after the implementation of the Judge Mehta remedies.",
+      "human_input": [
+        {
+          "by": "ai_drafted",
+          "stance": "refine",
+          "note": "We should observe that Apple might build its own local web search index or LLM-based query router inside Siri/Apple Intelligence to capture search monetization now that Google cannot pay them for defaults.",
+          "ts": "2026-05-26T23:10:00Z"
+        }
+      ]
+    }
+  ]
+}
