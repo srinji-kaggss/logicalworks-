@@ -4,7 +4,7 @@ MISSION — map the world as it actually is, to feed our OS-layer architecture (
 internet") and show where it plugs in. See the world straight, not the version that flatters a
 thesis. A myth three winners share is worth less than one clean counterexample.
 
-STANDARD — every entry conforms to **LW-RS/1** (`~/logic-research/LW-RS-1.md`):
+STANDARD — every entry conforms to **LW-RS/1** (`~/logicalworks-/vision/LW-RS-1.md`):
 ISO 8601 time (UTC `Z`) · ISO 3166 geography · ISO 4217 currency · ISO 80000/SI units (numbers like
 `1.2e9`, never "1.2B") · ISO 639-1 language. Subjective fields: `c` confidence with tier caps
 (T≤0.50, S≤0.75, elicited≤0.80, ≥0.90 only on primary) · `st` P/S/T/N · `p` M/E · `hr` n/l/m/h ·
@@ -24,11 +24,11 @@ RULES
   rates). Confidence = source tier × survival, not eloquence; obey LW-RS/1 caps.
 
 OUTPUT — two passes, lightweight, append-only (**diff, don't re-emit**):
-- **PASS 1 — FACTUAL** → `~/logic-research/notes/<topic>.jsonl` (first line `{"std":"LW-RS/1"}`).
+- **PASS 1 — FACTUAL** → `~/logicalworks-/vision/notes/<topic>.jsonl` (first line `{"std":"LW-RS/1"}`).
   Minified JSONL, one fact/line, short keys, omit empties. Kinds: `node` (thing in world), `edge`
   (relation), `claim` (atomic+sourced+falsifier), `os_hook` (where OUR OS plugs in), `gap`.
   Schema: `ARTIFACT_SCHEMA.md §A`.
-- **PASS 2 — DISTINCTIVE CLAIMS** (N+1, after pass 1) → `~/logic-research/claims/<topic>.json`
+- **PASS 2 — DISTINCTIVE CLAIMS** (N+1, after pass 1) → `~/logicalworks-/vision/claims/<topic>.json`
   (`"std":"LW-RS/1"`). Your own non-obvious claims beyond the facts
   (interpretation·prediction·contrarian·synthesis·implication), **≥2 per topic**. Each: claim,
   `type`, `basis` (ping ids + sources), `confidence` (`p:E`), `why_distinctive`, `falsifier`,

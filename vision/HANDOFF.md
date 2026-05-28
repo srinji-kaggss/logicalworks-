@@ -23,7 +23,7 @@ as-it-is (not as-AI-wishes), token economy, ISO/standard rigor, human-in-the-loo
 - **C01 prototype** (in chat, not saved): "messaging causally drives super-app success" → dialectic
   converged on MYTH (thesis 0.55 vs antithesis 0.86; Alipay/Grab/Gojek succeed without messaging).
 
-## Folder map (`~/logic-research/`)
+## Folder map (`~/logicalworks-/vision/`)
 - `HANDOFF.md` — this file.
 - `PROTOCOL.md` — the dialectic engine: anti-bias rules, triage gate, convergence-not-98%, checklist.
 - `LW-RS-1.md` — **the standard** (canonical). ISO codes + the subjective scales/caps. Versioned.
