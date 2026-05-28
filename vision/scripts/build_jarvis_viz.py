@@ -25,7 +25,10 @@ Conforms to viz-data/SCHEMA.md (graph-schema/2 + canvas-context-export/2).
 """
 import json, glob, os, datetime, html, sys, re
 
-ROOT = os.path.expanduser("~/logic-research")
+# ROOT is the vault this script lives in (vision/scripts/build_jarvis_viz.py -> vision/).
+# Was hardcoded to ~/logic-research, now a STALE pre-rename copy; script-relative keeps the
+# generator reading the canonical vault wherever it is moved/renamed. Override with VISION_ROOT.
+ROOT = os.environ.get("VISION_ROOT") or os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 NOTES = sorted(glob.glob(os.path.join(ROOT, "notes", "*.jsonl")))
 VIZ = os.path.join(ROOT, "viz-data")
 OUT = os.path.join(ROOT, "artifacts", "viz", "jarvis-world-map.html")

@@ -127,6 +127,21 @@
       "threatens": ["dc-reg-2", "EU launch scope/timing"],
       "verify_to_close": "Track Commission delegated acts + harmonised guidance on high-risk classification through 2026.",
       "status": "unresolvable-by-research"
+    },
+    {
+      "id": "wm-bs-language-kernel-abi-ungrounded",
+      "layer": "meta",
+      "blindspot": "The proposed language-kernel ABI (signed manifests, lexicon grid, candidate sets, brand/tenant overlays) is architecture-elicited from local framework docs and repo context; it is not yet grounded by live implementation evidence or cross-surface interoperability tests.",
+      "queries_run": [
+        "read local framework docs Untitled document-9.md and Translation.xml",
+        "inspect logicalworks vision artifacts and sales-landing-page locale seam"
+      ],
+      "surfaced": "Strong conceptual fit with the OS-layer framing, but no measured proof yet that the ABI is the minimal right cut or that enterprise white-label constraints map cleanly onto it.",
+      "caveat": "Architecture recommendation is ahead of evidence; risk is world-building outrunning measured substrate needs.",
+      "severity": "h",
+      "threatens": ["wm-ai-arch-language-service", "wedge.language-kernel-substrate"],
+      "verify_to_close": "Prototype one signed-bundle provider across landing plus one additional surface, then run interoperability and policy-override tests to prove the cut is stable.",
+      "status": "open"
     }
   ]
 }

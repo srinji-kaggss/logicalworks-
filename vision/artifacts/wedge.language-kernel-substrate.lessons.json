@@ -1,0 +1,50 @@
+[
+  {
+    "lesson_id": "L01",
+    "claim_ref": "LK-C01",
+    "type": "belief_revised",
+    "before": "The landing translation seam could be treated as the early version of the translation engine.",
+    "after": "The landing seam should be treated only as a bootstrap provider; the actual target is a resident governed language service.",
+    "evidence_span": "The framework docs and the explorer review both show that a kernel needs first-class language objects, policy, provenance, and fallback rather than just locale bundles and host projections.",
+    "sources": [],
+    "confidence": 0.79,
+    "confidence_basis": "Elicited from internal framework docs, repo architecture, and adversarial review.",
+    "falsifier": "The product never develops meaningful cross-surface semantic state beyond a small marketing site.",
+    "residual_disagreement": "The exact timing for lexicon-grid and candidate-set formalization remains unsettled.",
+    "hallucination_risk": "low",
+    "decision_weight": "high",
+    "maps_to_vision": ["gate", "ml", "scale"]
+  },
+  {
+    "lesson_id": "L02",
+    "claim_ref": "LK-C02",
+    "type": "belief_confirmed",
+    "before": "White-label should probably be architectural rather than cosmetic.",
+    "after": "White-label belongs in deterministic overlay artifacts with semantic and policy force: brand, tenant, domain, and jurisdiction.",
+    "evidence_span": "The governance and OS-layer artifacts consistently reward strict control planes and punish late or scattered policy handling.",
+    "sources": [],
+    "confidence": 0.77,
+    "confidence_basis": "Consistent internal evidence across the vision artifacts.",
+    "falsifier": "Brand and tenant differences prove purely visual with no legal, semantic, or policy-bearing effect.",
+    "residual_disagreement": null,
+    "hallucination_risk": "low",
+    "decision_weight": "high",
+    "maps_to_vision": ["sovereignty", "scale"]
+  },
+  {
+    "lesson_id": "L03",
+    "claim_ref": "LK-C03",
+    "type": "open_question",
+    "before": "A provider seam and request-scoped locale resolution might be enough future-proofing for now.",
+    "after": "A provider seam is necessary but insufficient without kernel primitives for concepts, messages, fallback, provenance, and policy bundles.",
+    "evidence_span": "The current work resolves bundles, but it does not yet define the resident semantic service boundary needed for widgets, shell surfaces, agents, and audited white-label deployments.",
+    "sources": [],
+    "confidence": 0.74,
+    "confidence_basis": "Comparison between live repo seams and the stronger kernel framing in the internal framework docs.",
+    "falsifier": "The platform never needs shared language semantics across surfaces or governed phrase provenance.",
+    "residual_disagreement": "Whether to define the full lexicon grid now or after another grounded workload pass.",
+    "hallucination_risk": "med",
+    "decision_weight": "high",
+    "maps_to_vision": ["gate", "tape", "ml"]
+  }
+]
