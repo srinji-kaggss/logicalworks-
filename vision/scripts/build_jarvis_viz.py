@@ -12,20 +12,23 @@ provenance (§1), merging (§3), link roles + direction (§2), world routing (§
 export canvas-context-export/2 (§8).
 
 Reads:
-  ~/logic-research/notes/*.jsonl          (living research — world nodes, edges, os_hooks, directives, claims)
-  ~/logic-research/viz-data/manual.jsonl         (NEW §9: hand-placed real-world nodes + same_as/merge; optional)
-  ~/logic-research/viz-data/incumbents.jsonl     (level-1 incumbent OS frameworks + benchmarks links)
-  ~/logic-research/viz-data/implementation.jsonl (level-4 foundation impl nodes + implements links)
-  ~/logic-research/viz-data/gh-issues.jsonl      (level-4 GH issues + addresses links)
-  ~/logic-research/viz-data/why-map.json         (per-node why/tag/maturity/distance/feature/priority overrides)
+  ~/logicalworks-/vision/notes/*.jsonl          (living research — world nodes, edges, os_hooks, directives, claims)
+  ~/logicalworks-/vision/viz-data/manual.jsonl         (NEW §9: hand-placed real-world nodes + same_as/merge; optional)
+  ~/logicalworks-/vision/viz-data/incumbents.jsonl     (level-1 incumbent OS frameworks + benchmarks links)
+  ~/logicalworks-/vision/viz-data/implementation.jsonl (level-4 foundation impl nodes + implements links)
+  ~/logicalworks-/vision/viz-data/gh-issues.jsonl      (level-4 GH issues + addresses links)
+  ~/logicalworks-/vision/viz-data/why-map.json         (per-node why/tag/maturity/distance/feature/priority overrides)
 Writes:
-  ~/logic-research/artifacts/viz/jarvis-world-map.html  (single self-contained file)
+  ~/logicalworks-/vision/artifacts/viz/jarvis-world-map.html  (single self-contained file)
 
 Conforms to viz-data/SCHEMA.md (graph-schema/2 + canvas-context-export/2).
 """
 import json, glob, os, datetime, html, sys, re
 
-ROOT = os.path.expanduser("~/logic-research")
+# ROOT is the vault this script lives in (vision/scripts/build_jarvis_viz.py -> vision/).
+# Was hardcoded to ~/logic-research, now a STALE pre-rename copy; script-relative keeps the
+# generator reading the canonical vault wherever it is moved/renamed. Override with VISION_ROOT.
+ROOT = os.environ.get("VISION_ROOT") or os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 NOTES = sorted(glob.glob(os.path.join(ROOT, "notes", "*.jsonl")))
 VIZ = os.path.join(ROOT, "viz-data")
 OUT = os.path.join(ROOT, "artifacts", "viz", "jarvis-world-map.html")

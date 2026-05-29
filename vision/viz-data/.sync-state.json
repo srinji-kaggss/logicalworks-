@@ -1,0 +1,25 @@
+{
+  "schema": "viz-sync-state/1",
+  "research": {
+    "last_sync_ts": "2026-05-28T22:15:00Z",
+    "line_counts": {
+      "notes/ai-layer.jsonl": 10,
+      "notes/blindspots.jsonl": 14,
+      "notes/cloud.jsonl": 23,
+      "notes/distribution.jsonl": 46,
+      "notes/ecosystems-frameworks-sdks.jsonl": 13,
+      "notes/ecosystems.jsonl": 27,
+      "notes/governance.jsonl": 16,
+      "notes/identity.jsonl": 56,
+      "notes/moats.jsonl": 41,
+      "notes/regulation-canada.jsonl": 47,
+      "notes/regulation.jsonl": 23,
+      "notes/stack.jsonl": 27,
+      "notes/t6-1-ui-vs-os.jsonl": 10
+    }
+  },
+  "codebase": { "repo": "/Users/srinji/sales-landing-page", "last_sync_commit": "2e4d09d" },
+  "gh": { "last_issue_sync_ts": "2026-05-28T22:15:00Z" },
+  "generated": "2026-05-28T22:15:00Z",
+  "_note": "Created this pass. Generator ROOT made script-relative (was hardcoded ~/logic-research, a stale pre-rename copy). codebase last_sync_commit = sales-landing-page HEAD at the 2026-05-28 reconciliation (ADR-009 boundary + ADR-057 motion AI-capability + canvas-protocol v0.4.0)."
+}

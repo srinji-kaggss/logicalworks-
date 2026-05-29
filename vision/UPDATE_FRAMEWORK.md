@@ -27,7 +27,7 @@ update only reads what changed. Create it once; bump it at the end of every succ
 }
 ```
 
-`research` is git-tracked here in `logic-research` (notes are append-only → diff by commit OR by line
+`research` is git-tracked here in `logicalworks-/vision` (notes are append-only → diff by commit OR by line
 count). `codebase` tracks the **app repo HEAD** we last reflected. Never trust memory for "what's new"
 — always read this file first, diff against it, then write it back last.
 
@@ -49,7 +49,7 @@ Only these paths in `~/sales-landing-page` can change the map. Ignore everything
 Append-only JSONL means **the diff is literally the new lines**. Never re-read a whole notes file.
 
 ```bash
-cd /Users/srinji/logic-research
+cd /Users/srinji/logicalworks-/vision
 LAST=$(python3 -c "import json;print(json.load(open('viz-data/.sync-state.json'))['research']['last_sync_ts'])")
 
 # 1. New/changed note lines since last sync (git-tracked) — cheap, bounded:
@@ -81,7 +81,7 @@ changed files that fall under the MANIFEST.
 
 ```bash
 REPO=/Users/srinji/sales-landing-page
-LAST=$(python3 -c "import json;print(json.load(open('/Users/srinji/logic-research/viz-data/.sync-state.json'))['codebase']['last_sync_commit'])")
+LAST=$(python3 -c "import json;print(json.load(open('/Users/srinji/logicalworks-/vision/viz-data/.sync-state.json'))['codebase']['last_sync_commit'])")
 
 # 1. What commits landed? (one cheap line each)
 git -C "$REPO" log --oneline "$LAST"..HEAD
@@ -121,7 +121,7 @@ gh issue list --repo srinji-kaggss/sales-landing-page --state open \
 ## C. REGENERATE (pure — run after A, B, or both; ~0 LLM tokens)
 
 ```bash
-cd /Users/srinji/logic-research
+cd /Users/srinji/logicalworks-/vision
 python3 scripts/build_jarvis_viz.py        # reads notes/*.jsonl + viz-data/* → writes the HTML
 # → wrote artifacts/viz/jarvis-world-map.html  /  nodes: N links: M / by kind: {...}
 ```
@@ -151,7 +151,7 @@ After a clean run, **write `viz-data/.sync-state.json` back** with the new `last
 ## Definition of done / QA gate (every update must pass)
 
 ```bash
-cd /Users/srinji/logic-research
+cd /Users/srinji/logicalworks-/vision
 # 1. JSON validity — every data line parses:
 for f in notes/*.jsonl viz-data/*.jsonl; do
   awk 'NR>1 && $0!~/^#/' "$f" | python3 -c 'import sys,json;[json.loads(l) for l in sys.stdin if l.strip()]' \
@@ -178,7 +178,7 @@ python3 scripts/build_jarvis_viz.py
 ## TL;DR cheat sheet — three recipes
 
 ```bash
-cd /Users/srinji/logic-research
+cd /Users/srinji/logicalworks-/vision
 REPO=/Users/srinji/sales-landing-page
 LASTC=$(python3 -c "import json;print(json.load(open('viz-data/.sync-state.json'))['codebase']['last_sync_commit'])")
 

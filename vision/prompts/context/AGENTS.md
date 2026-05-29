@@ -1,0 +1,1 @@
+/Users/srinji/sales-landing-page/AGENTS.md

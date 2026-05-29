@@ -1,6 +1,6 @@
 # References — skills & repos (public GH + local symlinks)
 
-Agents on this machine read the symlink (`~/logic-research/skills/...`).
+Agents on this machine read the symlink (`~/logicalworks-/vision/skills/...`).
 Agents elsewhere fetch the public GitHub URL. Same source, two doors.
 
 | Ref | Local symlink | Public GitHub |

@@ -9,7 +9,7 @@ deliverable for a human — only written when judgment work justifies the cost.
 
 ## Entry Standards — LW-RS/1 (governs every §A/§B/§C entry)
 
-**Canonical standard: `~/logic-research/LW-RS-1.md`** (the source of truth; this is a working
+**Canonical standard: `~/logicalworks-/vision/LW-RS-1.md`** (the source of truth; this is a working
 mirror). Use real ISO standards wherever one exists; for inherently subjective fields, apply the
 fixed internal scales below so judgment is applied *consistently, like a standard*.
 **Outcome-priority clause:** codes are the default discipline, not a straitjacket — if forcing a
@@ -49,7 +49,7 @@ Declare conformance once: the **first line** of each `notes/*.jsonl` is `{"std":
 
 Format = **minified JSONL**: one note per line, short fixed keys, **omit any empty/default field**,
 no pretty-print, no markdown fences inside the `.jsonl`. One research pass appends many lines to
-`~/logic-research/notes/<topic>.jsonl`. The ingestion agent reconciles by `i` + `sup`, and **diffs
+`~/logicalworks-/vision/notes/<topic>.jsonl`. The ingestion agent reconciles by `i` + `sup`, and **diffs
 rather than re-emits** — never re-send the whole map; emit only new/changed notes. One fact per
 line so a reader greps a line instead of loading the file.
 
@@ -94,7 +94,7 @@ as `gap` notes that seed the next wave.
 ## §B — RAC synthesis markdown (Opus-tier, optional)
 
 Written only for synthesis/judgment that earns Opus pricing. ONE file in
-`~/logic-research/artifacts/<id>.md`. Skims fast for a human, reassembles cold for Claude.
+`~/logicalworks-/vision/artifacts/<id>.md`. Skims fast for a human, reassembles cold for Claude.
 
 ## Format
 
