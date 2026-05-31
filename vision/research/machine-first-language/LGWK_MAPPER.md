@@ -2,6 +2,35 @@
 
 `lgwk mapper` is the local OS ingestion loop. It rebuilds the useful crawler/research-agent pattern for this app without depending on Firecrawl, ctx7, or external APIs.
 
+## Current CLI
+
+This repo now exposes the crawler as:
+
+```bash
+./lgwks jarvis crawl <website> --keywords "keyword one
+keyword two" --max-pages 40 --workers 2
+```
+
+Keyword-only mode uses `googler --json` when available:
+
+```bash
+./lgwks jarvis crawl "temporal graph neural network crawler" --max-pages 12
+```
+
+For URL + keyword runs, add `--search-expansion` to ask `googler` for bounded `site:<host>` expansion queries before the same-site crawl starts.
+
+The command prints an estimated compute time before the crawl and supports dry estimation:
+
+```bash
+./lgwks jarvis crawl https://example.com --keywords "protocol;state machine" --estimate-only
+```
+
+Legacy expedition databases can be upgraded in place:
+
+```bash
+./lgwks jarvis remap-db vision/research/research-network/runs/<run-id>
+```
+
 ## Command
 
 ```bash
@@ -29,13 +58,14 @@ Model-agnostic local Qwen embedding mode:
 
 ## Outputs
 
-Each run writes to `artifacts/lgwk-mapper/<run-id>/`:
+Each `lgwks jarvis crawl` run writes to `vision/research/research-network/runs/<run-id>/`:
 
 - `documents/` - normalized markdown documents from the source.
-- `jarvis-schema.json` - structural graph schema with SHA-256 node ids, hyperbolic coordinates, binary buffers, security perimeter, and typed edges.
-- `relationship-outputs.json` - final relationship list plus triage answers.
-- `final-guide.md` - final OS-focused implementation guide.
-- `embeddings.jsonl` - local deterministic embeddings for retrieval.
+- `raw/` - normalized markdown documents from crawled pages.
+- `db/research.sqlite` - canonical schema, including separated `understandings` and `question_events`.
+- `records/*.jsonl` - append-friendly document/chunk/node/edge exports.
+- `gnn/` - `nodes.csv`, `edges.csv`, and `features.jsonl` for graph/transformer experiments.
+- `graph/research-map.mmd` and `graph/research-map.html` - quick visual graph output.
 - `run-manifest.json` - run metadata and termination state.
 
 It also appends promoted, non-sandboxed OS intel to `notes/os-intel.jsonl` and keeps speculative questions in `notes/mapper-triage.jsonl`.
@@ -45,11 +75,11 @@ Provider contract lives in `LGWK_MAPPER_FACTORY_SPEC.md`.
 ## Lifecycle
 
 1. Give a source and prompt.
-2. Mapper crawls the source locally.
-3. Mapper creates the Jarvis-style schema.
-4. Mapper asks one deeper production/blindspot question.
-5. You answer, or type `terminate`.
-6. On termination it writes final relationship outputs, final guide, embeddings, and promoted stream notes.
+2. Mapper crawls the source locally with bounded concurrent workers.
+3. Mapper creates chunks, deterministic 256-d embeddings, typed concept nodes, lexical edges, and late-fusion similarity edges.
+4. Mapper stores a before/after snapshot pair.
+5. Mapper writes research understanding separately from question traces.
+6. Mapper emits three deterministic frontier questions per keyword drill, with a `what_were_you_thinking` rationale and separate vector.
 
 ## Design Rule
 

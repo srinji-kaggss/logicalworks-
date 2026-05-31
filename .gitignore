@@ -1,0 +1,8 @@
+.DS_Store
+__pycache__/
+*.py[cod]
+
+# Local crawl/research artifacts. The crawler writes reproducible run outputs here;
+# keep code, specs, and curated docs tracked instead of committing crawl corpora/DBs.
+.crwl/
+vision/research/research-network/runs/
