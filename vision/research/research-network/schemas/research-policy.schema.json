@@ -1,0 +1,26 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "LGWKS Research Bot Policy",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["objective", "boundaries", "coscientist_pattern", "constitutional_pattern", "tabula_rasa_pattern"],
+  "properties": {
+    "objective": { "type": "string" },
+    "boundaries": {
+      "type": "array",
+      "items": { "type": "string" }
+    },
+    "coscientist_pattern": {
+      "type": "array",
+      "items": { "type": "string" }
+    },
+    "constitutional_pattern": {
+      "type": "array",
+      "items": { "type": "string" }
+    },
+    "tabula_rasa_pattern": {
+      "type": "array",
+      "items": { "type": "string" }
+    }
+  }
+}

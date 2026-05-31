@@ -1,2 +1,5 @@
 .crwl/
 .firecrawl/
+vision/research/research-network/runs/
+__pycache__/
+*.pyc

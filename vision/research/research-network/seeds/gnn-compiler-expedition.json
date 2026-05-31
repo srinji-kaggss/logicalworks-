@@ -1,0 +1,90 @@
+{
+  "name": "gnn-compiler-expedition",
+  "description": "Seed set for graph neural networks, neural relationship mapping, compiler intermediates, and machine-first research graph formation.",
+  "sources": [
+    {
+      "url": "https://distill.pub/2021/gnn-intro/",
+      "title": "A Gentle Introduction to Graph Neural Networks",
+      "axis": "gnn_foundations",
+      "tier": "primary",
+      "notes": "Interactive GNN foundation and visualization reference."
+    },
+    {
+      "url": "https://arxiv.org/search/cs?query=graph+neural+network+message+passing+program+synthesis+compiler&searchtype=all&abstracts=show&order=-announced_date_first&size=50",
+      "title": "arXiv search: GNN message passing program synthesis compiler",
+      "axis": "gnn_foundations",
+      "tier": "primary",
+      "notes": "Broad arXiv entry point rather than unbounded crawl of the entire domain."
+    },
+    {
+      "url": "https://arxiv.org/abs/1806.01261",
+      "title": "Relational inductive biases, deep learning, and graph networks",
+      "axis": "graph_representation_learning",
+      "tier": "primary",
+      "notes": "Graph networks as relational inductive bias."
+    },
+    {
+      "url": "https://arxiv.org/abs/1812.08434",
+      "title": "Graph Neural Networks: A Review of Methods and Applications",
+      "axis": "gnn_foundations",
+      "tier": "primary",
+      "notes": "Survey for taxonomy extraction."
+    },
+    {
+      "url": "https://medium.com/dair-ai/an-illustrated-guide-to-graph-neural-networks-d5564a551783",
+      "title": "An Illustrated Guide to Graph Neural Networks",
+      "axis": "gnn_foundations",
+      "tier": "secondary",
+      "notes": "Explanatory source for visual concepts."
+    },
+    {
+      "url": "https://www.reddit.com/r/MLQuestions/s/wtpWZ6RZHv",
+      "title": "MLQuestions discussion seed",
+      "axis": "unknown",
+      "tier": "community",
+      "notes": "Community confusion and vocabulary mining."
+    },
+    {
+      "url": "https://pytorch-geometric.readthedocs.io/en/latest/",
+      "title": "PyTorch Geometric documentation",
+      "axis": "graph_representation_learning",
+      "tier": "primary",
+      "notes": "Real framework primitives and operational APIs."
+    },
+    {
+      "url": "https://www.dgl.ai/dgl_docs/",
+      "title": "Deep Graph Library documentation",
+      "axis": "graph_representation_learning",
+      "tier": "primary",
+      "notes": "Alternative GNN framework primitives."
+    },
+    {
+      "url": "https://mlir.llvm.org/docs/",
+      "title": "MLIR documentation",
+      "axis": "compiler_ir",
+      "tier": "primary",
+      "notes": "Compiler IR layering and dialect design."
+    },
+    {
+      "url": "https://llvm.org/docs/LangRef.html",
+      "title": "LLVM Language Reference",
+      "axis": "compiler_ir",
+      "tier": "primary",
+      "notes": "Typed IR and deterministic compiler substrate."
+    },
+    {
+      "url": "https://json-schema.org/learn/getting-started-step-by-step",
+      "title": "JSON Schema getting started",
+      "axis": "schema_validation",
+      "tier": "primary",
+      "notes": "Validation layer for graph records."
+    },
+    {
+      "url": "https://www.w3.org/TR/shacl/",
+      "title": "SHACL",
+      "axis": "schema_validation",
+      "tier": "primary",
+      "notes": "Graph constraint validation reference."
+    }
+  ]
+}

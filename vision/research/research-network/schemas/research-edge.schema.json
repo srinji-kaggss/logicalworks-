@@ -1,0 +1,19 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "LGWKS Research Edge",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["id", "from", "to", "kind", "weight"],
+  "properties": {
+    "id": { "type": "string" },
+    "from": { "type": "string" },
+    "to": { "type": "string" },
+    "kind": {
+      "type": "string",
+      "enum": ["contains", "mentions", "similar_to", "co_occurs", "supports", "contrasts", "derived_from"]
+    },
+    "weight": { "type": "number" },
+    "evidence": { "type": "string" },
+    "metadata": { "type": "object" }
+  }
+}

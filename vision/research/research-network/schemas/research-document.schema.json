@@ -1,0 +1,17 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "LGWKS Research Document",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["id", "source_id", "path", "title", "content_sha256", "retrieved_at"],
+  "properties": {
+    "id": { "type": "string" },
+    "source_id": { "type": "string" },
+    "path": { "type": "string" },
+    "title": { "type": "string" },
+    "content_sha256": { "type": "string" },
+    "retrieved_at": { "type": "string" },
+    "word_count": { "type": "integer", "minimum": 0 },
+    "chunk_count": { "type": "integer", "minimum": 0 }
+  }
+}

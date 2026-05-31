@@ -1,0 +1,30 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "LGWKS Research Source",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["url", "title", "axis", "tier"],
+  "properties": {
+    "url": { "type": "string" },
+    "title": { "type": "string" },
+    "axis": {
+      "type": "string",
+      "enum": [
+        "gnn_foundations",
+        "graph_representation_learning",
+        "neural_program_synthesis",
+        "compiler_ir",
+        "visual_programming",
+        "schema_validation",
+        "research_governance",
+        "security_provenance",
+        "unknown"
+      ]
+    },
+    "tier": {
+      "type": "string",
+      "enum": ["primary", "secondary", "tertiary", "community", "unknown"]
+    },
+    "notes": { "type": "string" }
+  }
+}
