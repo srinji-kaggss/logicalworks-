@@ -142,6 +142,34 @@
       "threatens": ["wm-ai-arch-language-service", "wedge.language-kernel-substrate"],
       "verify_to_close": "Prototype one signed-bundle provider across landing plus one additional surface, then run interoperability and policy-override tests to prove the cut is stable.",
       "status": "open"
+    },
+    {
+      "id": "wm-bs-derived-telemetry-surveillance",
+      "layer": "ai-layer",
+      "blindspot": "The current A4/ADR-068 plan strongly covers E2EE fact storage but has not yet measured or schema-hardened the surveillance risk of derived telemetry: embeddings, brief catalogues, slug resolvers, cross-device absence signals, speculative branches, and DP deltas.",
+      "queries_run": [
+        "crwl crawl Apple PCC",
+        "crwl crawl NIST Privacy Framework",
+        "crwl crawl ChromiumOS security overview",
+        "crwl crawl Fuchsia kernel concepts",
+        "crwl crawl seL4 capabilities",
+        "crwl crawl Microsoft 365 Copilot agents overview",
+        "crwl crawl Microsoft agents are apps",
+        "crwl crawl Google App Actions schema",
+        "read /Users/srinji/Downloads/Claude Research/ai_os_agent_handoff_pack/deep-research-report-2.md",
+        "read /Users/srinji/Downloads/Claude Research/Independent AI Insight3.yaml"
+      ],
+      "surfaced": "Primary sources support defense-in-depth, stateless cloud AI, handle/capability authority, privacy risk management, and typed manifest/action surfaces; they do not prove the current plan's derived-data layer is safe.",
+      "caveat": "Architecture recommendation is ahead of implementation evidence. Needs prototype tests for provider timeline reconstruction, projection partitioning, typed intent compilation, agent manifest enforcement, and budgeted egress.",
+      "severity": "h",
+      "threatens": [
+        "wedge.private-intent-fabric-hardening",
+        "wm-ai-arch-private-intent-fabric",
+        "wm-gov-arch-privacy-budget-ledger",
+        "wm-ai-arch-intent-compiler-manifest"
+      ],
+      "verify_to_close": "Build a local prototype with provider-dump reconstruction tests, projection scope tests, DP budget exhaustion tests, and a typed intent compiler/agent manifest conformance suite.",
+      "status": "open"
     }
   ]
 }
