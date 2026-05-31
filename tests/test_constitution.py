@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import dataclasses
 import importlib.util
+import json
 import subprocess
 import sys
 import tempfile
@@ -32,6 +33,7 @@ def _load_script(relpath: str):
     loader = SourceFileLoader(modname, str(ROOT / relpath))
     spec = importlib.util.spec_from_loader(modname, loader)
     mod = importlib.util.module_from_spec(spec)
+    sys.modules[modname] = mod          # @dataclass resolves cls.__module__ via sys.modules
     loader.exec_module(mod)
     return mod
 
@@ -157,6 +159,69 @@ class TestAkinatorForm(unittest.TestCase):
     def test_demo_conduct_yes(self):
         out = self._cli("--demo")
         self.assertIn("conduct (L9): YES", out.stdout)
+
+
+class TestHardeningFixes(unittest.TestCase):
+    """Regressions for the hacker FAIL: C1 keyed chain, C2 verdict provenance, C3 redirect SSRF, L1 ranges."""
+
+    def setUp(self):
+        self.plan, self.syn = r._demo_plan(all_pass=True)
+        self.tmp = Path(tempfile.mkdtemp())
+
+    def test_C1_keyed_chain_detects_rewrite(self):
+        key = b"secret-test-key"
+        log = r.RunLog("t", None, key=key)
+        log.append("a", {"x": 1}); log.append("b", {"y": 2})
+        self.assertTrue(log.verify())
+        # Attacker rewrites record AND recomputes hash — but without the secret key it cannot forge.
+        rec = log.records[0]
+        rec["data"]["x"] = 999
+        import lgwks_sign as _sign
+        core = json.dumps({k: v for k, v in rec.items() if k != "hash"}, sort_keys=True, separators=(",", ":"))
+        rec["hash"] = _sign.mac(core + "0" * 64, b"WRONG-KEY")   # rewriter lacks the real key
+        self.assertFalse(log.verify())
+
+    def test_C2_forged_verdict_rejected_when_keyed(self):
+        key = b"secret-test-key"
+        # Forged: passed=True but no valid signature for this run_id.
+        forged = tuple(r.GateVerdict(g, True, "", sig="deadbeef") for g in r.GATES_REQUIRED)
+        plan = dataclasses.replace(self.plan, verdicts=forged)
+        with self.assertRaises(r.GateError):
+            r.assert_gates_clicked(plan, key, "keyed-env")
+        # Properly signed by the admission verifier (uses r.sign_verdict → lgwks_sign HMAC) → accepted.
+        signed = tuple(r.GateVerdict(g, True, "", sig=r.sign_verdict(plan.run_id, g, True, key))
+                       for g in r.GATES_REQUIRED)
+        plan2 = dataclasses.replace(self.plan, verdicts=signed)
+        self.assertTrue(r.assert_gates_clicked(plan2, key, "keyed-env"))
+
+    def test_C3_private_and_metadata_hosts_blocked(self):
+        # Resolve-and-judge: literal private / loopback / metadata IPs are blocked.
+        self.assertTrue(r.host_is_blocked("127.0.0.1"))
+        self.assertTrue(r.host_is_blocked("169.254.169.254"))   # cloud metadata
+        self.assertTrue(r.host_is_blocked("10.0.0.5"))
+        self.assertTrue(r.host_is_blocked(""))
+
+    def test_C3_redirect_off_scope_and_bad_scheme_refused(self):
+        frozen = ("https://example.org/a",)
+        self.assertTrue(r._allowed_hop("https://example.org/a", frozen))   # in scope
+        self.assertFalse(r._allowed_hop("https://example.org/b", frozen))  # off-scope hop
+        self.assertFalse(r._allowed_hop("file:///etc/passwd", frozen))     # non-http(s)
+        self.assertFalse(r._allowed_hop("http://169.254.169.254/", frozen))# metadata (also off-scope)
+
+    def test_C3_real_fetch_of_out_of_scope_is_blocked(self):
+        # A non-dry fetch of a URL not in the frozen set never hits the network.
+        res = r.fetch("https://example.org/not-declared", dry=False, synthetic=None,
+                      frozen=("https://example.org/declared",))
+        self.assertEqual(res.status, "error")
+        self.assertIn("blocked", res.error)
+
+    def test_L1_range_violations_rejected(self):
+        mod = _load_script("lgwks-akinator")
+        base = {"objective": "x" * 5, "purpose": "y" * 5, "tier_floor": "secondary", "risk_class": "read_only"}
+        self.assertEqual(mod.gate_intent({**base, "max_pages": 12}), [])          # ok
+        self.assertIn("max_pages", mod.gate_intent({**base, "max_pages": 5000}))   # > max 500
+        self.assertIn("tier_floor", mod.gate_intent({**base, "tier_floor": "bogus"}))  # bad enum
+        self.assertIn("objective", mod.gate_intent({**base, "objective": "x"}))    # under min_len
 
 
 if __name__ == "__main__":

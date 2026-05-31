@@ -193,12 +193,26 @@ def write_mermaid(objective: str, chains: list[Chain], out: Path) -> Path:
 # Constitution gate (L1 bounds, L9 conduct yes/no) + the crawler tool.
 # ─────────────────────────────────────────────────────────────────────────────
 def gate_intent(intent: dict) -> list[str]:
-    """L1: return the list of missing/invalid required fields; empty list == admissible."""
-    missing = []
-    for field_name, rule in INTENT_BOUNDS.items():
-        if rule.get("required") and not intent.get(field_name):
-            missing.append(field_name)
-    return missing
+    """L1: return invalid/missing fields; empty list == admissible. Checks presence AND bounds
+    (min/max, len, enum) — not just presence (closes the M3 L1 gap: max_pages>500 must be rejected)."""
+    bad = []
+    for name, rule in INTENT_BOUNDS.items():
+        val = intent.get(name)
+        if val is None or (isinstance(val, str) and not val.strip()):
+            if rule.get("required"):
+                bad.append(name)
+            continue
+        if "enum" in rule and val not in rule["enum"]:
+            bad.append(name)
+        if "min_len" in rule and isinstance(val, str) and len(val) < rule["min_len"]:
+            bad.append(name)
+        if "max_len" in rule and isinstance(val, str) and len(val) > rule["max_len"]:
+            bad.append(name)
+        if "min" in rule and isinstance(val, (int, float)) and val < rule["min"]:
+            bad.append(name)
+        if "max" in rule and isinstance(val, (int, float)) and val > rule["max"]:
+            bad.append(name)
+    return list(dict.fromkeys(bad))
 
 
 def conduct_decision(chains: list[Chain]) -> tuple[bool, str]:

@@ -57,10 +57,23 @@ resolve cred_ref:  security find-generic-password -s lgwks:<site> -w   # token -
 | `lgwks-auth check <site>` | bot path: is a usable, non-stale cred present? (boolean) | never prints token |
 | *escape hatch* | open Passwords.app -> search `lgwks:` -> complete / rotate / delete | human, manually |
 
+## Integrity modes (honest)
+The chain HMACs each record under a signer from `lgwks_sign` (env `LGWKS_SIGNING_KEY` → Keychain
+`lgwks:signing-key` → none):
+- **keyed-*** (a secret key is present): tamper-EVIDENT. A rewriter cannot recompute hashes without
+  the secret → adversarial rewrite is detected.
+- **unanchored** (no key): a checksum only. Detects ACCIDENTAL corruption/truncation; does **NOT**
+  detect an adversarial rewrite (the algorithm + old constant are public). Do not claim more.
+
 ## Invariants
 - **I1** A token never appears in the registry, a log line, a fact envelope, or git. Only `cred_ref`.
-- **I2** The registry is append-only + hash-chained; a broken chain flags compromise (ADR-064).
-- **I3** The bot cannot author `stale`/`supersede`/delete — only the director.
-- **I4** Honor `rate_from_auth` as a hard cap; never exceed the grant (L8).
-- **I5 (platform, not script):** WORM must be enforced by OS-level append-only file mode + Keychain
-  ACL — a code convention is insufficient against a compromised bot. Tracked as a hardening item.
+- **I2** The registry is append-only + HMAC-chained. Tamper-evidence holds **only in keyed mode**;
+  unanchored is corruption-detection only (see Integrity modes).
+- **I3** The bot (`sa-runner`) cannot author `stale`/`supersede`/delete. NOTE: today this is a
+  name-based check (`by` arg) — hardening item H1: `HUMAN_EVENTS` must require a human-held signing
+  key / Touch ID, since the bot process supplies `by` itself.
+- **I4** Honor `rate_from_auth` as a hard cap; never exceed the grant (L8). NOTE: the spine does not
+  yet read the vault for the per-host floor (hardening item H5).
+- **I5 (platform, not script):** full WORM needs OS-level append-only file mode + a real per-tool
+  Keychain ACL (`-T /path/to/tool`, dedicated `lgwks-bot.keychain-db`) — the current `-T ""` is not a
+  bot-only ACL (H2). A code convention + keyed HMAC is the interim; OS enforcement is the target.

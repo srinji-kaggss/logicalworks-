@@ -25,18 +25,24 @@ from __future__ import annotations
 import argparse
 import hashlib
 import importlib.util
+import ipaddress
 import json
 import math
 import re
+import socket
 import time
+import urllib.error
 import urllib.parse
 import urllib.request
 from dataclasses import dataclass
 from pathlib import Path
 
+import lgwks_sign
+
 ROOT = Path(__file__).resolve().parent
-SIGNER = "local-unanchored"  # hardening target: Secure Enclave (ADR-064); linkage still detects rewrite
 DIMS = 256
+MAX_BYTES = 3_000_000          # H4: hard response-body cap (both fetch paths)
+MAX_REDIRECTS = 3
 
 # Every gate that must have clicked before the crawler may run (ADR-001 §5 + L9).
 GATES_REQUIRED = ("G1_intent", "G2_scope_lock", "G3_url_risk", "G4_auth", "G5_egress", "L9_conduct")
@@ -55,6 +61,11 @@ class GateVerdict:
     gate: str
     passed: bool
     detail: str = ""
+    sig: str = ""        # C2: HMAC over f"{run_id}|{gate}|{int(passed)}" by the admission verifier
+
+
+def sign_verdict(run_id: str, gate: str, passed: bool, key: bytes) -> str:
+    return lgwks_sign.mac(f"{run_id}|{gate}|{int(passed)}", key)
 
 
 @dataclass(frozen=True)
@@ -91,12 +102,16 @@ class RunResult:
     embed_provider: str
     prevector_path: str
     runlog_intact: bool
+    integrity_mode: str        # keyed-* (tamper-evident) or unanchored (corruption-only — honest)
+    gates_verified: bool       # True only when verdict signatures were cryptographically checked
 
 
 # ─────────────────────────────────────────────────────────────────────────────
 # 1. Fail-closed gate precondition.
 # ─────────────────────────────────────────────────────────────────────────────
-def assert_gates_clicked(plan: RunPlan) -> None:
+def assert_gates_clicked(plan: RunPlan, key: bytes, mode: str) -> bool:
+    """Fail-closed. C2: when keyed, every verdict's signature must verify against this run_id; a
+    forged/unsigned verdict is rejected. Returns whether verdicts were cryptographically verified."""
     by_gate = {v.gate: v for v in plan.verdicts}
     for gate in GATES_REQUIRED:
         v = by_gate.get(gate)
@@ -104,8 +119,12 @@ def assert_gates_clicked(plan: RunPlan) -> None:
             raise GateError(f"gate {gate} never evaluated — refusing to crawl (fail-closed)")
         if not v.passed:
             raise GateError(f"gate {gate} is RED: {v.detail} — refusing to crawl")
+        if lgwks_sign.is_keyed(mode):
+            if not lgwks_sign.verify(f"{plan.run_id}|{gate}|1", v.sig, key):
+                raise GateError(f"gate {gate} verdict is unsigned/forged — refusing to crawl (C2)")
     if not plan.frozen_scope:
         raise GateError("frozen scope is empty — nothing was declared")
+    return lgwks_sign.is_keyed(mode)
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -137,26 +156,87 @@ class HostRate:
 # ─────────────────────────────────────────────────────────────────────────────
 # 4. Provider seams (fetch, embed). Absent provider -> deterministic fallback, never a hard fail.
 # ─────────────────────────────────────────────────────────────────────────────
-def fetch(url: str, dry: bool, synthetic: dict[str, str] | None) -> FetchResult:
+def _scrub(text: str) -> str:
+    # L-1: never let a full URL (possible query-string credential) reach a log line.
+    return re.sub(r"https?://[^\s'\")]+", "<url>", text)[:300]
+
+
+def host_is_blocked(host: str) -> bool:
+    """C3/L-2: block loopback/private/link-local/metadata + DNS-rebinding. Resolve, then judge every IP."""
+    if not host:
+        return True
+    try:
+        infos = socket.getaddrinfo(host, None)
+    except Exception:
+        return True
+    for info in infos:
+        ip = ipaddress.ip_address(info[4][0])
+        if (ip.is_private or ip.is_loopback or ip.is_link_local or ip.is_reserved
+                or ip.is_multicast or ip.is_unspecified):
+            return True
+        if ip == ipaddress.ip_address("169.254.169.254"):  # cloud metadata (explicit; covered by link_local)
+            return True
+    return False
+
+
+def _allowed_hop(url: str, frozen: tuple[str, ...]) -> bool:
+    """A hop is allowed only if it is http(s), in the frozen declared set (L6), and not a blocked host."""
+    p = urllib.parse.urlparse(url)
+    if p.scheme not in ("http", "https"):       # no file://, gopher://, etc.
+        return False
+    if url not in frozen:                        # scope is immutable — a redirect off-set is rejected
+        return False
+    return not host_is_blocked(p.netloc)
+
+
+def fetch(url: str, dry: bool, synthetic: dict[str, str] | None, frozen: tuple[str, ...]) -> FetchResult:
     if dry:
         text = (synthetic or {}).get(url, "")
         return FetchResult(url, "ok" if text else "error", text=text,
                            error="" if text else "no synthetic page")
-    # Tier 1 stealth if available; else stdlib. (curl_cffi gives a real Chrome TLS/JA4 fingerprint.)
-    try:
-        from curl_cffi import requests as cffi  # type: ignore
-        r = cffi.get(url, impersonate="chrome", timeout=20)
-        return FetchResult(url, "ok", text=r.text)
-    except ImportError:
-        pass
-    except Exception as exc:  # fetch failure is recorded, never hidden
-        return FetchResult(url, "error", error=str(exc))
-    try:
-        req = urllib.request.Request(url, headers={"User-Agent": "lgwks-jarvis-crawl/0.2 (+research)"})
-        with urllib.request.urlopen(req, timeout=20) as resp:
-            return FetchResult(url, "ok", text=resp.read(2_000_000).decode("utf-8", errors="replace"))
-    except Exception as exc:
-        return FetchResult(url, "error", error=str(exc))
+    if not _allowed_hop(url, frozen):
+        return FetchResult(url, "error", error="blocked: out-of-scope, non-http(s), or private/metadata host")
+    # Manual redirect loop: redirects are NOT auto-followed; every hop is re-validated against the
+    # frozen scope + IP denylist (C3 — defeats redirect SSRF / scope escape to 169.254.169.254 / localhost).
+    current = url
+    for _ in range(MAX_REDIRECTS + 1):
+        try:
+            from curl_cffi import requests as cffi  # type: ignore
+            r = cffi.get(current, impersonate="chrome", timeout=20, allow_redirects=False)
+            if r.status_code in (301, 302, 303, 307, 308):
+                loc = urllib.parse.urljoin(current, r.headers.get("location", ""))
+                if not _allowed_hop(loc, frozen):
+                    return FetchResult(url, "error", error="redirect off declared scope — refused")
+                current = loc
+                continue
+            body = r.text if len(r.content) <= MAX_BYTES else r.text[:MAX_BYTES]  # H4 byte cap
+            return FetchResult(url, "ok", text=body)
+        except ImportError:
+            break
+        except Exception as exc:
+            return FetchResult(url, "error", error=_scrub(str(exc)))
+    # stdlib fallback, redirects disabled via a no-follow opener.
+    class _NoRedirect(urllib.request.HTTPRedirectHandler):
+        def redirect_request(self, *_args, **_kwargs):  # returning None disables auto-follow
+            return None
+    opener = urllib.request.build_opener(_NoRedirect)
+    current = url
+    for _ in range(MAX_REDIRECTS + 1):
+        req = urllib.request.Request(current, headers={"User-Agent": "lgwks-jarvis-crawl/0.2 (+research)"})
+        try:
+            with opener.open(req, timeout=20) as resp:
+                return FetchResult(url, "ok", text=resp.read(MAX_BYTES).decode("utf-8", errors="replace"))
+        except urllib.error.HTTPError as exc:
+            if exc.code in (301, 302, 303, 307, 308):
+                loc = urllib.parse.urljoin(current, exc.headers.get("Location", ""))
+                if not _allowed_hop(loc, frozen):
+                    return FetchResult(url, "error", error="redirect off declared scope — refused")
+                current = loc
+                continue
+            return FetchResult(url, "error", error=_scrub(str(exc)))
+        except Exception as exc:
+            return FetchResult(url, "error", error=_scrub(str(exc)))
+    return FetchResult(url, "error", error="too many redirects")
 
 
 def _deterministic_embed(text: str, dims: int = DIMS) -> list[float]:
@@ -185,17 +265,22 @@ def embed(text: str, embed_on: bool) -> tuple[list[float] | None, str, bool]:
 # 6. Hash-chained, append-only run log (L5) — replayable; tamper breaks the chain.
 # ─────────────────────────────────────────────────────────────────────────────
 class RunLog:
-    def __init__(self, run_id: str, path: Path | None):
+    """Append-only, HMAC-chained (C1). With a keyed signer the chain is tamper-EVIDENT (a rewriter
+    cannot recompute without the secret). Unanchored, it detects accidental corruption only — never
+    claimed as more (the mode is reported)."""
+
+    def __init__(self, run_id: str, path: Path | None, key: bytes | None = None):
         self.run_id = run_id
         self.path = path
         self.records: list[dict] = []
         self._prev = "0" * 64
+        self._key = key if key is not None else lgwks_sign.signing_key()[0]
 
     def append(self, event: str, data: dict) -> None:
         rec = {"seq": len(self.records) + 1, "event": event, "run_id": self.run_id,
                "data": data, "prev_hash": self._prev}
         core = json.dumps({k: v for k, v in rec.items() if k != "hash"}, sort_keys=True, separators=(",", ":"))
-        rec["hash"] = hashlib.sha256((core + self._prev + SIGNER).encode()).hexdigest()
+        rec["hash"] = lgwks_sign.mac(core + self._prev, self._key)
         self._prev = rec["hash"]
         self.records.append(rec)
         if self.path:
@@ -206,7 +291,7 @@ class RunLog:
         prev = "0" * 64
         for rec in self.records:
             core = json.dumps({k: v for k, v in rec.items() if k != "hash"}, sort_keys=True, separators=(",", ":"))
-            if rec["hash"] != hashlib.sha256((core + prev + SIGNER).encode()).hexdigest():
+            if not lgwks_sign.verify(core + prev, rec["hash"], self._key):
                 return False
             prev = rec["hash"]
         return True
@@ -222,10 +307,11 @@ def _chunk(text: str, size: int = 400) -> list[str]:
 # ─────────────────────────────────────────────────────────────────────────────
 def execute_plan(plan: RunPlan, dry: bool = False, synthetic: dict[str, str] | None = None,
                  out_dir: Path | None = None, rate: HostRate | None = None) -> RunResult:
-    assert_gates_clicked(plan)                                   # 1 — fail-closed
+    key, mode = lgwks_sign.signing_key()
+    gates_verified = assert_gates_clicked(plan, key, mode)       # 1 — fail-closed + C2 verdict check
     out_dir = out_dir or (ROOT / "runs" / plan.run_id)
     out_dir.mkdir(parents=True, exist_ok=True)
-    log = RunLog(plan.run_id, out_dir / "run.log.jsonl")
+    log = RunLog(plan.run_id, out_dir / "run.log.jsonl", key=key)
     rate = rate or HostRate(plan.per_host_seconds)
     log.append("run_start", {"chain": plan.chain_label, "scope_size": len(plan.frozen_scope),
                              "gates": [v.gate for v in plan.verdicts if v.passed]})
@@ -243,7 +329,7 @@ def execute_plan(plan: RunPlan, dry: bool = False, synthetic: dict[str, str] | N
         if fetched >= plan.max_pages:
             log.append("budget_stop", {"max_pages": plan.max_pages}); break
         rate.wait(_host(url))                                    # 3 — politeness
-        res = fetch(url, dry, synthetic)                         # 4 — provider seam
+        res = fetch(url, dry, synthetic, plan.frozen_scope)      # 4 — provider seam (scope-bound)
         fetched += 1
         log.append("fetch", {"url": url, "status": res.status, "error": res.error})
         if res.status != "ok" or not res.text.strip():
@@ -294,7 +380,8 @@ def execute_plan(plan: RunPlan, dry: bool = False, synthetic: dict[str, str] | N
     return RunResult(run_id=plan.run_id, fetched=fetched, documents=len(docs), nodes=len(nodes),
                      edges=len(edges), quarantined=len(quarantine), coverage=coverage,
                      uncertainty=uncertainty, embed_provider=embed_provider,
-                     prevector_path=str(prevector), runlog_intact=log.verify())
+                     prevector_path=str(prevector), runlog_intact=log.verify(),
+                     integrity_mode=mode, gates_verified=gates_verified)
 
 
 def _demo_plan(all_pass: bool = True) -> tuple[RunPlan, dict[str, str]]:
@@ -305,7 +392,14 @@ def _demo_plan(all_pass: bool = True) -> tuple[RunPlan, dict[str, str]]:
         scope[1]: "CRM versus CDP: the CRM controls contact records while the CDP controls events. "
                   "Benchmark against incumbents salesforce and hubspot for truth not marketing.",
     }
-    verdicts = tuple(GateVerdict(g, all_pass, "" if all_pass else "demo-forced-red") for g in GATES_REQUIRED)
+    # Sign verdicts as a legitimate admission verifier would (C2). Under a keyed signer these verify;
+    # a caller fabricating verdicts without the key is rejected by assert_gates_clicked.
+    key, _ = lgwks_sign.signing_key()
+    verdicts = tuple(
+        GateVerdict(g, all_pass, "" if all_pass else "demo-forced-red",
+                    sig=sign_verdict("demo-crm", g, all_pass, key))
+        for g in GATES_REQUIRED
+    )
     plan = RunPlan(run_id="demo-crm", chain_label="mechanism",
                    frozen_scope=scope, keywords=("crm", "lambda", "cognito", "github", "jira", "cdp", "contact"),
                    max_pages=12, per_host_seconds=0.0, tier_floor="secondary", embed=True, verdicts=verdicts)
@@ -330,7 +424,11 @@ def main(argv: list[str] | None = None) -> int:
     print(f"  run {res.run_id}: fetched={res.fetched} docs={res.documents} nodes={res.nodes} "
           f"edges={res.edges} quarantined={res.quarantined}")
     print(f"  embed={res.embed_provider}  coverage={res.coverage}  uncertainty={res.uncertainty}")
-    print(f"  run log chain intact: {res.runlog_intact}")
+    print(f"  run log chain intact: {res.runlog_intact}  integrity={res.integrity_mode}  "
+          f"gates_verified={res.gates_verified}")
+    if res.integrity_mode == "unanchored":
+        print("  note: unanchored signer — detects corruption only, NOT adversarial rewrite. "
+              "Provision a key: security add-generic-password -U -s lgwks:signing-key -w")
     print(f"  pre-vector graph: {res.prevector_path}")
     return 0
 
