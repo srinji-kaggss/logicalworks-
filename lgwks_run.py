@@ -24,7 +24,6 @@ from __future__ import annotations
 
 import argparse
 import hashlib
-import importlib.util
 import ipaddress
 import json
 import math
@@ -249,15 +248,18 @@ def _deterministic_embed(text: str, dims: int = DIMS) -> list[float]:
     return [round(v / norm, 6) for v in vec]
 
 
-def embed(text: str, embed_on: bool) -> tuple[list[float] | None, str, bool]:
-    """Returns (vector, provider, is_semantic). is_semantic gates L2 edge labelling."""
+def embed(text: str, embed_on: bool, provider: str = "auto") -> tuple[list[float] | None, str, bool]:
+    """Returns (vector, provider, is_semantic). is_semantic gates L2 edge labelling.
+    provider 'auto'|'ollama' tries the real Eye (qwen3-embedding via Ollama) → SEMANTIC vector,
+    MRL-sliced to DIMS for the hot graph. Falls back to deterministic feature-hash (NOT semantic)."""
     if not embed_on:
         return None, "none", False
-    if importlib.util.find_spec("mlx_embeddings") is not None:
-        # The real Eye (Qwen3-Embedding via MLX) wires in here during the migration and returns a
-        # SEMANTIC vector (is_semantic=True -> L2 lets edges be labelled semantic_similarity). Until
-        # that wiring lands we fall through to the deterministic provider, which is NOT semantic.
-        pass
+    if provider in ("auto", "ollama"):
+        import lgwks_ollama
+        vec = lgwks_ollama.embed_one(text)
+        if vec is not None:
+            return lgwks_ollama.slice_mrl(vec, DIMS), f"ollama:{lgwks_ollama.EYE_MODEL}", True
+    # MLX path lands here in the migration (also semantic). Until a real provider answers:
     return _deterministic_embed(text), "deterministic-feature-hash", False
 
 
@@ -336,8 +338,9 @@ def execute_plan(plan: RunPlan, dry: bool = False, synthetic: dict[str, str] | N
             continue
         doc_id = f"doc-{hashlib.sha256((url + res.text).encode()).hexdigest()[:12]}"
         docs.append({"id": doc_id, "url": url, "words": len(res.text.split())})
+        embed_prov = "deterministic" if dry else "auto"   # dry == hermetic, no external calls
         for ci, chunk in enumerate(_chunk(res.text)):
-            vec, embed_provider, semantic = embed(chunk, plan.embed)  # 4
+            vec, embed_provider, semantic = embed(chunk, plan.embed, provider=embed_prov)  # 4
             if vec is not None:           # persist to the vector cache, stamped with provider/dim
                 embeddings.append({"id": f"{doc_id}-c{ci}", "doc": doc_id, "dim": len(vec),
                                    "provider": embed_provider, "semantic": semantic, "vector": vec})

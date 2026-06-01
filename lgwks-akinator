@@ -249,6 +249,28 @@ class Session:
     trail: list[str] = field(default_factory=list)   # the tracked chain across deep-dives
 
 
+def tongue_enrich(objective: str, purpose: str, chains: list[Chain]) -> tuple[list[Chain], dict | None]:
+    """Let the Tongue (gemma4/Ollama) write good hypothesis/null/answer text + H0/H1/Hn over the
+    deterministic skeleton. Fails closed: Ollama down or bad JSON → chains unchanged, tongue=None."""
+    try:
+        import lgwks_tongue
+    except Exception:
+        return chains, None
+    labels = [c.label for c in chains]
+    enriched = lgwks_tongue.enrich_chains(objective, purpose, labels)
+    hyps = lgwks_tongue.hypotheses(objective, purpose)
+    if enriched and isinstance(enriched.get("chains"), list):
+        by_label = {c.get("label"): c for c in enriched["chains"] if isinstance(c, dict)}
+        for ch in chains:                       # graft text onto the deterministic structure only
+            e = by_label.get(ch.label)
+            if e:
+                ch.hypothesis = e.get("hypothesis") or ch.hypothesis
+                ch.null = e.get("null") or ch.null
+                if isinstance(e.get("keywords"), list) and e["keywords"]:
+                    ch.keywords = [str(k) for k in e["keywords"]][:6]
+    return chains, {"hypotheses": hyps, "question": (enriched or {}).get("question")}
+
+
 def run(objective: str, intent: dict, output: str, embed: bool, pick: int | None,
         interactive: bool) -> int:
     const = load_constitution()
@@ -268,11 +290,18 @@ def run(objective: str, intent: dict, output: str, embed: bool, pick: int | None
     while True:
         chains = map_intent(objective, intent["purpose"], intent["tier_floor"],
                             float(intent.get("novelty", 0.6)), prior=sess.trail)
+        chains, tongue = tongue_enrich(objective, intent["purpose"], chains)  # Tongue or fallback
         ok, reason = conduct_decision(chains)
         print(_c(f"  conduct (L9): {'YES' if ok else 'NO'} — {reason}", BOLD))
         if not ok:
             print(_c("  We're sorry — this intent does not match our code of conduct.", BOLD))
             return 3
+        if tongue and tongue.get("hypotheses"):
+            h = tongue["hypotheses"]
+            print(_c(f"  H0 (null to beat): {h.get('H0', {}).get('claim', '?')}", BOLD))
+            for k in ("H1", "Hn"):
+                if h.get(k, {}).get("claim"):
+                    print(_c(f"  {k}: {h[k]['claim']}", DIM))
         render_map(objective, chains)
 
         if output in ("graph", "all"):

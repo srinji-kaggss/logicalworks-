@@ -14,6 +14,7 @@ from __future__ import annotations
 import dataclasses
 import importlib.util
 import json
+import os
 import subprocess
 import sys
 import tempfile
@@ -148,8 +149,9 @@ class TestAkinatorForm(unittest.TestCase):
     """L1/L9 — under-specified intent is unrepresentable; conduct returns a hard yes/no."""
 
     def _cli(self, *args, stdin=""):
+        env = {**os.environ, "LGWKS_NO_MODELS": "1"}   # hermetic: never call the live Tongue in tests
         return subprocess.run([sys.executable, str(ROOT / "lgwks-akinator"), *args],
-                              capture_output=True, text=True, input=stdin)
+                              capture_output=True, text=True, input=stdin, env=env)
 
     def test_underspec_intent_blocked(self):
         out = self._cli("CRM", stdin="")  # objective present, purpose missing -> L1 blocks
