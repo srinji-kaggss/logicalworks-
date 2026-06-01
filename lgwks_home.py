@@ -263,17 +263,34 @@ def _run(argv: list[str]) -> None:
 
 
 def _intent_flow(intent: str, on: bool) -> None:
-    """The first question set: intent → the question behind it (L1 gate) → confirm → grounded run.
-    The human stands in for the not-yet-built Machine refinement (build #3) — same contract, by hand."""
-    purpose = _ask(fg("the question behind it (why)?  ", CREAM_DIM, on=on), on)
+    """The first question set, now driven by the Machine (build #3): it classifies the intent, detects
+    which slots are missing, and asks leading questions for each gap until specific enough — then a
+    grounded run. The Machine ABSTAINS (bounces) rather than guess; the human answers fill the gaps."""
     try:
-        import lgwks_steering as st
-        missing = st.require_context({"objective": intent, "purpose": purpose}, ["objective", "purpose"])
+        import lgwks_machine as machine
     except Exception:
-        missing = [] if purpose else ["purpose"]
-    if missing:   # honest L1 bounce — don't spend tokens on an underspecified question
-        print(ui.spine(fg(f"need {', '.join(missing)} to spend tokens — bouncing back to you", AMBER, on=on), on=on))
-        return
+        machine = None
+    purpose = ""
+    if machine:
+        r = machine.refine(intent, actor="human")
+        cls = r["intent_class"]
+        print(ui.spine(fg(f"machine read: {cls}", EMERALD_DIM, on=on)
+                       + fg(f"  specificity {r['specificity']:.2f}/{r['threshold']:.2f}"
+                            + (f"  · {', '.join(r['entities'][:3])}" if r["entities"] else ""), CREAM_DIM, on=on), on=on))
+        answers = []
+        for q in r["questions"]:   # one leading question per gap (the refinement chain)
+            a = _ask(fg(q + "  ", CREAM_DIM, on=on), on)
+            if a:
+                answers.append(a)
+        purpose = " · ".join(answers) if answers else _ask(fg("the question behind it (why)?  ", CREAM_DIM, on=on), on)
+        if r["abstain"] and not answers and not purpose:
+            print(ui.spine(fg("too thin to spend tokens — bounced back to you (the Machine won't guess)", AMBER, on=on), on=on))
+            return
+    else:
+        purpose = _ask(fg("the question behind it (why)?  ", CREAM_DIM, on=on), on)
+        if not purpose:
+            print(ui.spine(fg("need the why to spend tokens — bouncing back to you", AMBER, on=on), on=on))
+            return
     print(ui.spine(fg("this runs a grounded research pass — it spends Tongue tokens.", CREAM_DIM, on=on), on=on))
     if _ask(fg("go? [y/N]  ", CREAM_DIM, on=on), on).lower() not in ("y", "yes"):
         print(ui.spine(fg("held.", CREAM_DIM, on=on), on=on))

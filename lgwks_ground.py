@@ -62,6 +62,16 @@ def _ctx7_docs(query: str) -> tuple[str, list[str]]:
     return docs[:_MAX], urls
 
 
+def _quarantine(url: str, kind: str, body: str) -> str:
+    """Put fetched UNTRUSTED content into the content-addressed cache; return its hash (or '' fail-soft).
+    Realises the z2/z4 quarantine + evidence-by-ref: the model reasons over text the store holds as data."""
+    try:
+        import lgwks_cache
+        return lgwks_cache.put(url, kind, body)["hash"]
+    except Exception:
+        return ""
+
+
 def _web(query: str, read_top: int = 3) -> tuple[str, list[str]]:
     """Web grounding via the multi-modal search sweep + source extraction (the eyes, finally wired).
     Best present search provider (googler→ddgr→DDG floor) → top results → read each source to text
@@ -84,7 +94,9 @@ def _web(query: str, read_top: int = 3) -> tuple[str, list[str]]:
         doc = lgwks_extract.extract(url, max_chars=2500)
         body = doc["text"] if doc["ok"] else r.get("snippet", "")
         if body:
-            blocks.append(f"[{','.join(r.get('arms', []))} · {doc['kind']}] {r.get('title','')}\n{body}\n{url}")
+            ch = _quarantine(url, doc.get("kind", "html"), body)   # untrusted → content-addressed cache
+            tag = f" · cache:{ch[:12]}" if ch else ""
+            blocks.append(f"[{','.join(r.get('arms', []))} · {doc['kind']}{tag}] {r.get('title','')}\n{body}\n{url}")
             cites.append(url)
     # the rest contribute title+snippet+url (breadth without the token cost of reading every page).
     for r in results[read_top:]:

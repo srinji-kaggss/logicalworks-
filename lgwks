@@ -1167,6 +1167,14 @@ def build_parser() -> argparse.ArgumentParser:
     mult.add_argument("--plan-only", action="store_true", dest="plan_only", help="with --json: emit plan, don't run")
     mult.set_defaults(func=_multiply_dispatch)
 
+    # refine — the Machine (Tier-E): classify intent, detect gaps, score specificity, abstain-or-proceed.
+    refine = sub.add_parser("refine", help="machine intent refinement (class·gaps·specificity·abstain)")
+    refine.add_argument("intent", help="raw intent to refine")
+    refine.add_argument("--agent", action="store_true", help="caller is an agent (auto-inject quality keywords)")
+    refine.add_argument("--depth", type=float, default=0.5, help="0..1 — higher demands more specificity")
+    refine.add_argument("--render", action="store_true", help="human view instead of JSON")
+    refine.set_defaults(func=_refine_dispatch, json=True)
+
     # store — the data trust boundary: status of the three at-rest stores (untrusted/cognition/intent).
     store = sub.add_parser("store", help="status of the three data stores (cache·cognition·vault)")
     store.add_argument("--json", action="store_true", help="structured status")
@@ -1213,6 +1221,11 @@ def _convert_dispatch(args) -> int:
 def _multiply_dispatch(args) -> int:
     import lgwks_multiply
     return lgwks_multiply.multiply_command(args)
+
+
+def _refine_dispatch(args) -> int:
+    import lgwks_machine
+    return lgwks_machine.refine_command(args)
 
 
 def _store_dispatch(args) -> int:
