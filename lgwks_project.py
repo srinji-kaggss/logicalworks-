@@ -287,7 +287,11 @@ def _learning_records(project: str, prompt: str, cycles: list[dict], learning_mo
             "source_scope": "transcript" if row["seq"] == 1 else "critic",
             "consent": learning_mode,
             "device_consent": device_consent,
-            "redaction_status": "raw_vaulted" if device_consent == "local-device" else "derived_only",
+            # //why honest label (issue #12): the execute path writes raw public-search.json + memory-context.json
+            # to disk regardless of consent, so claiming "derived_only" under research-only was false. Report the
+            # actual retention (raw) + an explicit enforcement flag. Real suppression of raw writes is deferred.
+            "redaction_status": "raw_vaulted",
+            "derived_only_enforced": False,
             "said": said_ref,
             "meant": {"intent_class": "research_orchestration", "entities": _terms(prompt)[:8], "gaps": []},
             "assumed": ["CLI should act as an automated research operator"],
