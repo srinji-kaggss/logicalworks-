@@ -151,22 +151,18 @@ def _crawl(cfg: AutoConfig, frontier: str) -> tuple[str, bool, list[str]]:
     convergence (epistemics CRITICAL: no evidence → no evidence-bearing claims). source_urls are the
     verifiable citation URLs ctx7 attached to the docs (provenance — so a verdict's evidence is
     auditable, not mistaken for fabrication). estimate = offline PLANNING; live = the signed spine."""
-    if cfg.crawl_mode == "ground":
-        # REAL evidence via fused grounding (ctx7 + web). has_evidence keys EVIDENCE vs PLANNING —
-        # this is the unlock that retires estimate-mode theater (#9 / epistemics CRITICAL).
+    if cfg.crawl_mode in ("ground", "live"):
+        # REAL evidence: ctx7 docs + the multi-modal web sweep (search→READ the source: PDF/office/html).
+        # has_evidence keys EVIDENCE vs PLANNING (epistemics CRITICAL). 'live' routes here too — the web
+        # sweep IS the live fetch; the signed scope-frozen spine remains future hardening for
+        # write_quarantine runs, not a blocker for read-only research.
         import lgwks_ground
         g = lgwks_ground.ground(f"{cfg.objective} {frontier}".strip())
         return lgwks_ground.as_findings(g), g["has_evidence"], g.get("doc_sources", [])
-    if cfg.crawl_mode == "estimate":
-        return ((f"[PLANNING — no document content fetched] frontier node: {frontier!r}. "
-                 f"Plan only: name what evidence at this node would decide each hypothesis. "
-                 f"You have NO findings, so you cannot confirm or falsify anything this round."), False, [])
-    # live mode is intentionally explicit: it must go through the gated, scope-frozen spine
-    # (lgwks_run.execute_plan with signed verdicts). Wiring a per-round frozen URL set is the next
-    # gated step (#9 Unit A.live) — until provisioned, live degrades to estimate, never silent crawl.
-    return ((f"[live mode requested for node {frontier!r}] live crawl must run through the signed "
-             f"scope-frozen spine with an explicit frozen URL set — not yet provisioned; planning only."),
-            False, [])
+    # estimate = offline PLANNING (no fetch) — explicit, never a silent empty crawl.
+    return ((f"[PLANNING — no document content fetched] frontier node: {frontier!r}. "
+             f"Plan only: name what evidence at this node would decide each hypothesis. "
+             f"You have NO findings, so you cannot confirm or falsify anything this round."), False, [])
 
 
 def _canon(obj) -> str:

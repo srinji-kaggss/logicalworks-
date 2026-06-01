@@ -62,20 +62,47 @@ def _ctx7_docs(query: str) -> tuple[str, list[str]]:
     return docs[:_MAX], urls
 
 
-def _web(query: str) -> str:
-    """Web grounding seam. firecrawl (MCP) is the query interface; when its credits are exhausted we
-    return '' (no evidence) rather than fake it. Wired by the caller's MCP layer when available."""
-    return ""   # honest degraded state today (firecrawl credits exhausted); no silent fabrication
+def _web(query: str, read_top: int = 3) -> tuple[str, list[str]]:
+    """Web grounding via the multi-modal search sweep + source extraction (the eyes, finally wired).
+    Best present search provider (googler→ddgr→DDG floor) → top results → read each source to text
+    (PDF/office/html via lgwks_extract). Returns (findings_text, citation_urls). ('', []) = honest
+    no-evidence (every provider empty) — never fabricated. Replaces the firecrawl-402 stub."""
+    try:
+        import lgwks_search
+        import lgwks_extract
+    except Exception:
+        return "", []
+    sweep = lgwks_search.sweep(query)
+    results = sweep.get("results", [])
+    if not results:
+        return "", []
+    blocks: list[str] = []
+    cites: list[str] = []
+    # read the top results in full (the source, not just the snippet — OpenAI-DR principle).
+    for r in results[:read_top]:
+        url = r.get("url", "")
+        doc = lgwks_extract.extract(url, max_chars=2500)
+        body = doc["text"] if doc["ok"] else r.get("snippet", "")
+        if body:
+            blocks.append(f"[{','.join(r.get('arms', []))} · {doc['kind']}] {r.get('title','')}\n{body}\n{url}")
+            cites.append(url)
+    # the rest contribute title+snippet+url (breadth without the token cost of reading every page).
+    for r in results[read_top:]:
+        if r.get("url"):
+            blocks.append(f"[{','.join(r.get('arms', []))}] {r.get('title','')} — {r.get('snippet','')}\n{r['url']}")
+            cites.append(r["url"])
+    note = f"(arms_empty: {sweep.get('arms_empty')})" if sweep.get("arms_empty") else ""
+    return ("\n\n".join(blocks) + (f"\n{note}" if note else ""), cites)
 
 
 def ground(query: str, want_docs: bool = True, want_web: bool = True) -> dict:
     """Fuse the sources for one query. Returns {query, docs, web, sources, has_evidence, doc_sources}.
-    sources lists which providers actually contributed real content; doc_sources are the real
-    citation URLs ctx7 attached to the docs body (verifiable, not model-claimed)."""
+    doc_sources are verifiable citation URLs (ctx7 docs + web results), not model-claimed."""
     docs, doc_sources = _ctx7_docs(query) if want_docs else ("", [])
-    web = _web(query) if want_web else ""
-    sources = [n for n, v in (("ctx7", docs), ("web", web)) if v]
-    return {"query": query, "docs": docs, "web": web, "doc_sources": doc_sources,
+    web, web_sources = _web(query) if want_web else ("", [])
+    sources = [n for n, v in (("docs", docs), ("web", web)) if v]  # agnostic role labels, no brands
+    return {"query": query, "docs": docs, "web": web,
+            "doc_sources": list(dict.fromkeys(doc_sources + web_sources)),
             "sources": sources, "has_evidence": bool(sources)}
 
 
