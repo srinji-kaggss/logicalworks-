@@ -57,10 +57,12 @@ HYP_SCHEMA = (
 )
 
 
-def compile_hypotheses(objective: str, purpose: str) -> dict | None:
+def compile_hypotheses(objective: str, purpose: str, context: str = "") -> dict | None:
     """Autonomously compile H0 + H1..Hn (variable count), each grounded in prior art.
+    `context` carries the rolling cross-round digest so a hypothesis builds on prior rounds' learnings.
     Returns None on any failure → caller uses the deterministic skeleton (fail closed)."""
-    prompt = (f"{SYSTEM}\n\nIntent: {objective!r}\nPurpose: {purpose!r}\n"
+    ctx = f"\nPrior rounds' learnings (build on these, do not repeat settled findings):\n{context}\n" if context else ""
+    prompt = (f"{SYSTEM}\n\nIntent: {objective!r}\nPurpose: {purpose!r}\n{ctx}"
               f"Compile the hypotheses now.")
     out = _generate(prompt, HYP_SCHEMA)
     if not out or not isinstance(out.get("hypotheses"), list) or not out["hypotheses"]:
@@ -80,3 +82,72 @@ def compile_hypotheses(objective: str, purpose: str) -> dict | None:
     if not any(h["role"] == "null" for h in clean):
         return None   # no null compiled → not trustworthy, fall back
     return {"meant": out.get("meant", ""), "hypotheses": clean, "question": out.get("question")}
+
+
+# ── autonomous-loop functions (#9): reason over findings, then steelman the null (contrarian) ──
+
+REASON_SYSTEM = (
+    "You are the Reasoning step of an autonomous research instrument. You are given hypotheses and "
+    "the findings of one crawl round. RULES: "
+    "(1) For each hypothesis, decide if the findings HIT its falsifier (evidence that would kill it). "
+    "(2) Track which hypotheses SURVIVE. H0 (the null) survives until its falsifier is hit — do not "
+    "drop it just because a mechanism looks interesting. Truth over interestingness. "
+    "(3) Extract concrete LEARNINGS (facts, not vibes). "
+    "(4) Propose the next FRONTIER: unexplored nodes ranked by expected information gain (which node "
+    "most reduces uncertainty or could still falsify a surviving hypothesis). "
+    "(5) Emit a terse THINK trace (your raw reasoning) and a compact DIGEST (the carry-forward state). "
+    "Be specific, no hedging, no flattery."
+)
+
+REASON_SCHEMA = (
+    '{"think":"<raw reasoning trace>",'
+    '"falsifiers_hit":["H1"],"surviving":["H0","H2"],'
+    '"learnings":["<concrete fact>"],'
+    '"frontier":[{"node":"<next thing to explore>","why":"<what it could decide>","eig":0.0}],'
+    '"digest":"<=120-word carry-forward state for the next round>",'
+    '"converged":false}'
+)
+
+CONTRARIAN_SCHEMA = (
+    '{"think":"<raw reasoning>","attack":"<strongest case the leading hypothesis is WRONG / the null '
+    'holds>","new_falsifier":"<a sharper test>","shifts_belief":false}'
+)
+
+
+def reason_over_findings(objective: str, hypotheses: list[dict], findings: str,
+                         context: str = "") -> dict | None:
+    """One round's Reason step. Returns the verdict envelope (think/falsifiers_hit/surviving/learnings/
+    frontier/digest/converged), or None to signal the loop to fall back / skip. Fails closed."""
+    hyp_lines = "\n".join(f"  {h['id']} [{h.get('role','mechanism')}]: {h['claim']}  "
+                          f"(falsifier: {h['falsifier']})" for h in hypotheses)
+    ctx = f"\nPrior learnings:\n{context}\n" if context else ""
+    prompt = (f"{REASON_SYSTEM}\n\nIntent: {objective!r}\nHypotheses:\n{hyp_lines}\n{ctx}"
+              f"\nThis round's findings:\n{findings}\n\nReason now.")
+    out = _generate(prompt, REASON_SCHEMA)
+    if not out or not isinstance(out, dict):
+        return None
+    return {
+        "think": str(out.get("think", "")),
+        "falsifiers_hit": [str(x) for x in (out.get("falsifiers_hit") or [])][:12],
+        "surviving": [str(x) for x in (out.get("surviving") or [])][:12],
+        "learnings": [str(x) for x in (out.get("learnings") or []) if x][:20],
+        "frontier": [{"node": str(f.get("node", "")), "why": str(f.get("why", "")),
+                      "eig": float(f.get("eig", 0.0) or 0.0)}
+                     for f in (out.get("frontier") or []) if isinstance(f, dict) and f.get("node")][:8],
+        "digest": str(out.get("digest", "")),
+        "converged": bool(out.get("converged", False)),
+    }
+
+
+def contrarian(objective: str, leading_claim: str, context: str = "") -> dict | None:
+    """Steelman the null / attack the leading hypothesis — extra bias-stripping per round. Fails closed."""
+    ctx = f"\nState so far:\n{context}\n" if context else ""
+    prompt = (f"You are the Contrarian of a truth-seeking research instrument. Attack the LEADING "
+              f"hypothesis as hard as evidence allows; defend the skeptical null. Be specific.\n\n"
+              f"Intent: {objective!r}\nLeading hypothesis: {leading_claim!r}\n{ctx}\nAttack now.")
+    out = _generate(prompt, CONTRARIAN_SCHEMA)
+    if not out or not isinstance(out, dict):
+        return None
+    return {"think": str(out.get("think", "")), "attack": str(out.get("attack", "")),
+            "new_falsifier": str(out.get("new_falsifier", "")),
+            "shifts_belief": bool(out.get("shifts_belief", False))}

@@ -273,5 +273,43 @@ class TestUrlRiskCurator(unittest.TestCase):
         self.assertEqual(rec["runs"], 2)
 
 
+class TestAutonomousLoop(unittest.TestCase):
+    """#9 Unit A — the autonomous loop must fail closed when the Tongue is offline, and its per-round
+    ledger must be hash-chained (tamper-evident under a key)."""
+
+    def setUp(self):
+        import lgwks_research
+        self.lr = lgwks_research
+
+    def test_fails_closed_when_tongue_offline(self):
+        # NO_MODELS forces cloud+local Tongue offline → the loop must stop at round 1, never fabricate.
+        os.environ["LGWKS_NO_MODELS"] = "1"
+        try:
+            cfg = self.lr.AutoConfig(objective="x", purpose="why x", start="x", max_rounds=3)
+            res = self.lr.run_auto(cfg, emit=lambda *_: None)
+        finally:
+            os.environ.pop("LGWKS_NO_MODELS", None)
+        self.assertEqual(res.stop_reason, "tongue_offline")
+        self.assertEqual(res.rounds, 1)
+
+    def test_ledger_detects_tampering(self):
+        import lgwks_sign
+        key, _ = lgwks_sign.signing_key()
+        with tempfile.TemporaryDirectory() as d:
+            ledger = Path(d) / "rounds.ledger.jsonl"
+            prev = "genesis"
+            with ledger.open("w") as lf:
+                for n in (1, 2):
+                    rec = {"n": n, "digest": f"d{n}", "prev": prev}
+                    rec["hash"] = lgwks_sign.mac(prev + self.lr._canon(rec), key)
+                    prev = rec["hash"]
+                    lf.write(self.lr._canon(rec) + "\n")
+            self.assertTrue(self.lr._verify_ledger(ledger, key))
+            lines = ledger.read_text().splitlines()
+            lines[0] = lines[0].replace('"d1"', '"TAMPERED"')
+            ledger.write_text("\n".join(lines) + "\n")
+            self.assertFalse(self.lr._verify_ledger(ledger, key))
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)

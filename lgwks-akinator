@@ -366,6 +366,16 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--no-embed", action="store_true", help="skip embedding (Eye model not loaded)")
     p.add_argument("--pick", type=int, help="non-interactive: dive into chain N then exit")
     p.add_argument("--demo", action="store_true", help="run a deterministic sample pass (offline)")
+    # autonomous deep-research mode (#9): self-drives, no questions, saves every round.
+    p.add_argument("--auto", action="store_true",
+                   help="autonomous mode: self-drive rounds (generate→crawl→reason→contrarian→expand)")
+    p.add_argument("--start", help="autonomous start node (entity/url), e.g. 'amazon'")
+    p.add_argument("--rounds", type=int, default=6, help="auto: hard cap on rounds")
+    p.add_argument("--budget", type=int, default=120_000, help="auto: hard ceiling on cloud-Tongue tokens")
+    p.add_argument("--functions", default="generate,falsify,expand,contrarian",
+                   help="auto: comma-set of per-round functions (frozen at launch)")
+    p.add_argument("--crawl", default="estimate", choices=["estimate", "live"],
+                   help="auto: estimate (offline planning) or live (gated signed spine)")
     return p
 
 
@@ -376,6 +386,17 @@ def main(argv: list[str] | None = None) -> int:
     if not args.objective:
         build_parser().print_help()
         return 1
+    if args.auto:                                   # autonomous deep-research mode (#9)
+        if not args.purpose:
+            print(_c("  --auto needs --purpose (the question behind the intent, L1).", BOLD)); return 2
+        import lgwks_research
+        cfg = lgwks_research.AutoConfig(
+            objective=args.objective, purpose=args.purpose, start=(args.start or args.objective),
+            functions=tuple(f.strip() for f in args.functions.split(",") if f.strip()),
+            max_rounds=args.rounds, token_budget=args.budget, crawl_mode=args.crawl,
+            max_pages=args.max_pages)
+        res = lgwks_research.run_auto(cfg)
+        return 0 if res.ledger_intact else 1
     intent = {
         "objective": args.objective, "purpose": args.purpose, "tier_floor": args.tier_floor,
         "max_pages": args.max_pages, "max_depth": args.max_depth, "novelty": args.novelty,
