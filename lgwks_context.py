@@ -65,11 +65,15 @@ def _agenda_block(run_dir: Path, rounds: list[dict]) -> str:
     verdict_by_node = {r.get("frontier_in"): (r.get("guide_verdict") or {}).get("verdict")
                        for r in rounds if r.get("guide_verdict")}
     covered = sum(1 for a in items if a.get("node") in done)
-    contra = sum(1 for v in verdict_by_node.values() if v == "contradicted")
+    nodes = {a.get("node") for a in items}
+    tally = {v: sum(1 for node, vv in verdict_by_node.items() if vv == v and node in nodes)
+             for v in ("supported", "contradicted", "unverified")}
     mark = {"contradicted": "✗", "supported": "✓", "unverified": "?"}
-    head = (f"\n## RESEARCH AGENDA — {covered}/{len(items)} covered"
-            + (f", {contra} CONTRADICTED" if contra else "")
-            + (f"  ·  {data['summary']}" if data.get("summary") else ""))
+    # aggregate-first (product review): the headline tally before the per-question detail.
+    head = (f"\n## RESEARCH AGENDA — {covered}/{len(items)} covered  ·  "
+            f"{tally['supported']} supported · {tally['contradicted']} CONTRADICTED · "
+            f"{tally['unverified']} unverified"
+            + (f"\n   plan: {data['summary']}" if data.get("summary") else ""))
     lines = []
     for a in items:
         node = a.get("node", "")

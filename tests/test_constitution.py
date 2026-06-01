@@ -461,7 +461,7 @@ class TestGuideAgenda(unittest.TestCase):
         self.lt.reason_over_findings = lambda obj, h, f, context="": {
             "think": "t", "falsifiers_hit": [], "surviving": ["H0"], "learnings": ["l"],
             "frontier": [{"node": "gamma node", "why": "w", "eig": 0.9}], "digest": "d", "converged": True}
-        self.lr._crawl = lambda cfg, frontier: ("<UNTRUSTED_FINDINGS>real evidence</UNTRUSTED_FINDINGS>", True)
+        self.lr._crawl = lambda cfg, frontier: ("<UNTRUSTED_FINDINGS>real evidence</UNTRUSTED_FINDINGS>", True, [])
         try:
             with tempfile.TemporaryDirectory() as d:
                 self.lr.ROOT = Path(d)
@@ -492,8 +492,8 @@ class TestGuideAgenda(unittest.TestCase):
             "guide_verdict": {"claim": "requests is async", "verdict": verdict, "evidence": "docs show synchronous"},
             "frontier": [{"node": "low node", "why": "w", "eig": 0.05}], "digest": "d", "converged": False}
         self.lt.contrarian = lambda *a, **k: None
-        self.lr._crawl = lambda cfg, frontier: (("<UNTRUSTED_FINDINGS>e</UNTRUSTED_FINDINGS>", True)
-                                                if force_evidence else ("[planning]", False))
+        self.lr._crawl = lambda cfg, frontier: (("<UNTRUSTED_FINDINGS>e</UNTRUSTED_FINDINGS>", True, ["https://docs.example/x"])
+                                                if force_evidence else ("[planning]", False, []))
         d = tempfile.mkdtemp()
         self.lr.ROOT = Path(d)
         cfg = self.lr.AutoConfig(objective="o", purpose="p", start="o", max_rounds=2,
@@ -513,6 +513,9 @@ class TestGuideAgenda(unittest.TestCase):
             self.assertEqual(result["guide_verdicts"]["contradicted"], 1)
             self.assertEqual(len(result["contradicted"]), 1)
             self.assertEqual(result["contradicted"][0]["claim"], "requests is async")
+            # provenance (product review): the contradicted verdict carries its verifiable citation URL.
+            self.assertEqual(result["contradicted"][0]["sources"], ["https://docs.example/x"])
+            self.assertIn("1 contradicted", result["plan_summary"])   # aggregate-first summary present
             ctx = (Path(res.out_dir) / "CONTEXT" / "CONTEXT.md").read_text()
             self.assertIn("CONTRADICTED", ctx)
             self.assertIn("[✗]", ctx)

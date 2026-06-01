@@ -145,27 +145,28 @@ def _run_id(cfg: AutoConfig) -> str:
     return f"auto-{h}"
 
 
-def _crawl(cfg: AutoConfig, frontier: str) -> tuple[str, bool]:
-    """The crawl step. Returns (findings_text, has_evidence). has_evidence=False means NO external
-    document content was gathered — the loop must then NOT claim falsifiers/learnings/convergence
-    (epistemics CRITICAL: no evidence → no evidence-bearing claims). estimate = offline PLANNING;
-    live = the signed, scope-frozen spine (gated, not yet provisioned → degrades to planning)."""
+def _crawl(cfg: AutoConfig, frontier: str) -> tuple[str, bool, list[str]]:
+    """The crawl step. Returns (findings_text, has_evidence, source_urls). has_evidence=False means NO
+    external document content was gathered — the loop must then NOT claim falsifiers/learnings/
+    convergence (epistemics CRITICAL: no evidence → no evidence-bearing claims). source_urls are the
+    verifiable citation URLs ctx7 attached to the docs (provenance — so a verdict's evidence is
+    auditable, not mistaken for fabrication). estimate = offline PLANNING; live = the signed spine."""
     if cfg.crawl_mode == "ground":
         # REAL evidence via fused grounding (ctx7 + web). has_evidence keys EVIDENCE vs PLANNING —
         # this is the unlock that retires estimate-mode theater (#9 / epistemics CRITICAL).
         import lgwks_ground
         g = lgwks_ground.ground(f"{cfg.objective} {frontier}".strip())
-        return lgwks_ground.as_findings(g), g["has_evidence"]
+        return lgwks_ground.as_findings(g), g["has_evidence"], g.get("doc_sources", [])
     if cfg.crawl_mode == "estimate":
         return ((f"[PLANNING — no document content fetched] frontier node: {frontier!r}. "
                  f"Plan only: name what evidence at this node would decide each hypothesis. "
-                 f"You have NO findings, so you cannot confirm or falsify anything this round."), False)
+                 f"You have NO findings, so you cannot confirm or falsify anything this round."), False, [])
     # live mode is intentionally explicit: it must go through the gated, scope-frozen spine
     # (lgwks_run.execute_plan with signed verdicts). Wiring a per-round frozen URL set is the next
     # gated step (#9 Unit A.live) — until provisioned, live degrades to estimate, never silent crawl.
     return ((f"[live mode requested for node {frontier!r}] live crawl must run through the signed "
              f"scope-frozen spine with an explicit frozen URL set — not yet provisioned; planning only."),
-            False)
+            False, [])
 
 
 def _canon(obj) -> str:
@@ -262,8 +263,8 @@ def run_auto(cfg: AutoConfig, emit=print) -> AutoResult:
             emit(f"    generate: {len(hyps)} hypotheses (H0 null + {len(hyps)-1} mechanism) "
                  f"· citations UNVERIFIED")
 
-            # 2. CRAWL — frontier → (findings, has_evidence). No evidence ⇒ this is a PLANNING round.
-            findings, has_evidence = _crawl(cfg, frontier)
+            # 2. CRAWL — frontier → (findings, has_evidence, sources). No evidence ⇒ PLANNING round.
+            findings, has_evidence, sources = _crawl(cfg, frontier)
             if has_evidence:
                 evidence_rounds += 1
 
@@ -286,8 +287,17 @@ def run_auto(cfg: AutoConfig, emit=print) -> AutoResult:
             gv.setdefault("claim", cur_item["question"] if cur_item else "")
             gv["verdict"] = gv.get("verdict", "unverified") if has_evidence else "unverified"
             gv.setdefault("evidence", "")
-            emit(f"    falsify [{mode_tag}]: hit={reason['falsifiers_hit'] or '—'} · surviving={surviving}"
-                 + (f" · GUIDE: {gv['verdict'].upper()}" if cur_item else ""))
+            gv["sources"] = sources if has_evidence else []     # provenance: verifiable citation URLs
+            if cur_item:
+                # guide mode: the GUIDE verdict is the HEADLINE; the hypothesis lane (falsifiers_hit/
+                # surviving) is internal detail in parens — never a competing top-line signal (product
+                # review CRITICAL: two adjacent lanes that look mutually exclusive destroy trust).
+                vmark = {"contradicted": "✗", "supported": "✓", "unverified": "?"}.get(gv["verdict"], "?")
+                emit(f"    [{mode_tag}] GUIDE {cur_item['id']}: {gv['verdict'].upper()} {vmark}"
+                     + (f"  ({len(gv['sources'])} cited)" if gv["sources"] else "")
+                     + f"   ·  internal: {len(surviving)} hyp surviving")
+            else:
+                emit(f"    falsify [{mode_tag}]: hit={reason['falsifiers_hit'] or '—'} · surviving={surviving}")
             top = sorted(reason["frontier"], key=lambda f: -f["eig"])   # eig = MODEL-ESTIMATED priority
             emit(f"    expand: {len(top)} frontier candidates"
                  + (f" · top={top[0]['node']!r} (eig~{top[0]['eig']:.2f})" if top else " · none"))
@@ -333,7 +343,8 @@ def run_auto(cfg: AutoConfig, emit=print) -> AutoResult:
             digest = _sanitize_carry((digest + "\n" + reason["digest"]).strip())[-6000:]
             if cur_item is not None:                          # this round consumed an agenda question
                 covered.append({"id": cur_item["id"], "node": cur_item["node"], "evidence": has_evidence,
-                                "verdict": gv["verdict"], "claim": gv["claim"], "why": gv["evidence"]})
+                                "verdict": gv["verdict"], "claim": gv["claim"], "why": gv["evidence"],
+                                "sources": gv["sources"]})
             agenda_remaining = agenda_i < len(agenda)
             # converged is ADVISORY: honoured only on EVIDENCE rounds, after ≥2 consecutive (anti-injection,
             # hacker R1), AND only once the whole agenda is drained — converging on Q1 must not abandon
@@ -370,17 +381,23 @@ def run_auto(cfg: AutoConfig, emit=print) -> AutoResult:
     contradicted = [c for c in covered if c.get("verdict") == "contradicted"]
     verdicts = {v: sum(1 for c in covered if c.get("verdict") == v)
                 for v in ("supported", "contradicted", "unverified")}
+    # aggregate-first summary (product review: a reader/poller wants the headline before the detail).
+    plan_summary = (f"{verdicts['supported']} supported · {verdicts['contradicted']} contradicted · "
+                    f"{verdicts['unverified']} unverified  (of {len(agenda)} guide assumptions)"
+                    if agenda else "")
     if contradicted:
         emit(f"\n  ✗ {len(contradicted)} GUIDE ASSUMPTION(S) CONTRADICTED BY EVIDENCE:")
         for c in contradicted:
-            emit(f"      [{c['id']}] {c['claim'][:100]}  ←  {c['why'][:120]}")
+            cite = f"  [cite: {c['sources'][0]}]" if c.get("sources") else "  [cite: UNRESOLVED]"
+            emit(f"      [{c['id']}] {c['claim'][:100]}  ←  {c['why'][:110]}{cite}")
     (out_dir / "result.json").write_text(_canon({
         "run_id": run_id, "rounds": n, "evidence_rounds": evidence_rounds, "stop_reason": stop,
         "surviving": surviving, "spent": budget.spent, "integrity_mode": mode,
         "chain_consistent": chain_ok,
         "agenda_total": len(agenda), "agenda_covered": len(covered_ids),
-        "guide_verdicts": verdicts, "contradicted": [{"id": c["id"], "claim": c["claim"],
-                                                       "evidence": c["why"]} for c in contradicted],
+        "guide_verdicts": verdicts, "plan_summary": plan_summary,
+        "contradicted": [{"id": c["id"], "claim": c["claim"], "evidence": c["why"],
+                          "sources": c.get("sources", [])} for c in contradicted],
         # do NOT claim tamper-evidence in unanchored mode (hacker F3 / epistemics 4b): the signer
         # constant is in source, so an adversary can recompute the chain. Only keyed mode is evident.
         "tamper_evident": tamper_evident and chain_ok,
