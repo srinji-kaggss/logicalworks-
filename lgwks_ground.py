@@ -20,24 +20,46 @@ EVIDENCE off this, never off a model claim.
 
 from __future__ import annotations
 
+import re
 import subprocess
 
-_CTX7_TIMEOUT = 45
+_CTX7_TIMEOUT = 60
 _MAX = 4000   # clip each source — grounding feeds a prompt; keep it window-cheap
+_LIB_ID = re.compile(r"Context7-compatible library ID:\s*(/\S+)")
+_SRC_URL = re.compile(r"Source:\s*(https?://\S+)")
 
 
-def _ctx7_docs(query: str) -> str:
-    """Resolve libraries/APIs for the query via the ctx7 CLI. Real grounding; fail-soft to ''."""
+def _ctx7_run(args: list[str]) -> str:
+    """Run a ctx7 CLI subcommand, fail-soft to ''. A quota/error banner is not evidence."""
     try:
-        proc = subprocess.run(["npx", "ctx7@latest", "library", query],
+        proc = subprocess.run(["npx", "ctx7@latest", *args],
                               capture_output=True, text=True, timeout=_CTX7_TIMEOUT)
     except Exception:
         return ""
     out = (proc.stdout or "").strip()
-    # a quota/error line is not evidence
-    if not out or "quota" in out.lower() or "error" in out.lower()[:40]:
+    if not out or "quota" in out.lower() or out.lower().startswith("error"):
         return ""
-    return out[:_MAX]
+    return out
+
+
+def _ctx7_docs(query: str) -> tuple[str, list[str]]:
+    """TWO-STEP ctx7 grounding (the fix for shallow evidence): `library` resolves the query to a
+    Context7 library ID, then `docs <id> "<query>"` fetches the ACTUAL documentation (code + prose +
+    Source: URLs) — not the one-line resolver descriptions the loop was reasoning over before. The
+    docs body is what lets the Reason step actually confirm/contradict a behavioural claim. Returns
+    (docs_text, source_urls); fail-soft to ('', [])."""
+    resolved = _ctx7_run(["library", query])
+    if not resolved:
+        return "", []
+    m = _LIB_ID.search(resolved)             # pick the top-ranked library id (ctx7 lists best first)
+    if not m:
+        return "", []
+    docs = _ctx7_run(["docs", m.group(1), query])
+    if not docs:
+        # docs fetch failed/empty — fall back to the resolver descriptions (thin but real), and say so.
+        return f"[ctx7 resolver descriptions only — no docs body for {m.group(1)}]\n{resolved}"[:_MAX], []
+    urls = list(dict.fromkeys(_SRC_URL.findall(docs)))[:10]   # real citations — seeds the resolver RISK
+    return docs[:_MAX], urls
 
 
 def _web(query: str) -> str:
@@ -47,12 +69,13 @@ def _web(query: str) -> str:
 
 
 def ground(query: str, want_docs: bool = True, want_web: bool = True) -> dict:
-    """Fuse the sources for one query. Returns {query, docs, web, sources, has_evidence}.
-    sources lists which providers actually contributed real content."""
-    docs = _ctx7_docs(query) if want_docs else ""
+    """Fuse the sources for one query. Returns {query, docs, web, sources, has_evidence, doc_sources}.
+    sources lists which providers actually contributed real content; doc_sources are the real
+    citation URLs ctx7 attached to the docs body (verifiable, not model-claimed)."""
+    docs, doc_sources = _ctx7_docs(query) if want_docs else ("", [])
     web = _web(query) if want_web else ""
     sources = [n for n, v in (("ctx7", docs), ("web", web)) if v]
-    return {"query": query, "docs": docs, "web": web,
+    return {"query": query, "docs": docs, "web": web, "doc_sources": doc_sources,
             "sources": sources, "has_evidence": bool(sources)}
 
 
@@ -62,6 +85,8 @@ def as_findings(g: dict) -> str:
     parts = [f"<UNTRUSTED_FINDINGS source={','.join(g['sources']) or 'none'}>"]
     if g["docs"]:
         parts.append(f"[docs/ctx7]\n{g['docs']}")
+    if g.get("doc_sources"):
+        parts.append("[citation URLs (verifiable)]\n" + "\n".join(g["doc_sources"]))
     if g["web"]:
         parts.append(f"[web]\n{g['web']}")
     if not g["sources"]:

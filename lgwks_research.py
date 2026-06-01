@@ -279,7 +279,15 @@ def run_auto(cfg: AutoConfig, emit=print) -> AutoResult:
                 reason["converged"] = False
             surviving = reason["surviving"] or [h["id"] for h in hyps]
             mode_tag = "EVIDENCE" if has_evidence else "PLANNING"
-            emit(f"    falsify [{mode_tag}]: hit={reason['falsifiers_hit'] or '—'} · surviving={surviving}")
+            # guide verdict (the product): is the current guide assumption supported/contradicted by
+            # the evidence? Without evidence it is ALWAYS 'unverified' (epistemics — no verdict from a
+            # planning round). Defensive .get: canned/older reason envelopes may omit it.
+            gv = dict(reason.get("guide_verdict") or {})
+            gv.setdefault("claim", cur_item["question"] if cur_item else "")
+            gv["verdict"] = gv.get("verdict", "unverified") if has_evidence else "unverified"
+            gv.setdefault("evidence", "")
+            emit(f"    falsify [{mode_tag}]: hit={reason['falsifiers_hit'] or '—'} · surviving={surviving}"
+                 + (f" · GUIDE: {gv['verdict'].upper()}" if cur_item else ""))
             top = sorted(reason["frontier"], key=lambda f: -f["eig"])   # eig = MODEL-ESTIMATED priority
             emit(f"    expand: {len(top)} frontier candidates"
                  + (f" · top={top[0]['node']!r} (eig~{top[0]['eig']:.2f})" if top else " · none"))
@@ -305,6 +313,7 @@ def run_auto(cfg: AutoConfig, emit=print) -> AutoResult:
                    "hyp_count": len(hyps), "citations_verified": False,
                    "falsifiers_hit": reason["falsifiers_hit"], "surviving": surviving,
                    "learnings": reason["learnings"], "digest": reason["digest"],
+                   "guide_verdict": gv if cur_item else None,
                    "converged": reason["converged"], "spent": budget.spent, "prev": prev_hash}
             rec["hash"] = lgwks_sign.mac(prev_hash + _canon(rec), key)
             prev_hash = rec["hash"]
@@ -323,7 +332,8 @@ def run_auto(cfg: AutoConfig, emit=print) -> AutoResult:
             # 7. Carry forward (sanitized) + decide next frontier.
             digest = _sanitize_carry((digest + "\n" + reason["digest"]).strip())[-6000:]
             if cur_item is not None:                          # this round consumed an agenda question
-                covered.append({"id": cur_item["id"], "node": cur_item["node"], "evidence": has_evidence})
+                covered.append({"id": cur_item["id"], "node": cur_item["node"], "evidence": has_evidence,
+                                "verdict": gv["verdict"], "claim": gv["claim"], "why": gv["evidence"]})
             agenda_remaining = agenda_i < len(agenda)
             # converged is ADVISORY: honoured only on EVIDENCE rounds, after ≥2 consecutive (anti-injection,
             # hacker R1), AND only once the whole agenda is drained — converging on Q1 must not abandon
@@ -355,11 +365,22 @@ def run_auto(cfg: AutoConfig, emit=print) -> AutoResult:
     if agenda and uncovered > 0:
         emit(f"  ! {uncovered}/{len(agenda)} agenda questions unresearched "
              f"(stopped: {stop}) — NOT silently dropped")
+    # THE PRODUCT SIGNAL: guide assumptions the evidence CONTRADICTED — the flaws the coding AI must
+    # see. Surface them loudly; this is why the co-processor exists (not to agree, to refute).
+    contradicted = [c for c in covered if c.get("verdict") == "contradicted"]
+    verdicts = {v: sum(1 for c in covered if c.get("verdict") == v)
+                for v in ("supported", "contradicted", "unverified")}
+    if contradicted:
+        emit(f"\n  ✗ {len(contradicted)} GUIDE ASSUMPTION(S) CONTRADICTED BY EVIDENCE:")
+        for c in contradicted:
+            emit(f"      [{c['id']}] {c['claim'][:100]}  ←  {c['why'][:120]}")
     (out_dir / "result.json").write_text(_canon({
         "run_id": run_id, "rounds": n, "evidence_rounds": evidence_rounds, "stop_reason": stop,
         "surviving": surviving, "spent": budget.spent, "integrity_mode": mode,
         "chain_consistent": chain_ok,
         "agenda_total": len(agenda), "agenda_covered": len(covered_ids),
+        "guide_verdicts": verdicts, "contradicted": [{"id": c["id"], "claim": c["claim"],
+                                                       "evidence": c["why"]} for c in contradicted],
         # do NOT claim tamper-evidence in unanchored mode (hacker F3 / epistemics 4b): the signer
         # constant is in source, so an adversary can recompute the chain. Only keyed mode is evident.
         "tamper_evident": tamper_evident and chain_ok,

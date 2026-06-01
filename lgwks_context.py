@@ -61,11 +61,20 @@ def _agenda_block(run_dir: Path, rounds: list[dict]) -> str:
     if not items:
         return ""
     done = {r.get("frontier_in") for r in rounds}
+    # node → guide verdict (supported/contradicted/unverified) from the round that researched it.
+    verdict_by_node = {r.get("frontier_in"): (r.get("guide_verdict") or {}).get("verdict")
+                       for r in rounds if r.get("guide_verdict")}
     covered = sum(1 for a in items if a.get("node") in done)
+    contra = sum(1 for v in verdict_by_node.values() if v == "contradicted")
+    mark = {"contradicted": "✗", "supported": "✓", "unverified": "?"}
     head = (f"\n## RESEARCH AGENDA — {covered}/{len(items)} covered"
+            + (f", {contra} CONTRADICTED" if contra else "")
             + (f"  ·  {data['summary']}" if data.get("summary") else ""))
-    lines = [f"  [{'✓' if a.get('node') in done else ' '}] {a.get('id','?')} {a.get('node','')!r} "
-             f"— {(a.get('question') or '')[:90]}" for a in items]
+    lines = []
+    for a in items:
+        node = a.get("node", "")
+        flag = mark.get(verdict_by_node.get(node) or "", "✓" if node in done else " ")
+        lines.append(f"  [{flag}] {a.get('id','?')} {node!r} — {(a.get('question') or '')[:88]}")
     return "\n".join([head, *lines])
 
 

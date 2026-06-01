@@ -477,6 +477,99 @@ class TestGuideAgenda(unittest.TestCase):
              self.lt.reason_over_findings, self.lr._crawl, self.lr.ROOT) = saved
             os.environ.pop("LGWKS_NO_MODELS", None)
 
+    def _run_with_verdict(self, verdict, force_evidence):
+        # helper: 1-question agenda, canned reason emits `verdict`; crawl gives evidence iff force_evidence.
+        os.environ["LGWKS_NO_MODELS"] = "1"
+        self._saved = (self.lt.decompose_guide, self.lt.compile_hypotheses,
+                       self.lt.reason_over_findings, self.lt.contrarian, self.lr._crawl, self.lr.ROOT)
+        self.lt.decompose_guide = lambda g, o="": {"summary": "s", "agenda": [
+            {"id": "Q1", "node": "requests async", "question": "is requests async", "why": "plan awaits it"}]}
+        self.lt.compile_hypotheses = lambda obj, pur, context="": {
+            "meant": "m", "question": "q",
+            "hypotheses": [{"id": "H0", "role": "null", "claim": "c", "falsifier": "f", "builds_on": [], "keywords": []}]}
+        self.lt.reason_over_findings = lambda obj, h, f, context="": {
+            "think": "t", "falsifiers_hit": [], "surviving": ["H0"], "learnings": [],
+            "guide_verdict": {"claim": "requests is async", "verdict": verdict, "evidence": "docs show synchronous"},
+            "frontier": [{"node": "low node", "why": "w", "eig": 0.05}], "digest": "d", "converged": False}
+        self.lt.contrarian = lambda *a, **k: None
+        self.lr._crawl = lambda cfg, frontier: (("<UNTRUSTED_FINDINGS>e</UNTRUSTED_FINDINGS>", True)
+                                                if force_evidence else ("[planning]", False))
+        d = tempfile.mkdtemp()
+        self.lr.ROOT = Path(d)
+        cfg = self.lr.AutoConfig(objective="o", purpose="p", start="o", max_rounds=2,
+                                 crawl_mode="ground", guide_text="# plan\nx")
+        return self.lr.run_auto(cfg, emit=lambda *_: None)
+
+    def _restore_verdict(self):
+        (self.lt.decompose_guide, self.lt.compile_hypotheses, self.lt.reason_over_findings,
+         self.lt.contrarian, self.lr._crawl, self.lr.ROOT) = self._saved
+        os.environ.pop("LGWKS_NO_MODELS", None)
+
+    def test_guide_verdict_contradicted_surfaced_on_evidence(self):
+        # THE product: a contradicted guide assumption must reach result.json + CONTEXT.md (✗), loudly.
+        try:
+            res = self._run_with_verdict("contradicted", force_evidence=True)
+            result = json.loads((Path(res.out_dir) / "result.json").read_text())
+            self.assertEqual(result["guide_verdicts"]["contradicted"], 1)
+            self.assertEqual(len(result["contradicted"]), 1)
+            self.assertEqual(result["contradicted"][0]["claim"], "requests is async")
+            ctx = (Path(res.out_dir) / "CONTEXT" / "CONTEXT.md").read_text()
+            self.assertIn("CONTRADICTED", ctx)
+            self.assertIn("[✗]", ctx)
+        finally:
+            self._restore_verdict()
+
+    def test_guide_verdict_forced_unverified_without_evidence(self):
+        # epistemics: even if the Tongue asserts 'contradicted', a PLANNING round (no findings) must
+        # downgrade the verdict to 'unverified' — no verdict without evidence.
+        try:
+            res = self._run_with_verdict("contradicted", force_evidence=False)
+            result = json.loads((Path(res.out_dir) / "result.json").read_text())
+            self.assertEqual(result["contradicted"], [])
+            self.assertEqual(result["guide_verdicts"]["contradicted"], 0)
+            self.assertGreaterEqual(result["guide_verdicts"]["unverified"], 1)
+        finally:
+            self._restore_verdict()
+
+
+class TestGroundingDepth(unittest.TestCase):
+    """#9 hardening — grounding must do the TWO-STEP ctx7 (library→docs), not just resolve; and must
+    capture real Source: URLs (citation seed). Hermetic: the ctx7 subprocess is stubbed."""
+
+    def setUp(self):
+        import lgwks_ground
+        self.gr = lgwks_ground
+        self._saved = self.gr._ctx7_run
+        self.addCleanup(lambda: setattr(self.gr, "_ctx7_run", self._saved))
+
+    def test_two_step_resolve_then_docs_with_urls(self):
+        calls = []
+
+        def fake(args):
+            calls.append(list(args))
+            if args[0] == "library":
+                return "1. Title: Requests\n   Context7-compatible library ID: /psf/requests\n   Score: 80"
+            return "### Sync API\nSource: https://github.com/psf/requests/blob/main/docs/api.md\nrequests.get is blocking"
+        self.gr._ctx7_run = fake
+        docs, urls = self.gr._ctx7_docs("is requests.get synchronous")
+        self.assertEqual(calls[0][0], "library")                      # step 1: resolve
+        self.assertEqual(calls[1][:2], ["docs", "/psf/requests"])     # step 2: fetch docs for the id
+        self.assertIn("requests.get is blocking", docs)               # real behavioural content, not a listing
+        self.assertEqual(urls, ["https://github.com/psf/requests/blob/main/docs/api.md"])
+
+    def test_docs_empty_falls_back_to_resolver_text(self):
+        self.gr._ctx7_run = lambda args: ("X\nContext7-compatible library ID: /psf/requests\n"
+                                          if args[0] == "library" else "")
+        docs, urls = self.gr._ctx7_docs("q")
+        self.assertIn("resolver descriptions only", docs)             # honest about thin evidence
+        self.assertEqual(urls, [])
+
+    def test_no_library_means_no_evidence(self):
+        self.gr._ctx7_run = lambda args: ""
+        self.assertEqual(self.gr._ctx7_docs("q"), ("", []))
+        g = self.gr.ground("q", want_web=False)
+        self.assertFalse(g["has_evidence"])                           # fail-soft → planning round
+
 
 if __name__ == "__main__":
     unittest.main(verbosity=2)
