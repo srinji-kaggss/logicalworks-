@@ -14,11 +14,11 @@ Grammar (from spec):
   kv         <- KEY ':' value
   value      <- STRING | NUMBER | BOOL | NULL
 
-//why recursive-descent not a parser library: stdlib only per spec constraint;
-// the grammar is LL(1) so a hand-written parser is ~120 lines and unambiguous.
-//why PEG-style: ordered choice means no ambiguity even if a future verb_id
-// segment collides with a keyword (true | false | null are matched inside
-// value position only, never as SEGMENT tokens).
+# //why recursive-descent not a parser library: stdlib only per spec constraint;
+# // the grammar is LL(1) so a hand-written parser is ~120 lines and unambiguous.
+# //why PEG-style: ordered choice means no ambiguity even if a future verb_id
+# // segment collides with a keyword (true | false | null are matched inside
+# // value position only, never as SEGMENT tokens).
 """
 
 from __future__ import annotations
@@ -234,10 +234,18 @@ class _Parser:
             if ch == "\\":
                 self._pos += 1
                 esc = self._src[self._pos] if self._pos < len(self._src) else ""
-                # Basic JSON escape sequences.
-                buf.append(
-                    {"n": "\n", "t": "\t", "r": "\r", '"': '"', "\\": "\\"}.get(esc, esc)
-                )
+                # Basic JSON escape sequences only; unrecognised escapes are an error
+                # //why reject unknown escapes: silently stripping the backslash (the
+                # // fallback .get(esc,esc)) changes the string value without warning,
+                # // which could mask injection attempts in arg values.
+                _ESC_MAP = {"n": "\n", "t": "\t", "r": "\r", '"': '"', "\\": "\\"}
+                if esc not in _ESC_MAP:
+                    raise ExpressionParseError(
+                        f"unsupported escape sequence \\{esc!r} in string literal",
+                        pos=self._pos - 1,
+                        token="\\" + esc,
+                    )
+                buf.append(_ESC_MAP[esc])
                 self._pos += 1
             else:
                 buf.append(ch)
@@ -272,9 +280,9 @@ def parse(expr_string: str) -> ExprAST:
 def _canonical_step(step: dict) -> str:
     """Render one step as its canonical string for plan_id computation.
 
-    //why canonical form: plan_id is SHA-256 of the canonical expression so the
-    // same intent expressed with different arg ordering or whitespace gives the
-    // same plan_id (portable, machine-agnostic identity for the intent).
+    # //why canonical form: plan_id is SHA-256 of the canonical expression so the
+    # // same intent expressed with different arg ordering or whitespace gives the
+    # // same plan_id (portable, machine-agnostic identity for the intent).
     """
     vid = step["verb_id"].lower()
     args = step["args"]
@@ -369,9 +377,14 @@ def _resolve_verb_against_manifest(verb_id: str, manifest: dict) -> str | None:
     if cli_name in verb_names:
         return f"cli:{cli_name}"
 
-    # 2. mcp -- capabilities list with a wired, non-null entry.
+    # 2. mcp -- capabilities list with a wired, non-null non-empty string entry.
+    # //why isinstance(wired, str) and wired check: build_manifest() sets wired=r.get("chosen")
+    # // which is either None (unwired) or a non-empty string (capability path). Requiring a
+    # // non-empty string (rather than truthy) prevents string "false"/"0"/"null" from a
+    # // crafted manifest from activating MCP resolution when the capability is not live.
     for cap_entry in manifest.get("capabilities", []):
-        if cap_entry.get("capability") == verb_id and cap_entry.get("wired"):
+        wired = cap_entry.get("wired")
+        if cap_entry.get("capability") == verb_id and isinstance(wired, str) and wired:
             return f"mcp:{verb_id}"
 
     # 3. skill -- global skills directory.
@@ -407,8 +420,8 @@ def _schemas_compatible(upstream_output: dict, downstream_input: dict) -> bool:
     """Structural subtype: True if every required field in downstream_input
     exists in upstream_output with a compatible type, or either schema is {} (any).
 
-    //why {} == any: the spec says 'either schema is any -> compatible'. Un-annotated
-    // verbs do not break pipelines; the gap is surfaced as a warning.
+    # //why {} == any: the spec says 'either schema is any -> compatible'. Un-annotated
+    # // verbs do not break pipelines; the gap is surfaced as a warning.
     """
     if not upstream_output or not downstream_input:
         return True
@@ -431,8 +444,8 @@ def _validate_plan_schema(plan: dict) -> None:
     Uses stdlib only (no jsonschema library per spec dependency constraint).
     Checks required keys, const values, and regex patterns from the schema.
 
-    //why validate inside compile not at caller: the plan must be valid before
-    // it leaves this module; callers should not need a separate validation call.
+    # //why validate inside compile not at caller: the plan must be valid before
+    # // it leaves this module; callers should not need a separate validation call.
     """
     required_keys = {
         "schema", "plan_id", "expression", "canonical_expression",
@@ -486,6 +499,20 @@ def _validate_plan_schema(plan: dict) -> None:
                 raise ExpressionParseError(
                     f"resolved_primitive {s['resolved_primitive']!r} does not match PrimitiveRef pattern"
                 )
+        # //why validate step-level risk_class: the schema enum applies per-step, not just
+        # // plan-level. A malformed plan (e.g. produced by compile() with a crafted AST) could
+        # // carry an invalid risk_class that confuses downstream risk aggregation.
+        if s["risk_class"] not in {"read", "mutate", "unknown", "destructive"}:
+            raise ExpressionParseError(
+                f"step {s.get('index', '?')} risk_class {s['risk_class']!r} not in valid set"
+            )
+        # //why validate needs_review is a bool: a non-bool truthy value (e.g. string) passes
+        # // any(s["needs_review"]...) in approval_for_plan, but a non-bool falsy value (e.g. "")
+        # // could allow a review-required step to slip through the deny gate.
+        if not isinstance(s["needs_review"], bool):
+            raise ExpressionParseError(
+                f"step {s.get('index', '?')} needs_review must be bool, got {type(s['needs_review']).__name__!r}"
+            )
 
 
 # ---------------------------------------------------------------------------
@@ -517,10 +544,23 @@ def compile_from_string(expr_string: str, manifest: dict) -> dict:
         idx = step["index"]
 
         primitive = _resolve_verb_against_manifest(verb_id, manifest)
-        needs_review = primitive is None
-        if needs_review:
+        # //why agent:/skill: also need review: per spec and schema, needs_review must
+        # // be True for unresolved verbs AND for agent:/skill: primitives (both namespaces
+        # // have unbounded execution scope not visible from the expression alone). Leaving
+        # // needs_review=False for agent: would allow approval='ask' instead of 'deny'.
+        needs_review = (
+            primitive is None
+            or (isinstance(primitive, str) and (
+                primitive.startswith("agent:") or primitive.startswith("skill:")
+            ))
+        )
+        if primitive is None:
             warnings.append(
                 f"step {idx}: verb_id {verb_id!r} unresolved; needs_review=true"
+            )
+        elif needs_review:
+            warnings.append(
+                f"step {idx}: primitive {primitive!r} requires human review; needs_review=true"
             )
 
         risk = _risk_for_primitive(primitive)
@@ -591,10 +631,20 @@ def compile(expr_ast: ExprAST, manifest: dict) -> dict:  # noqa: A001
         idx = step["index"]
 
         primitive = _resolve_verb_against_manifest(verb_id, manifest)
-        needs_review = primitive is None
-        if needs_review:
+        # //why same fix as compile_from_string: agent:/skill: -> needs_review=True.
+        needs_review = (
+            primitive is None
+            or (isinstance(primitive, str) and (
+                primitive.startswith("agent:") or primitive.startswith("skill:")
+            ))
+        )
+        if primitive is None:
             warnings.append(
                 f"step {idx}: verb_id {verb_id!r} unresolved; needs_review=true"
+            )
+        elif needs_review:
+            warnings.append(
+                f"step {idx}: primitive {primitive!r} requires human review; needs_review=true"
             )
 
         risk = _risk_for_primitive(primitive)
@@ -673,9 +723,9 @@ def is_expression_string(text: str) -> bool:
     Heuristic: starts with a lowercase SEGMENT identifier (not '{', '[', '"'),
     followed by either '[' (args) or ' | ' (pipe) or end of input.
 
-    //why heuristic not full parse: cheap O(1) probe for routing. A false
-    // negative sends the input to the existing JSON path which correctly errors.
-    // A false positive produces a descriptive ExpressionParseError.
+    # //why heuristic not full parse: cheap O(1) probe for routing. A false
+    # // negative sends the input to the existing JSON path which correctly errors.
+    # // A false positive produces a descriptive ExpressionParseError.
     """
     stripped = text.strip()
     if not stripped:

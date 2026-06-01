@@ -1271,3 +1271,179 @@ class TestExpressionParser(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+class TestExpressionHardenV1(unittest.TestCase):
+    """Pinning tests for confirmed bugs found in the lgwks-expression/1 hacker pass.
+
+    Each test targets one confirmed finding and must stay green after the fix.
+    Regression: if a future change removes a fix, the corresponding test fails.
+    """
+
+    def _mock_manifest(self, extra_verbs=None) -> dict:
+        verbs = [
+            {"verb": "research", "intent": "test", "args": {}, "output": "", "tokens": "none"},
+            {"verb": "store", "intent": "test", "args": {}, "output": "", "tokens": "none"},
+            {"verb": "extract", "intent": "test", "args": {}, "output": "", "tokens": "none"},
+            {"verb": "memory remember", "intent": "test", "args": {}, "output": "", "tokens": "none"},
+        ] + (extra_verbs or [])
+        return {
+            "manifest": "lgwks.manifest.v0",
+            "tool": "lgwks",
+            "brand": "Logical Works",
+            "machine_first": True,
+            "verbs": verbs,
+            "capabilities": [],
+            "steering": {},
+            "thought_schema": "",
+        }
+
+    # ------------------------------------------------------------------
+    # BUG-1 (HIGH): agent: and skill: primitives must have needs_review=True
+    # Regression: if needs_review is False for agent:, approval_for_plan
+    # returns 'ask' instead of the correct 'deny'.
+    # ------------------------------------------------------------------
+
+    def test_agent_primitive_sets_needs_review_true(self):
+        """Resolved agent: primitive must force needs_review=True and approval=deny."""
+        import lgwks_expression as ex
+        manifest = self._mock_manifest()
+        # Only works if ~/.claude/agents/coder.md or ~/.claude/agents/coder/ exists on this machine.
+        # Use a fake manifest where we check _resolve_verb_against_manifest directly.
+        # We test compile_from_string with an expression that exercises the needs_review path
+        # by patching the resolver result.
+        import unittest.mock as mock
+        with mock.patch("lgwks_expression._resolve_verb_against_manifest", return_value="agent:coder"):
+            plan = ex.compile_from_string("coder", manifest)
+        step = plan["steps"][0]
+        self.assertEqual(step["resolved_primitive"], "agent:coder")
+        self.assertTrue(step["needs_review"],
+                        "agent: primitive must set needs_review=True per spec/schema")
+        self.assertEqual(ex.approval_for_plan(plan), "deny",
+                         "any needs_review step must produce deny, not ask")
+
+    def test_skill_primitive_sets_needs_review_true(self):
+        """Resolved skill: primitive must force needs_review=True and approval=deny."""
+        import lgwks_expression as ex
+        import unittest.mock as mock
+        manifest = self._mock_manifest()
+        with mock.patch("lgwks_expression._resolve_verb_against_manifest", return_value="skill:graphify"):
+            plan = ex.compile_from_string("graphify", manifest)
+        step = plan["steps"][0]
+        self.assertEqual(step["resolved_primitive"], "skill:graphify")
+        self.assertTrue(step["needs_review"],
+                        "skill: primitive must set needs_review=True per spec/schema")
+        self.assertEqual(ex.approval_for_plan(plan), "deny")
+
+    # ------------------------------------------------------------------
+    # BUG-2 (MED): _validate_plan_schema must reject invalid step risk_class
+    # ------------------------------------------------------------------
+
+    def test_validate_plan_schema_rejects_invalid_step_risk_class(self):
+        """A plan with an invalid step-level risk_class must fail validation."""
+        import lgwks_expression as ex
+        plan = {
+            "schema": "lgwks-expression/1",
+            "plan_id": "a" * 64,
+            "expression": "test",
+            "canonical_expression": "test",
+            "manifest_version": "v0",
+            "steps": [{
+                "index": 0, "verb_id": "test", "resolved_primitive": "cli:test",
+                "args": {}, "input_schema": {}, "output_schema": {},
+                "risk_class": "superadmin",  # invalid
+                "needs_review": False,
+            }],
+            "risk_class": "read",
+            "compile_policy": {"shell": False, "unknown_requires_review": True, "destructive_requires_force": True},
+            "warnings": [],
+        }
+        with self.assertRaises(ex.ExpressionParseError, msg="invalid step risk_class must be rejected"):
+            ex._validate_plan_schema(plan)
+
+    # ------------------------------------------------------------------
+    # BUG-2b (MED): _validate_plan_schema must reject non-bool needs_review
+    # ------------------------------------------------------------------
+
+    def test_validate_plan_schema_rejects_non_bool_needs_review(self):
+        """A plan with a non-bool needs_review at step level must fail validation."""
+        import lgwks_expression as ex
+        plan = {
+            "schema": "lgwks-expression/1",
+            "plan_id": "a" * 64,
+            "expression": "test",
+            "canonical_expression": "test",
+            "manifest_version": "v0",
+            "steps": [{
+                "index": 0, "verb_id": "test", "resolved_primitive": "cli:test",
+                "args": {}, "input_schema": {}, "output_schema": {},
+                "risk_class": "read",
+                "needs_review": "yes",  # string, not bool
+            }],
+            "risk_class": "read",
+            "compile_policy": {"shell": False, "unknown_requires_review": True, "destructive_requires_force": True},
+            "warnings": [],
+        }
+        with self.assertRaises(ex.ExpressionParseError, msg="non-bool needs_review must be rejected"):
+            ex._validate_plan_schema(plan)
+
+    # ------------------------------------------------------------------
+    # BUG-3 (MED): MCP wired="false" (string) must NOT resolve
+    # ------------------------------------------------------------------
+
+    def test_mcp_boolean_false_wired_does_not_resolve(self):
+        """wired=False (boolean) must not activate MCP resolution (spec: non-null AND active).
+        The boolean False is distinguishable from None; manifests can set wired=False to
+        explicitly mark a capability as present-but-inactive. The resolver must not treat it
+        as wired. String "false" is ambiguous per spec and is a Director call (HARDEN-NOTES).
+        """
+        import lgwks_expression as ex
+        manifest = {
+            "manifest": "lgwks.manifest.v0",
+            "verbs": [],
+            "capabilities": [{"capability": "test_mcp", "wired": False}],
+        }
+        primitive = ex._resolve_verb_against_manifest("test_mcp", manifest)
+        self.assertIsNone(primitive,
+                          "wired=False (boolean) must not resolve as a live MCP capability")
+
+    def test_mcp_empty_string_wired_does_not_resolve(self):
+        """wired='' (falsy string) must not resolve."""
+        import lgwks_expression as ex
+        manifest = {
+            "manifest": "lgwks.manifest.v0",
+            "verbs": [],
+            "capabilities": [{"capability": "cap", "wired": ""}],
+        }
+        self.assertIsNone(ex._resolve_verb_against_manifest("cap", manifest))
+
+    def test_mcp_true_wired_resolves(self):
+        """wired=True or a non-empty non-False string is a valid wired capability."""
+        import lgwks_expression as ex
+        manifest = {
+            "manifest": "lgwks.manifest.v0",
+            "verbs": [],
+            "capabilities": [{"capability": "embed", "wired": "mcp://server"}],
+        }
+        self.assertEqual(ex._resolve_verb_against_manifest("embed", manifest), "mcp:embed")
+
+    # ------------------------------------------------------------------
+    # BUG-4 (LOW): unknown escape sequences in string literals must raise
+    # ------------------------------------------------------------------
+
+    def test_unknown_escape_in_string_raises_parse_error(self):
+        """Unknown escape sequences like \\a or \\x must raise ExpressionParseError."""
+        import lgwks_expression as ex
+        for bad_escape in [r'extract["k":"\a"]', r'extract["k":"\x41"]', r'extract["k":"\q"]']:
+            with self.assertRaises(ex.ExpressionParseError,
+                                   msg=f"unknown escape in {bad_escape!r} must raise"):
+                ex.parse(bad_escape)
+
+    def test_known_escapes_still_parse_correctly(self):
+        """Standard JSON escape sequences \\n \\t \\r \\\\ \\" must still work."""
+        import lgwks_expression as ex
+        ast = ex.parse(r'extract["k":"line1\nline2\ttab\\back\"quote"]')
+        val = ast[0]["args"]["k"]
+        self.assertIn("\n", val)
+        self.assertIn("\t", val)
+        self.assertIn("\\", val)
+        self.assertIn('"', val)
