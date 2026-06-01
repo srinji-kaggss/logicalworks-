@@ -374,8 +374,9 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--budget", type=int, default=120_000, help="auto: hard ceiling on cloud-Tongue tokens")
     p.add_argument("--functions", default="generate,falsify,expand,contrarian",
                    help="auto: comma-set of per-round functions (frozen at launch)")
-    p.add_argument("--crawl", default="estimate", choices=["estimate", "live"],
-                   help="auto: estimate (offline planning) or live (gated signed spine)")
+    p.add_argument("--crawl", default="estimate", choices=["estimate", "ground", "live"],
+                   help="auto: estimate (planning) | ground (ctx7+web evidence) | live (gated spine)")
+    p.add_argument("--guide", help="auto: path to an implementation guide to deep-research while you code")
     return p
 
 
@@ -383,18 +384,29 @@ def main(argv: list[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
     if args.demo and not args.objective:
         args.objective, args.purpose = "CRM", "map how a CRM connects services and where truth lives"
+    guide_text = ""
+    if args.auto and args.guide:                    # ingest an implementation guide to research
+        try:
+            guide_text = Path(args.guide).read_text()[:20000]
+        except Exception as exc:
+            print(_c(f"  cannot read --guide {args.guide!r}: {exc}", BOLD)); return 2
+        if not args.objective:                       # derive objective from the guide's first heading/line
+            first = next((ln.lstrip("# ").strip() for ln in guide_text.splitlines() if ln.strip()), "guide")
+            args.objective = first[:80]
+        if not args.purpose:
+            args.purpose = "deep-research and validate this implementation guide; ground its claims"
     if not args.objective:
         build_parser().print_help()
         return 1
     if args.auto:                                   # autonomous deep-research mode (#9)
         if not args.purpose:
-            print(_c("  --auto needs --purpose (the question behind the intent, L1).", BOLD)); return 2
+            print(_c("  --auto needs --purpose or --guide (the question behind it, L1).", BOLD)); return 2
         import lgwks_research
         cfg = lgwks_research.AutoConfig(
             objective=args.objective, purpose=args.purpose, start=(args.start or args.objective),
             functions=tuple(f.strip() for f in args.functions.split(",") if f.strip()),
             max_rounds=args.rounds, token_budget=args.budget, crawl_mode=args.crawl,
-            max_pages=args.max_pages)
+            max_pages=args.max_pages, guide_text=guide_text)
         res = lgwks_research.run_auto(cfg)
         return 0 if res.ledger_intact else 1
     intent = {

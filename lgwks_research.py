@@ -70,8 +70,9 @@ class AutoConfig:
     functions: tuple[str, ...] = ("generate", "falsify", "expand", "contrarian")
     max_rounds: int = 6
     token_budget: int = 120_000                  # hard ceiling on cloud-Tongue tokens
-    crawl_mode: str = "estimate"                 # estimate (offline planning) | live (signed spine)
+    crawl_mode: str = "estimate"                 # estimate (planning) | ground (ctx7+web) | live (spine)
     max_pages: int = 8
+    guide_text: str = ""                         # an implementation guide to research (the AI's plan)
 
     def __post_init__(self):
         # clamp adversary-supplied bounds (hacker F8) and drop unknown functions (no silent calls).
@@ -79,7 +80,7 @@ class AutoConfig:
         object.__setattr__(self, "token_budget", max(1, min(BUDGET_CAP, int(self.token_budget))))
         object.__setattr__(self, "functions",
                            tuple(f for f in self.functions if f in ALLOWED_FUNCTIONS) or ("generate",))
-        if self.crawl_mode not in ("estimate", "live"):
+        if self.crawl_mode not in ("estimate", "ground", "live"):
             object.__setattr__(self, "crawl_mode", "estimate")
 
 
@@ -125,6 +126,12 @@ def _crawl(cfg: AutoConfig, frontier: str) -> tuple[str, bool]:
     document content was gathered — the loop must then NOT claim falsifiers/learnings/convergence
     (epistemics CRITICAL: no evidence → no evidence-bearing claims). estimate = offline PLANNING;
     live = the signed, scope-frozen spine (gated, not yet provisioned → degrades to planning)."""
+    if cfg.crawl_mode == "ground":
+        # REAL evidence via fused grounding (ctx7 + web). has_evidence keys EVIDENCE vs PLANNING —
+        # this is the unlock that retires estimate-mode theater (#9 / epistemics CRITICAL).
+        import lgwks_ground
+        g = lgwks_ground.ground(f"{cfg.objective} {frontier}".strip())
+        return lgwks_ground.as_findings(g), g["has_evidence"]
     if cfg.crawl_mode == "estimate":
         return ((f"[PLANNING — no document content fetched] frontier node: {frontier!r}. "
                  f"Plan only: name what evidence at this node would decide each hypothesis. "
@@ -150,7 +157,9 @@ def run_auto(cfg: AutoConfig, emit=print) -> AutoResult:
     budget = Budget(cap=cfg.token_budget)
     ledger = out_dir / "rounds.ledger.jsonl"
     prev_hash = "genesis"
-    digest = ""                       # rolling cross-round memory (distilled, not raw)
+    # seed the rolling memory with the implementation guide (sanitized) so round-1 hypotheses target it.
+    digest = (_sanitize_carry("IMPLEMENTATION GUIDE UNDER RESEARCH:\n" + cfg.guide_text)
+              if cfg.guide_text else "")
     frontier = cfg.start
     surviving: list[str] = []
     dry_streak = 0
