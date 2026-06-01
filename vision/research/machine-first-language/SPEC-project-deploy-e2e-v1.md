@@ -85,9 +85,12 @@ Must produce:
 11. learning-record ledger for transcript/input-derived training signals
 12. AI-to-AI machine packets (`MachinePacket`) separate from human prose
 13. operator profile capturing research-only steering, one-command orchestration, and experiment lanes
+14. worker map capped at four concurrent internal mapper slots
+15. artifact embedding ledger for transcript, learning material, source records, packets, and metadata
 
 Deploy may be `--dry-run` first. `--dry-run` must emit the same DAG and record schemas without
-network fetches or embeddings. `--execute` in the non-ML slice may execute only existing lgwks verbs:
+network fetches. It still embeds the deploy artifacts locally because embeddings are deterministic,
+local, and part of the Machine's memory substrate. `--execute` in the non-ML slice may execute only existing lgwks verbs:
 memory initialization/context, open-license public search, deterministic embedding vaults, and review
 rendering. Authenticated crawling, hidden session reuse, model calls, and weight updates are deferred.
 
@@ -348,6 +351,44 @@ Fail:
 - implementation bypasses existing `memory`, `public`, or `embed` modules
 - auth/session crawling is silently enabled before the final review
 
+### H14 — Worker fanout is capped and mapped internally
+
+Claim: the CLI should fan out research work without spawning an unbounded swarm or requiring extra
+API keys for mapper work.
+
+Pass:
+
+- `--max-workers` is hard-capped at 4
+- deploy writes `worker-map.json`
+- worker map has `max_concurrent_workers:4`
+- all first-slice mapper slots use internal/deterministic mapper policies by default
+- review reports active worker slots and max concurrent workers
+
+Fail:
+
+- more than four workers can be active at once
+- worker mapping depends on external API keys by default
+- logical research roles are invisible to future AI workers
+
+### H15 — Everything is embedded immediately and locally
+
+Claim: every artifact becomes searchable Machine memory as soon as it is produced.
+
+Pass:
+
+- deploy writes `artifact-embeddings.jsonl`
+- transcript/prompt input gets an individual local embedding record
+- cycle, lease, token, critic, packet, learning, lineage, graph, source, execution, model, worker,
+  operator, vector, and DAG artifacts are embedded individually
+- embeddings use deterministic local feature hashing in the first slice
+- embedding records store hashes and vectors, not remote-provider IDs or API-keyed side effects
+
+Fail:
+
+- only final summaries are embedded
+- learning/training material is skipped
+- embedding requires a keyed external provider in the default path
+
 ## 4. Required Schemas
 
 ### 4.1 Cycle Record
@@ -579,6 +620,43 @@ Fail:
 }
 ```
 
+### 4.12 Worker Map
+
+```json
+{
+  "schema": "lgwks-worker-map/1",
+  "project": "salesforce",
+  "max_concurrent_workers": 4,
+  "requested_workers": 4,
+  "active_slots": [
+    {"slot": 1, "worker_id": "context-001", "mapper": "internal-context-mapper", "api_keys": "none"},
+    {"slot": 2, "worker_id": "source-001", "mapper": "internal-public-source-mapper", "api_keys": "none-by-default"},
+    {"slot": 3, "worker_id": "embed-001", "mapper": "internal-deterministic-embed-mapper", "api_keys": "none"},
+    {"slot": 4, "worker_id": "critic-packet-001", "mapper": "internal-critic-packet-mapper", "api_keys": "none"}
+  ],
+  "api_key_policy": "prefer internal deterministic mappers; keyed external providers are optional later",
+  "spawn_policy": "never run more than four worker slots at any given time"
+}
+```
+
+### 4.13 Artifact Embedding
+
+```json
+{
+  "schema": "lgwks-artifact-embedding/1",
+  "project": "salesforce",
+  "kind": "transcript|artifact_doc|artifact_record",
+  "artifact": "learning-records.jsonl",
+  "item_id": "sha256-or-row-id",
+  "text_sha256": "sha256",
+  "embedding_model": "deterministic-feature-hash-v1",
+  "dimensions": 128,
+  "local_only": true,
+  "embedding": [0.0],
+  "hash": "sha256"
+}
+```
+
 ## 5. Command Contract
 
 ### `lgwks project deploy`
@@ -610,6 +688,8 @@ Pass:
 - `oss-coreml` spine requires model lineage records before any semantic model output is trusted
 - `--execute` in this slice runs non-ML typed steps only: memory, public search, deterministic embed
 - auth/private crawling remains skipped until the final hacker review gate
+- `--max-workers` is request input only; active workers are hard-capped at 4
+- `artifact-embeddings.jsonl` is always written, including dry-run
 
 ### `lgwks project review`
 
@@ -626,6 +706,7 @@ Pass:
 - reports unsupported claims
 - reports rollback ref
 - reports source count, execution status counts, vector vault status
+- reports artifact embedding count and worker-slot cap
 
 ## 6. Identify -> Spec -> Deploy Sequence
 
@@ -677,9 +758,11 @@ Implementation order:
 10. graph-edge ledger and dry-run GNN pathway.
 11. operator profile emitter.
 12. non-ML executor: memory + public source records + deterministic vector vault + execution events.
-13. CLI polish: `--render` human review projected from JSON.
-14. final hacker review gate for auth/private crawling.
-15. challenger promotion/rollback.
+13. worker map: max four internal mapper slots, no API-keyed mapper by default.
+14. immediate artifact embeddings for transcript, learning material, and every deploy artifact.
+15. CLI polish: `--render` human review projected from JSON.
+16. final hacker review gate for auth/private crawling.
+17. challenger promotion/rollback.
 
 Stop after step 4 for first review. Do not jump to full model training in the same slice.
 
@@ -690,8 +773,10 @@ Non-ML completion slice:
 3. Write execution records to `execution-events.jsonl`.
 4. Write public/open-license metadata to `source-records.jsonl`.
 5. Write vector vault summary to `vector-vault.json` when `--folder` is present.
-6. Human CLI polish is render-only; JSON remains source of truth.
-7. Auth/private crawling and all ML/model evolution remain deferred.
+6. Write `worker-map.json` with max 4 active mapper slots.
+7. Write `artifact-embeddings.jsonl` for every deploy artifact and record.
+8. Human CLI polish is render-only; JSON remains source of truth.
+9. Auth/private crawling and all ML/model evolution remain deferred.
 
 Second learning slice:
 
@@ -717,6 +802,8 @@ The first implementation slice is accepted only if:
   - `execution-events.jsonl`
   - `source-records.jsonl` when executed
   - `vector-vault.json` when executed with a folder
+  - `worker-map.json`
+  - `artifact-embeddings.jsonl`
 - `lgwks project review ai-ml-layers` reports:
   - `chain_ok:true`
   - `cycles:5` by default
@@ -728,6 +815,8 @@ The first implementation slice is accepted only if:
   - execution status counts
   - source count
   - vector vault status
+  - artifact embedding count
+  - max concurrent workers = 4
 - tests cover:
   - tamper breaks cycle chain
   - default cycle count is 5
@@ -739,6 +828,8 @@ The first implementation slice is accepted only if:
   - operator profile records build-on-existing-work and local-device consent separately from export
   - execute composes existing public/embed/memory functions
   - review render is projected from JSON review data
+  - requested workers >4 are capped at 4
+  - every produced deploy artifact has deterministic local embedding coverage
 
 ## 8. Non-Goals For First Slice
 
@@ -751,6 +842,8 @@ The first implementation slice is accepted only if:
 - no unpinned model downloads
 - no license-unverified base weights
 - no authenticated crawling before final hacker review
+- no more than 4 active workers
+- no default keyed embedding mapper
 
 ## 9. Open Questions
 

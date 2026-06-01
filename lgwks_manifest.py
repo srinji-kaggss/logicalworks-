@@ -78,8 +78,8 @@ _VERBS = [
                  "--source": "all|openalex|crossref|openverse", "--source-limit": "public/open-license result bound",
                  "--embed-cycles": "deterministic vector-vault cycle bound", "--max-files": "local file bound",
                  "--site": "memory scope label", "--device-consent": "research-only|local-device",
-                 "--model-spine": "deterministic|oss-coreml"},
-        "output": "deploy DAG + cycle/token/critic/model/learning/packet/graph/operator/source/execution artifacts", "tokens": "bounded by --tokens-per-cycle",
+                 "--max-workers": "hard-capped at 4", "--model-spine": "deterministic|oss-coreml"},
+        "output": "deploy DAG + cycle/token/critic/model/learning/packet/graph/operator/source/execution/worker/embedding artifacts", "tokens": "bounded by --tokens-per-cycle",
     },
     {
         "verb": "project review", "intent": "read deploy artifacts and report chain, spend, bias, learning, model lineage",

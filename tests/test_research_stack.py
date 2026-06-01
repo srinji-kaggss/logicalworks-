@@ -326,6 +326,18 @@ class TestProjectPlanner(unittest.TestCase):
         self.assertIn("Self-RAG", plan["frontier_techniques"])
         self.assertTrue(plan["next_commands"])
 
+    def test_project_plan_caps_workers_at_four(self):
+        import argparse
+        import lgwks_project as proj
+
+        args = argparse.Namespace(project="salesforce", prompt="map Salesforce", site="", folder=".",
+                                  reasoning_cycles=None, embedding_rounds=400, max_workers=99,
+                                  tokens_per_cycle=8000)
+        plan = proj.build_plan(args)
+        self.assertEqual(plan["budgets"]["max_workers"], 4)
+        self.assertEqual(plan["budgets"]["max_concurrent_workers"], 4)
+        self.assertLessEqual(len(plan["branch_workers"]), 4)
+
     def test_project_deploy_dry_run_writes_machine_native_artifacts(self):
         import argparse
         import lgwks_project as proj
@@ -348,9 +360,13 @@ class TestProjectPlanner(unittest.TestCase):
             for name in ("cycles.jsonl", "leases.jsonl", "token-ledger.jsonl", "model_state.json",
                          "machine-packets.jsonl", "learning-records.jsonl", "model-lineage.jsonl",
                          "graph-edges.jsonl", "operator-profile.json", "execution-events.jsonl",
-                         "source-records.jsonl", "vector-vault.json"):
+                         "source-records.jsonl", "vector-vault.json", "worker-map.json",
+                         "artifact-embeddings.jsonl"):
                 self.assertTrue((out_dir / name).exists(), name)
             review = proj.review_project("ai-ml-layers")
+            worker_map = json.loads((out_dir / "worker-map.json").read_text(encoding="utf-8"))
+            embeddings = [json.loads(line) for line in (out_dir / "artifact-embeddings.jsonl").read_text(
+                encoding="utf-8").splitlines()]
         finally:
             proj.DEPLOY_ROOT = old
         self.assertTrue(review["chain_ok"])
@@ -361,6 +377,13 @@ class TestProjectPlanner(unittest.TestCase):
         self.assertTrue(review["one_command_replaces_many"])
         self.assertTrue(review["build_on_existing_work"])
         self.assertIn("local-only", review["learning_export_policy"])
+        self.assertEqual(worker_map["max_concurrent_workers"], 4)
+        self.assertLessEqual(len(worker_map["active_slots"]), 4)
+        self.assertGreater(review["artifact_embeddings"], 0)
+        self.assertIn("transcript", {row["kind"] for row in embeddings})
+        self.assertIn("learning-records.jsonl", {row["artifact"] for row in embeddings})
+        self.assertIn("artifact-embeddings.jsonl", {row["artifact"] for row in embeddings})
+        self.assertTrue(all(row["embedding_model"] == "deterministic-feature-hash-v1" for row in embeddings))
 
     def test_project_deploy_tamper_breaks_cycle_chain(self):
         import argparse
@@ -465,6 +488,10 @@ class TestProjectPlanner(unittest.TestCase):
         self.assertEqual(review["source_records"], 3)
         self.assertEqual(review["vector_vault_status"], "ok")
         self.assertGreater(review["vector_records"], 0)
+        self.assertGreater(review["artifact_embeddings"], review["source_records"])
+        self.assertEqual(review["max_concurrent_workers"], 4)
+        self.assertLessEqual(review["active_worker_slots"], 4)
+        self.assertIn("internal deterministic", review["worker_api_key_policy"])
         self.assertIn("ok", review["execution_status_counts"])
         self.assertIn("skipped", review["execution_status_counts"])
         self.assertEqual({e["step"] for e in events},
@@ -478,11 +505,13 @@ class TestProjectPlanner(unittest.TestCase):
             "source_records": 2, "vector_vault_status": "ok", "vector_records": 3, "machine_packets": 5,
             "graph_edges": 10, "model_lineage_count": 3, "one_command_replaces_many": True,
             "build_on_existing_work": True, "rollback_ref": "champion", "unsupported_claims": ["claim-2"],
-            "execution_status_counts": {"ok": 3, "skipped": 1},
+            "execution_status_counts": {"ok": 3, "skipped": 1}, "artifact_embeddings": 22,
+            "active_worker_slots": 4, "max_concurrent_workers": 4,
         }
         rendered = proj._render_review(review)
         self.assertIn("project x", rendered)
         self.assertIn("sources 2", rendered)
+        self.assertIn("artifact embeddings 22", rendered)
         self.assertIn("execution ok:3, skipped:1", rendered)
 
 

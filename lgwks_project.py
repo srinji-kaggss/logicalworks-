@@ -24,7 +24,9 @@ DEPLOY_ROOT = ROOT / "store" / "project-deploy"
 DEFAULT_REASONING_CYCLES = 5
 DEFAULT_EMBEDDING_ROUNDS = 400
 DEFAULT_WORKERS = 4
+MAX_CONCURRENT_WORKERS = 4
 DEFAULT_TOKENS = 8000
+EMBED_DIMS = 128
 ACADEMIC_SOURCES = ["openalex", "crossref", "openverse"]
 DEFAULT_WEIGHT = {
     "retrieval": 0.35,
@@ -52,6 +54,18 @@ def _terms(text: str) -> list[str]:
     return out[:24]
 
 
+def _embedding(text: str, dims: int = EMBED_DIMS) -> list[float]:
+    vec = [0.0] * dims
+    features = _terms(text)
+    features.extend(" ".join(features[i:i + 2]) for i in range(max(0, len(features) - 1)))
+    for feat in features:
+        digest = hashlib.blake2b(feat.encode("utf-8"), digest_size=8).digest()
+        bucket = int.from_bytes(digest[:4], "big") % dims
+        vec[bucket] += 1.0 if digest[4] % 2 == 0 else -1.0
+    norm = sum(v * v for v in vec) ** 0.5 or 1.0
+    return [round(v / norm, 6) for v in vec]
+
+
 def _sha(value: str) -> str:
     return hashlib.sha256(value.encode("utf-8")).hexdigest()
 
@@ -66,17 +80,15 @@ def build_plan(args: argparse.Namespace) -> dict:
     prompt = args.prompt or project
     reasoning_cycles = _clamp(args.reasoning_cycles, DEFAULT_REASONING_CYCLES, 1, 50)
     embedding_rounds = _clamp(args.embedding_rounds, DEFAULT_EMBEDDING_ROUNDS, 1, 10_000)
-    max_workers = _clamp(args.max_workers, DEFAULT_WORKERS, 1, 16)
+    max_workers = _clamp(args.max_workers, DEFAULT_WORKERS, 1, MAX_CONCURRENT_WORKERS)
     tokens_per_cycle = _clamp(args.tokens_per_cycle, DEFAULT_TOKENS, 1000, 200_000)
     keywords = _terms(prompt)
     plan_id = _slug(project + "\n" + prompt)
     branch_workers = [
-        {"id": "seed", "role": "derive source set and hypotheses", "max_commands": 2},
-        {"id": "academic", "role": "query open scholarly/public indexes", "sources": ACADEMIC_SOURCES},
-        {"id": "authorized", "role": "crawl keychain/session hosts only; append needs_auth on miss"},
-        {"id": "embed", "role": "run vector vault rounds", "rounds": embedding_rounds},
-        {"id": "critic", "role": "score evidence, contradiction, license, novelty"},
-        {"id": "frontier", "role": "emit next command set within budget"},
+        {"id": "context", "role": "scope memory, transcript, and prompt-derived themes", "max_commands": 2},
+        {"id": "source", "role": "query open scholarly/public indexes", "sources": ACADEMIC_SOURCES},
+        {"id": "embed", "role": "embed every artifact and run vector vault rounds", "rounds": embedding_rounds},
+        {"id": "critic-packet", "role": "score evidence gaps and emit AI-to-AI packets"},
     ]
     return {
         "schema": "lgwks-project-plan/1",
@@ -89,6 +101,7 @@ def build_plan(args: argparse.Namespace) -> dict:
             "reasoning_cycles": reasoning_cycles,
             "embedding_rounds": embedding_rounds,
             "max_workers": max_workers,
+            "max_concurrent_workers": MAX_CONCURRENT_WORKERS,
             "tokens_per_cycle": tokens_per_cycle,
             "defaulted_reasoning_cycles": args.reasoning_cycles is None,
         },
@@ -144,12 +157,10 @@ def _deploy_path(project: str) -> Path:
 
 def _worker_leases(project: str, chain_head: str, tokens_per_cycle: int, max_workers: int) -> list[dict]:
     workers = [
-        ("seed-001", "seed_hypotheses", ["memory", "public"]),
-        ("academic-001", "neutral_academic", ["openalex", "crossref", "openverse"]),
-        ("authorized-001", "authorized_research", ["keychain-session-hosts"]),
-        ("embed-001", "vectorize", ["local-folder", "subvaults"]),
-        ("critic-001", "rigor_review", ["critic", "heldout"]),
-        ("packet-001", "machine_packet", ["ai-to-ai"]),
+        ("context-001", "scope_memory", ["memory", "transcript", "operator-profile"]),
+        ("source-001", "neutral_academic", ["openalex", "crossref", "openverse"]),
+        ("embed-001", "vectorize_everything", ["artifact-embeddings", "local-folder", "subvaults"]),
+        ("critic-packet-001", "rigor_packet", ["critic", "heldout", "ai-to-ai"]),
     ]
     out: list[dict] = []
     for worker_id, form, sources in workers[:max_workers]:
@@ -366,6 +377,64 @@ def _operator_profile(project: str, prompt: str, learning_mode: str, device_cons
     }
 
 
+def _worker_map(project: str, max_workers: int) -> dict:
+    workers = [
+        {"slot": 1, "worker_id": "context-001", "mapper": "internal-context-mapper",
+         "owns": ["prompt transcript", "memory-context", "operator-profile"], "api_keys": "none"},
+        {"slot": 2, "worker_id": "source-001", "mapper": "internal-public-source-mapper",
+         "owns": ["open-license source metadata"], "api_keys": "none-by-default"},
+        {"slot": 3, "worker_id": "embed-001", "mapper": "internal-deterministic-embed-mapper",
+         "owns": ["artifact-embeddings", "vector-vault"], "api_keys": "none"},
+        {"slot": 4, "worker_id": "critic-packet-001", "mapper": "internal-critic-packet-mapper",
+         "owns": ["critic-records", "machine-packets", "graph-edges"], "api_keys": "none"},
+    ]
+    return {
+        "schema": "lgwks-worker-map/1",
+        "project": project,
+        "max_concurrent_workers": MAX_CONCURRENT_WORKERS,
+        "requested_workers": max_workers,
+        "active_slots": workers[:max_workers],
+        "api_key_policy": "prefer internal deterministic mappers; keyed external providers are optional later",
+        "spawn_policy": "never run more than four worker slots at any given time",
+    }
+
+
+def _embedding_record(project: str, kind: str, artifact: str, item_id: str, text: str,
+                      *, local_only: bool = True) -> dict:
+    text_hash = _sha(text)
+    return {
+        "schema": "lgwks-artifact-embedding/1",
+        "project": project,
+        "kind": kind,
+        "artifact": artifact,
+        "item_id": item_id,
+        "text_sha256": text_hash,
+        "embedding_model": "deterministic-feature-hash-v1",
+        "dimensions": EMBED_DIMS,
+        "local_only": local_only,
+        "embedding": _embedding(text, EMBED_DIMS),
+        "hash": _sha(f"{project}\n{kind}\n{artifact}\n{item_id}\n{text_hash}"),
+    }
+
+
+def _artifact_embeddings(project: str, prompt: str, artifact_rows: dict[str, list[dict]],
+                         artifact_docs: dict[str, dict]) -> list[dict]:
+    rows = [
+        _embedding_record(project, "transcript", "prompt", "prompt", prompt),
+    ]
+    for artifact, doc in artifact_docs.items():
+        rows.append(_embedding_record(project, "artifact_doc", artifact, artifact,
+                                      json.dumps(doc, sort_keys=True, ensure_ascii=False)))
+    for artifact, records in artifact_rows.items():
+        for idx, rec in enumerate(records):
+            item_id = rec.get("hash") or rec.get("packet_id") or rec.get("source_id") or rec.get("cycle_hash")
+            if not item_id:
+                item_id = f"{artifact}:{idx + 1}"
+            rows.append(_embedding_record(project, "artifact_record", artifact, str(item_id),
+                                          json.dumps(rec, sort_keys=True, ensure_ascii=False)))
+    return rows
+
+
 def _event(project: str, step: str, status: str, started: float, *, inputs: dict | None = None,
            outputs: dict | None = None, error: str = "") -> dict:
     return {
@@ -488,7 +557,7 @@ def deploy_command(args: argparse.Namespace) -> int:
     prompt = args.prompt or args.project
     reasoning_cycles = _clamp(args.reasoning_cycles, DEFAULT_REASONING_CYCLES, 1, 50)
     embedding_rounds = _clamp(args.embedding_rounds, DEFAULT_EMBEDDING_ROUNDS, 1, 10_000)
-    max_workers = _clamp(args.max_workers, DEFAULT_WORKERS, 1, 16)
+    max_workers = _clamp(args.max_workers, DEFAULT_WORKERS, 1, MAX_CONCURRENT_WORKERS)
     tokens_per_cycle = _clamp(args.tokens_per_cycle, DEFAULT_TOKENS, 1000, 200_000)
     learning_mode = args.learning_mode
     dry_run = args.dry_run or not args.execute
@@ -507,6 +576,7 @@ def deploy_command(args: argparse.Namespace) -> int:
     critics = _critic_records(cycles)
     token_ledger = _token_ledger(cycles)
     operator_profile = _operator_profile(args.project, prompt, learning_mode, args.device_consent)
+    worker_map = _worker_map(args.project, max_workers)
     execution_summary = {"events": [], "source_records": 0,
                          "vector_summary": {"status": "skipped", "reason": "dry-run"}}
 
@@ -525,9 +595,13 @@ def deploy_command(args: argparse.Namespace) -> int:
     (out_dir / "model_state.json").write_text(json.dumps(model_state, indent=2, sort_keys=True), encoding="utf-8")
     (out_dir / "operator-profile.json").write_text(json.dumps(operator_profile, indent=2, sort_keys=True),
                                                    encoding="utf-8")
+    _write_json(out_dir / "worker-map.json", worker_map)
     _write_json(out_dir / "vector-vault.json", execution_summary["vector_summary"])
     if not dry_run:
         execution_summary = _run_non_ml_execution(args, prompt, keywords, out_dir)
+    source_rows = lgwks_cycle.read_jsonl(out_dir / "source-records.jsonl")
+    execution_events = lgwks_cycle.read_jsonl(out_dir / "execution-events.jsonl")
+    vector_summary = json.loads((out_dir / "vector-vault.json").read_text(encoding="utf-8"))
     dag = {
         "schema": "lgwks-project-deploy/1",
         "project": args.project,
@@ -538,7 +612,8 @@ def deploy_command(args: argparse.Namespace) -> int:
         "learning_mode": learning_mode,
         "device_consent": args.device_consent,
         "budgets": {"reasoning_cycles": reasoning_cycles, "embedding_rounds": embedding_rounds,
-                    "max_workers": max_workers, "tokens_per_cycle": tokens_per_cycle},
+                    "max_workers": max_workers, "max_concurrent_workers": MAX_CONCURRENT_WORKERS,
+                    "tokens_per_cycle": tokens_per_cycle},
         "ai_research_skills_map": {
             "orchestration": "autoresearch two-loop",
             "artifact": "ARA compiler/research-manager/rigor-reviewer",
@@ -560,6 +635,8 @@ def deploy_command(args: argparse.Namespace) -> int:
             "sources": "source-records.jsonl",
             "execution_events": "execution-events.jsonl",
             "vector_vault": "vector-vault.json",
+            "worker_map": "worker-map.json",
+            "artifact_embeddings": "artifact-embeddings.jsonl",
         },
         "chain_head": chain_head,
         "execution": {
@@ -570,6 +647,29 @@ def deploy_command(args: argparse.Namespace) -> int:
         },
     }
     (out_dir / "deploy-dag.json").write_text(json.dumps(dag, indent=2, sort_keys=True), encoding="utf-8")
+    artifact_embeddings = _artifact_embeddings(args.project, prompt, {
+        "cycles.jsonl": cycles,
+        "leases.jsonl": leases,
+        "token-ledger.jsonl": token_ledger,
+        "critic-records.jsonl": critics,
+        "machine-packets.jsonl": packets,
+        "learning-records.jsonl": learning,
+        "model-lineage.jsonl": model_lineage,
+        "graph-edges.jsonl": edges,
+        "source-records.jsonl": source_rows,
+        "execution-events.jsonl": execution_events,
+    }, {
+        "model_state.json": model_state,
+        "operator-profile.json": operator_profile,
+        "worker-map.json": worker_map,
+        "vector-vault.json": vector_summary,
+        "deploy-dag.json": dag,
+        "artifact-embeddings.jsonl": {
+            "schema": "lgwks-artifact-embedding/1",
+            "coverage": "transcript plus each deploy artifact document and JSONL record",
+        },
+    })
+    _jsonl(out_dir / "artifact-embeddings.jsonl", artifact_embeddings)
     print(json.dumps({**dag, "path": str(out_dir)}, indent=2, sort_keys=True))
     return 0
 
@@ -586,12 +686,15 @@ def review_project(project: str) -> dict:
     edges = lgwks_cycle.read_jsonl(out_dir / "graph-edges.jsonl")
     sources = lgwks_cycle.read_jsonl(out_dir / "source-records.jsonl")
     events = lgwks_cycle.read_jsonl(out_dir / "execution-events.jsonl")
+    artifact_embeddings = lgwks_cycle.read_jsonl(out_dir / "artifact-embeddings.jsonl")
     model_state_path = out_dir / "model_state.json"
     model_state = json.loads(model_state_path.read_text(encoding="utf-8")) if model_state_path.exists() else {}
     operator_path = out_dir / "operator-profile.json"
     operator_profile = json.loads(operator_path.read_text(encoding="utf-8")) if operator_path.exists() else {}
     vector_path = out_dir / "vector-vault.json"
     vector_vault = json.loads(vector_path.read_text(encoding="utf-8")) if vector_path.exists() else {}
+    worker_map_path = out_dir / "worker-map.json"
+    worker_map = json.loads(worker_map_path.read_text(encoding="utf-8")) if worker_map_path.exists() else {}
 
     bias_counts: Counter[str] = Counter()
     unsupported: list[str] = []
@@ -622,6 +725,10 @@ def review_project(project: str) -> dict:
         "execution_status_counts": event_counts,
         "vector_vault_status": vector_vault.get("status", "missing"),
         "vector_records": vector_vault.get("records", 0),
+        "artifact_embeddings": len(artifact_embeddings),
+        "max_concurrent_workers": worker_map.get("max_concurrent_workers", 0),
+        "active_worker_slots": len(worker_map.get("active_slots", [])),
+        "worker_api_key_policy": worker_map.get("api_key_policy", ""),
         "operator_profile": operator_profile.get("profile_id", ""),
         "one_command_replaces_many": operator_profile.get("stance", {}).get("one_command_replaces_many", False),
         "build_on_existing_work": operator_profile.get("stance", {}).get("build_on_existing_work", False),
@@ -636,6 +743,7 @@ def _render_review(review: dict) -> str:
         f"project {review['project']}",
         f"chain {'ok' if review['chain_ok'] else 'broken'} · cycles {review['cycles']} · tokens {review['token_status']} ({review['token_spend']})",
         f"sources {review['source_records']} · vector {review['vector_vault_status']} ({review['vector_records']} records)",
+        f"artifact embeddings {review.get('artifact_embeddings', 0)} · workers {review.get('active_worker_slots', 0)}/{review.get('max_concurrent_workers', MAX_CONCURRENT_WORKERS)}",
         f"machine packets {review['machine_packets']} · graph edges {review['graph_edges']} · lineage {review['model_lineage_count']}",
         f"operator one-command={str(review['one_command_replaces_many']).lower()} build-on-existing={str(review['build_on_existing_work']).lower()}",
         f"rollback {review['rollback_ref'] or 'none'}",
@@ -675,7 +783,8 @@ def add_parser(sub) -> None:
     deploy.add_argument("--prompt", default="")
     deploy.add_argument("--reasoning-cycles", type=int)
     deploy.add_argument("--embedding-rounds", type=int, default=DEFAULT_EMBEDDING_ROUNDS)
-    deploy.add_argument("--max-workers", type=int, default=DEFAULT_WORKERS)
+    deploy.add_argument("--max-workers", type=int, default=DEFAULT_WORKERS,
+                        help="requested workers; hard-capped at 4 concurrent internal mapper slots")
     deploy.add_argument("--tokens-per-cycle", type=int, default=DEFAULT_TOKENS)
     deploy.add_argument("--site", default="open-public-sources")
     deploy.add_argument("--folder", default="", help="optional local folder for deterministic vector vault")
