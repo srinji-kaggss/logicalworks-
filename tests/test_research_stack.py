@@ -22,6 +22,7 @@ import lgwks_search as search
 import lgwks_steering as steering
 import lgwks_extract as extract
 import lgwks_ground as ground
+import lgwks_home  # noqa: E402  (TestHomeQuickHints exercises _live_hints introspection)
 
 
 class TestCapabilitiesAgnostic(unittest.TestCase):
@@ -780,6 +781,122 @@ class TestGroundDegradation(unittest.TestCase):
             ground._ctx7_docs, ground._web = o1, o2
         self.assertFalse(g["has_evidence"])
         self.assertEqual(g["sources"], [])
+
+
+class TestHomeQuickHints(unittest.TestCase):
+    """L4 invariant: every verb shown in the `quick` block must exist in the live parser, and the
+    block must never contain a separate binary (e.g. `lgwks-akinator`) that the parser can't dispatch.
+    Source-of-truth = `lgwks build_parser()` (the same parser `lgwks --help` shows)."""
+
+    def _build_parser(self):
+        # The home launcher loads `lgwks` (a no-extension script) via SourceFileLoader. Mirror that
+        # so the test exercises the same path the runtime does.
+        import importlib.util
+        from importlib.machinery import SourceFileLoader
+        from pathlib import Path
+        loader = SourceFileLoader("lgwks_cli", str(Path(lgwks_home.ROOT) / "lgwks"))
+        spec = importlib.util.spec_from_loader("lgwks_cli", loader)
+        mod = importlib.util.module_from_spec(spec)
+        import sys as _sys
+        _sys.modules.setdefault("lgwks_cli", mod)
+        loader.exec_module(mod)
+        return mod.build_parser()
+
+    def _live_verb_names(self):
+        parser = self._build_parser()
+        for action in parser._actions:
+            if action.dest == "command":
+                return set(action.choices.keys())
+        return set()
+
+    def test_hints_match_live_subparsers(self):
+        import lgwks_home as home
+        hints = home._live_hints()
+        self.assertTrue(hints, "hints must be non-empty when the live parser is reachable")
+        live = self._live_verb_names()
+        shown = {name for name, _ in hints}
+        # every shown verb must be a registered subparser
+        self.assertTrue(shown.issubset(live), f"hints reference verbs not in parser: {shown - live}")
+        # //why: regression for the user-visible drift — `lgwks-akinator` is a separate binary
+        # and must NEVER appear in the quick block (it isn't in `lgwks --help`).
+        self.assertNotIn("akinator", shown)
+
+    def test_hints_capped_at_six(self):
+        import lgwks_home as home
+        hints = home._live_hints()
+        self.assertLessEqual(len(hints), 6)
+
+    def test_hint_order_read_then_mutate_then_orchestrator(self):
+        import lgwks_home as home
+        hints = home._live_hints()
+        # //why: bucket must be monotonically non-decreasing (read=0, mutate=1, orchestrator=2).
+        # We don't know which specific verbs appear (cap=6), only the bucket invariant.
+        ranks = [home._bucket_order(name)[0] for name, _ in hints]
+        self.assertEqual(ranks, sorted(ranks), f"hints cross bucket boundaries: {ranks}")
+
+    def test_hints_have_non_empty_one_line_help(self):
+        import lgwks_home as home
+        hints = home._live_hints()
+        for name, why in hints:
+            self.assertTrue(why, f"verb {name!r} has empty help text")
+            # cap to keep the spine from wrapping on 80-col TTYs (see //why in _live_hints)
+            self.assertLessEqual(len(why), 64, f"help for {name!r} exceeds 64 chars: {why!r}")
+
+    def test_introspection_failure_emits_no_hints(self):
+        import lgwks_home as home
+        import importlib
+        # Break _live_hints by replacing the importlib loader with a stub that raises on exec.
+        orig = home._live_hints
+        def _broken():
+            try:
+                raise RuntimeError("simulated parser load failure")
+            except Exception:
+                return []
+        # //why: the spec says "fallback if introspection fails: emit nothing (no fake hints)".
+        # We monkeypatch the loader's exec_module to raise, then call the real _live_hints to
+        # exercise the except branch end-to-end.
+        import importlib.util
+        from importlib.machinery import SourceFileLoader
+        from pathlib import Path
+        real_loader = SourceFileLoader
+        class _Boom(real_loader):
+            def exec_module(self, module):  # type: ignore[override]
+                raise RuntimeError("simulated parser load failure")
+        orig_loader = importlib.machinery.SourceFileLoader
+        importlib.machinery.SourceFileLoader = _Boom
+        try:
+            out = orig()
+        finally:
+            importlib.machinery.SourceFileLoader = orig_loader
+        self.assertEqual(out, [])
+
+    def test_commands_block_does_not_reference_separate_binary(self):
+        # //why: belt-and-braces regression for the explicit user complaint. Render the `quick` block
+        # with `on=False` (no colour, deterministic) and verify the binary name `lgwks-akinator`
+        # (the separate binary) never appears. We also assert each non-empty line is a real verb
+        # from the live parser — the hand-curated list is gone, so a future regression would
+        # have to re-introduce a cur cmds list to break this.
+        import io
+        import lgwks_home as home
+        captured = io.StringIO()
+        import sys as _sys
+        real = _sys.stdout
+        _sys.stdout = captured
+        try:
+            home._commands(on=False, anim=False)
+        finally:
+            _sys.stdout = real
+        out = captured.getvalue()
+        self.assertNotIn("lgwks-akinator", out)
+        live = self._live_verb_names()
+        for line in out.splitlines():
+            # the rendered hint lines look like "  lgwks <verb>   <one-liner>"
+            stripped = line.lstrip()
+            if not stripped.startswith("lgwks "):
+                continue  # not a hint line (could be the section header or an empty spine)
+            tail = stripped[len("lgwks "):]
+            verb = tail.split()[0] if tail else ""
+            self.assertIn(verb, live, f"quick block line references non-verb {verb!r}: {line!r}")
 
 
 if __name__ == "__main__":

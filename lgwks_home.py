@@ -178,15 +178,92 @@ def _dials(on: bool, anim: bool) -> None:
     _emit(ui.scale("depth", s.depth, "shallow", "deep", on=on), anim)
 
 
+# ── spec: home quick hints derived from live parser ─────────────────────────────
+# L0 intent: the home launcher's `quick` block must show what `lgwks` can actually do — no curated
+#            list that drifts from the parser (e.g. suggesting `lgwks-akinator`, a separate binary).
+# L1 reality gap: hand-maintained hints will lie the first time a verb is added/renamed/removed.
+#            the binary already advertises itself via `build_parser()`; the home launcher must read
+#            the same source of truth and never invent a verb that doesn't exist in `lgwks --help`.
+# L4 invariant:  for every verb shown in the `quick` block, `lgwks <verb> --help` succeeds; the block
+#            is empty (not an error) when introspection fails; hint order = read-only → mutate →
+#            orchestrators; cap at 6; no `lgwks-akinator` (separate binary) ever appears.
+# L5 parallel:   `kubectl`/plugin discovery — the surface area is derived from registered plugins
+#            at runtime, not curated in a separate help text. The launcher becomes a window onto
+#            the real registry, not a marketing list that goes stale.
+# ─────────────────────────────────────────────────────────────────────────────────
+
+# verb → bucket; "orchestrator" means "coordinates sub-verbs" and is rendered last so the
+# read/mutate verbs the user is most likely to type first stay on top. //why a hardcoded map
+# rather than a runtime classifier: the cost of being wrong is cosmetic (order), and a
+# runtime classifier would have to introspect each verb's flags — a much bigger surface to
+# maintain. New verbs default to "mutate" so they appear, not silently disappear.
+_READ_FIRST = ["manifest", "extract", "convert", "refine", "store", "login", "memory", "public", "embed"]
+_MUTATE_NEXT = ["jarvis", "x", "geo"]
+_ORCHESTRATORS_LAST = ["solve", "project"]
+_MAX_HINTS = 6
+
+
+def _bucket_order(verb: str) -> tuple[int, str]:
+    if verb in _READ_FIRST:
+        return (0, verb)
+    if verb in _MUTATE_NEXT:
+        return (1, verb)
+    if verb in _ORCHESTRATORS_LAST:
+        return (2, verb)
+    return (1, verb)  # unknown verbs render in the mutate band — visible, not hidden
+
+
+def _live_hints() -> list[tuple[str, str]]:
+    # //why: the only source of truth is the live parser; if we can't read it, emit nothing
+    # (no fake hints that drift again). `lgwks` is a script (no .py suffix), so load it via
+    # SourceFileLoader and register the module in sys.modules BEFORE exec (Python 3.14
+    # dataclass() needs sys.modules[__name__] for @dataclass-decorated classes).
+    try:
+        import importlib.util
+        from importlib.machinery import SourceFileLoader
+        from pathlib import Path as _P
+        loader = SourceFileLoader("lgwks_cli", str(_P(__file__).resolve().parent / "lgwks"))
+        spec = importlib.util.spec_from_loader("lgwks_cli", loader)
+        mod = importlib.util.module_from_spec(spec)
+        sys.modules.setdefault("lgwks_cli", mod)
+        loader.exec_module(mod)
+        parser = mod.build_parser()
+    except Exception:
+        return []
+    sub_action = None
+    for action in parser._actions:
+        if action.dest == "command":
+            sub_action = action
+            break
+    if sub_action is None or not getattr(sub_action, "choices", None):
+        return []
+    # //why: argparse keeps the per-verb help on the subparser action (`_choices_actions`),
+    # not on the inner ArgumentParser objects (their `description` is None when only `help=`
+    # was passed). Build a name→help map once, then iterate `sub_action.choices` for the
+    # actual subparser instances (some callers may rely on those being real parsers).
+    help_by_name: dict[str, str] = {ca.dest: (ca.help or "").strip() for ca in sub_action._choices_actions}
+    ordered: list[tuple[str, str]] = []
+    for name in sorted(sub_action.choices.keys(), key=_bucket_order):
+        help_text = help_by_name.get(name, "")
+        # //why: descriptions are written for the agent manifest ("machine-readable contract...") and
+        # contain em-dashes / arrows that read fine in --help. Trim to the first sentence for the
+        # quick block, capped at ~64 chars so the spine doesn't wrap on 80-col TTYs.
+        if "." in help_text:
+            help_text = help_text.split(".", 1)[0]
+        if len(help_text) > 64:
+            help_text = help_text[:61].rstrip() + "..."
+        ordered.append((name, help_text))
+    return ordered[:_MAX_HINTS]
+
+
 def _commands(on: bool, anim: bool) -> None:
-    cmds = [
-        ("lgwks solve git", "prove what happened in a repo"),
-        ("lgwks-akinator --demo", "watch the full loop, offline, no tokens"),
-        ('lgwks-akinator "<intent>" --purpose "<why>" --auto --crawl ground', "a grounded run"),
-    ]
     _emit(ui.spine(fg("quick", EMERALD_DIM, on=on) + fg("  — what you can do today", CREAM_DIM, on=on), on=on), anim)
-    for c, why in cmds:
-        _emit(ui.spine("  " + fg(c, EMERALD, on=on) + fg(f"   {why}", CREAM_DIM, on=on), on=on), anim)
+    hints = _live_hints()
+    if not hints:
+        return  # //why: never invent a hint that isn't in the live parser — silence is honest
+    for name, why in hints:
+        _emit(ui.spine("  " + fg(f"lgwks {name}", EMERALD, on=on)
+                       + fg(f"   {why}", CREAM_DIM, on=on), on=on), anim)
 
 
 def render_home(no_anim: bool = False) -> int:
