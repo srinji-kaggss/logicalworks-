@@ -1,0 +1,194 @@
+"""
+lgwks_memory — deterministic project memory chain.
+
+This is the local version of "remember the whole conversation": append-only,
+HMAC-chained project facts plus deterministic theme extraction. Every context
+pack is rebuilt from the chain, never from ambient model memory.
+"""
+
+from __future__ import annotations
+
+import argparse
+import hashlib
+import json
+import re
+import time
+import urllib.parse
+from collections import Counter
+from pathlib import Path
+
+import lgwks_sign
+
+ROOT = Path(__file__).resolve().parent
+_DIR = ROOT / "store" / "projects"
+_GENESIS = "0" * 64
+_SAFE = re.compile(r"[^a-z0-9._-]+")
+_KINDS = {"project_scope", "conversation", "theme", "fetch_plan", "fetch_result", "note"}
+_STOP = {
+    "a", "an", "and", "are", "as", "at", "be", "by", "for", "from", "have", "i", "if", "in",
+    "is", "it", "its", "me", "my", "no", "not", "of", "on", "or", "our", "that", "the",
+    "this", "to", "we", "with", "you", "your",
+}
+
+
+def _project_id(project: str) -> str:
+    safe = _SAFE.sub("-", project.strip().lower()).strip(".-") or "project"
+    suffix = hashlib.sha256(project.encode("utf-8")).hexdigest()[:12]
+    return f"{safe}-{suffix}"
+
+
+def _path(project: str) -> Path:
+    return _DIR / _project_id(project) / "memory.jsonl"
+
+
+def _core(rec: dict) -> str:
+    return json.dumps({k: v for k, v in rec.items() if k != "hash"}, sort_keys=True, separators=(",", ":"))
+
+
+def _read(project: str) -> list[dict]:
+    p = _path(project)
+    if not p.exists():
+        return []
+    out: list[dict] = []
+    for line in p.read_text(encoding="utf-8").splitlines():
+        if line.strip():
+            out.append(json.loads(line))
+    return out
+
+
+def verify(project: str, key: bytes | None = None) -> bool:
+    key = key if key is not None else lgwks_sign.signing_key()[0]
+    prev = _GENESIS
+    try:
+        rows = _read(project)
+    except Exception:
+        return False
+    for rec in rows:
+        if rec.get("kind") not in _KINDS or rec.get("prev") != prev:
+            return False
+        if lgwks_sign.mac(_core(rec) + prev, key) != rec.get("hash"):
+            return False
+        prev = rec["hash"]
+    return True
+
+
+def append(project: str, kind: str, data: dict, key: bytes | None = None) -> dict:
+    if kind not in _KINDS:
+        raise ValueError(f"unknown memory kind {kind!r}")
+    if not verify(project, key=key):
+        raise ValueError(f"refusing to append to broken project memory chain: {project}")
+    key = key if key is not None else lgwks_sign.signing_key()[0]
+    rows = _read(project)
+    prev = rows[-1]["hash"] if rows else _GENESIS
+    rec = {"seq": len(rows) + 1, "ts": time.time(), "project": project, "kind": kind, "data": data, "prev": prev}
+    rec["hash"] = lgwks_sign.mac(_core(rec) + prev, key)
+    p = _path(project)
+    p.parent.mkdir(parents=True, exist_ok=True)
+    with p.open("a", encoding="utf-8") as fh:
+        fh.write(json.dumps(rec, sort_keys=True, ensure_ascii=False) + "\n")
+    return rec
+
+
+def _tokens(text: str) -> list[str]:
+    return [t for t in re.findall(r"[a-zA-Z][a-zA-Z0-9_+\-.]{2,}", text.lower()) if t not in _STOP]
+
+
+def themes(text: str, limit: int = 24) -> list[dict]:
+    toks = _tokens(text)
+    counts: Counter[str] = Counter(toks)
+    counts.update(" ".join(toks[i:i + 2]) for i in range(max(0, len(toks) - 1)))
+    counts.update(" ".join(toks[i:i + 3]) for i in range(max(0, len(toks) - 2)))
+    rows = []
+    for label, weight in counts.most_common(limit):
+        rows.append({"theme": label, "weight": weight, "embedding": embedding(label)})
+    return rows
+
+
+def embedding(text: str, dims: int = 128) -> list[float]:
+    vec = [0.0] * dims
+    features = _tokens(text)
+    features.extend(" ".join(features[i:i + 2]) for i in range(max(0, len(features) - 1)))
+    for feat in features:
+        digest = hashlib.blake2b(feat.encode("utf-8"), digest_size=8).digest()
+        vec[int.from_bytes(digest[:4], "big") % dims] += 1.0 if digest[4] % 2 == 0 else -1.0
+    norm = sum(v * v for v in vec) ** 0.5 or 1.0
+    return [round(v / norm, 6) for v in vec]
+
+
+def _cos(a: list[float], b: list[float]) -> float:
+    return sum(x * y for x, y in zip(a, b)) if a and b and len(a) == len(b) else 0.0
+
+
+def remember(project: str, text: str, source: str = "conversation") -> dict:
+    rec = append(project, "conversation", {"source": source, "text_sha256": hashlib.sha256(text.encode()).hexdigest()})
+    th = themes(text)
+    append(project, "theme", {"source_seq": rec["seq"], "themes": th})
+    return {"project": project, "conversation_seq": rec["seq"], "themes": th}
+
+
+def init_project(project: str, site: str, goal: str) -> dict:
+    parsed = urllib.parse.urlparse(site if "://" in site else "https://" + site)
+    host = parsed.hostname or site
+    rec = append(project, "project_scope", {"site": host, "goal": goal, "allowed_hosts": [host]})
+    if goal:
+        remember(project, goal, source="project-goal")
+    return {"project": project, "scope_seq": rec["seq"], "site": host}
+
+
+def context(project: str, query: str = "", limit: int = 12) -> dict:
+    if not verify(project):
+        raise ValueError(f"project memory chain is broken: {project}")
+    rows = _read(project)
+    qv = embedding(query) if query else []
+    theme_rows: list[dict] = []
+    scopes: list[dict] = []
+    for rec in rows:
+        if rec.get("kind") == "theme":
+            for t in rec["data"].get("themes", []):
+                theme_rows.append({**t, "seq": rec["seq"], "score": _cos(qv, t.get("embedding", [])) if qv else t["weight"]})
+        elif rec.get("kind") == "project_scope":
+            scopes.append(rec["data"])
+    theme_rows.sort(key=lambda x: (x["score"], x["weight"]), reverse=True)
+    return {
+        "project": project,
+        "chain_ok": True,
+        "chain_head": rows[-1]["hash"] if rows else _GENESIS,
+        "events": len(rows),
+        "scopes": scopes,
+        "focus_themes": theme_rows[:limit],
+        "context_rule": "Use this chain as prior context; do not invent memory outside the chain.",
+    }
+
+
+def memory_command(args: argparse.Namespace) -> int:
+    if args.memory_command == "init":
+        payload = init_project(args.project, args.site, args.goal)
+    elif args.memory_command == "remember":
+        text = Path(args.file).read_text(encoding="utf-8") if args.file else args.text
+        payload = remember(args.project, text, source=args.source)
+    else:
+        payload = context(args.project, query=args.query, limit=args.limit)
+    print(json.dumps(payload, indent=2, sort_keys=True))
+    return 0
+
+
+def add_parser(sub) -> None:
+    p = sub.add_parser("memory", help="project memory chain: init, remember, context")
+    mem = p.add_subparsers(dest="memory_command", required=True)
+    init = mem.add_parser("init", help="declare project scope and goal")
+    init.add_argument("project")
+    init.add_argument("--site", required=True)
+    init.add_argument("--goal", default="")
+    init.set_defaults(func=memory_command)
+    rem = mem.add_parser("remember", help="append conversation text and derived themes")
+    rem.add_argument("project")
+    rem.add_argument("--text", default="")
+    rem.add_argument("--file")
+    rem.add_argument("--source", default="conversation")
+    rem.set_defaults(func=memory_command)
+    ctx = mem.add_parser("context", help="emit deterministic chained context")
+    ctx.add_argument("project")
+    ctx.add_argument("--query", default="")
+    ctx.add_argument("--limit", type=int, default=12)
+    ctx.set_defaults(func=memory_command)
+

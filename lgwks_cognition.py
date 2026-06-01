@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import re
 import time
 from pathlib import Path
 
@@ -25,10 +26,15 @@ ROOT = Path(__file__).resolve().parent
 _DIR = ROOT / "store" / "cognition"
 _GENESIS = "0" * 64
 _KINDS = {"thought", "intent_commit", "alignment", "gate", "note"}
+_STREAM_SAFE = re.compile(r"[^a-z0-9._-]+")
 
 
 def _log_path(stream: str) -> Path:
-    return _DIR / f"{stream}.cognition.jsonl"
+    safe = _STREAM_SAFE.sub("-", stream.strip().lower()).strip(".-")
+    if not safe:
+        raise ValueError("cognition stream name cannot be empty")
+    suffix = hashlib.sha256(stream.encode("utf-8")).hexdigest()[:12]
+    return _DIR / f"{safe}-{suffix}.cognition.jsonl"
 
 
 class CognitionLog:
@@ -60,6 +66,8 @@ class CognitionLog:
         """Append one chained, signed entry. kind must be known (no silent free-form). Returns the entry."""
         if kind not in _KINDS:
             raise ValueError(f"unknown cognition kind {kind!r}; known: {sorted(_KINDS)}")
+        if self._path.exists() and not self.verify():
+            raise ValueError(f"refusing to append to broken cognition chain: {self.stream}")
         self._path.parent.mkdir(parents=True, exist_ok=True)
         rec = {"seq": self._next_seq(), "ts": time.time(), "kind": kind, "data": data, "prev": self._prev}
         core = json.dumps(rec, sort_keys=True, separators=(",", ":"))
@@ -90,8 +98,21 @@ class CognitionLog:
         """Re-walk the chain: each entry's hash recomputes and its prev matches the predecessor. With a
         keyed signer, also verify the HMAC. Any break ⇒ False (tamper / corruption)."""
         prev = _GENESIS
-        for rec in self._read_raw():
+        if not self._path.exists():
+            return True
+        for line in self._path.read_text(encoding="utf-8").splitlines():
+            line = line.strip()
+            if not line:
+                continue
+            try:
+                rec = json.loads(line)
+            except json.JSONDecodeError:
+                return False
             body = {k: rec[k] for k in ("seq", "ts", "kind", "data", "prev") if k in rec}
+            if set(body) != {"seq", "ts", "kind", "data", "prev"}:
+                return False
+            if rec.get("kind") not in _KINDS:
+                return False
             core = json.dumps(body, sort_keys=True, separators=(",", ":"))
             if hashlib.sha256(core.encode("utf-8")).hexdigest() != rec.get("hash"):
                 return False
@@ -104,6 +125,8 @@ class CognitionLog:
 
     def corpus(self, kind: str = "intent_commit") -> list[dict]:
         """Read back entries of a kind — how the distillation flywheel pulls the Machine's training data."""
+        if not self.verify():
+            raise ValueError(f"refusing to read corpus from broken cognition chain: {self.stream}")
         return [r["data"] for r in self._read_raw() if r.get("kind") == kind]
 
 

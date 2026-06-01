@@ -46,6 +46,46 @@ _VERBS = [
         "args": {"source": "url or keyword seed", "--max-pages": "int", "--max-depth": "int", "--estimate-only": "plan only"},
         "output": "run db + prevector graph + embeddings under runs/", "tokens": "none (crawl); embedding optional",
     },
+    {
+        "verb": "memory", "intent": "project-scoped deterministic memory chain: init, remember, context",
+        "args": {"init": "project --site host --goal text", "remember": "project --text/--file", "context": "project --query"},
+        "output": "chain head + scopes + focus themes + deterministic embeddings", "tokens": "none",
+    },
+    {
+        "verb": "login", "intent": "save a human-consented, host-scoped browser session for authenticated pages",
+        "args": {"target": "login URL or shorthand, e.g. linkedin"},
+        "output": "{ok,path,reason}; no credentials printed", "tokens": "none",
+    },
+    {
+        "verb": "public", "intent": "search reusable public sources with explicit open-license basis",
+        "args": {"query": "search text", "--source": "all|openalex|crossref|openverse", "--limit": "int"},
+        "output": "records with source, url, open_url, license, license_url, basis", "tokens": "none",
+    },
+    {
+        "verb": "embed", "intent": "build deterministic project vector vault from a local folder",
+        "args": {"path": "folder", "--project": "memory project", "--keywords": "repeatable focus terms", "--cycles": "0 = until stable"},
+        "output": "project root vault + per-folder sub-vault manifests and embeddings", "tokens": "none",
+    },
+    {
+        "verb": "project plan", "intent": "turn one prompt into bounded branch-worker crawl/embed/reason plan",
+        "args": {"project": "name", "--prompt": "goal", "--reasoning-cycles": "default 5", "--embedding-rounds": "default 400"},
+        "output": "plan.json with budgets, branch workers, frontier techniques, next commands", "tokens": "none",
+    },
+    {
+        "verb": "project deploy", "intent": "one-command research orchestrator: plan leases, cycles, packets, learning records",
+        "args": {"project": "name", "--prompt": "goal", "--dry-run": "default-safe artifact run",
+                 "--execute": "run non-ML existing lgwks steps", "--folder": "optional local vector-vault root",
+                 "--source": "all|openalex|crossref|openverse", "--source-limit": "public/open-license result bound",
+                 "--embed-cycles": "deterministic vector-vault cycle bound", "--max-files": "local file bound",
+                 "--site": "memory scope label", "--device-consent": "research-only|local-device",
+                 "--max-workers": "hard-capped at 4", "--model-spine": "deterministic|oss-coreml"},
+        "output": "deploy DAG + cycle/token/critic/model/learning/packet/graph/operator/source/execution/worker/embedding artifacts", "tokens": "bounded by --tokens-per-cycle",
+    },
+    {
+        "verb": "project review", "intent": "read deploy artifacts and report chain, spend, bias, learning, model lineage",
+        "args": {"project": "name", "--render": "human projection of JSON review"},
+        "output": "machine-readable review with chain_ok, rollback, packet counts, operator stance", "tokens": "none",
+    },
 ]
 
 # Agent-facing usage notes — terse, the things an AI needs to not misuse the tool.

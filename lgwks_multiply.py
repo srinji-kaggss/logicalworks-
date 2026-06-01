@@ -26,13 +26,24 @@ import sys
 from itertools import product
 
 # Heuristic risk classes. Conservative: anything that could lose work is 'destructive'; unknown verbs are
-# never silently auto-run. //why heuristic not allowlist: the human gate is the real authority (claude model).
-_DESTRUCTIVE = re.compile(r"\b(rm|rmdir|--force\b|-f\b|--hard|push\s+--force|push\s+-f|reset\s+--hard|"
-                          r"clean\s+-[a-z]*f|branch\s+-D|drop|truncate|delete|checkout\s+--|stash\s+drop)\b")
+# never silently auto-run. //why heuristic + DEFAULT-DENY-ON-FLAGS: the human gate is the real authority,
+# but the classifier is the gate behind `geo run`'s non-interactive execute, so a 'read' verb that carries a
+# deletion/force flag (git branch -d, checkout --, clean -fd) must NOT win the read class. Hardened after the
+# 2026-06-01 hacker pass found git branch -d -> read -> auto_allowed (keyword match, flag-blind).
+_DESTRUCTIVE = re.compile(
+    r"\brm\b|\brmdir\b|\bshred\b|\bdd\b|--force\b|--hard\b|--delete\b|--prune\b|(?<![\w-])-f\b|"
+    r"\bpush\s+(?:--force|-f|--delete|--prune)\b|\breset\s+--hard\b|\bclean\s+-[a-zA-Z]*f[a-zA-Z]*\b|"
+    r"\bbranch\s+-[a-zA-Z]*[dD]\b|\btag\s+-[a-zA-Z]*d[a-zA-Z]*\b|\bcheckout\s+--(?:\s|$)|\brestore\b|"
+    r"\bstash\s+(?:drop|clear|pop)\b|\bupdate-ref\s+-d\b|\bworktree\s+remove\b|\bsubmodule\s+deinit\b|"
+    r"\bdrop\b|\btruncate\b|\bdelete\b")
 _MUTATE = re.compile(r"\b(git\s+(add|commit|push|merge|rebase|stash|tag|mv|restore|checkout|switch)|"
                      r"mv|cp|mkdir|touch|chmod|chown|npm\s+(install|i)|pip\s+install|git\s+reset)\b")
 _READ = re.compile(r"\b(git\s+(status|log|diff|show|blame|branch|remote|describe|rev-parse|ls-files|"
                    r"shortlog|reflog)|ls|cat|grep|head|tail|wc|find|pwd|echo|which)\b")
+# Deletion/force flag carried by an otherwise mutate/read verb -> escalate (default-deny). Short flag clusters
+# containing d/f/D (e.g. -d, -fd) or the long destructive flags. Safe read flags (--show-current, -la, --stat,
+# --oneline) contain no d/f/D short cluster and are not in the long set, so they stay read.
+_DANGER_FLAG = re.compile(r"(?:^|\s)-[a-zA-Z]*[dfD][a-zA-Z]*\b|--(?:force|hard|delete|prune|purge|no-verify)\b")
 
 _RISK_ORDER = {"read": 0, "mutate": 1, "unknown": 2, "destructive": 3}
 
@@ -72,10 +83,13 @@ def _expand_braces(expr: str) -> list[str]:
 def _classify(cmd: str) -> str:
     if _DESTRUCTIVE.search(cmd):
         return "destructive"
+    danger = _DANGER_FLAG.search(cmd) is not None
     if _MUTATE.search(cmd):
-        return "mutate"
+        # //why default-deny: a mutating verb carrying a deletion/force flag is destructive, not mutate.
+        return "destructive" if danger else "mutate"
     if _READ.search(cmd):
-        return "read"
+        # //why: a read verb with a deletion/force flag is not provably safe -> never 'read'/auto_allowed.
+        return "unknown" if danger else "read"
     return "unknown"
 
 
@@ -146,6 +160,9 @@ def multiply_command(args) -> int:
     if not interactive:
         if not getattr(args, "yes", False):
             print("refusing: non-interactive run needs --yes (and --force for destructive)", file=sys.stderr)
+            return 2
+        if any(r == "unknown" for r in risks) and not getattr(args, "allow_unknown", False):
+            print("refusing: unknown commands in non-interactive chain need --allow-unknown", file=sys.stderr)
             return 2
         if has_destructive and not getattr(args, "force", False):
             print("refusing: destructive commands in chain need --force", file=sys.stderr)

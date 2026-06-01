@@ -11,5 +11,8 @@ vision/research/research-network/runs/
 research-map.mmd
 runs/
 
+# lgwks runtime output (project deploys, geo runs, embeddings). Never source of truth.
+store/
+
 # hermetic test / CI: force deterministic fallbacks (no Ollama)
 # LGWKS_NO_MODELS=1
