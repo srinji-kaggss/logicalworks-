@@ -104,11 +104,11 @@ def build_plan(args: argparse.Namespace) -> dict:
             ["lgwks", "memory", "context", project, "--query", " ".join(keywords[:8])],
         ],
         "deploy_missing": [
-            "worker queue with leases",
+            "parallel lease-claim worker runner",
             "semantic embedding provider beside deterministic vectors",
             "critic held-out eval set",
             "champion/challenger snapshot promotion",
-            "token ledger enforcement",
+            "auth/private crawl after final hacker review",
         ],
         "whimsy": {
             "instrument": "frontier compass",
@@ -131,6 +131,11 @@ def plan_command(args: argparse.Namespace) -> int:
 
 def _jsonl(path: Path, rows: list[dict]) -> None:
     lgwks_cycle.write_jsonl(path, rows)
+
+
+def _write_json(path: Path, payload: dict) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps(payload, indent=2, sort_keys=True, ensure_ascii=False), encoding="utf-8")
 
 
 def _deploy_path(project: str) -> Path:
@@ -361,6 +366,124 @@ def _operator_profile(project: str, prompt: str, learning_mode: str, device_cons
     }
 
 
+def _event(project: str, step: str, status: str, started: float, *, inputs: dict | None = None,
+           outputs: dict | None = None, error: str = "") -> dict:
+    return {
+        "schema": "lgwks-execution-event/1",
+        "project": project,
+        "step": step,
+        "status": status,
+        "started_at": started,
+        "finished_at": time.time(),
+        "inputs": inputs or {},
+        "outputs": outputs or {},
+        "error": error,
+    }
+
+
+def _source_records(project: str, payload: dict) -> list[dict]:
+    rows = []
+    for rec in payload.get("records", []):
+        core = {
+            "project": project,
+            "via": rec.get("source", ""),
+            "title": rec.get("title", ""),
+            "url": rec.get("url", ""),
+            "open_url": rec.get("open_url", ""),
+            "license": rec.get("license", ""),
+            "license_url": rec.get("license_url", ""),
+            "basis": rec.get("basis", ""),
+            "year": rec.get("year"),
+            "creator": rec.get("creator", ""),
+            "content_status": "metadata_only",
+        }
+        source_id = _sha(json.dumps(core, sort_keys=True, ensure_ascii=False))
+        rows.append({
+            "schema": "lgwks-source-record/1",
+            **core,
+            "source_id": source_id,
+            "hash": source_id,
+        })
+    return rows
+
+
+def _run_non_ml_execution(args: argparse.Namespace, prompt: str, keywords: list[str],
+                          out_dir: Path) -> dict:
+    events: list[dict] = []
+    source_rows: list[dict] = []
+    memory_context: dict = {}
+    vector_summary: dict = {"status": "skipped", "reason": "no --folder provided"}
+
+    site = args.site or "open-public-sources"
+    started = time.time()
+    try:
+        import lgwks_memory
+        lgwks_memory.init_project(args.project, site, prompt)
+        memory_context = lgwks_memory.context(args.project, query=" ".join(keywords[:8]))
+        _write_json(out_dir / "memory-context.json", memory_context)
+        events.append(_event(args.project, "memory", "ok", started,
+                             inputs={"site": site}, outputs={"artifact": "memory-context.json",
+                                                             "events": memory_context.get("events", 0)}))
+    except Exception as exc:
+        events.append(_event(args.project, "memory", "error", started,
+                             inputs={"site": site}, error=type(exc).__name__))
+
+    query = " ".join(keywords[:8]) or prompt
+    started = time.time()
+    try:
+        import lgwks_public
+        public_payload = lgwks_public.search_public(query, source=args.source, limit=args.source_limit)
+        source_rows = _source_records(args.project, public_payload)
+        _jsonl(out_dir / "source-records.jsonl", source_rows)
+        _write_json(out_dir / "public-search.json", public_payload)
+        events.append(_event(args.project, "public_search", "ok", started,
+                             inputs={"query": query, "source": args.source, "limit": args.source_limit},
+                             outputs={"records": len(source_rows), "artifact": "source-records.jsonl",
+                                      "errors": public_payload.get("errors", {})}))
+    except Exception as exc:
+        _jsonl(out_dir / "source-records.jsonl", [])
+        events.append(_event(args.project, "public_search", "error", started,
+                             inputs={"query": query}, error=type(exc).__name__))
+
+    if args.folder:
+        started = time.time()
+        try:
+            folder = Path(args.folder).expanduser()
+            if not folder.exists() or not folder.is_dir():
+                vector_summary = {"status": "skipped", "reason": "folder missing", "folder": str(folder)}
+                events.append(_event(args.project, "embed", "skipped", started,
+                                     inputs={"folder": str(folder)}, outputs=vector_summary))
+            else:
+                import lgwks_embed
+                vault = lgwks_embed.build_vault(str(folder), args.project, keywords,
+                                                cycles=max(1, args.embed_cycles),
+                                                max_cycles=max(1, args.embed_cycles),
+                                                max_files=args.max_files)
+                vector_summary = {"status": "ok", **vault}
+                events.append(_event(args.project, "embed", "ok", started,
+                                     inputs={"folder": str(folder), "cycles": args.embed_cycles,
+                                             "max_files": args.max_files},
+                                     outputs={"records": vault.get("records", 0),
+                                              "cycles_run": vault.get("cycles_run", 0),
+                                              "artifact": "vector-vault.json"}))
+        except Exception as exc:
+            vector_summary = {"status": "error", "error": type(exc).__name__}
+            events.append(_event(args.project, "embed", "error", started, error=type(exc).__name__))
+
+    started = time.time()
+    events.append(_event(args.project, "auth_private_crawl", "skipped", started,
+                         outputs={"reason": "deferred until final hacker review gate"}))
+
+    _write_json(out_dir / "vector-vault.json", vector_summary)
+    _jsonl(out_dir / "execution-events.jsonl", events)
+    return {
+        "events": events,
+        "source_records": len(source_rows),
+        "memory_context": memory_context,
+        "vector_summary": vector_summary,
+    }
+
+
 def deploy_command(args: argparse.Namespace) -> int:
     prompt = args.prompt or args.project
     reasoning_cycles = _clamp(args.reasoning_cycles, DEFAULT_REASONING_CYCLES, 1, 50)
@@ -384,6 +507,8 @@ def deploy_command(args: argparse.Namespace) -> int:
     critics = _critic_records(cycles)
     token_ledger = _token_ledger(cycles)
     operator_profile = _operator_profile(args.project, prompt, learning_mode, args.device_consent)
+    execution_summary = {"events": [], "source_records": 0,
+                         "vector_summary": {"status": "skipped", "reason": "dry-run"}}
 
     out_dir = _deploy_path(args.project)
     out_dir.mkdir(parents=True, exist_ok=True)
@@ -395,9 +520,14 @@ def deploy_command(args: argparse.Namespace) -> int:
     _jsonl(out_dir / "learning-records.jsonl", learning)
     _jsonl(out_dir / "model-lineage.jsonl", model_lineage)
     _jsonl(out_dir / "graph-edges.jsonl", edges)
+    _jsonl(out_dir / "source-records.jsonl", [])
+    _jsonl(out_dir / "execution-events.jsonl", [])
     (out_dir / "model_state.json").write_text(json.dumps(model_state, indent=2, sort_keys=True), encoding="utf-8")
     (out_dir / "operator-profile.json").write_text(json.dumps(operator_profile, indent=2, sort_keys=True),
                                                    encoding="utf-8")
+    _write_json(out_dir / "vector-vault.json", execution_summary["vector_summary"])
+    if not dry_run:
+        execution_summary = _run_non_ml_execution(args, prompt, keywords, out_dir)
     dag = {
         "schema": "lgwks-project-deploy/1",
         "project": args.project,
@@ -427,8 +557,17 @@ def deploy_command(args: argparse.Namespace) -> int:
             "graph": "graph-edges.jsonl",
             "model_state": "model_state.json",
             "operator_profile": "operator-profile.json",
+            "sources": "source-records.jsonl",
+            "execution_events": "execution-events.jsonl",
+            "vector_vault": "vector-vault.json",
         },
         "chain_head": chain_head,
+        "execution": {
+            "enabled": not dry_run,
+            "source_records": execution_summary["source_records"],
+            "vector_status": execution_summary["vector_summary"].get("status", "skipped"),
+            "auth_private_crawl": "deferred",
+        },
     }
     (out_dir / "deploy-dag.json").write_text(json.dumps(dag, indent=2, sort_keys=True), encoding="utf-8")
     print(json.dumps({**dag, "path": str(out_dir)}, indent=2, sort_keys=True))
@@ -445,10 +584,14 @@ def review_project(project: str) -> dict:
     lineage = lgwks_cycle.read_jsonl(out_dir / "model-lineage.jsonl")
     packets = lgwks_cycle.read_jsonl(out_dir / "machine-packets.jsonl")
     edges = lgwks_cycle.read_jsonl(out_dir / "graph-edges.jsonl")
+    sources = lgwks_cycle.read_jsonl(out_dir / "source-records.jsonl")
+    events = lgwks_cycle.read_jsonl(out_dir / "execution-events.jsonl")
     model_state_path = out_dir / "model_state.json"
     model_state = json.loads(model_state_path.read_text(encoding="utf-8")) if model_state_path.exists() else {}
     operator_path = out_dir / "operator-profile.json"
     operator_profile = json.loads(operator_path.read_text(encoding="utf-8")) if operator_path.exists() else {}
+    vector_path = out_dir / "vector-vault.json"
+    vector_vault = json.loads(vector_path.read_text(encoding="utf-8")) if vector_path.exists() else {}
 
     bias_counts: Counter[str] = Counter()
     unsupported: list[str] = []
@@ -458,6 +601,7 @@ def review_project(project: str) -> dict:
         if rec.get("label") == "unsupported":
             unsupported.append(rec.get("claim_id", ""))
     export_policies = sorted({r.get("export_policy", r.get("consent", "")) for r in learning if r})
+    event_counts = dict(sorted(Counter(e.get("status", "unknown") for e in events).items()))
     return {
         "schema": "lgwks-project-review/1",
         "project": project,
@@ -474,6 +618,10 @@ def review_project(project: str) -> dict:
         "model_lineage_count": len(lineage),
         "machine_packets": len(packets),
         "graph_edges": len(edges),
+        "source_records": len(sources),
+        "execution_status_counts": event_counts,
+        "vector_vault_status": vector_vault.get("status", "missing"),
+        "vector_records": vector_vault.get("records", 0),
         "operator_profile": operator_profile.get("profile_id", ""),
         "one_command_replaces_many": operator_profile.get("stance", {}).get("one_command_replaces_many", False),
         "build_on_existing_work": operator_profile.get("stance", {}).get("build_on_existing_work", False),
@@ -483,8 +631,29 @@ def review_project(project: str) -> dict:
     }
 
 
+def _render_review(review: dict) -> str:
+    lines = [
+        f"project {review['project']}",
+        f"chain {'ok' if review['chain_ok'] else 'broken'} · cycles {review['cycles']} · tokens {review['token_status']} ({review['token_spend']})",
+        f"sources {review['source_records']} · vector {review['vector_vault_status']} ({review['vector_records']} records)",
+        f"machine packets {review['machine_packets']} · graph edges {review['graph_edges']} · lineage {review['model_lineage_count']}",
+        f"operator one-command={str(review['one_command_replaces_many']).lower()} build-on-existing={str(review['build_on_existing_work']).lower()}",
+        f"rollback {review['rollback_ref'] or 'none'}",
+    ]
+    if review["unsupported_claims"]:
+        lines.append("unsupported " + ", ".join(review["unsupported_claims"]))
+    if review["execution_status_counts"]:
+        counts = ", ".join(f"{k}:{v}" for k, v in review["execution_status_counts"].items())
+        lines.append("execution " + counts)
+    return "\n".join(lines)
+
+
 def review_command(args: argparse.Namespace) -> int:
-    print(json.dumps(review_project(args.project), indent=2, sort_keys=True))
+    review = review_project(args.project)
+    if getattr(args, "render", False):
+        print(_render_review(review))
+    else:
+        print(json.dumps(review, indent=2, sort_keys=True))
     return 0
 
 
@@ -508,6 +677,12 @@ def add_parser(sub) -> None:
     deploy.add_argument("--embedding-rounds", type=int, default=DEFAULT_EMBEDDING_ROUNDS)
     deploy.add_argument("--max-workers", type=int, default=DEFAULT_WORKERS)
     deploy.add_argument("--tokens-per-cycle", type=int, default=DEFAULT_TOKENS)
+    deploy.add_argument("--site", default="open-public-sources")
+    deploy.add_argument("--folder", default="", help="optional local folder for deterministic vector vault")
+    deploy.add_argument("--source", choices=["all", *ACADEMIC_SOURCES], default="all")
+    deploy.add_argument("--source-limit", type=int, default=5)
+    deploy.add_argument("--embed-cycles", type=int, default=3)
+    deploy.add_argument("--max-files", type=int, default=100)
     deploy.add_argument("--learning-mode", choices=["off", "local-only", "export-allowed"], default="local-only")
     deploy.add_argument("--device-consent", choices=["research-only", "local-device"], default="local-device",
                         help="local-device means the CLI may use local user-owned context for this research run")
@@ -517,4 +692,5 @@ def add_parser(sub) -> None:
     deploy.set_defaults(func=deploy_command)
     review = ps.add_parser("review", help="review a project deploy artifact set")
     review.add_argument("project")
+    review.add_argument("--render", action="store_true", help="human projection of the JSON review")
     review.set_defaults(func=review_command)

@@ -1,7 +1,7 @@
 # SPEC-project-deploy-e2e-v1
 
-Status: SPEC first. No implementation should start until these hypotheses and pass conditions are
-accepted or edited.
+Status: non-ML implementation slice implemented. ML/model-training work remains gated behind the later
+learning slice.
 
 ## 0. Doctrine Alignment
 
@@ -87,7 +87,9 @@ Must produce:
 13. operator profile capturing research-only steering, one-command orchestration, and experiment lanes
 
 Deploy may be `--dry-run` first. `--dry-run` must emit the same DAG and record schemas without
-network fetches or embeddings.
+network fetches or embeddings. `--execute` in the non-ML slice may execute only existing lgwks verbs:
+memory initialization/context, open-license public search, deterministic embedding vaults, and review
+rendering. Authenticated crawling, hidden session reuse, model calls, and weight updates are deferred.
 
 ## 2. Core Hypothesis
 
@@ -326,6 +328,26 @@ Fail:
 - one-command CLI orchestration is treated as just another crawler command
 - local-device consent silently implies remote export
 
+### H13 — Non-ML execution composes existing verbs
+
+Claim: the next CLI should replace the user's repeated manual research commands by orchestrating the
+existing lgwks surfaces, not by recreating a new crawler.
+
+Pass:
+
+- `project deploy --execute` writes `execution-events.jsonl`
+- memory scope/context is initialized and linked into the deploy directory
+- public/open-license search writes `source-records.jsonl`
+- deterministic folder embedding, when a folder is provided, writes `vector-vault.json`
+- execution is bounded by `--source-limit`, `--embed-cycles`, `--max-files`, and typed leases
+- authenticated crawling is explicitly skipped until the final hacker review gate
+
+Fail:
+
+- live execution is an unbounded crawl
+- implementation bypasses existing `memory`, `public`, or `embed` modules
+- auth/session crawling is silently enabled before the final review
+
 ## 4. Required Schemas
 
 ### 4.1 Cycle Record
@@ -523,6 +545,40 @@ Fail:
 }
 ```
 
+### 4.10 Execution Event
+
+```json
+{
+  "schema": "lgwks-execution-event/1",
+  "project": "salesforce",
+  "step": "public_search",
+  "status": "ok|skipped|error",
+  "started_at": 0.0,
+  "finished_at": 0.0,
+  "inputs": {"query": "salesforce ai os"},
+  "outputs": {"records": 8, "artifact": "source-records.jsonl"},
+  "error": ""
+}
+```
+
+### 4.11 Source Record
+
+```json
+{
+  "schema": "lgwks-source-record/1",
+  "project": "salesforce",
+  "source_id": "sha256",
+  "via": "openalex",
+  "title": "paper title",
+  "url": "https://...",
+  "open_url": "https://...",
+  "license": "cc-by|metadata:CC0",
+  "basis": "open reuse basis from source provider",
+  "content_status": "metadata_only",
+  "hash": "sha256"
+}
+```
+
 ## 5. Command Contract
 
 ### `lgwks project deploy`
@@ -536,6 +592,9 @@ lgwks project deploy <project> \
   --learning-mode local-only \
   --device-consent local-device \
   --model-spine oss-coreml \
+  --folder . \
+  --source-limit 5 \
+  --embed-cycles 3 \
   --dry-run
 ```
 
@@ -549,6 +608,8 @@ Pass:
 - device consent modes are `research-only|local-device`; local-device permits local user-context
   inspection for research orchestration but never implies remote export
 - `oss-coreml` spine requires model lineage records before any semantic model output is trusted
+- `--execute` in this slice runs non-ML typed steps only: memory, public search, deterministic embed
+- auth/private crawling remains skipped until the final hacker review gate
 
 ### `lgwks project review`
 
@@ -564,6 +625,7 @@ Pass:
 - reports bias counts by plane
 - reports unsupported claims
 - reports rollback ref
+- reports source count, execution status counts, vector vault status
 
 ## 6. Identify -> Spec -> Deploy Sequence
 
@@ -614,10 +676,22 @@ Implementation order:
 9. MachinePacket emitter.
 10. graph-edge ledger and dry-run GNN pathway.
 11. operator profile emitter.
-12. non-dry executor with approval gate.
-13. challenger promotion/rollback.
+12. non-ML executor: memory + public source records + deterministic vector vault + execution events.
+13. CLI polish: `--render` human review projected from JSON.
+14. final hacker review gate for auth/private crawling.
+15. challenger promotion/rollback.
 
 Stop after step 4 for first review. Do not jump to full model training in the same slice.
+
+Non-ML completion slice:
+
+1. Keep `--dry-run` default-safe.
+2. `--execute` runs only existing modules: `lgwks_memory`, `lgwks_public`, `lgwks_embed`.
+3. Write execution records to `execution-events.jsonl`.
+4. Write public/open-license metadata to `source-records.jsonl`.
+5. Write vector vault summary to `vector-vault.json` when `--folder` is present.
+6. Human CLI polish is render-only; JSON remains source of truth.
+7. Auth/private crawling and all ML/model evolution remain deferred.
 
 Second learning slice:
 
@@ -640,6 +714,9 @@ The first implementation slice is accepted only if:
   - `learning-records.jsonl` with derived-only/local-only fixture data
   - `model-lineage.jsonl` with deterministic fallback lineage
   - `operator-profile.json`
+  - `execution-events.jsonl`
+  - `source-records.jsonl` when executed
+  - `vector-vault.json` when executed with a folder
 - `lgwks project review ai-ml-layers` reports:
   - `chain_ok:true`
   - `cycles:5` by default
@@ -648,6 +725,9 @@ The first implementation slice is accepted only if:
   - learning export policy
   - model lineage count
   - one-command/operator stance
+  - execution status counts
+  - source count
+  - vector vault status
 - tests cover:
   - tamper breaks cycle chain
   - default cycle count is 5
@@ -657,6 +737,8 @@ The first implementation slice is accepted only if:
   - raw user text does not leave the vault/log boundary in learning records
   - MachinePacket is derivable without human prose
   - operator profile records build-on-existing-work and local-device consent separately from export
+  - execute composes existing public/embed/memory functions
+  - review render is projected from JSON review data
 
 ## 8. Non-Goals For First Slice
 
@@ -668,6 +750,7 @@ The first implementation slice is accepted only if:
 - no remote training or operator-owned telemetry
 - no unpinned model downloads
 - no license-unverified base weights
+- no authenticated crawling before final hacker review
 
 ## 9. Open Questions
 

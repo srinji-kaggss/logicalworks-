@@ -336,7 +336,9 @@ class TestProjectPlanner(unittest.TestCase):
         args = argparse.Namespace(project="ai-ml-layers",
                                   prompt="build a one-command research CLI on existing AI research skills",
                                   reasoning_cycles=None, embedding_rounds=400, max_workers=4,
-                                  tokens_per_cycle=8000, learning_mode="local-only",
+                                  tokens_per_cycle=8000, site="open-public-sources", folder="",
+                                  source="all", source_limit=5, embed_cycles=3, max_files=100,
+                                  learning_mode="local-only",
                                   device_consent="local-device", model_spine="oss-coreml",
                                   dry_run=True, execute=False)
         try:
@@ -345,7 +347,8 @@ class TestProjectPlanner(unittest.TestCase):
             out_dir = proj._deploy_path("ai-ml-layers")
             for name in ("cycles.jsonl", "leases.jsonl", "token-ledger.jsonl", "model_state.json",
                          "machine-packets.jsonl", "learning-records.jsonl", "model-lineage.jsonl",
-                         "graph-edges.jsonl", "operator-profile.json"):
+                         "graph-edges.jsonl", "operator-profile.json", "execution-events.jsonl",
+                         "source-records.jsonl", "vector-vault.json"):
                 self.assertTrue((out_dir / name).exists(), name)
             review = proj.review_project("ai-ml-layers")
         finally:
@@ -368,6 +371,8 @@ class TestProjectPlanner(unittest.TestCase):
         proj.DEPLOY_ROOT = tmp / "deploy"
         args = argparse.Namespace(project="tamper-demo", prompt="test tamper chain", reasoning_cycles=2,
                                   embedding_rounds=400, max_workers=2, tokens_per_cycle=8000,
+                                  site="open-public-sources", folder="", source="all", source_limit=5,
+                                  embed_cycles=3, max_files=100,
                                   learning_mode="local-only", device_consent="research-only",
                                   model_spine="oss-coreml", dry_run=True, execute=False)
         try:
@@ -392,6 +397,8 @@ class TestProjectPlanner(unittest.TestCase):
         proj.DEPLOY_ROOT = tmp / "deploy"
         args = argparse.Namespace(project="privacy-boundary", prompt=prompt, reasoning_cycles=1,
                                   embedding_rounds=400, max_workers=1, tokens_per_cycle=8000,
+                                  site="open-public-sources", folder="", source="all", source_limit=5,
+                                  embed_cycles=3, max_files=100,
                                   learning_mode="local-only", device_consent="local-device",
                                   model_spine="oss-coreml", dry_run=True, execute=False)
         try:
@@ -404,6 +411,79 @@ class TestProjectPlanner(unittest.TestCase):
             proj.DEPLOY_ROOT = old
         self.assertNotIn(prompt, learning_text)
         self.assertEqual(packets["schema"], "lgwks-machine-packet/1")
+
+    def test_project_execute_composes_public_memory_and_embed(self):
+        import argparse
+        import lgwks_embed as emb
+        import lgwks_memory as mem
+        import lgwks_project as proj
+        import lgwks_public as pub
+
+        tmp = Path(tempfile.mkdtemp())
+        old_deploy, old_mem, old_vectors = proj.DEPLOY_ROOT, mem._DIR, emb.VAULT_ROOT
+        old_fetch = pub._fetch_json
+        proj.DEPLOY_ROOT = tmp / "deploy"
+        mem._DIR = tmp / "projects"
+        emb.VAULT_ROOT = tmp / "vectors"
+        folder = tmp / "src"
+        folder.mkdir()
+        (folder / "notes.md").write_text("salesforce ai operating system agent runtime evidence", encoding="utf-8")
+
+        def fake_fetch(url, timeout=20):
+            if "openalex" in url:
+                return {"results": [{"display_name": "Agent runtime evidence", "id": "https://openalex.org/W1",
+                                     "publication_year": 2026,
+                                     "best_oa_location": {"landing_page_url": "https://example.org/p",
+                                                          "license": "cc-by"}}]}
+            if "crossref" in url:
+                return {"message": {"items": [{"title": ["Open metadata"], "URL": "https://doi.org/10/x",
+                                               "license": [{"URL": "https://creativecommons.org/publicdomain/zero/1.0/"}],
+                                               "published-online": {"date-parts": [[2025]]}}]}}
+            return {"results": [{"title": "Open diagram", "url": "https://img.example/x.jpg",
+                                 "foreign_landing_url": "https://example.org/x", "license": "cc0",
+                                 "license_url": "https://creativecommons.org/publicdomain/zero/1.0/"}]}
+
+        pub._fetch_json = fake_fetch
+        args = argparse.Namespace(project="execute-demo", prompt="map salesforce ai os", reasoning_cycles=2,
+                                  embedding_rounds=400, max_workers=4, tokens_per_cycle=8000,
+                                  site="open-public-sources", folder=str(folder), source="all", source_limit=1,
+                                  embed_cycles=1, max_files=10, learning_mode="local-only",
+                                  device_consent="local-device", model_spine="oss-coreml",
+                                  dry_run=False, execute=True)
+        try:
+            with contextlib.redirect_stdout(io.StringIO()):
+                self.assertEqual(proj.deploy_command(args), 0)
+            review = proj.review_project("execute-demo")
+            out_dir = proj._deploy_path("execute-demo")
+            events = [json.loads(line) for line in (out_dir / "execution-events.jsonl").read_text(
+                encoding="utf-8").splitlines()]
+        finally:
+            proj.DEPLOY_ROOT, mem._DIR, emb.VAULT_ROOT = old_deploy, old_mem, old_vectors
+            pub._fetch_json = old_fetch
+
+        self.assertTrue(review["chain_ok"])
+        self.assertEqual(review["source_records"], 3)
+        self.assertEqual(review["vector_vault_status"], "ok")
+        self.assertGreater(review["vector_records"], 0)
+        self.assertIn("ok", review["execution_status_counts"])
+        self.assertIn("skipped", review["execution_status_counts"])
+        self.assertEqual({e["step"] for e in events},
+                         {"memory", "public_search", "embed", "auth_private_crawl"})
+
+    def test_project_review_render_is_projection(self):
+        import lgwks_project as proj
+
+        review = {
+            "project": "x", "chain_ok": True, "cycles": 5, "token_status": "ok", "token_spend": 100,
+            "source_records": 2, "vector_vault_status": "ok", "vector_records": 3, "machine_packets": 5,
+            "graph_edges": 10, "model_lineage_count": 3, "one_command_replaces_many": True,
+            "build_on_existing_work": True, "rollback_ref": "champion", "unsupported_claims": ["claim-2"],
+            "execution_status_counts": {"ok": 3, "skipped": 1},
+        }
+        rendered = proj._render_review(review)
+        self.assertIn("project x", rendered)
+        self.assertIn("sources 2", rendered)
+        self.assertIn("execution ok:3, skipped:1", rendered)
 
 
 class TestMultiply(unittest.TestCase):

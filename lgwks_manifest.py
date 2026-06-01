@@ -74,12 +74,16 @@ _VERBS = [
     {
         "verb": "project deploy", "intent": "one-command research orchestrator: plan leases, cycles, packets, learning records",
         "args": {"project": "name", "--prompt": "goal", "--dry-run": "default-safe artifact run",
-                 "--device-consent": "research-only|local-device", "--model-spine": "deterministic|oss-coreml"},
-        "output": "deploy DAG + cycle/token/critic/model/learning/packet/graph/operator artifacts", "tokens": "bounded by --tokens-per-cycle",
+                 "--execute": "run non-ML existing lgwks steps", "--folder": "optional local vector-vault root",
+                 "--source": "all|openalex|crossref|openverse", "--source-limit": "public/open-license result bound",
+                 "--embed-cycles": "deterministic vector-vault cycle bound", "--max-files": "local file bound",
+                 "--site": "memory scope label", "--device-consent": "research-only|local-device",
+                 "--model-spine": "deterministic|oss-coreml"},
+        "output": "deploy DAG + cycle/token/critic/model/learning/packet/graph/operator/source/execution artifacts", "tokens": "bounded by --tokens-per-cycle",
     },
     {
         "verb": "project review", "intent": "read deploy artifacts and report chain, spend, bias, learning, model lineage",
-        "args": {"project": "name"},
+        "args": {"project": "name", "--render": "human projection of JSON review"},
         "output": "machine-readable review with chain_ok, rollback, packet counts, operator stance", "tokens": "none",
     },
 ]
