@@ -11,42 +11,8 @@ Design rules (machine-first):
   • every verb declares `tokens` so an agent can budget before calling (read-only verbs cost nothing).
   • the verb list is derived from the registered argparse subparsers at runtime — the manifest cannot
     drift from what the binary actually accepts.
-
-==============================================================================
-SPEC — fix: lgwks manifest verb list (DiD item 8, 2026-06-01)
-==============================================================================
-L0 intent (one line): the manifest must list every verb the binary actually
-  accepts, never more, never less — derived from the live argparse tree, not
-  hand-maintained.
-
-L1 reality gap (what the hostile world does to it): a developer adds a new
-  verb to build_parser() (e.g. `preview`, `geo`, `x`, `refine`, `store`) and
-  forgets to update _VERBS in lgwks_manifest.py. An agent reading the manifest
-  then makes decisions based on a stale capability surface — it skips a verb
-  it thinks doesn't exist, or budgets token costs for a verb it has no chance
-  of calling. Hand-maintained data + drift = silent contract rot.
-
-L4 invariant (the test that proves the fix holds): for every leaf subparser
-  reachable from build_parser() (one level: convert, extract, …; two levels:
-  geo compile, memory init, project plan, …), there is a corresponding entry
-  in the manifest's `verbs` list. The test that pins this is in
-  TestManifest::test_every_registered_subparser_appears_in_manifest.
-
-L5 industry parallel: Sphinx's autodoc / Kubernetes' `kubectl api-resources`
-  / OpenAPI's server-derived schema — the public surface is enumerated from
-  the source of truth at runtime, not transcribed. Transcription rots; the
-  parser is the contract.
-
-Mechanics:
-  * _collect_verbs() walks build_parser() and returns [name, ...] for every
-    leaf subparser; nested names join with a single space (e.g. "geo compile").
-  * _VERB_META is a hand-curated name->metadata dict (intent, args, output,
-    tokens). Unknown verbs still appear in the output, with
-    intent="(no metadata)", so missing entries are LOUD, not silent.
-  * build_manifest() merges the two: verbs = live names merged with metadata.
-  * _AGENT_NOTES stays hand-curated (a single human paragraph, not a
-    per-verb field).
-==============================================================================
+  • --json is the default output flag (accepted for caller intent); --render is the human opt-in.
+    L5: same discipline as kubectl get -o json / terraform output -json.
 """
 
 from __future__ import annotations
@@ -322,6 +288,7 @@ def build_manifest() -> dict:
 
 def manifest_command(args) -> int:
     m = build_manifest()
+    # --render wins over --json: the human view is an explicit opt-in, JSON is the default.
     if getattr(args, "render", False):
         return _render(m)
     print(json.dumps(m, indent=2, sort_keys=False))

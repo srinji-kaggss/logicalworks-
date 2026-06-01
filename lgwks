@@ -1137,7 +1137,9 @@ def build_parser() -> argparse.ArgumentParser:
     remap.set_defaults(func=remap_db_command)
 
     # manifest — the machine-first contract: one JSON an agent reads instead of docs (AI discovery).
+    # --json is the default (and accept the flag for caller intent); --render is the human view.
     manifest = sub.add_parser("manifest", help="machine-readable contract (verbs, capabilities, schema)")
+    manifest.add_argument("--json", action="store_true", help="structured (default; flag exists for caller intent)")
     manifest.add_argument("--render", action="store_true", help="human view instead of JSON")
     manifest.set_defaults(func=_manifest_dispatch)
 

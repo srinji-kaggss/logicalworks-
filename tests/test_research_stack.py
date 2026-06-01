@@ -190,33 +190,23 @@ class TestManifest(unittest.TestCase):
             self.assertNotIn(c["capability"], brands)
 
     def test_every_registered_subparser_appears_in_manifest(self):
-        # //why: L4 invariant — the verb list must be DERIVED from build_parser(), so a new subparser
-        # added to the binary shows up in the manifest without anyone editing a hand-maintained table.
-        # The manifest is the agent's door; a verb that exists in `lgwks --help` but not in the
-        # manifest means the agent skips a verb it could call.
         import importlib.machinery
         import importlib.util
         import os
         import sys
         import lgwks_manifest as man
-
-        # //why: resolve the binary path relative to the test file (not cwd), so the test passes
-        # from any invocation path — `python -m unittest`, IDE runner, daemonized CI, etc.
         here = os.path.dirname(os.path.abspath(__file__))
         script_path = os.path.join(os.path.dirname(here), "lgwks")
         loader = importlib.machinery.SourceFileLoader("_lgwks_main_for_manifest_test", script_path)
         spec = importlib.util.spec_from_loader("_lgwks_main_for_manifest_test", loader)
+        assert spec is not None
         mod = importlib.util.module_from_spec(spec)
         sys.modules[spec.name] = mod
         loader.exec_module(mod)
-        parser = mod.build_parser()
-
         live = man._collect_verbs()
-        # the live surface must include the core verbs; failing here means the walker is broken
         for expected in ("manifest", "extract", "convert", "solve", "x", "refine", "store",
                          "jarvis crawl", "memory init", "project plan", "geo compile"):
             self.assertIn(expected, live, f"{expected!r} must appear in the live verb surface")
-
         m = man.build_manifest()
         manifest_names = {v["verb"] for v in m["verbs"]}
         for name in live:
@@ -224,10 +214,6 @@ class TestManifest(unittest.TestCase):
                           f"verb {name!r} is registered in build_parser() but missing from the manifest")
 
     def test_verb_collection_degrades_loudly_on_broken_parser(self):
-        # //why: regression guard for the "broken parser takes down the manifest" path. If a future
-        # change to build_parser() or its imports raises, the manifest must still return a valid
-        # JSON object (with a single degraded verb entry naming the error) — agents downstream
-        # never see an unparseable blob.
         import lgwks_manifest as man
         original = man._collect_verbs
         man._collect_verbs = lambda: (_ for _ in ()).throw(RuntimeError("simulated parser failure"))
@@ -235,18 +221,14 @@ class TestManifest(unittest.TestCase):
             m = man.build_manifest()
         finally:
             man._collect_verbs = original
-        # whole manifest still well-formed
         self.assertTrue(m["machine_first"])
         self.assertEqual(len(m["verbs"]), 1)
         entry = m["verbs"][0]
-        # error class name appears so the reader knows the verb list is degraded, not empty
         self.assertIn("RuntimeError", entry["verb"])
         self.assertIn("simulated parser failure", entry["verb"])
         self.assertEqual(entry["intent"], "(no metadata)")
 
     def test_missing_metadata_is_loud_not_silent(self):
-        # //why: drift guard — a developer who adds a subparser but forgets to add _VERB_META entry
-        # must SEE the gap in the manifest output (intent="(no metadata)"), not silent acceptance.
         import lgwks_manifest as man
         saved = man._VERB_META.get("manifest")
         try:
@@ -258,6 +240,53 @@ class TestManifest(unittest.TestCase):
         finally:
             if saved is not None:
                 man._VERB_META["manifest"] = saved
+
+    def test_manifest_default_emits_parseable_json(self):
+        import argparse
+        import lgwks_manifest as man
+        with contextlib.redirect_stdout(io.StringIO()) as buf:
+            rc = man.manifest_command(argparse.Namespace(json=False, render=False))
+        self.assertEqual(rc, 0)
+        m = json.loads(buf.getvalue())
+        self.assertTrue(m["machine_first"])
+        self.assertIn("verbs", m)
+
+    def test_manifest_json_flag_emits_parseable_json(self):
+        import argparse
+        import lgwks_manifest as man
+        with contextlib.redirect_stdout(io.StringIO()) as buf:
+            rc = man.manifest_command(argparse.Namespace(json=True, render=False))
+        self.assertEqual(rc, 0)
+        m = json.loads(buf.getvalue())
+        self.assertTrue(m["machine_first"])
+        self.assertGreaterEqual(len(m["verbs"]), 4)
+
+    def test_manifest_render_flag_routes_to_human_view(self):
+        import argparse
+        import lgwks_manifest as man
+        with contextlib.redirect_stdout(io.StringIO()) as buf:
+            rc = man.manifest_command(argparse.Namespace(json=True, render=True))
+        self.assertEqual(rc, 0)
+        out = buf.getvalue()
+        self.assertFalse(out.lstrip().startswith("{"), "render must not emit JSON")
+        self.assertIn("manifest", out)
+
+    def test_manifest_args_line_reflects_registered_flags(self):
+        import re as _re
+        import lgwks_manifest as man
+        here = os.path.dirname(os.path.abspath(__file__))
+        src = Path(os.path.join(os.path.dirname(here), "lgwks")).read_text(encoding="utf-8")
+        m_block = _re.search(r'manifest\s*=\s*sub\.add_parser\(\s*"manifest"(.*?)manifest\.set_defaults',
+                             src, _re.DOTALL)
+        self.assertIsNotNone(m_block, "could not locate the manifest parser block in lgwks")
+        assert m_block is not None
+        registered = set(_re.findall(r'add_argument\(\s*"(--[\w-]+)"', m_block.group(1)))
+        self.assertIn("--json", registered, "--json must be registered on the manifest subparser")
+        self.assertIn("--render", registered)
+        # _VERB_META["manifest"]["args"] must name both flags (drift guard)
+        manifest_meta = man._VERB_META.get("manifest", {})
+        self.assertIn("--json", manifest_meta.get("args", {}))
+        self.assertIn("--render", manifest_meta.get("args", {}))
 
 
 class TestAuthRuntime(unittest.TestCase):
