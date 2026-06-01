@@ -585,6 +585,21 @@ class TestWorkerCap(unittest.TestCase):
                 os.environ.pop(k, None) if v is None else os.environ.__setitem__(k, v)
         self.assertEqual(host, {"ram_total_gib": 32, "cpu_total": 12, "source": "override"})
 
+    def test_malformed_env_override_fails_closed_not_crashes(self):
+        # //why: regression for the hacker LOW finding — a non-numeric override crashed deploy. Must degrade.
+        import lgwks_workercap as wc
+        prior = {k: os.environ.get(k) for k in ("LGWKS_HOST_RAM_GIB", "LGWKS_HOST_CPU")}
+        os.environ["LGWKS_HOST_RAM_GIB"] = "not-a-number"
+        os.environ["LGWKS_HOST_CPU"] = "12"
+        try:
+            host = wc.probe_host()
+            cap = wc.compute_worker_cap(4, host=host)
+        finally:
+            for k, v in prior.items():
+                os.environ.pop(k, None) if v is None else os.environ.__setitem__(k, v)
+        self.assertEqual(host["source"], "override-invalid")
+        self.assertEqual(cap["computed_cap"], 1)  # smallest viable, never a crash or a spawn-storm
+
 
 class TestGeoExpr(unittest.TestCase):
     def _expr(self, verbs, risk_max="read"):
@@ -715,6 +730,19 @@ class TestMultiply(unittest.TestCase):
         self.assertEqual(mx._classify("git add x.py"), "mutate")
         self.assertEqual(mx._classify("git status"), "read")
         self.assertEqual(mx._classify("frobnicate x"), "unknown")
+
+    def test_default_deny_on_flags_no_data_loss_verb_reads_as_safe(self):
+        # //why: regression for the 2026-06-01 hacker finding — a read/mutate verb carrying a
+        # deletion/force flag must NOT classify as 'read' (which is auto_allowed). Default-deny on flags.
+        import lgwks_multiply as mx
+        for cmd in ("git branch -d feature", "git branch -D feature", "git clean -fd",
+                    "git checkout -- file", "git stash clear", "git update-ref -d X",
+                    "git tag -d v1", "git restore file", "git push --delete origin x"):
+            self.assertEqual(mx._classify(cmd), "destructive", cmd)
+        # safe read verbs (incl. their benign flags) stay read — no false positives
+        for cmd in ("git status", "git log -5 --oneline", "git diff --stat",
+                    "git branch --show-current", "ls -la", "pwd"):
+            self.assertEqual(mx._classify(cmd), "read", cmd)
 
     def test_run_one_uses_no_shell(self):
         # injection guard: shell metachars are NOT interpreted (argv via shlex, no shell=True).

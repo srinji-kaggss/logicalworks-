@@ -44,7 +44,12 @@ def probe_host() -> dict:
     ram_env = os.environ.get("LGWKS_HOST_RAM_GIB")
     cpu_env = os.environ.get("LGWKS_HOST_CPU")
     if ram_env is not None and cpu_env is not None:
-        return {"ram_total_gib": int(ram_env), "cpu_total": int(cpu_env), "source": "override"}
+        # //why fail-closed, not crash: a malformed override (CI typo / hostile env) must degrade to the
+        # smallest viable profile, never propagate a ValueError out of deploy. Mirrors the sysconf fallback.
+        try:
+            return {"ram_total_gib": int(ram_env), "cpu_total": int(cpu_env), "source": "override"}
+        except ValueError:
+            return {"ram_total_gib": 0, "cpu_total": 1, "source": "override-invalid"}
     try:
         page_size = os.sysconf("SC_PAGE_SIZE")
         phys_pages = os.sysconf("SC_PHYS_PAGES")
