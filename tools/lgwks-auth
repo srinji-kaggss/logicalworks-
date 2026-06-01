@@ -14,7 +14,6 @@ never bypass auth not held, paywalls, or CAPTCHA.
 from __future__ import annotations
 
 import argparse
-import hashlib
 import json
 import os
 import subprocess
@@ -26,9 +25,12 @@ VAULT_DIR = Path(os.environ.get("LGWKS_VAULT_DIR", Path.home() / ".lgwks" / "aut
 REGISTRY = VAULT_DIR / "locks.jsonl"
 SCHEMA = "lgwks-auth-vault/1"
 SERVICE_PREFIX = "lgwks:"
-# Hardening target: anchor the signer to the Secure Enclave (ADR-064). Until then it is an
-# unanchored local marker — the prev_hash linkage still detects rewrite/deletion of history.
-SIGNER = os.environ.get("LGWKS_VAULT_SIGNER", "local-unanchored")
+# Integrity (hacker F3): the chain is HMAC-keyed via the shared signer, NOT a source-visible
+# constant. With a key (env/Keychain) the chain is tamper-EVIDENT; unanchored degrades to
+# corruption-only — and we never claim more than that. Same model as the run-log chain (C1 fix).
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+import lgwks_sign  # noqa: E402
+_VKEY, _VMODE = lgwks_sign.signing_key()
 
 BOT_EVENTS = {"used", "needs_auth", "observed"}
 HUMAN_EVENTS = {"lock", "stale", "supersede"}
@@ -76,7 +78,7 @@ def _append(event: str, site: str, by: str, **fields) -> dict:
         "prev_hash": prev_hash,
         **fields,
     }
-    record["hash"] = hashlib.sha256((_core(record) + prev_hash + SIGNER).encode("utf-8")).hexdigest()
+    record["hash"] = lgwks_sign.mac(_core(record) + prev_hash, _VKEY)
     VAULT_DIR.mkdir(parents=True, exist_ok=True)
     with REGISTRY.open("a", encoding="utf-8") as fh:  # O_APPEND; never truncates
         fh.write(json.dumps(record, sort_keys=True, ensure_ascii=False) + "\n")
@@ -87,11 +89,12 @@ def verify_chain() -> tuple[bool, str]:
     records = _read_records()
     prev = "0" * 64
     for rec in records:
-        expect = hashlib.sha256((_core(rec) + prev + SIGNER).encode("utf-8")).hexdigest()
+        expect = lgwks_sign.mac(_core(rec) + prev, _VKEY)
         if rec.get("hash") != expect:
             return False, f"chain broken at seq {rec.get('seq')} (tamper/deletion detected)"
         prev = rec["hash"]
-    return True, f"intact ({len(records)} records)"
+    evident = "tamper-evident" if lgwks_sign.is_keyed(_VMODE) else "corruption-only (unanchored)"
+    return True, f"intact ({len(records)} records · {evident})"
 
 
 def _latest_status(site: str) -> str:

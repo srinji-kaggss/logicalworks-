@@ -334,7 +334,9 @@ def execute_plan(plan: RunPlan, dry: bool = False, synthetic: dict[str, str] | N
         rate.wait(_host(url))                                    # 3 — politeness
         res = fetch(url, dry, synthetic, plan.frozen_scope)      # 4 — provider seam (scope-bound)
         fetched += 1
-        log.append("fetch", {"url": url, "status": res.status, "error": res.error})
+        # L-1 (hacker F9): never log a full URL — a query string can carry a credential. Log host+path only.
+        safe_url = urllib.parse.urlparse(url)._replace(query="", fragment="").geturl()
+        log.append("fetch", {"url": safe_url, "status": res.status, "error": res.error})
         if res.status != "ok" or not res.text.strip():
             continue
         doc_id = f"doc-{hashlib.sha256((url + res.text).encode()).hexdigest()[:12]}"

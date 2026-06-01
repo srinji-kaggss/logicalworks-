@@ -62,9 +62,13 @@ def _models_to_try(model: str | None) -> list[str]:
     return order
 
 
+_LAST_USAGE = 0   # total_tokens of the most recent successful call — read by generate_json_metered
+
+
 def _call_one(model: str, prompt: str, schema_hint: str, key: str, timeout: int) -> tuple[dict | None, bool]:
     """One attempt. Returns (parsed_json_or_None, retryable). retryable=True means rotate to the next
     free model (429 throttle / 5xx); False means stop (success, or a non-retryable client error)."""
+    global _LAST_USAGE
     body = json.dumps({
         "model": model,
         "messages": [
@@ -91,9 +95,26 @@ def _call_one(model: str, prompt: str, schema_hint: str, key: str, timeout: int)
     except (urllib.error.URLError, TimeoutError, OSError, json.JSONDecodeError):
         return None, True   # transient network → worth trying another model
     try:
-        return json.loads(data["choices"][0]["message"]["content"]), False
+        parsed = json.loads(data["choices"][0]["message"]["content"])
+        _LAST_USAGE = int(data.get("usage", {}).get("total_tokens", 0) or 0)
+        return parsed, False
     except (KeyError, IndexError, TypeError, json.JSONDecodeError):
         return None, False   # answered but unparseable → not a throttle; do not spin the chain
+
+
+def generate_json_metered(prompt: str, schema_hint: str, model: str | None = None,
+                          timeout: int = 60) -> tuple[dict | None, int]:
+    """Like generate_json, but also returns total_tokens spent (0 on failure) for budget accounting."""
+    out = generate_json(prompt, schema_hint, model, timeout)
+    return out, (_LAST_USAGE if out is not None else 0)
+
+
+def take_usage() -> int:
+    """Return total_tokens of the last cloud call and zero the counter (so the loop can meter each
+    Tongue call without double-counting). Local-Ollama calls don't set it → reads as 0 (free)."""
+    global _LAST_USAGE
+    n, _LAST_USAGE = _LAST_USAGE, 0
+    return n
 
 
 def generate_json(prompt: str, schema_hint: str, model: str | None = None,

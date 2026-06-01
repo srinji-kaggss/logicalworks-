@@ -1108,7 +1108,10 @@ def remap_db_command(args: argparse.Namespace) -> int:
 
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="lgwks")
-    sub = parser.add_subparsers(dest="command", required=True)
+    # bare `lgwks` → the home launcher (the "pop up" experience), so no subcommand is required.
+    parser.add_argument("--no-anim", action="store_true", help="skip the reveal animation")
+    parser.set_defaults(func=_home_dispatch)
+    sub = parser.add_subparsers(dest="command", required=False)
     jarvis = sub.add_parser("jarvis", help="deterministic research graph crawler")
     jarvis_sub = jarvis.add_subparsers(dest="jarvis_command", required=True)
     crawl = jarvis_sub.add_parser("crawl", help="crawl a website or keyword frontier")
@@ -1132,7 +1135,110 @@ def build_parser() -> argparse.ArgumentParser:
     remap = jarvis_sub.add_parser("remap-db", help="upgrade an existing run database to the current Jarvis schema")
     remap.add_argument("run_dir")
     remap.set_defaults(func=remap_db_command)
+
+    # manifest — the machine-first contract: one JSON an agent reads instead of docs (AI discovery).
+    manifest = sub.add_parser("manifest", help="machine-readable contract (verbs, capabilities, schema)")
+    manifest.add_argument("--render", action="store_true", help="human view instead of JSON")
+    manifest.set_defaults(func=_manifest_dispatch)
+
+    # extract — read ANY format (pdf·docx·xlsx·pptx·html·csv·md) → text. Read-only, no tokens.
+    extract = sub.add_parser("extract", help="read any file/URL → text")
+    extract.add_argument("target", help="URL or local file path")
+    extract.add_argument("--json", action="store_true", help="structured {source,kind,ok,text}")
+    extract.add_argument("--max-chars", type=int, default=8000, dest="max_chars")
+    extract.set_defaults(func=_extract_dispatch)
+
+    # convert — any source → text/markdown/json artifact (the read-anything port, materialised).
+    convert = sub.add_parser("convert", help="any source → text/md/json")
+    convert.add_argument("source", help="URL or local file path")
+    convert.add_argument("--to", choices=["txt", "md", "json"], default="txt")
+    convert.add_argument("--out", help="write to file (default: stdout)")
+    convert.add_argument("--max-chars", type=int, default=20000, dest="max_chars")
+    convert.set_defaults(func=_convert_dispatch)
+
+    # x — multiply intent: one product expression → a command chain, one confirmation, runs them all.
+    mult = sub.add_parser("x", help="multiply intent: 'git {status,log,diff}' → runs the chain")
+    mult.add_argument("expr", help="product expression with {a,b,c} axes (cartesian across braces)")
+    mult.add_argument("--yes", action="store_true", help="non-interactive approve (read-only chains)")
+    mult.add_argument("--force", action="store_true", help="allow destructive commands non-interactively")
+    mult.add_argument("--dry-run", action="store_true", dest="dry_run", help="show the expanded chain, run nothing")
+    mult.add_argument("--keep-going", action="store_true", dest="keep_going", help="continue after a failure")
+    mult.add_argument("--json", action="store_true", help="structured plan/results")
+    mult.add_argument("--plan-only", action="store_true", dest="plan_only", help="with --json: emit plan, don't run")
+    mult.set_defaults(func=_multiply_dispatch)
+
+    # refine — the Machine (Tier-E): classify intent, detect gaps, score specificity, abstain-or-proceed.
+    refine = sub.add_parser("refine", help="machine intent refinement (class·gaps·specificity·abstain)")
+    refine.add_argument("intent", help="raw intent to refine")
+    refine.add_argument("--agent", action="store_true", help="caller is an agent (auto-inject quality keywords)")
+    refine.add_argument("--depth", type=float, default=0.5, help="0..1 — higher demands more specificity")
+    refine.add_argument("--render", action="store_true", help="human view instead of JSON")
+    refine.set_defaults(func=_refine_dispatch, json=True)
+
+    # store — the data trust boundary: status of the three at-rest stores (untrusted/cognition/intent).
+    store = sub.add_parser("store", help="status of the three data stores (cache·cognition·vault)")
+    store.add_argument("--json", action="store_true", help="structured status")
+    store.set_defaults(func=_store_dispatch)
+
+    # solve — "I have this mess/thought: prove what happened." The first real-world experience.
+    solve = sub.add_parser("solve", help="prove what happened (currently: git)")
+    solve.add_argument("target", nargs="?", default="git", help="what to solve (currently: git)")
+    solve.add_argument("--thought", default="", help="your worry/claim — 'prove this for me'")
+    solve.add_argument("--repo", default=".", help="path to the repo (default: cwd)")
+    solve.add_argument("--json", action="store_true", help="structured output with CSL-JSON provenance")
+    solve.add_argument("--frontier", type=float, metavar="0..1", help="settled(0) <-> frontier(1)")
+    solve.add_argument("--lens", type=float, metavar="-1..1", help="philosophy(-1) <-> science(+1)")
+    solve.add_argument("--depth", type=float, metavar="0..1", help="shallow(0) <-> deep(1)")
+    solve.set_defaults(func=_solve_dispatch)
     return parser
+
+
+def _solve_dispatch(args) -> int:
+    import lgwks_solve  # local module; imported lazily so the head loads without it
+    return lgwks_solve.solve_command(args)
+
+
+def _home_dispatch(args) -> int:
+    import lgwks_home  # lazy: the launcher pulls ui/capabilities/steering only when you land on it
+    return lgwks_home.home_command(args)
+
+
+def _manifest_dispatch(args) -> int:
+    import lgwks_manifest
+    return lgwks_manifest.manifest_command(args)
+
+
+def _extract_dispatch(args) -> int:
+    import lgwks_files
+    return lgwks_files.extract_command(args)
+
+
+def _convert_dispatch(args) -> int:
+    import lgwks_files
+    return lgwks_files.convert_command(args)
+
+
+def _multiply_dispatch(args) -> int:
+    import lgwks_multiply
+    return lgwks_multiply.multiply_command(args)
+
+
+def _refine_dispatch(args) -> int:
+    import lgwks_machine
+    return lgwks_machine.refine_command(args)
+
+
+def _store_dispatch(args) -> int:
+    import json as _json
+    import lgwks_cache, lgwks_cognition, lgwks_vault
+    stores = [lgwks_cache.status(), lgwks_cognition.status(), lgwks_vault.status()]
+    if getattr(args, "json", False):
+        print(_json.dumps({"stores": stores}, indent=2))
+        return 0
+    for s in stores:
+        line = "  ".join(f"{k}={v}" for k, v in s.items())
+        print(f"  {line}")
+    return 0
 
 
 def main(argv: list[str] | None = None) -> int:
