@@ -155,6 +155,23 @@ class TestExtractTyping(unittest.TestCase):
         self.assertEqual(r["text"], "")
 
 
+class TestManifest(unittest.TestCase):
+    def test_manifest_is_a_valid_machine_contract(self):
+        # the AI's door: an agent reads this instead of docs — it must always be complete + structured.
+        import lgwks_manifest as man
+        m = man.build_manifest()
+        self.assertTrue(m["machine_first"])
+        self.assertGreaterEqual(len(m["verbs"]), 4, "must declare the core verbs")
+        for v in m["verbs"]:
+            self.assertIn("tokens", v, "every verb declares its token cost so an agent can budget")
+            self.assertIn("intent", v)
+        self.assertTrue(m["thought_schema"], "must carry the thought-continuation schema")
+        # capabilities come from the live resolver (agnostic ids, no vendor brand leak)
+        brands = {"firecrawl", "playwright", "crwl", "pdftotext"}
+        for c in m["capabilities"]:
+            self.assertNotIn(c["capability"], brands)
+
+
 class TestGroundDegradation(unittest.TestCase):
     def test_web_empty_search_returns_no_evidence(self):
         orig = search.sweep

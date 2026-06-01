@@ -30,7 +30,10 @@ _TAG = re.compile(r"<[^>]+>")
 _WS = re.compile(r"\n{3,}")
 _PDF_EXT = {".pdf"}
 _OFFICE_EXT = {".docx", ".xlsx", ".pptx", ".doc", ".xls", ".ppt"}
-_TEXT_EXT = {".txt", ".md", ".csv", ".json", ".yaml", ".yml", ".log"}
+_TEXT_EXT = {".txt", ".md", ".csv", ".json", ".yaml", ".yml", ".log", ".toml", ".ini", ".cfg", ".xml",
+             # source files — a coding AI reads code constantly; label it honestly as text, not html.
+             ".py", ".js", ".ts", ".tsx", ".jsx", ".rs", ".go", ".java", ".kt", ".swift", ".rb", ".php",
+             ".c", ".h", ".cpp", ".hpp", ".cc", ".cs", ".sh", ".bash", ".zsh", ".sql", ".lua", ".r"}
 
 
 def _bin(name: str) -> str | None:

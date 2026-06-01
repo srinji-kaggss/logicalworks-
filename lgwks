@@ -1136,6 +1136,26 @@ def build_parser() -> argparse.ArgumentParser:
     remap.add_argument("run_dir")
     remap.set_defaults(func=remap_db_command)
 
+    # manifest — the machine-first contract: one JSON an agent reads instead of docs (AI discovery).
+    manifest = sub.add_parser("manifest", help="machine-readable contract (verbs, capabilities, schema)")
+    manifest.add_argument("--render", action="store_true", help="human view instead of JSON")
+    manifest.set_defaults(func=_manifest_dispatch)
+
+    # extract — read ANY format (pdf·docx·xlsx·pptx·html·csv·md) → text. Read-only, no tokens.
+    extract = sub.add_parser("extract", help="read any file/URL → text")
+    extract.add_argument("target", help="URL or local file path")
+    extract.add_argument("--json", action="store_true", help="structured {source,kind,ok,text}")
+    extract.add_argument("--max-chars", type=int, default=8000, dest="max_chars")
+    extract.set_defaults(func=_extract_dispatch)
+
+    # convert — any source → text/markdown/json artifact (the read-anything port, materialised).
+    convert = sub.add_parser("convert", help="any source → text/md/json")
+    convert.add_argument("source", help="URL or local file path")
+    convert.add_argument("--to", choices=["txt", "md", "json"], default="txt")
+    convert.add_argument("--out", help="write to file (default: stdout)")
+    convert.add_argument("--max-chars", type=int, default=20000, dest="max_chars")
+    convert.set_defaults(func=_convert_dispatch)
+
     # solve — "I have this mess/thought: prove what happened." The first real-world experience.
     solve = sub.add_parser("solve", help="prove what happened (currently: git)")
     solve.add_argument("target", nargs="?", default="git", help="what to solve (currently: git)")
@@ -1157,6 +1177,21 @@ def _solve_dispatch(args) -> int:
 def _home_dispatch(args) -> int:
     import lgwks_home  # lazy: the launcher pulls ui/capabilities/steering only when you land on it
     return lgwks_home.home_command(args)
+
+
+def _manifest_dispatch(args) -> int:
+    import lgwks_manifest
+    return lgwks_manifest.manifest_command(args)
+
+
+def _extract_dispatch(args) -> int:
+    import lgwks_files
+    return lgwks_files.extract_command(args)
+
+
+def _convert_dispatch(args) -> int:
+    import lgwks_files
+    return lgwks_files.convert_command(args)
 
 
 def main(argv: list[str] | None = None) -> int:
