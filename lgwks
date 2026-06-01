@@ -1132,7 +1132,23 @@ def build_parser() -> argparse.ArgumentParser:
     remap = jarvis_sub.add_parser("remap-db", help="upgrade an existing run database to the current Jarvis schema")
     remap.add_argument("run_dir")
     remap.set_defaults(func=remap_db_command)
+
+    # solve — "I have this mess/thought: prove what happened." The first real-world experience.
+    solve = sub.add_parser("solve", help="prove what happened (currently: git)")
+    solve.add_argument("target", nargs="?", default="git", help="what to solve (currently: git)")
+    solve.add_argument("--thought", default="", help="your worry/claim — 'prove this for me'")
+    solve.add_argument("--repo", default=".", help="path to the repo (default: cwd)")
+    solve.add_argument("--json", action="store_true", help="structured output with CSL-JSON provenance")
+    solve.add_argument("--frontier", type=float, metavar="0..1", help="settled(0) <-> frontier(1)")
+    solve.add_argument("--lens", type=float, metavar="-1..1", help="philosophy(-1) <-> science(+1)")
+    solve.add_argument("--depth", type=float, metavar="0..1", help="shallow(0) <-> deep(1)")
+    solve.set_defaults(func=_solve_dispatch)
     return parser
+
+
+def _solve_dispatch(args) -> int:
+    import lgwks_solve  # local module; imported lazily so the head loads without it
+    return lgwks_solve.solve_command(args)
 
 
 def main(argv: list[str] | None = None) -> int:
