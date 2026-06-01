@@ -586,6 +586,71 @@ class TestWorkerCap(unittest.TestCase):
         self.assertEqual(host, {"ram_total_gib": 32, "cpu_total": 12, "source": "override"})
 
 
+class TestGeoExpr(unittest.TestCase):
+    def _expr(self, verbs, risk_max="read"):
+        return {"schema": "lgwks-geoexpr/1", "op": "product",
+                "axes": [{"name": "verb", "values": verbs}, {"name": "scope", "values": ["repo.current"]}],
+                "constraints": {"risk_max": risk_max, "requires_human_preview": True}}
+
+    def test_product_expands_argv_without_shell(self):
+        import lgwks_geoexpr as g
+        plan = g.compile_plan(self._expr(["git.status", "git.log", "git.diff"]))
+        self.assertTrue(plan["ok"])
+        cmds = plan["value"]["commands"]
+        self.assertEqual(len(cmds), 3)  # 3 verbs x 1 scope
+        self.assertEqual(cmds[0]["argv"], ["git", "status"])
+        self.assertFalse(plan["value"]["compile_policy"]["shell"])
+        self.assertTrue(all(isinstance(c["argv"], list) for c in cmds))  # argv, never a shell string
+
+    def test_plan_id_is_deterministic(self):
+        import lgwks_geoexpr as g
+        a = g.compile_plan(self._expr(["git.status"]))["value"]
+        b = g.compile_plan(self._expr(["git.status"]))["value"]
+        self.assertEqual(a["plan_id"], b["plan_id"])
+
+    def test_unknown_verb_is_flagged_for_review_not_executed(self):
+        import lgwks_geoexpr as g
+        plan = g.compile_plan(self._expr(["git.frobnicate"]))["value"]
+        cmd = plan["commands"][0]
+        self.assertIsNone(cmd["argv"])
+        self.assertEqual(cmd["risk"], "unknown")
+        self.assertTrue(cmd["needs_review"])
+        self.assertTrue(plan["compile_policy"]["unknown_requires_review"])
+
+    def test_preview_is_projection_with_risk_gated_approval(self):
+        import lgwks_geoexpr as g
+        plan = g.compile_plan(self._expr(["git.status", "git.log"]))["value"]
+        preview = g.human_preview(plan, risk_max="read")
+        self.assertEqual(preview["risk"], "read")
+        self.assertEqual(preview["approval"], "auto_allowed")
+        self.assertEqual([s["label"] for s in preview["steps"]], ["git.status", "git.log"])
+        self.assertEqual(preview["plan_id"], plan["plan_id"])
+
+    def test_unknown_verb_preview_asks_not_auto(self):
+        import lgwks_geoexpr as g
+        plan = g.compile_plan(self._expr(["git.frobnicate"]))["value"]
+        self.assertEqual(g.human_preview(plan, risk_max="read")["approval"], "ask")
+
+    def test_validate_rejects_bad_shapes(self):
+        import lgwks_geoexpr as g
+        self.assertEqual(g.validate_geoexpr({"schema": "wrong"})["error_code"], "schema_mismatch")
+        self.assertEqual(g.validate_geoexpr(
+            {"schema": "lgwks-geoexpr/1", "op": "sum", "axes": []})["error_code"], "unsupported_op")
+        self.assertEqual(g.validate_geoexpr(
+            {"schema": "lgwks-geoexpr/1", "op": "product",
+             "axes": [{"name": "scope", "values": ["x"]}]})["error_code"], "axis_missing_verb")
+
+    def test_correction_record_builder_validates_failure_type(self):
+        import lgwks_geoexpr as g
+        ok = g.correction_record(source_expr="sha", failure_type="human_misread",
+                                 before={}, after={}, corrected_by="human")
+        self.assertTrue(ok["ok"])
+        self.assertEqual(ok["value"]["training_use"], "local_only")
+        bad = g.correction_record(source_expr="sha", failure_type="bogus",
+                                  before={}, after={}, corrected_by="human")
+        self.assertEqual(bad["error_code"], "correction_failure_type_unknown")
+
+
 class TestMultiply(unittest.TestCase):
     def test_expands_cartesian_product(self):
         import lgwks_multiply as mx

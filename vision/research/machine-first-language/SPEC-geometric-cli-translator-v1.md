@@ -1,6 +1,10 @@
 # SPEC-geometric-cli-translator-v1
 
-Status: SPEC only. Do not implement in this slice.
+Status: PARTIALLY IMPLEMENTED. Director authorized advancing past the original SPEC-only marker
+(2026-06-01). The deterministic compiler half is built in `lgwks_geoexpr.py` (`lgwks geo compile|preview`):
+GeoExpr validation, product expansion, CommandPlan (argv, no shell), HumanPreview projection, and the
+CorrectionRecord builder. Still deferred: the Deep ML Model translation/scoring layer (§5), the AI/Tongue
+debug loop (§6), the correction ledger STORE (§4.3 is built as a shape, not a sink), and any execute path.
 
 ## 0. Definitions
 
@@ -248,7 +252,7 @@ future larger-memory host may raise this automatically, but the formula must be 
 
 ## 9. Non-Goals
 
-- No implementation in this slice.
+- ~~No implementation in this slice.~~ Superseded: deterministic compiler implemented (see Status).
 - No real model training in this slice.
 - No destructive command expansion without existing approval gates.
 - No keyed external translation provider by default.

@@ -1198,6 +1198,10 @@ def build_parser() -> argparse.ArgumentParser:
     import lgwks_project
     lgwks_project.add_parser(sub)
 
+    # geo — geometric-CLI translator: typed GeoExpr -> argv plan, the compiler behind `lgwks x`.
+    import lgwks_geoexpr
+    lgwks_geoexpr.add_parser(sub)
+
     # login — capture a user-consented browser session for one host. Secrets/cookies stay in the
     # host-scoped Playwright storage file and are only reused for that same host.
     login = sub.add_parser("login", help="save a host-scoped browser session (human logs in)")
