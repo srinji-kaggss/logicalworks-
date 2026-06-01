@@ -898,6 +898,33 @@ class TestHomeQuickHints(unittest.TestCase):
             verb = tail.split()[0] if tail else ""
             self.assertIn(verb, live, f"quick block line references non-verb {verb!r}: {line!r}")
 
+    def test_commands_block_emits_no_header_when_hints_empty(self):
+        # //why: a "quick — what you can do today" header with zero lines under it reads as a broken
+        # promise. When introspection fails, emit nothing — header AND body.
+        import io
+        import importlib
+        import importlib.machinery
+        import importlib.util
+        from importlib.machinery import SourceFileLoader
+        from pathlib import Path
+        import lgwks_home as home
+
+        class _Boom(SourceFileLoader):
+            def exec_module(self, module):  # type: ignore[override]
+                raise RuntimeError("simulated parser load failure")
+        orig_loader = importlib.machinery.SourceFileLoader
+        importlib.machinery.SourceFileLoader = _Boom
+        captured = io.StringIO()
+        real = importlib.import_module("sys").stdout
+        importlib.import_module("sys").stdout = captured
+        try:
+            home._commands(on=False, anim=False)
+        finally:
+            importlib.machinery.SourceFileLoader = orig_loader
+            importlib.import_module("sys").stdout = real
+        out = captured.getvalue()
+        self.assertEqual(out, "", f"quick block should be empty when hints unavailable, got: {out!r}")
+
 
 if __name__ == "__main__":
     unittest.main()

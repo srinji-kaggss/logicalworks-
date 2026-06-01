@@ -257,10 +257,13 @@ def _live_hints() -> list[tuple[str, str]]:
 
 
 def _commands(on: bool, anim: bool) -> None:
-    _emit(ui.spine(fg("quick", EMERALD_DIM, on=on) + fg("  — what you can do today", CREAM_DIM, on=on), on=on), anim)
     hints = _live_hints()
     if not hints:
         return  # //why: never invent a hint that isn't in the live parser — silence is honest
+    # //why: skip the section header too if we have nothing to put under it — an empty "quick — what
+    # you can do today" block with zero lines below it is worse than no block at all (the user reads
+    # the header as a promise the body can't keep).
+    _emit(ui.spine(fg("quick", EMERALD_DIM, on=on) + fg("  — what you can do today", CREAM_DIM, on=on), on=on), anim)
     for name, why in hints:
         _emit(ui.spine("  " + fg(f"lgwks {name}", EMERALD, on=on)
                        + fg(f"   {why}", CREAM_DIM, on=on), on=on), anim)
