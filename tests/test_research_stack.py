@@ -650,6 +650,52 @@ class TestGeoExpr(unittest.TestCase):
                                   before={}, after={}, corrected_by="human")
         self.assertEqual(bad["error_code"], "correction_failure_type_unknown")
 
+    def test_execute_runs_validated_read_argv(self):
+        import lgwks_geoexpr as g
+        plan = g.compile_plan(self._expr(["fs.pwd"]))["value"]
+        tr = g.execute_plan(plan)
+        self.assertTrue(tr["ok"])
+        self.assertEqual(tr["value"]["results"][0]["argv"], ["pwd"])
+        self.assertTrue(tr["value"]["results"][0]["ok"])
+
+    def test_execute_blocks_destructive_without_force(self):
+        import lgwks_geoexpr as g
+        # //why argv is a harmless `echo` (not a real rm): we test the gate, not destruction. risk is set
+        # destructive to exercise the block; executing echo can never lose work.
+        plan = {"plan_id": "p", "source_expr": "s",
+                "commands": [{"argv": ["echo", "rm", "-rf", "x"], "risk": "destructive", "why": "",
+                              "verb": "fs.rm", "needs_review": False}]}
+        self.assertEqual(g.execute_plan(plan)["error_code"], "execute_destructive_blocked")
+        forced = g.execute_plan(plan, force=True)  # gate passes; transcript produced
+        self.assertTrue(forced["ok"])
+        self.assertEqual(forced["value"]["results"][0]["verb"], "fs.rm")
+
+    def test_execute_blocks_unknown_without_allow(self):
+        import lgwks_geoexpr as g
+        plan = g.compile_plan(self._expr(["git.frobnicate"]))["value"]
+        self.assertEqual(g.execute_plan(plan)["error_code"], "execute_unknown_blocked")
+
+    def test_run_persists_artifacts_and_embeddings(self):
+        import lgwks_geoexpr as g
+        tmp = Path(tempfile.mkdtemp())
+        old = g.RUN_ROOT
+        g.RUN_ROOT = tmp / "geo-runs"
+        try:
+            plan = g.compile_plan(self._expr(["fs.pwd"]))["value"]
+            preview = g.human_preview(plan, "read")
+            tr = g.execute_plan(plan)["value"]
+            run_dir = g._persist_run(self._expr(["fs.pwd"]), plan, preview, tr)
+            for name in ("geoexpr.json", "command-plan.json", "human-preview.json",
+                         "result-transcript.json", "artifact-embeddings.jsonl"):
+                self.assertTrue((run_dir / name).exists(), name)
+            embeds = [json.loads(l) for l in (run_dir / "artifact-embeddings.jsonl").read_text(
+                encoding="utf-8").splitlines()]
+            kinds = {e["kind"] for e in embeds}
+            self.assertEqual(kinds, {"geoexpr", "command-plan", "human-preview", "result"})
+            self.assertTrue(all(len(e["embedding"]) == g.EMBED_DIMS for e in embeds))
+        finally:
+            g.RUN_ROOT = old
+
 
 class TestMultiply(unittest.TestCase):
     def test_expands_cartesian_product(self):

@@ -18,9 +18,18 @@ from __future__ import annotations
 
 import hashlib
 import json
+import shlex
+import sys
+from pathlib import Path
 
 # //why reuse, not re-declare: a second risk classifier would drift from `lgwks x`. One source of risk truth.
-from lgwks_multiply import _classify, _RISK_ORDER
+from lgwks_multiply import _classify, _RISK_ORDER, _run_one
+
+ROOT = Path(__file__).resolve().parent
+RUN_ROOT = ROOT / "store" / "geo-runs"  # runtime output; gitignored, never source of truth
+SCHEMA_TRANSCRIPT = "lgwks-result-transcript/1"
+SCHEMA_EMBEDDING = "lgwks-artifact-embedding/1"
+EMBED_DIMS = 128
 
 SCHEMA_GEOEXPR = "lgwks-geoexpr/1"
 SCHEMA_PREVIEW = "lgwks-human-preview/1"
@@ -177,10 +186,77 @@ def correction_record(*, source_expr: str, failure_type: str, before: dict, afte
     })
 
 
+def _embed_record(kind: str, item_id: str, text: str) -> dict:
+    """Deterministic local embedding record. //why reuse lgwks_embed: one embedder, no drift."""
+    import lgwks_embed
+    return {
+        "schema": SCHEMA_EMBEDDING,
+        "kind": kind,
+        "item_id": item_id,
+        "text_sha256": hashlib.sha256(text.encode("utf-8")).hexdigest(),
+        "embedding_model": "deterministic-feature-hash-v1",
+        "dimensions": EMBED_DIMS,
+        "embedding": lgwks_embed._embedding(text, EMBED_DIMS),
+        "local_only": True,
+    }
+
+
+def execute_plan(plan: dict, *, allow_unknown: bool = False, force: bool = False) -> dict:
+    """Gate then execute a CommandPlan. Returns a ResultTranscript Result.
+
+    Gate (mirrors `lgwks x`, the single approval authority):
+      - destructive  -> refused unless force (compile_policy.destructive_requires_force)
+      - unknown verb -> refused unless allow_unknown (compile_policy.unknown_requires_review)
+    Only validated argv run, never a shell string.
+    """
+    commands = plan["commands"]
+    if any(c["risk"] == "destructive" for c in commands) and not force:
+        return _err("execute_destructive_blocked", "destructive commands need force; refusing")
+    if any(c["needs_review"] for c in commands) and not allow_unknown:
+        return _err("execute_unknown_blocked", "unknown verbs need review (--allow-unknown); refusing")
+    results = []
+    for c in commands:
+        if c["argv"] is None:
+            results.append({"verb": c["verb"], "argv": None, "rc": 2, "ok": False, "out": "unresolved verb"})
+            continue
+        # //why shlex.join then _run_one: reuse the audited no-shell executor; argv come from a controlled
+        # registry with no shell metacharacters, so the round-trip is lossless and injection-free.
+        r = _run_one(shlex.join(c["argv"]))
+        results.append({"verb": c["verb"], "argv": c["argv"], "rc": r["rc"], "ok": r["ok"], "out": r["out"]})
+    return _ok({
+        "schema": SCHEMA_TRANSCRIPT,
+        "plan_id": plan["plan_id"],
+        "source_expr": plan["source_expr"],
+        "results": results,
+        "all_ok": all(r["ok"] for r in results),
+    })
+
+
+def _persist_run(geoexpr: dict, plan: dict, preview: dict, transcript: dict) -> Path:
+    """Embed every translation/preview/plan/result locally (spec §8 pass-condition). Returns the run dir."""
+    run_dir = RUN_ROOT / plan["plan_id"]
+    run_dir.mkdir(parents=True, exist_ok=True)
+    (run_dir / "geoexpr.json").write_text(json.dumps(geoexpr, indent=2, sort_keys=True), encoding="utf-8")
+    (run_dir / "command-plan.json").write_text(json.dumps(plan, indent=2, sort_keys=True), encoding="utf-8")
+    (run_dir / "human-preview.json").write_text(json.dumps(preview, indent=2, sort_keys=True), encoding="utf-8")
+    (run_dir / "result-transcript.json").write_text(json.dumps(transcript, indent=2, sort_keys=True),
+                                                    encoding="utf-8")
+    embeddings = [
+        _embed_record("geoexpr", plan["source_expr"], json.dumps(geoexpr, sort_keys=True)),
+        _embed_record("command-plan", plan["plan_id"], json.dumps(plan["commands"], sort_keys=True)),
+        _embed_record("human-preview", plan["plan_id"], preview["summary"]),
+    ]
+    for i, r in enumerate(transcript["results"]):
+        embeddings.append(_embed_record("result", f"{plan['plan_id']}:{i}", r.get("out", "") or r["verb"]))
+    with (run_dir / "artifact-embeddings.jsonl").open("w", encoding="utf-8") as fh:
+        for row in embeddings:
+            fh.write(json.dumps(row, sort_keys=True) + "\n")
+    return run_dir
+
+
 # --- CLI surface -----------------------------------------------------------------------------------------
 
 def _load_geoexpr(args) -> dict:
-    import sys
     raw = open(args.file, encoding="utf-8").read() if getattr(args, "file", None) else sys.stdin.read()
     try:
         return _ok(json.loads(raw))
@@ -216,6 +292,38 @@ def preview_command(args) -> int:
     return 0
 
 
+def run_command(args) -> int:
+    loaded = _load_geoexpr(args)
+    if not loaded["ok"]:
+        print(json.dumps(loaded), file=sys.stderr)
+        return 2
+    geoexpr = loaded["value"]
+    compiled = compile_plan(geoexpr)
+    if not compiled["ok"]:
+        print(json.dumps(compiled), file=sys.stderr)
+        return 2
+    plan = compiled["value"]
+    risk_max = geoexpr.get("constraints", {}).get("risk_max", "read")
+    preview = human_preview(plan, risk_max)
+    # //why gate before execute: non-interactive callers (agents) must opt in; auto_allowed is read-only.
+    if preview["approval"] == "deny":
+        print(json.dumps(_err("run_denied", "preview approval is 'deny' (destructive)")), file=sys.stderr)
+        return 2
+    if preview["approval"] == "ask" and not getattr(args, "yes", False):
+        print(json.dumps(_err("run_needs_yes", "approval 'ask' needs --yes in non-interactive run")),
+              file=sys.stderr)
+        return 2
+    transcript = execute_plan(plan, allow_unknown=getattr(args, "allow_unknown", False),
+                              force=getattr(args, "force", False))
+    if not transcript["ok"]:
+        print(json.dumps(transcript), file=sys.stderr)
+        return 2
+    run_dir = _persist_run(geoexpr, plan, preview, transcript["value"])
+    out = {"run_dir": str(run_dir), "transcript": transcript["value"]}
+    print(json.dumps(out, indent=2, sort_keys=True))
+    return 0 if transcript["value"]["all_ok"] else 1
+
+
 def add_parser(sub) -> None:
     p = sub.add_parser("geo", help="geometric-CLI translator: typed GeoExpr -> argv plan (no shell)")
     gs = p.add_subparsers(dest="geo_command", required=True)
@@ -225,3 +333,9 @@ def add_parser(sub) -> None:
     prev = gs.add_parser("preview", help="GeoExpr JSON -> HumanPreview projection")
     prev.add_argument("--file", help="path to a GeoExpr JSON file; omit to read stdin")
     prev.set_defaults(func=preview_command)
+    run = gs.add_parser("run", help="compile -> preview -> gated execute (argv, no shell) -> embed locally")
+    run.add_argument("--file", help="path to a GeoExpr JSON file; omit to read stdin")
+    run.add_argument("--yes", action="store_true", help="approve an 'ask' plan in non-interactive run")
+    run.add_argument("--allow-unknown", action="store_true", help="allow unknown verbs (still never executed)")
+    run.add_argument("--force", action="store_true", help="required for destructive commands")
+    run.set_defaults(func=run_command)
