@@ -1141,6 +1141,12 @@ def build_parser() -> argparse.ArgumentParser:
     manifest.add_argument("--render", action="store_true", help="human view instead of JSON")
     manifest.set_defaults(func=_manifest_dispatch)
 
+    # preview — dry-run brace/expression strings: show plan + risk verdict, no execution (T0 safe).
+    preview = sub.add_parser("preview", help="dry-run a brace expression — risk verdict, no execution")
+    preview.add_argument("expr", help="brace or lgwks-expression string to preview")
+    preview.add_argument("--json", action="store_true", help="emit HumanPreview JSON instead of TTY render")
+    preview.set_defaults(func=_preview_dispatch)
+
     # extract — read ANY format (pdf·docx·xlsx·pptx·html·csv·md) → text. Read-only, no tokens.
     extract = sub.add_parser("extract", help="read any file/URL → text")
     extract.add_argument("target", help="URL or local file path")
@@ -1234,6 +1240,11 @@ def _home_dispatch(args) -> int:
 def _manifest_dispatch(args) -> int:
     import lgwks_manifest
     return lgwks_manifest.manifest_command(args)
+
+
+def _preview_dispatch(args) -> int:
+    import lgwks_preview
+    return lgwks_preview.preview_command(args)
 
 
 def _extract_dispatch(args) -> int:
