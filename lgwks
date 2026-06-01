@@ -1167,6 +1167,11 @@ def build_parser() -> argparse.ArgumentParser:
     mult.add_argument("--plan-only", action="store_true", dest="plan_only", help="with --json: emit plan, don't run")
     mult.set_defaults(func=_multiply_dispatch)
 
+    # store — the data trust boundary: status of the three at-rest stores (untrusted/cognition/intent).
+    store = sub.add_parser("store", help="status of the three data stores (cache·cognition·vault)")
+    store.add_argument("--json", action="store_true", help="structured status")
+    store.set_defaults(func=_store_dispatch)
+
     # solve — "I have this mess/thought: prove what happened." The first real-world experience.
     solve = sub.add_parser("solve", help="prove what happened (currently: git)")
     solve.add_argument("target", nargs="?", default="git", help="what to solve (currently: git)")
@@ -1208,6 +1213,19 @@ def _convert_dispatch(args) -> int:
 def _multiply_dispatch(args) -> int:
     import lgwks_multiply
     return lgwks_multiply.multiply_command(args)
+
+
+def _store_dispatch(args) -> int:
+    import json as _json
+    import lgwks_cache, lgwks_cognition, lgwks_vault
+    stores = [lgwks_cache.status(), lgwks_cognition.status(), lgwks_vault.status()]
+    if getattr(args, "json", False):
+        print(_json.dumps({"stores": stores}, indent=2))
+        return 0
+    for s in stores:
+        line = "  ".join(f"{k}={v}" for k, v in s.items())
+        print(f"  {line}")
+    return 0
 
 
 def main(argv: list[str] | None = None) -> int:
