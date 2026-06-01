@@ -147,6 +147,9 @@ def multiply_command(args) -> int:
         if not getattr(args, "yes", False):
             print("refusing: non-interactive run needs --yes (and --force for destructive)", file=sys.stderr)
             return 2
+        if any(r == "unknown" for r in risks) and not getattr(args, "allow_unknown", False):
+            print("refusing: unknown commands in non-interactive chain need --allow-unknown", file=sys.stderr)
+            return 2
         if has_destructive and not getattr(args, "force", False):
             print("refusing: destructive commands in chain need --force", file=sys.stderr)
             return 2

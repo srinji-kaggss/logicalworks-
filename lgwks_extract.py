@@ -16,7 +16,10 @@ Degrade chain per type, LOUD on total failure (never silently drop a source):
 from __future__ import annotations
 
 import re
+import ipaddress
+import socket
 import subprocess
+import urllib.error
 import urllib.parse
 import urllib.request
 from pathlib import Path
@@ -47,6 +50,53 @@ def _trim(s: str, max_chars: int) -> str:
 def _ext_of(target: str) -> str:
     path = urllib.parse.urlparse(target).path if "://" in target else target
     return Path(path).suffix.lower()
+
+
+def _is_url(target: str) -> bool:
+    return bool(urllib.parse.urlparse(target).scheme)
+
+
+def _is_http_url(target: str) -> bool:
+    return urllib.parse.urlparse(target).scheme in {"http", "https"}
+
+
+def _host_is_blocked(target: str) -> bool:
+    host = urllib.parse.urlparse(target).hostname
+    if not host:
+        return True
+    low = host.lower().rstrip(".")
+    if low in {"localhost", "metadata.google.internal"} or low.endswith(".localhost"):
+        return True
+    candidates = [low]
+    try:
+        candidates.extend(info[4][0] for info in socket.getaddrinfo(low, None))
+    except Exception:
+        pass
+    for candidate in set(candidates):
+        try:
+            ip = ipaddress.ip_address(candidate)
+        except ValueError:
+            continue
+        if any((ip.is_private, ip.is_loopback, ip.is_link_local, ip.is_multicast,
+                ip.is_reserved, ip.is_unspecified)):
+            return True
+        if str(ip) == "169.254.169.254":
+            return True
+    return False
+
+
+def _remote_allowed(target: str) -> bool:
+    return _is_http_url(target) and not _host_is_blocked(target)
+
+
+def _headers(url: str) -> dict[str, str]:
+    headers = {"User-Agent": "Mozilla/5.0"}
+    try:
+        import lgwks_auth_runtime
+        headers.update(lgwks_auth_runtime.headers_for_url(url))
+    except Exception:
+        pass
+    return headers
 
 
 def _pdf(raw: bytes, max_chars: int) -> str:
@@ -86,6 +136,8 @@ _JS_WALL = re.compile(r"enable JavaScript|doesn't work properly without|requires
 def _html(url: str, max_chars: int) -> str:
     """crwl md-fit → curl floor → escalate to a real browser (playwright) on a JS/bot wall.
     The escalation is the fix for SPAs like canadalife.com that return 'enable JavaScript'."""
+    if not _remote_allowed(url):
+        return ""
     best = ""
     exe = _bin("crwl")
     if exe:
@@ -96,8 +148,14 @@ def _html(url: str, max_chars: int) -> str:
             pass
     if not best:
         try:
-            req = urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0"})
+            req = urllib.request.Request(url, headers=_headers(url))
             best = _TAG.sub("", urllib.request.urlopen(req, timeout=25).read().decode("utf-8", "replace"))
+        except urllib.error.HTTPError as exc:
+            try:
+                import lgwks_auth_runtime
+                lgwks_auth_runtime.note_auth_failure(url, exc.code)
+            except Exception:
+                pass
         except Exception:
             best = ""
     # escalate to the real browser if we got nothing or hit a JS/bot wall.
@@ -113,9 +171,18 @@ def _html(url: str, max_chars: int) -> str:
 
 
 def _download(url: str) -> bytes:
+    if not _remote_allowed(url):
+        return b""
     try:
-        req = urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0"})
+        req = urllib.request.Request(url, headers=_headers(url))
         return urllib.request.urlopen(req, timeout=30).read()
+    except urllib.error.HTTPError as exc:
+        try:
+            import lgwks_auth_runtime
+            lgwks_auth_runtime.note_auth_failure(url, exc.code)
+        except Exception:
+            pass
+        return b""
     except Exception:
         return b""
 
@@ -123,7 +190,10 @@ def _download(url: str) -> bytes:
 def extract(target: str, max_chars: int = 8000) -> dict:
     """Any URL or local path → {text, kind, ok, source}. ok=False is honest failure (never silent ext)."""
     ext = _ext_of(target)
-    is_url = "://" in target
+    is_url = _is_url(target)
+    if is_url and not _remote_allowed(target):
+        kind = "unsupported-url-scheme" if not _is_http_url(target) else "blocked-host"
+        return {"source": target, "kind": kind, "ok": False, "text": ""}
     kind, text = "html", ""
 
     if ext in _PDF_EXT:

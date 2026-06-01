@@ -28,16 +28,21 @@ class TestUntrustedCache(unittest.TestCase):
         cache._INDEX = cache._DIR / "index.jsonl"
 
     def test_content_addressed_dedup_and_integrity(self):
-        e1 = cache.put("https://x.com/a", "html", "hello world")
+        e1 = cache.put("https://user:secret@x.com/a?token=abc#frag", "html", "hello world")
         e2 = cache.put("https://x.com/a", "html", "hello world")
         self.assertEqual(e1["hash"], e2["hash"], "same content → same hash (dedup)")
         self.assertEqual(len(cache.entries()), 1, "identical content stored once")
         self.assertEqual(cache.get_text(e1["hash"]), "hello world")
+        self.assertEqual(cache.entries()[0]["url"], "https://x.com/a", "cache index strips userinfo/query/fragment")
 
     def test_tamper_on_read_returns_none(self):
         e = cache.put("u", "html", "trusted-bytes")
         Path(e["path"]).write_text("ALTERED")          # someone edits the cached file
         self.assertIsNone(cache.get_bytes(e["hash"]), "hash mismatch ⇒ treated as absent (tamper-evident)")
+
+    def test_invalid_hash_cannot_escape_cache_dir(self):
+        self.assertFalse(cache.has("../intent/secret.enc"))
+        self.assertIsNone(cache.get_bytes("../intent/secret.enc"))
 
     def test_cached_file_is_not_executable(self):
         e = cache.put("u", "html", "x")
@@ -73,6 +78,23 @@ class TestCognitionLog(unittest.TestCase):
         with self.assertRaises(ValueError):
             log.append("freeform-anything", {})
 
+    def test_stream_name_cannot_traverse_out_of_cognition_dir(self):
+        log = cognition.CognitionLog("../intent/session", key=b"k")
+        self.assertTrue(log._path.name.endswith(".cognition.jsonl"))
+        self.assertTrue(log._path.parent == cognition._DIR)
+
+    def test_malformed_line_breaks_chain_and_blocks_append(self):
+        log = cognition.CognitionLog("t4", key=b"k")
+        log.append("note", {"a": 1})
+        p = cognition._log_path("t4")
+        p.write_text(p.read_text() + "{not-json}\n")
+        log2 = cognition.CognitionLog("t4", key=b"k")
+        self.assertFalse(log2.verify())
+        with self.assertRaises(ValueError):
+            log2.corpus("note")
+        with self.assertRaises(ValueError):
+            log2.append("note", {"a": 2})
+
 
 class TestIntentVault(unittest.TestCase):
     def setUp(self):
@@ -96,7 +118,15 @@ class TestIntentVault(unittest.TestCase):
         # the on-disk blob is ciphertext — the plaintext value must NOT appear
         blob = next(vault._DIR.glob("*.enc")).read_bytes()
         self.assertNotIn(b"invest", blob, "value is encrypted at rest, never plaintext")
-        self.assertEqual(vault.keys(), ["intent"], "keys() lists names only")
+        self.assertTrue(vault.keys()[0].startswith("intent-"), "keys() lists sanitised names only")
+
+    def test_sanitized_key_names_do_not_collide(self):
+        sign.signing_key = lambda: (b"a-real-anchored-secret", "keyed-env")
+        vault.set_entry("User Name", "a")
+        vault.set_entry("user/name", "b")
+        self.assertEqual(vault.get_entry("User Name"), "a")
+        self.assertEqual(vault.get_entry("user/name"), "b")
+        self.assertEqual(len(vault.keys()), 2)
 
     def test_foreign_blob_reads_as_absent(self):
         sign.signing_key = lambda: (b"keyA", "keyed-env")

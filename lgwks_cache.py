@@ -16,11 +16,14 @@ from __future__ import annotations
 import hashlib
 import json
 import os
+import re
+import urllib.parse
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent
 _DIR = ROOT / "store" / "untrusted"          # quarantine: its own dir, never mixed with cognition/intent
 _INDEX = _DIR / "index.jsonl"
+_HEX64 = re.compile(r"^[0-9a-f]{64}$")
 
 
 def _ensure() -> None:
@@ -32,7 +35,22 @@ def _hash(content: bytes) -> str:
 
 
 def _path_for(h: str) -> Path:
+    if not _HEX64.fullmatch(h):
+        raise ValueError("cache hash must be 64 lowercase hex characters")
     return _DIR / h[:2] / h                    # sharded by hash prefix to keep dirs shallow
+
+
+def _safe_url(url: str) -> str:
+    """Provenance for an untrusted cache entry. Strip userinfo, query, and fragment so auth URLs,
+    bearer tokens, emails, and signed URL material do not land in the append-only cache index."""
+    parsed = urllib.parse.urlparse(url)
+    if not parsed.scheme or not parsed.netloc:
+        return url.split("?", 1)[0].split("#", 1)[0]
+    host = parsed.hostname or ""
+    if parsed.port:
+        host = f"{host}:{parsed.port}"
+    clean = parsed._replace(netloc=host, query="", fragment="")
+    return urllib.parse.urlunparse(clean)
 
 
 def put(url: str, kind: str, content) -> dict:
@@ -47,17 +65,23 @@ def put(url: str, kind: str, content) -> dict:
         p.write_bytes(raw)
         os.chmod(p, 0o600)                      # owner read/write only; NOT executable
         with _INDEX.open("a", encoding="utf-8") as f:
-            f.write(json.dumps({"hash": h, "url": url, "kind": kind, "bytes": len(raw)}, sort_keys=True) + "\n")
-    return {"hash": h, "url": url, "kind": kind, "bytes": len(raw), "path": str(p)}
+            f.write(json.dumps({"hash": h, "url": _safe_url(url), "kind": kind, "bytes": len(raw)}, sort_keys=True) + "\n")
+    return {"hash": h, "url": _safe_url(url), "kind": kind, "bytes": len(raw), "path": str(p)}
 
 
 def has(h: str) -> bool:
-    return _path_for(h).exists()
+    try:
+        return _path_for(h).exists()
+    except ValueError:
+        return False
 
 
 def get_bytes(h: str) -> bytes | None:
     """Return content by hash, or None. Verifies the hash on read — a mismatch is tamper-evidence."""
-    p = _path_for(h)
+    try:
+        p = _path_for(h)
+    except ValueError:
+        return None
     if not p.exists():
         return None
     raw = p.read_bytes()

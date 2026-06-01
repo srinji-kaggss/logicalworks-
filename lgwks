@@ -1161,6 +1161,8 @@ def build_parser() -> argparse.ArgumentParser:
     mult.add_argument("expr", help="product expression with {a,b,c} axes (cartesian across braces)")
     mult.add_argument("--yes", action="store_true", help="non-interactive approve (read-only chains)")
     mult.add_argument("--force", action="store_true", help="allow destructive commands non-interactively")
+    mult.add_argument("--allow-unknown", action="store_true", dest="allow_unknown",
+                      help="allow unknown commands non-interactively after --yes")
     mult.add_argument("--dry-run", action="store_true", dest="dry_run", help="show the expanded chain, run nothing")
     mult.add_argument("--keep-going", action="store_true", dest="keep_going", help="continue after a failure")
     mult.add_argument("--json", action="store_true", help="structured plan/results")
@@ -1179,6 +1181,24 @@ def build_parser() -> argparse.ArgumentParser:
     store = sub.add_parser("store", help="status of the three data stores (cache·cognition·vault)")
     store.add_argument("--json", action="store_true", help="structured status")
     store.set_defaults(func=_store_dispatch)
+
+    # memory — deterministic project context chain. This is the local "remember everything" surface.
+    import lgwks_memory
+    lgwks_memory.add_parser(sub)
+
+    # public — open-license source search. Public web is not enough; every result carries license basis.
+    import lgwks_public
+    lgwks_public.add_parser(sub)
+
+    # embed — deterministic local folder vector vault, with per-folder sub-vaults.
+    import lgwks_embed
+    lgwks_embed.add_parser(sub)
+
+    # login — capture a user-consented browser session for one host. Secrets/cookies stay in the
+    # host-scoped Playwright storage file and are only reused for that same host.
+    login = sub.add_parser("login", help="save a host-scoped browser session (human logs in)")
+    login.add_argument("target", help="login URL or shorthand: linkedin")
+    login.set_defaults(func=_login_dispatch)
 
     # solve — "I have this mess/thought: prove what happened." The first real-world experience.
     solve = sub.add_parser("solve", help="prove what happened (currently: git)")
@@ -1238,6 +1258,18 @@ def _store_dispatch(args) -> int:
     for s in stores:
         line = "  ".join(f"{k}={v}" for k, v in s.items())
         print(f"  {line}")
+    return 0
+
+
+def _login_dispatch(args) -> int:
+    import json as _json
+    import lgwks_browser
+    target = args.target
+    if target == "linkedin":
+        target = "https://www.linkedin.com/login"
+    elif "://" not in target:
+        target = "https://" + target
+    print(_json.dumps(lgwks_browser.save_session(target), indent=2))
     return 0
 
 

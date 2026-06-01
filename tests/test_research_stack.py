@@ -8,7 +8,10 @@ from __future__ import annotations
 
 import os
 import sys
+import json
+import tempfile
 import unittest
+from pathlib import Path
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
@@ -154,6 +157,18 @@ class TestExtractTyping(unittest.TestCase):
         self.assertFalse(r["ok"])
         self.assertEqual(r["text"], "")
 
+    def test_non_http_url_scheme_is_rejected(self):
+        r = extract.extract("file:///etc/passwd")
+        self.assertFalse(r["ok"])
+        self.assertEqual(r["kind"], "unsupported-url-scheme")
+
+    def test_private_and_metadata_hosts_are_blocked(self):
+        for url in ("http://127.0.0.1:8000/admin", "http://169.254.169.254/latest/meta-data",
+                    "http://metadata.google.internal/computeMetadata/v1"):
+            r = extract.extract(url)
+            self.assertFalse(r["ok"])
+            self.assertEqual(r["kind"], "blocked-host")
+
 
 class TestManifest(unittest.TestCase):
     def test_manifest_is_a_valid_machine_contract(self):
@@ -170,6 +185,128 @@ class TestManifest(unittest.TestCase):
         brands = {"firecrawl", "playwright", "crwl", "pdftotext"}
         for c in m["capabilities"]:
             self.assertNotIn(c["capability"], brands)
+
+
+class TestAuthRuntime(unittest.TestCase):
+    def test_active_lock_maps_host_to_keychain_headers(self):
+        import lgwks_auth_runtime as auth
+
+        tmp = Path(tempfile.mkdtemp())
+        auth.REGISTRY = tmp / "locks.jsonl"
+        auth.REGISTRY.parent.mkdir(parents=True, exist_ok=True)
+        auth.REGISTRY.write_text(json.dumps({"event": "lock", "site": "scholar.google.com"}) + "\n")
+
+        class P:
+            returncode = 0
+            stdout = "Bearer test-token\n"
+
+        old = auth.subprocess.run
+        auth.subprocess.run = lambda *a, **k: P()
+        try:
+            self.assertEqual(auth.site_for_url("https://scholar.google.com/scholar?q=x"), "scholar.google.com")
+            self.assertEqual(auth.headers_for_url("https://scholar.google.com/scholar?q=x"),
+                             {"Authorization": "Bearer test-token"})
+            self.assertEqual(auth.headers_for_url("https://example.com/"), {})
+        finally:
+            auth.subprocess.run = old
+
+    def test_browser_session_is_host_scoped(self):
+        import lgwks_browser as browser
+
+        tmp = Path(tempfile.mkdtemp())
+        old_dir, old_legacy = browser._SESSION_DIR, browser._SESSION
+        browser._SESSION_DIR = tmp / "sessions"
+        browser._SESSION = tmp / "linkedin-session.json"
+        try:
+            browser._SESSION_DIR.mkdir()
+            scoped = browser._SESSION_DIR / "scholar.google.com.json"
+            scoped.write_text("{}", encoding="utf-8")
+            self.assertEqual(browser._session_for_url("https://scholar.google.com/scholar"), scoped)
+            self.assertIsNone(browser._session_for_url("https://example.com/"))
+        finally:
+            browser._SESSION_DIR, browser._SESSION = old_dir, old_legacy
+
+    def test_needs_auth_json_sanitizes_url(self):
+        import lgwks_auth_runtime as auth
+
+        tmp = Path(tempfile.mkdtemp())
+        auth.REQUESTS = tmp / "needs_auth.jsonl"
+        auth.request_keyring("https://user:secret@example.com/private?token=x#frag", "remote returned auth failure", 403)
+        rec = json.loads(auth.REQUESTS.read_text().splitlines()[0])
+        self.assertEqual(rec["url"], "https://example.com/private")
+        self.assertNotIn("token", json.dumps(rec))
+
+
+class TestProjectMemory(unittest.TestCase):
+    def test_project_memory_chain_focuses_themes(self):
+        import lgwks_memory as mem
+
+        tmp = Path(tempfile.mkdtemp())
+        mem._DIR = tmp / "projects"
+        mem.init_project("project 1", "scholar.google.com",
+                         "machine-first language embeddings focus on deterministic memory chains")
+        mem.remember("project 1", "Previous convo: auth tokens stay in keychain, crawler obeys scoped grants.")
+        ctx = mem.context("project 1", query="deterministic context chain embeddings")
+        self.assertTrue(ctx["chain_ok"])
+        self.assertEqual(ctx["scopes"][0]["site"], "scholar.google.com")
+        labels = {t["theme"] for t in ctx["focus_themes"]}
+        self.assertIn("deterministic", labels)
+        self.assertTrue(ctx["chain_head"])
+
+
+class TestPublicSources(unittest.TestCase):
+    def test_public_search_carries_license_basis(self):
+        import lgwks_public as pub
+
+        old = pub._fetch_json
+        def fake(url, timeout=20):
+            if "openalex" in url:
+                return {"results": [{"display_name": "Machine memory", "id": "https://openalex.org/W1",
+                                     "publication_year": 2026,
+                                     "best_oa_location": {"landing_page_url": "https://example.org/p",
+                                                          "pdf_url": "https://example.org/p.pdf",
+                                                          "license": "cc-by",
+                                                          "license_url": "https://creativecommons.org/licenses/by/4.0/"}}]}
+            if "crossref" in url:
+                return {"message": {"items": [{"title": ["Open metadata"], "URL": "https://doi.org/10/x",
+                                               "license": [{"URL": "https://creativecommons.org/publicdomain/zero/1.0/"}],
+                                               "published-online": {"date-parts": [[2025]]}}]}}
+            return {"results": [{"title": "Open image", "url": "https://img.example/x.jpg",
+                                 "foreign_landing_url": "https://example.org/x",
+                                 "license": "cc0",
+                                 "license_url": "https://creativecommons.org/publicdomain/zero/1.0/"}]}
+
+        pub._fetch_json = fake
+        try:
+            out = pub.search_public("machine memory", limit=1)
+        finally:
+            pub._fetch_json = old
+        self.assertEqual(len(out["records"]), 3)
+        self.assertTrue(all(r["basis"] for r in out["records"]))
+        self.assertEqual(out["policy"], "open-license-only; verify per-item license before redistribution")
+
+
+class TestEmbeddingVault(unittest.TestCase):
+    def test_folder_embedding_vault_has_root_and_subvaults(self):
+        import lgwks_embed as emb
+
+        tmp = Path(tempfile.mkdtemp())
+        old = emb.VAULT_ROOT
+        emb.VAULT_ROOT = tmp / "vectors"
+        root = tmp / "src"
+        (root / "a").mkdir(parents=True)
+        (root / "b").mkdir()
+        (root / "a" / "one.md").write_text("deterministic context chain embeddings memory", encoding="utf-8")
+        (root / "b" / "two.py").write_text("def keyring_auth(): return 'vault context'", encoding="utf-8")
+        try:
+            out = emb.build_vault(str(root), "project 1", ["deterministic", "keyring"], cycles=0, max_cycles=3)
+        finally:
+            emb.VAULT_ROOT = old
+        manifest = json.loads(Path(out["manifest"]).read_text())
+        self.assertTrue(Path(out["vault"], "root", "embeddings.jsonl").exists())
+        self.assertGreaterEqual(len(manifest["subvaults"]), 2)
+        self.assertGreater(manifest["records"], 0)
+        self.assertLessEqual(manifest["cycles_run"], 3)
 
 
 class TestMultiply(unittest.TestCase):
@@ -198,6 +335,13 @@ class TestMultiply(unittest.TestCase):
         # echo receives the rest as literal args; the rm is never executed as a separate shell command.
         self.assertIn("safe", r["out"])
         self.assertNotIn("should-not-happen", r["out"].split("safe")[0] if "safe" in r["out"] else "x")
+
+    def test_unknown_noninteractive_requires_second_gate(self):
+        import argparse
+        import lgwks_multiply as mx
+        args = argparse.Namespace(expr="frobnicate x", yes=True, force=False, allow_unknown=False,
+                                  dry_run=False, json=False, plan_only=False, keep_going=False)
+        self.assertEqual(mx.multiply_command(args), 2)
 
 
 class TestGroundDegradation(unittest.TestCase):

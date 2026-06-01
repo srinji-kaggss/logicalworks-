@@ -54,7 +54,8 @@ def is_unlocked() -> bool:
 
 def _entry_path(key: str) -> Path:
     safe = _SAFE.sub("-", key.strip().lower()).strip("-") or "unnamed"
-    return _DIR / f"{safe}.enc"
+    suffix = hashlib.sha256(key.encode("utf-8")).hexdigest()[:16]
+    return _DIR / f"{safe}-{suffix}.enc"
 
 
 _LOCKED = ("vault LOCKED — no encryption key anchored. provision once (no echo, no argv):\n"
