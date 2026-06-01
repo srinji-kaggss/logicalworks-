@@ -46,6 +46,29 @@ def _compact(r: dict) -> str:
     return f"R{r['n']:03d} [{r.get('frontier_in','?')}] {dig}"
 
 
+def _agenda_block(run_dir: Path, rounds: list[dict]) -> str:
+    """Render guide→agenda coverage (#9 co-processor) so a polling coding agent sees, live, which of
+    its plan's questions have been researched. Coverage is DERIVED from the ledger (a node is covered
+    once a round consumed it as frontier_in) — true even mid-run, before result.json exists."""
+    ap = run_dir / "agenda.json"
+    if not ap.exists():
+        return ""
+    try:
+        data = json.loads(ap.read_text())
+    except Exception:
+        return ""
+    items = data.get("agenda") or []
+    if not items:
+        return ""
+    done = {r.get("frontier_in") for r in rounds}
+    covered = sum(1 for a in items if a.get("node") in done)
+    head = (f"\n## RESEARCH AGENDA — {covered}/{len(items)} covered"
+            + (f"  ·  {data['summary']}" if data.get("summary") else ""))
+    lines = [f"  [{'✓' if a.get('node') in done else ' '}] {a.get('id','?')} {a.get('node','')!r} "
+             f"— {(a.get('question') or '')[:90]}" for a in items]
+    return "\n".join([head, *lines])
+
+
 def _state_matrix(rounds: list[dict]) -> str:
     """Dense state table — machine reads it as state, human audits it as a grid."""
     head = "  n | surv | hit | converged | spent"
@@ -68,6 +91,7 @@ def assemble(run_dir: Path) -> str:
              f"objective={res.get('objective','?')!r} start={res.get('start','?')!r} "
              f"stop={res.get('stop_reason','?')} surviving={res.get('surviving',[])} "
              f"integrity={res.get('integrity_mode','?')} ledger_intact={res.get('ledger_intact','?')}",
+             _agenda_block(run_dir, rounds),
              "\n## STATE MATRIX (math-for-AI / human-auditable)", _state_matrix(rounds),
              f"\n## TIER 0 — last {TIER_RAW} round JSONs (RAW, symlinked under ./CONTEXT/raw/)"]
     parts += [f"  raw/{run_dir.name}-R{r['n']:03d}.reason.json" for r in recent[:TIER_RAW]]

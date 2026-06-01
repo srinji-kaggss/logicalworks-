@@ -62,6 +62,15 @@ def _sanitize_carry(s: str) -> str:
     return s[:4000]
 
 
+def _agenda_node(raw: str) -> str | None:
+    """Coerce a decomposed agenda node into a frontier label that survives _safe_node (hacker F1/F2):
+    the agenda is model-generated over UNTRUSTED guide text, so its nodes re-enter prompts/crawl
+    targets under the same injection guard as any other model-proposed frontier node."""
+    s = re.sub(r"[^A-Za-z0-9 ._:/\-]", " ", raw or "")
+    s = re.sub(r"\s+", " ", s).strip()[:70]
+    return _safe_node(s)
+
+
 @dataclass
 class AutoConfig:
     objective: str
@@ -160,7 +169,38 @@ def run_auto(cfg: AutoConfig, emit=print) -> AutoResult:
     # seed the rolling memory with the implementation guide (sanitized) so round-1 hypotheses target it.
     digest = (_sanitize_carry("IMPLEMENTATION GUIDE UNDER RESEARCH:\n" + cfg.guide_text)
               if cfg.guide_text else "")
-    frontier = cfg.start
+
+    # CO-PROCESSOR CORE (#9): decompose the guide into a research AGENDA — N concrete falsifiable
+    # questions, each a frontier node — instead of only seeding the digest with the guide's prose.
+    # The agenda drives the frontier walk; once it drains, EIG-proposed expansion takes over.
+    # Fail closed: no Tongue / malformed agenda → empty agenda → the old seed-the-digest behaviour.
+    agenda: list[dict] = []
+    if cfg.guide_text:
+        emit("    decomposing guide → research agenda …")
+        dg = lgwks_tongue.decompose_guide(cfg.guide_text, cfg.objective)
+        budget.charge()
+        if dg and dg.get("agenda"):
+            for a in dg["agenda"]:
+                ns = _agenda_node(a.get("node", ""))      # injection-guard the model-emitted node
+                if ns:
+                    agenda.append({"id": a["id"], "node": ns,
+                                   "question": _sanitize_carry(a["question"]),
+                                   "why": _sanitize_carry(a.get("why", ""))})
+            (out_dir / "agenda.json").write_text(_canon({"summary": dg.get("summary", ""),
+                                                         "agenda": agenda}))
+            dropped = len(dg["agenda"]) - len(agenda)
+            emit(f"    agenda: {len(agenda)} research questions"
+                 + (f" ({dropped} unsafe nodes dropped)" if dropped else ""))
+        else:
+            emit("    guide decomposition unavailable (Tongue offline / malformed) — "
+                 "falling back to seed-the-digest.")
+
+    agenda_i = 0
+    if agenda:
+        cur_item = agenda[0]; agenda_i = 1; frontier = cur_item["node"]
+    else:
+        cur_item = None; frontier = cfg.start
+    covered: list[dict] = []
     surviving: list[str] = []
     dry_streak = 0
     conv_streak = 0
@@ -184,9 +224,17 @@ def run_auto(cfg: AutoConfig, emit=print) -> AutoResult:
                 stop = "budget_exhausted"; break
             emit(f"\n  ── round {n}/{cfg.max_rounds} · frontier={frontier!r} · "
                  f"spent={budget.spent}/{budget.cap} tok ──")
+            if cur_item:
+                emit(f"    agenda {cur_item['id']}: {cur_item['question'][:90]}")
 
-            # 1. GENERATE — autonomous Hn, building on the (sanitized) rolling digest.
-            compiled = lgwks_tongue.compile_hypotheses(cfg.objective, cfg.purpose, context=digest)
+            # Per-round focus: the current agenda question sharpens this round's hypotheses + reasoning
+            # (carried as DATA, already sanitized). Falls back to the bare digest when off-agenda.
+            focus = (f"\nCURRENT RESEARCH QUESTION [{cur_item['id']}]: {cur_item['question']} "
+                     f"(de-risks: {cur_item['why']})") if cur_item else ""
+            round_ctx = (digest + focus)[-6000:]
+
+            # 1. GENERATE — autonomous Hn, building on the (sanitized) rolling digest + agenda focus.
+            compiled = lgwks_tongue.compile_hypotheses(cfg.objective, cfg.purpose, context=round_ctx)
             budget.charge()
             if not compiled:
                 stop = "tongue_offline"; emit("    Tongue offline — stopping (fail closed)."); break
@@ -203,7 +251,7 @@ def run_auto(cfg: AutoConfig, emit=print) -> AutoResult:
 
             # 3. REASON. Without evidence, the loop MUST NOT claim falsifiers/learnings/convergence
             #    (epistemics CRITICAL): a planning round plans, it does not conclude.
-            reason = lgwks_tongue.reason_over_findings(cfg.objective, hyps, findings, context=digest)
+            reason = lgwks_tongue.reason_over_findings(cfg.objective, hyps, findings, context=round_ctx)
             budget.charge()
             if not reason:
                 stop = "tongue_offline"; emit("    reason step offline — stopping."); break
@@ -243,32 +291,57 @@ def run_auto(cfg: AutoConfig, emit=print) -> AutoResult:
             rec["hash"] = lgwks_sign.mac(prev_hash + _canon(rec), key)
             prev_hash = rec["hash"]
             lf.write(_canon(rec) + "\n"); lf.flush()
+            # Refresh the LOD context pack EVERY round (#9 background-while-coding): a foreground
+            # coding agent polls runs/<id>/CONTEXT/CONTEXT.md and pulls artifacts as they land —
+            # it must not wait for the run to finish. Convenience, never fails the round.
+            try:
+                import lgwks_context
+                lgwks_context.write_pack(out_dir)
+            except Exception:
+                pass
             if _spent_break():
                 emit("    budget hit after contrarian — stopping."); break
 
             # 7. Carry forward (sanitized) + decide next frontier.
             digest = _sanitize_carry((digest + "\n" + reason["digest"]).strip())[-6000:]
-            # converged is ADVISORY: honoured only on EVIDENCE rounds, and only after ≥2 consecutive
-            # (anti-injection — a single hostile {"converged":true} cannot end the run; hacker R1).
-            conv_streak = conv_streak + 1 if (has_evidence and reason["converged"]) else 0
+            if cur_item is not None:                          # this round consumed an agenda question
+                covered.append({"id": cur_item["id"], "node": cur_item["node"], "evidence": has_evidence})
+            agenda_remaining = agenda_i < len(agenda)
+            # converged is ADVISORY: honoured only on EVIDENCE rounds, after ≥2 consecutive (anti-injection,
+            # hacker R1), AND only once the whole agenda is drained — converging on Q1 must not abandon
+            # the rest of the guide's questions (research the WHOLE plan).
+            conv_streak = conv_streak + 1 if (has_evidence and reason["converged"] and not agenda_remaining) else 0
             if conv_streak >= CONVERGE_STREAK:
-                stop = "converged"; emit("\n  ✓ converged — hypotheses resolved on evidence."); break
-            nxt = _safe_node(top[0]["node"]) if top else None    # reject injection-shaped frontier nodes
-            top_eig = top[0]["eig"] if top else 0.0
-            if nxt is None or top_eig < EIG_FLOOR:
-                dry_streak += 1
-                if dry_streak >= DRY_LIMIT:
-                    stop = "frontier_dry"; emit(f"\n  ✓ frontier dry for {DRY_LIMIT} rounds — stopping."); break
-            else:
-                dry_streak = 0
-                frontier = nxt
+                stop = "converged"; emit("\n  ✓ converged — agenda resolved on evidence."); break
+            if agenda_remaining:                              # walk the agenda before emergent expansion
+                cur_item = agenda[agenda_i]; agenda_i += 1
+                frontier = cur_item["node"]; dry_streak = 0
+            else:                                             # agenda drained → EIG-proposed expansion
+                cur_item = None
+                nxt = _safe_node(top[0]["node"]) if top else None   # reject injection-shaped frontier nodes
+                top_eig = top[0]["eig"] if top else 0.0
+                if nxt is None or top_eig < EIG_FLOOR:
+                    dry_streak += 1
+                    if dry_streak >= DRY_LIMIT:
+                        stop = "frontier_dry"; emit(f"\n  ✓ frontier dry for {DRY_LIMIT} rounds — stopping."); break
+                else:
+                    dry_streak = 0
+                    frontier = nxt
 
     chain_ok = _verify_ledger(ledger, key)
     tamper_evident = lgwks_sign.is_keyed(mode)        # honest: chain is tamper-EVIDENT only when keyed
+    covered_ids = {c["id"] for c in covered}
+    uncovered = len(agenda) - len(covered_ids)
+    # no silent truncation (doctrine): if the budget/rounds cap stopped us before the agenda drained,
+    # say so — an unresearched question must never read as covered.
+    if agenda and uncovered > 0:
+        emit(f"  ! {uncovered}/{len(agenda)} agenda questions unresearched "
+             f"(stopped: {stop}) — NOT silently dropped")
     (out_dir / "result.json").write_text(_canon({
         "run_id": run_id, "rounds": n, "evidence_rounds": evidence_rounds, "stop_reason": stop,
         "surviving": surviving, "spent": budget.spent, "integrity_mode": mode,
         "chain_consistent": chain_ok,
+        "agenda_total": len(agenda), "agenda_covered": len(covered_ids),
         # do NOT claim tamper-evidence in unanchored mode (hacker F3 / epistemics 4b): the signer
         # constant is in source, so an adversary can recompute the chain. Only keyed mode is evident.
         "tamper_evident": tamper_evident and chain_ok,

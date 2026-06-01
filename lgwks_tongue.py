@@ -84,6 +84,64 @@ def compile_hypotheses(objective: str, purpose: str, context: str = "") -> dict 
     return {"meant": out.get("meant", ""), "hypotheses": clean, "question": out.get("question")}
 
 
+# ── co-processor core (#9): decompose an implementation guide into a research agenda ──
+# The guide is the coding AI's plan. We do NOT just seed-the-digest with its prose — we turn it into
+# N CONCRETE research questions, each grounding a specific claim/assumption/risk the guide depends on.
+# Each agenda item carries a short frontier `node` (re-enters prompts/crawl, so it must survive the
+# loop's _safe_node injection guard) AND the prose `question`/`why` (carried as DATA, sanitized).
+DECOMPOSE_SYSTEM = (
+    "You are the Decomposer of a research instrument. You are given an implementation guide — the plan "
+    "a coding agent is about to build. Your job: extract the CONCRETE, FALSIFIABLE claims/assumptions "
+    "the plan depends on, and turn each into ONE research question that, if grounded against real "
+    "docs/evidence, would CONFIRM or REFUTE that the plan is sound. RULES: "
+    "(1) One question per distinct claim — decide the count yourself; do NOT pad and do NOT merge "
+    "distinct concerns into one question (binning is a failure). "
+    "(2) Target the load-bearing assumptions: library/API behavior the plan assumes, version/compat "
+    "claims, performance/limits claims, security/trust assumptions, 'this is the standard way' claims. "
+    "(3) Each item needs a SHORT `node` (<=70 chars, plain label, the searchable subject — e.g. "
+    "'react useEffect cleanup timing', NO punctuation beyond . _ : / -), a `question` (the concrete "
+    "thing to verify), and `why` (which plan claim/risk it de-risks). "
+    "(4) Truth over agreement: prefer questions that could expose the plan as WRONG. "
+    "(5) Terse, specific, no flattery."
+)
+
+# Variable-cardinality agenda. Shape validated; count is the model's (anti-binning).
+AGENDA_SCHEMA = (
+    '{"summary":"<1-line: what this guide builds>",'
+    '"agenda":[{"id":"Q1","node":"<=70-char searchable label>",'
+    '"question":"<concrete claim to verify against evidence>",'
+    '"why":"<which plan assumption/risk this de-risks>"}'
+    '/* ...Q2..Qn as the guide warrants... */]}'
+)
+
+
+def decompose_guide(guide_text: str, objective: str = "") -> dict | None:
+    """Decompose an implementation guide into a research agenda (N concrete, falsifiable questions).
+    Returns {summary, agenda:[{id,node,question,why}]} or None on any failure (fail closed → caller
+    keeps the seed-the-digest fallback). The `node` is NOT injection-validated here — the caller
+    (lgwks_research) runs it through _safe_node before it re-enters any prompt or crawl target."""
+    if not guide_text or not guide_text.strip():
+        return None
+    obj = f"Objective: {objective!r}\n" if objective else ""
+    prompt = (f"{DECOMPOSE_SYSTEM}\n\n{obj}Implementation guide to decompose:\n"
+              f"<GUIDE>\n{guide_text[:16000]}\n</GUIDE>\n\nProduce the research agenda now.")
+    out = _generate(prompt, AGENDA_SCHEMA)
+    if not out or not isinstance(out.get("agenda"), list) or not out["agenda"]:
+        return None
+    clean = []
+    for a in out["agenda"]:
+        if isinstance(a, dict) and a.get("node") and a.get("question"):
+            clean.append({
+                "id": str(a.get("id", f"Q{len(clean) + 1}")),
+                "node": str(a["node"])[:70],
+                "question": str(a["question"])[:300],
+                "why": str(a.get("why", ""))[:300],
+            })
+    if not clean:
+        return None
+    return {"summary": str(out.get("summary", "")), "agenda": clean}
+
+
 # ── autonomous-loop functions (#9): reason over findings, then steelman the null (contrarian) ──
 
 REASON_SYSTEM = (
