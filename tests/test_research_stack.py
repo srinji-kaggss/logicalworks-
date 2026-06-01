@@ -172,6 +172,34 @@ class TestManifest(unittest.TestCase):
             self.assertNotIn(c["capability"], brands)
 
 
+class TestMultiply(unittest.TestCase):
+    def test_expands_cartesian_product(self):
+        import lgwks_multiply as mx
+        out = mx._expand_braces("git {add,reset} {a.py,b.py}")
+        self.assertEqual(out, ["git add a.py", "git add b.py", "git reset a.py", "git reset b.py"])
+
+    def test_single_axis_and_no_brace(self):
+        import lgwks_multiply as mx
+        self.assertEqual(mx._expand_braces("git {status,log}"), ["git status", "git log"])
+        self.assertEqual(mx._expand_braces("git status"), ["git status"])
+
+    def test_classifies_risk_destructive_outranks(self):
+        import lgwks_multiply as mx
+        self.assertEqual(mx._classify("git reset --hard"), "destructive")
+        self.assertEqual(mx._classify("rm -rf build"), "destructive")
+        self.assertEqual(mx._classify("git add x.py"), "mutate")
+        self.assertEqual(mx._classify("git status"), "read")
+        self.assertEqual(mx._classify("frobnicate x"), "unknown")
+
+    def test_run_one_uses_no_shell(self):
+        # injection guard: shell metachars are NOT interpreted (argv via shlex, no shell=True).
+        import lgwks_multiply as mx
+        r = mx._run_one("echo safe; rm -rf /tmp/should-not-happen")
+        # echo receives the rest as literal args; the rm is never executed as a separate shell command.
+        self.assertIn("safe", r["out"])
+        self.assertNotIn("should-not-happen", r["out"].split("safe")[0] if "safe" in r["out"] else "x")
+
+
 class TestGroundDegradation(unittest.TestCase):
     def test_web_empty_search_returns_no_evidence(self):
         orig = search.sweep

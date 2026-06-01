@@ -1156,6 +1156,17 @@ def build_parser() -> argparse.ArgumentParser:
     convert.add_argument("--max-chars", type=int, default=20000, dest="max_chars")
     convert.set_defaults(func=_convert_dispatch)
 
+    # x — multiply intent: one product expression → a command chain, one confirmation, runs them all.
+    mult = sub.add_parser("x", help="multiply intent: 'git {status,log,diff}' → runs the chain")
+    mult.add_argument("expr", help="product expression with {a,b,c} axes (cartesian across braces)")
+    mult.add_argument("--yes", action="store_true", help="non-interactive approve (read-only chains)")
+    mult.add_argument("--force", action="store_true", help="allow destructive commands non-interactively")
+    mult.add_argument("--dry-run", action="store_true", dest="dry_run", help="show the expanded chain, run nothing")
+    mult.add_argument("--keep-going", action="store_true", dest="keep_going", help="continue after a failure")
+    mult.add_argument("--json", action="store_true", help="structured plan/results")
+    mult.add_argument("--plan-only", action="store_true", dest="plan_only", help="with --json: emit plan, don't run")
+    mult.set_defaults(func=_multiply_dispatch)
+
     # solve — "I have this mess/thought: prove what happened." The first real-world experience.
     solve = sub.add_parser("solve", help="prove what happened (currently: git)")
     solve.add_argument("target", nargs="?", default="git", help="what to solve (currently: git)")
@@ -1192,6 +1203,11 @@ def _extract_dispatch(args) -> int:
 def _convert_dispatch(args) -> int:
     import lgwks_files
     return lgwks_files.convert_command(args)
+
+
+def _multiply_dispatch(args) -> int:
+    import lgwks_multiply
+    return lgwks_multiply.multiply_command(args)
 
 
 def main(argv: list[str] | None = None) -> int:
