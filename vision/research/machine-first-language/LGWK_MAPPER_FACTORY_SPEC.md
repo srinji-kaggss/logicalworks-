@@ -188,12 +188,50 @@ Every factory falls back to deterministic behavior when its provider is absent.
   human authors `lock|stale|supersede`. Honors `rate_from_auth` as a hard cap (constitution L8).
 - Never bypass auth not held, paywalls, or CAPTCHA. CLI: `tools/lgwks-auth`.
 
-### UrlRiskFactory  (G3 — "stop evil, not weird")
-- Score, not blocklist (Stripe-Radar pattern). Stage-1 list membership (URLhaus CC0 + Google Safe
-  Browsing / **Web Risk** Update-API local DB + Spamhaus DBL) = instant BLOCK. Stage-2 static
-  classifier (URL lexical entropy, WHOIS domain age, TLS, ASN — **no fetch**) = 0–100.
-- Bands: `0–64 ALLOW · 65–74 REVIEW · 75–100 BLOCK`. Runs at scope-declaration, before the set is
-  frozen. **GSB free = non-commercial; use Web Risk if distributed.**
+### UrlRiskFactory  (G3 — the scope curator; "stop evil, not weird")
+Implemented: `lgwks_urlrisk.py` (deterministic core, stdlib, tested). It does NOT just blocklist —
+it **cherry-picks / reviews / blocks each declared slug** on two axes, at scope-declaration AND
+over time, and it **adapts slug granularity**:
+- **axis 1 — malware:** Stage-1 list membership (URLhaus CC0 + GSB/**Web Risk** local DB + Spamhaus
+  DBL) = instant BLOCK; Stage-2 static lexical score (host entropy/DGA, IP-literal, punycode,
+  suspicious TLD/tokens, userinfo trick, length — **no fetch**) = 0–100.
+- **axis 2 — corrupted intent:** `1 − cos(meant_vec, slug_evidence_centroid)`, accumulated (EMA)
+  over runs. A slug that began on-purpose but drifts — or was smuggled — is blocked even if clean.
+  This is the three-track meant↔true divergence applied to one scope item.
+- **bands:** `0–64 ALLOW · 65–74 REVIEW · 75–100 BLOCK`; worst axis governs (DiD). **GSB free =
+  non-commercial; use Web Risk if distributed.**
+- **granularity adaptation (`adapt_granularity`):** over time the layer REDUCES or INCREASES slugs
+  from the ML chains — N sibling subdomains with low, agreeing drift collapse to `*.domain`
+  (e.g. `docs/mail/drive.google.com → *.google.com`); a wildcard whose children disagree expands
+  back to the specific members. Emitted as **proposals** (critic/human-gated; never silently
+  rewrites the frozen scope — feeds the next declaration round).
+
+**Provider seam + the learning architecture (the Director's "transformer + DeepMind GNN that grows"):**
+- `provider="deterministic"` (today) → `"transformer"` → `"gnn"`. Absent/unwired providers fall back
+  to deterministic; **a model can never ALLOW what a feed-hit BLOCKs** (law gates imagination).
+- **transformer:** a small open-weights URL classifier (world-class framework + weights, not slop) —
+  replaces the lexical Stage-2 score with a learned one. Frozen reference checkpoint = the "teacher".
+- **GNN (grows on the graph):** a graph net over the domain/ASN/co-host/registrar graph the crawl
+  builds (DeepMind-style message passing) — it learns malicious-neighbourhood structure and gets
+  better as the graph grows. This is what makes granularity adaptation principled (siblings that
+  message-pass to the same embedding collapse).
+- **divergence monitor (corrected):** the Director's "track our changing weights vs real weights" is
+  sound in intent but must compare in **function/representation space, not raw weight space** —
+  raw-weight comparison across nets is meaningless (permutation symmetry, different init). Concretely:
+  hold the pretrained model frozen as the **reference (teacher)**; our model is the **student** that
+  continually learns on the crawl. Track `divergence = D(student_outputs, teacher_outputs)` on a
+  shared probe set (KL / cosine of logits/embeddings) + drift of the student vs its OWN earlier
+  checkpoint. Where they differ is a signal: drift-toward-our-slice (overfit, flag) vs genuine new
+  structure the teacher lacks (novel, candidate-promote). Same said/meant/true divergence pattern,
+  applied to the model. Distillation keeps the student grounded in the teacher's framework, not slop.
+
+### Port path (local → portable)
+- **Today:** all stdlib + local; deterministic providers; runs on the 24 GB Mac, no models required.
+- **Port:** each factory is a provider behind a stable interface; porting = adding a provider, never
+  rewriting the kernel. EmbeddingFactory/RerankFactory → MLX (Qwen3) locally or a spot-GPU/Bedrock
+  Titan provider in cloud; UrlRiskFactory transformer/gnn → local MLX or a served checkpoint;
+  MapFactory crawl workers → AWS Lambda non-VPC (rotating egress IPs). The constitution + the
+  deterministic kernel are invariant across the port; only providers and the signer source change.
 
 ### ConductFactory  (the stateless third-AI reviewer, constitution L9)
 - A **zero-memory** reviewer (fresh context, no shared state) sees only the constitution + the

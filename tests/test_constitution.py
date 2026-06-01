@@ -224,5 +224,52 @@ class TestHardeningFixes(unittest.TestCase):
         self.assertIn("objective", mod.gate_intent({**base, "objective": "x"}))    # under min_len
 
 
+class TestUrlRiskCurator(unittest.TestCase):
+    """G3 (L9 malware half): cherry-pick/block slugs on malware + corrupted-intent; granularity adapt."""
+
+    def setUp(self):
+        import lgwks_urlrisk as g
+        self.g = g
+        self.tmp = Path(tempfile.mkdtemp())
+
+    def test_feed_hit_blocks(self):
+        feed = self.tmp / "feed.txt"
+        feed.write_text("evil.example\n", encoding="utf-8")
+        c = self.g.curate_scope(["https://evil.example/x"], feed_path=feed)
+        self.assertEqual(c.scored[0].decision, "block")
+        self.assertEqual(c.scored[0].malware, 100.0)
+
+    def test_benign_allowed_phishing_blocked(self):
+        c = self.g.curate_scope([
+            "https://arxiv.org/abs/2502.13347",
+            "https://xn--paypl-secure.tk/wallet-unlock-verify",
+        ])
+        self.assertEqual(c.scored[0].decision, "allow")
+        self.assertEqual(c.scored[1].decision, "block")
+
+    def test_corrupted_intent_blocks_over_time(self):
+        # A slug whose accumulated evidence is orthogonal to the declared intent is blocked.
+        slug = self.g.slugify_target("https://benign.example/page")
+        history = {slug: {"slug": slug, "evidence_vec": [0.0, 1.0], "runs": 4}}
+        risk = self.g.score_slug("https://benign.example/page", intent_vec=[1.0, 0.0],
+                                 feed=set(), history=history)
+        self.assertEqual(risk.decision, "block")          # drift = 1 - cos = 1.0
+        self.assertGreaterEqual(risk.intent_corruption, self.g.INTENT_CORRUPTION_BLOCK)
+
+    def test_granularity_reduce_to_wildcard(self):
+        urls = ["docs.google.com/a", "mail.google.com/b", "drive.google.com/c"]
+        hist = {u: {"drift": 0.05} for u in urls}
+        prop = self.g.adapt_granularity(urls, hist)
+        self.assertIn("*.google.com", prop["reduce"])
+
+    def test_evidence_accumulates(self):
+        hp = self.tmp / "hist.jsonl"
+        self.g.record_evidence("a.com/x", [1.0, 0.0], hp)
+        self.g.record_evidence("a.com/x", [0.0, 1.0], hp)
+        import json
+        rec = json.loads(hp.read_text().splitlines()[0])
+        self.assertEqual(rec["runs"], 2)
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)
