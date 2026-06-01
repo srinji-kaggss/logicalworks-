@@ -165,6 +165,7 @@ class _Parser:
         while self._peek() == "." and _SEGMENT_RE.match(self._src, self._pos + 1):
             self._pos += 1  # consume '.'
             m2 = _SEGMENT_RE.match(self._src, self._pos)
+            assert m2 is not None  # //why: while condition checked same pos; guaranteed non-None
             self._pos = m2.end()
             segments.append(m2.group())
         return ".".join(segments)
@@ -386,7 +387,7 @@ def _resolve_verb_against_manifest(verb_id: str, manifest: dict) -> str | None:
     return None
 
 
-def _schema_for_verb(verb_id: str, manifest: dict) -> tuple[dict, dict]:
+def _schema_for_verb(_verb_id: str, _manifest: dict) -> tuple[dict, dict]:
     """Return (input_schema, output_schema) for a verb_id.
 
     Currently returns ({}, {}) (any) for all verbs; the manifest v0 does not
