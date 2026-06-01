@@ -203,9 +203,16 @@ At the last committed implementation point:
 
 ## Remaining Work
 
-1. Implement mathematical worker cap as a computed artifact rather than a constant.
-   - Include Model reserve explicitly in `worker-map.json`.
-   - Keep current M5 Pro 24GB outcome at 4 workers.
+1. ~~Implement mathematical worker cap as a computed artifact rather than a constant.~~ DONE.
+   - New module `lgwks_workercap.py`: `probe_host()` + `compute_worker_cap(role_count, host=, reserves=)`.
+   - `MAX_CONCURRENT_WORKERS` constant removed; cap computed from host formula per deploy/plan.
+   - Director decisions encoded: formula cap is a *ceiling*; active slots stay bound to the 4 defined
+     mapper roles (`MAPPER_ROLES`); host is probed live (`os.sysconf` RAM + `os.cpu_count`), overridable
+     and pinned via `LGWKS_HOST_RAM_GIB`/`LGWKS_HOST_CPU` so artifacts replay deterministically.
+   - Model reserve (8GiB) is a named input in `reserves`, stamped into `worker-map.json` + plan/deploy
+     budgets under `worker_cap`. 24GiB/15cpu → 4 (cap_basis=role_count); 64GiB+ records higher headroom
+     but cap stays 4 until a 5th role is added. Tests: `TestWorkerCap` (5) + host-pinned planner suite.
+     110 tests pass.
 
 2. Implement the geometric CLI translator.
    - Add `GeoExpr`, `HumanPreview`, `CommandPlan`, `CorrectionRecord` schemas.

@@ -312,6 +312,21 @@ class TestEmbeddingVault(unittest.TestCase):
 
 
 class TestProjectPlanner(unittest.TestCase):
+    def setUp(self):
+        # //why: pin the host to the spec profile (24GiB/15cpu) so the worker-cap
+        # math is deterministic on any machine. Without this the suite only
+        # passes by accident on a host that happens to match the spec.
+        self._host_env = {k: os.environ.get(k) for k in ("LGWKS_HOST_RAM_GIB", "LGWKS_HOST_CPU")}
+        os.environ["LGWKS_HOST_RAM_GIB"] = "24"
+        os.environ["LGWKS_HOST_CPU"] = "15"
+
+    def tearDown(self):
+        for k, v in self._host_env.items():
+            if v is None:
+                os.environ.pop(k, None)
+            else:
+                os.environ[k] = v
+
     def test_one_prompt_defaults_to_five_cycles_and_four_hundred_embeddings(self):
         import argparse
         import lgwks_project as proj
@@ -337,6 +352,12 @@ class TestProjectPlanner(unittest.TestCase):
         self.assertEqual(plan["budgets"]["max_workers"], 4)
         self.assertEqual(plan["budgets"]["max_concurrent_workers"], 4)
         self.assertLessEqual(len(plan["branch_workers"]), 4)
+        # cap is computed from the host formula, not a constant; 24/15 -> 4 via roles
+        wc = plan["budgets"]["worker_cap"]
+        self.assertEqual(wc["computed_cap"], 4)
+        self.assertEqual(wc["formula_headroom"], 4)
+        self.assertEqual(wc["cap_basis"], "role_count")
+        self.assertEqual(wc["host"]["source"], "override")
 
     def test_project_deploy_dry_run_writes_machine_native_artifacts(self):
         import argparse
@@ -379,6 +400,8 @@ class TestProjectPlanner(unittest.TestCase):
         self.assertIn("local-only", review["learning_export_policy"])
         self.assertEqual(worker_map["max_concurrent_workers"], 4)
         self.assertLessEqual(len(worker_map["active_slots"]), 4)
+        self.assertEqual(worker_map["worker_cap"]["cap_basis"], "role_count")
+        self.assertEqual(worker_map["worker_cap"]["reserves"]["always_on_deep_ml_model_gib"], 8)
         self.assertGreater(review["artifact_embeddings"], 0)
         self.assertIn("transcript", {row["kind"] for row in embeddings})
         self.assertIn("learning-records.jsonl", {row["artifact"] for row in embeddings})
@@ -513,6 +536,54 @@ class TestProjectPlanner(unittest.TestCase):
         self.assertIn("sources 2", rendered)
         self.assertIn("artifact embeddings 22", rendered)
         self.assertIn("execution ok:3, skipped:1", rendered)
+
+
+class TestWorkerCap(unittest.TestCase):
+    def test_spec_host_yields_four_via_role_ceiling(self):
+        import lgwks_workercap as wc
+        cap = wc.compute_worker_cap(4, host={"ram_total_gib": 24, "cpu_total": 15, "source": "test"})
+        self.assertEqual(cap["ram_available_for_workers_gib"], 8)  # 24 - 6 - 8 - 2
+        self.assertEqual(cap["memory_cap"], 4)
+        self.assertEqual(cap["cpu_cap"], 10)
+        self.assertEqual(cap["formula_headroom"], 4)
+        self.assertEqual(cap["computed_cap"], 4)
+        self.assertEqual(cap["cap_basis"], "role_count")
+
+    def test_larger_host_records_headroom_but_stays_role_bound(self):
+        import lgwks_workercap as wc
+        cap = wc.compute_worker_cap(4, host={"ram_total_gib": 64, "cpu_total": 24, "source": "test"})
+        self.assertGreater(cap["formula_headroom"], 4)  # host could take more
+        self.assertEqual(cap["computed_cap"], 4)         # but no phantom slots beyond defined roles
+        self.assertEqual(cap["cap_basis"], "role_count")
+
+    def test_model_reserve_is_an_enforced_input_not_a_comment(self):
+        import lgwks_workercap as wc
+        with_reserve = wc.compute_worker_cap(8, host={"ram_total_gib": 24, "cpu_total": 15, "source": "t"})
+        no_reserve = wc.compute_worker_cap(
+            8, host={"ram_total_gib": 24, "cpu_total": 15, "source": "t"},
+            reserves={**wc.RESERVES, "always_on_deep_ml_model_gib": 0})
+        # dropping the 8GiB Model reserve must visibly raise the memory headroom
+        self.assertEqual(with_reserve["memory_cap"], 4)
+        self.assertEqual(no_reserve["memory_cap"], 8)
+        self.assertGreater(no_reserve["formula_headroom"], with_reserve["formula_headroom"])
+
+    def test_constrained_host_floors_at_one_not_zero(self):
+        import lgwks_workercap as wc
+        cap = wc.compute_worker_cap(4, host={"ram_total_gib": 12, "cpu_total": 4, "source": "test"})
+        self.assertEqual(cap["formula_headroom"], 0)  # no slack after reserves
+        self.assertEqual(cap["computed_cap"], 1)       # still runs one worker, never deadlocks at 0
+
+    def test_probe_env_override_is_deterministic_and_flagged(self):
+        import lgwks_workercap as wc
+        prior = {k: os.environ.get(k) for k in ("LGWKS_HOST_RAM_GIB", "LGWKS_HOST_CPU")}
+        os.environ["LGWKS_HOST_RAM_GIB"] = "32"
+        os.environ["LGWKS_HOST_CPU"] = "12"
+        try:
+            host = wc.probe_host()
+        finally:
+            for k, v in prior.items():
+                os.environ.pop(k, None) if v is None else os.environ.__setitem__(k, v)
+        self.assertEqual(host, {"ram_total_gib": 32, "cpu_total": 12, "source": "override"})
 
 
 class TestMultiply(unittest.TestCase):

@@ -16,6 +16,7 @@ from collections import Counter
 from pathlib import Path
 
 import lgwks_cycle
+import lgwks_workercap
 
 ROOT = Path(__file__).resolve().parent
 PROJECT_ROOT = ROOT / "store" / "project-plans"
@@ -23,9 +24,30 @@ DEPLOY_ROOT = ROOT / "store" / "project-deploy"
 
 DEFAULT_REASONING_CYCLES = 5
 DEFAULT_EMBEDDING_ROUNDS = 400
-DEFAULT_WORKERS = 4
-MAX_CONCURRENT_WORKERS = 4
 DEFAULT_TOKENS = 8000
+
+# //why: the four defined mapper roles are the single source of concurrency
+# truth. The spawnable ceiling is min(host-formula-headroom, role_count) — see
+# lgwks_workercap. A new role is a deliberate addition here, not a phantom slot.
+MAPPER_ROLES = [
+    {"slot": 1, "worker_id": "context-001", "mapper": "internal-context-mapper",
+     "owns": ["prompt transcript", "memory-context", "operator-profile"], "api_keys": "none"},
+    {"slot": 2, "worker_id": "source-001", "mapper": "internal-public-source-mapper",
+     "owns": ["open-license source metadata"], "api_keys": "none-by-default"},
+    {"slot": 3, "worker_id": "embed-001", "mapper": "internal-deterministic-embed-mapper",
+     "owns": ["artifact-embeddings", "vector-vault"], "api_keys": "none"},
+    {"slot": 4, "worker_id": "critic-packet-001", "mapper": "internal-critic-packet-mapper",
+     "owns": ["critic-records", "machine-packets", "graph-edges"], "api_keys": "none"},
+]
+MAPPER_ROLE_COUNT = len(MAPPER_ROLES)
+
+
+def worker_cap() -> dict:
+    """Computed worker-cap breakdown for the current (probed) host."""
+    return lgwks_workercap.compute_worker_cap(MAPPER_ROLE_COUNT)
+
+
+DEFAULT_WORKERS = MAPPER_ROLE_COUNT
 EMBED_DIMS = 128
 ACADEMIC_SOURCES = ["openalex", "crossref", "openverse"]
 DEFAULT_WEIGHT = {
@@ -78,9 +100,10 @@ def _clamp(value: int, default: int, low: int, high: int) -> int:
 def build_plan(args: argparse.Namespace) -> dict:
     project = args.project
     prompt = args.prompt or project
+    cap = worker_cap()
     reasoning_cycles = _clamp(args.reasoning_cycles, DEFAULT_REASONING_CYCLES, 1, 50)
     embedding_rounds = _clamp(args.embedding_rounds, DEFAULT_EMBEDDING_ROUNDS, 1, 10_000)
-    max_workers = _clamp(args.max_workers, DEFAULT_WORKERS, 1, MAX_CONCURRENT_WORKERS)
+    max_workers = _clamp(args.max_workers, cap["computed_cap"], 1, cap["computed_cap"])
     tokens_per_cycle = _clamp(args.tokens_per_cycle, DEFAULT_TOKENS, 1000, 200_000)
     keywords = _terms(prompt)
     plan_id = _slug(project + "\n" + prompt)
@@ -101,7 +124,8 @@ def build_plan(args: argparse.Namespace) -> dict:
             "reasoning_cycles": reasoning_cycles,
             "embedding_rounds": embedding_rounds,
             "max_workers": max_workers,
-            "max_concurrent_workers": MAX_CONCURRENT_WORKERS,
+            "max_concurrent_workers": cap["computed_cap"],
+            "worker_cap": cap,
             "tokens_per_cycle": tokens_per_cycle,
             "defaulted_reasoning_cycles": args.reasoning_cycles is None,
         },
@@ -377,25 +401,20 @@ def _operator_profile(project: str, prompt: str, learning_mode: str, device_cons
     }
 
 
-def _worker_map(project: str, max_workers: int) -> dict:
-    workers = [
-        {"slot": 1, "worker_id": "context-001", "mapper": "internal-context-mapper",
-         "owns": ["prompt transcript", "memory-context", "operator-profile"], "api_keys": "none"},
-        {"slot": 2, "worker_id": "source-001", "mapper": "internal-public-source-mapper",
-         "owns": ["open-license source metadata"], "api_keys": "none-by-default"},
-        {"slot": 3, "worker_id": "embed-001", "mapper": "internal-deterministic-embed-mapper",
-         "owns": ["artifact-embeddings", "vector-vault"], "api_keys": "none"},
-        {"slot": 4, "worker_id": "critic-packet-001", "mapper": "internal-critic-packet-mapper",
-         "owns": ["critic-records", "machine-packets", "graph-edges"], "api_keys": "none"},
-    ]
+def _worker_map(project: str, max_workers: int, cap: dict) -> dict:
     return {
         "schema": "lgwks-worker-map/1",
         "project": project,
-        "max_concurrent_workers": MAX_CONCURRENT_WORKERS,
+        "max_concurrent_workers": cap["computed_cap"],
         "requested_workers": max_workers,
-        "active_slots": workers[:max_workers],
+        "active_slots": MAPPER_ROLES[:max_workers],
+        "worker_cap": cap,
         "api_key_policy": "prefer internal deterministic mappers; keyed external providers are optional later",
-        "spawn_policy": "never run more than four worker slots at any given time",
+        "spawn_policy": (
+            f"never run more than the computed cap ({cap['computed_cap']}) worker slots at once; "
+            f"cap basis = {cap['cap_basis']}, host {cap['host']['ram_total_gib']}GiB/"
+            f"{cap['host']['cpu_total']}cpu ({cap['host']['source']})"
+        ),
     }
 
 
@@ -555,9 +574,10 @@ def _run_non_ml_execution(args: argparse.Namespace, prompt: str, keywords: list[
 
 def deploy_command(args: argparse.Namespace) -> int:
     prompt = args.prompt or args.project
+    cap = worker_cap()
     reasoning_cycles = _clamp(args.reasoning_cycles, DEFAULT_REASONING_CYCLES, 1, 50)
     embedding_rounds = _clamp(args.embedding_rounds, DEFAULT_EMBEDDING_ROUNDS, 1, 10_000)
-    max_workers = _clamp(args.max_workers, DEFAULT_WORKERS, 1, MAX_CONCURRENT_WORKERS)
+    max_workers = _clamp(args.max_workers, cap["computed_cap"], 1, cap["computed_cap"])
     tokens_per_cycle = _clamp(args.tokens_per_cycle, DEFAULT_TOKENS, 1000, 200_000)
     learning_mode = args.learning_mode
     dry_run = args.dry_run or not args.execute
@@ -576,7 +596,7 @@ def deploy_command(args: argparse.Namespace) -> int:
     critics = _critic_records(cycles)
     token_ledger = _token_ledger(cycles)
     operator_profile = _operator_profile(args.project, prompt, learning_mode, args.device_consent)
-    worker_map = _worker_map(args.project, max_workers)
+    worker_map = _worker_map(args.project, max_workers, cap)
     execution_summary = {"events": [], "source_records": 0,
                          "vector_summary": {"status": "skipped", "reason": "dry-run"}}
 
@@ -612,8 +632,8 @@ def deploy_command(args: argparse.Namespace) -> int:
         "learning_mode": learning_mode,
         "device_consent": args.device_consent,
         "budgets": {"reasoning_cycles": reasoning_cycles, "embedding_rounds": embedding_rounds,
-                    "max_workers": max_workers, "max_concurrent_workers": MAX_CONCURRENT_WORKERS,
-                    "tokens_per_cycle": tokens_per_cycle},
+                    "max_workers": max_workers, "max_concurrent_workers": cap["computed_cap"],
+                    "worker_cap": cap, "tokens_per_cycle": tokens_per_cycle},
         "ai_research_skills_map": {
             "orchestration": "autoresearch two-loop",
             "artifact": "ARA compiler/research-manager/rigor-reviewer",
@@ -743,7 +763,7 @@ def _render_review(review: dict) -> str:
         f"project {review['project']}",
         f"chain {'ok' if review['chain_ok'] else 'broken'} · cycles {review['cycles']} · tokens {review['token_status']} ({review['token_spend']})",
         f"sources {review['source_records']} · vector {review['vector_vault_status']} ({review['vector_records']} records)",
-        f"artifact embeddings {review.get('artifact_embeddings', 0)} · workers {review.get('active_worker_slots', 0)}/{review.get('max_concurrent_workers', MAX_CONCURRENT_WORKERS)}",
+        f"artifact embeddings {review.get('artifact_embeddings', 0)} · workers {review.get('active_worker_slots', 0)}/{review.get('max_concurrent_workers', MAPPER_ROLE_COUNT)}",
         f"machine packets {review['machine_packets']} · graph edges {review['graph_edges']} · lineage {review['model_lineage_count']}",
         f"operator one-command={str(review['one_command_replaces_many']).lower()} build-on-existing={str(review['build_on_existing_work']).lower()}",
         f"rollback {review['rollback_ref'] or 'none'}",
