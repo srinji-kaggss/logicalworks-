@@ -1194,6 +1194,10 @@ def build_parser() -> argparse.ArgumentParser:
     import lgwks_embed
     lgwks_embed.add_parser(sub)
 
+    # project — one-prompt orchestrator: identify/spec now, deploy executor next.
+    import lgwks_project
+    lgwks_project.add_parser(sub)
+
     # login — capture a user-consented browser session for one host. Secrets/cookies stay in the
     # host-scoped Playwright storage file and are only reused for that same host.
     login = sub.add_parser("login", help="save a host-scoped browser session (human logs in)")

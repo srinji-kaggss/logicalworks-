@@ -66,6 +66,11 @@ _VERBS = [
         "args": {"path": "folder", "--project": "memory project", "--keywords": "repeatable focus terms", "--cycles": "0 = until stable"},
         "output": "project root vault + per-folder sub-vault manifests and embeddings", "tokens": "none",
     },
+    {
+        "verb": "project plan", "intent": "turn one prompt into bounded branch-worker crawl/embed/reason plan",
+        "args": {"project": "name", "--prompt": "goal", "--reasoning-cycles": "default 5", "--embedding-rounds": "default 400"},
+        "output": "plan.json with budgets, branch workers, frontier techniques, next commands", "tokens": "none",
+    },
 ]
 
 # Agent-facing usage notes — terse, the things an AI needs to not misuse the tool.

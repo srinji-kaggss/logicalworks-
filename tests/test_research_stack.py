@@ -309,6 +309,22 @@ class TestEmbeddingVault(unittest.TestCase):
         self.assertLessEqual(manifest["cycles_run"], 3)
 
 
+class TestProjectPlanner(unittest.TestCase):
+    def test_one_prompt_defaults_to_five_cycles_and_four_hundred_embeddings(self):
+        import argparse
+        import lgwks_project as proj
+
+        args = argparse.Namespace(project="salesforce", prompt="map Salesforce as AI OS competitor",
+                                  site="scholar.google.com", folder=".", reasoning_cycles=None,
+                                  embedding_rounds=400, max_workers=4, tokens_per_cycle=8000)
+        plan = proj.build_plan(args)
+        self.assertEqual(plan["budgets"]["reasoning_cycles"], 5)
+        self.assertEqual(plan["budgets"]["embedding_rounds"], 400)
+        self.assertEqual(plan["machine_weight"]["retrieval"], 0.35)
+        self.assertIn("Self-RAG", plan["frontier_techniques"])
+        self.assertTrue(plan["next_commands"])
+
+
 class TestMultiply(unittest.TestCase):
     def test_expands_cartesian_product(self):
         import lgwks_multiply as mx
