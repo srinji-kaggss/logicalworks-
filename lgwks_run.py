@@ -256,6 +256,7 @@ def embed(text: str, embed_on: bool, provider: str = "auto") -> tuple[list[float
         return None, "none", False
     if provider in ("auto", "ollama"):
         import lgwks_ollama
+        lgwks_ollama.ensure_eye_model()      # pull the local Eye on first use (no-op if present/down)
         vec = lgwks_ollama.embed_one(text)
         if vec is not None:
             return lgwks_ollama.slice_mrl(vec, DIMS), f"ollama:{lgwks_ollama.EYE_MODEL}", True

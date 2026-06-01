@@ -48,6 +48,39 @@ def is_up(timeout: int = 2) -> bool:
         return False
 
 
+def _have_model(name: str, timeout: int = 2) -> bool:
+    data = _post("/api/tags", {}, timeout) or {}
+    return any(str(m.get("name", "")).split(":")[0] == name.split(":")[0]
+               for m in data.get("models", []))
+
+
+_eye_ready = False
+
+
+def ensure_eye_model(model: str = EYE_MODEL) -> bool:
+    """Pull the local embedding model on start so local embed works out of the box (Director's spec:
+    'embedding model is downloaded on start for local embed'). No-op if already present or Ollama is
+    down. The Eye stays LOCAL — only the Tongue goes cloud. Returns True if the model is ready.
+    Memoised: the per-chunk caller pays the /api/tags check at most once per process."""
+    global _eye_ready
+    if _eye_ready:
+        return True
+    if os.environ.get("LGWKS_NO_MODELS") or not is_up():
+        return False
+    if _have_model(model):
+        _eye_ready = True
+        return True
+    print(f"  Eye: pulling {model} (one-time local download)…", flush=True)
+    try:
+        import subprocess
+        proc = subprocess.run(["ollama", "pull", model], timeout=3600)
+        if proc.returncode == 0:
+            _eye_ready = True
+        return proc.returncode == 0
+    except Exception:
+        return False
+
+
 def embed_one(text: str, model: str = EYE_MODEL, timeout: int = 60) -> list[float] | None:
     """Real semantic embedding (the Eye). Returns the full native vector, or None to signal fallback."""
     if os.environ.get("LGWKS_NO_MODELS"):

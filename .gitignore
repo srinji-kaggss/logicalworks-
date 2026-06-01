@@ -10,3 +10,6 @@ vision/research/research-network/runs/
 # jarvis akinator generated artifacts
 research-map.mmd
 runs/
+
+# hermetic test / CI: force deterministic fallbacks (no Ollama)
+# LGWKS_NO_MODELS=1

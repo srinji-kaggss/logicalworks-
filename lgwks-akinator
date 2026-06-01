@@ -103,7 +103,7 @@ class Confidence:
 
 @dataclass
 class Chain:
-    """One causal chain: hypothesis + its NULL (bias-stripping), the path nodes, keywords, confidence."""
+    """One hypothesis: claim + its NULL (bias-stripping), what it builds on, path, keywords, confidence."""
     label: str
     hypothesis: str
     null: str
@@ -112,6 +112,8 @@ class Chain:
     keywords: list[str]
     confidence: Confidence
     parent: str | None = None           # the node we dived from (chain tracking)
+    builds_on: list[str] = field(default_factory=list)   # prior breakthroughs/frameworks it extends
+    role: str = "mechanism"             # null | mechanism (H0 is the null)
 
     @property
     def c(self) -> float:
@@ -169,11 +171,14 @@ def render_map(objective: str, chains: list[Chain]) -> None:
     for i, ch in enumerate(chains, 1):
         tier = HOT[min(2, int(ch.c * 3))]
         bar = "█" * max(1, round(ch.c * 12))
-        print(f"  {_c(str(i), BOLD)}  {_c(ch.label.upper(), tier)}  {_c(bar, tier)} {_c(f'C={ch.c}', DIM)}  {_c(f'({ch.confidence.drivers()})', DIM)}")
+        tag = "NULL" if ch.role == "null" else ch.label.upper()
+        print(f"  {_c(str(i), BOLD)}  {_c(tag, tier)}  {_c(bar, tier)} {_c(f'C={ch.c}', DIM)}  {_c(f'({ch.confidence.drivers()})', DIM)}")
         path = _c(" → ", DIM).join(_c(n, tier) for n in ch.nodes)
         print(f"      {path}")
         print(f"      {_c('H', BOLD)} {ch.hypothesis}")
-        print(f"      {_c('Ø', DIM)} {_c(ch.null, DIM)}   {_c('← the falsifier we dive toward (strip bias)', DIM)}")
+        print(f"      {_c('Ø', DIM)} {_c(ch.null, DIM)}   {_c('← falsifier we dive toward (strip bias)', DIM)}")
+        if ch.builds_on:
+            print(f"      {_c('⊕ builds on: ' + ', '.join(ch.builds_on), DIM)}")
         if ch.parent:
             print(f"      {_c('↑ continues from: ' + ch.parent, DIM)}")
         print()
@@ -249,26 +254,39 @@ class Session:
     trail: list[str] = field(default_factory=list)   # the tracked chain across deep-dives
 
 
-def tongue_enrich(objective: str, purpose: str, chains: list[Chain]) -> tuple[list[Chain], dict | None]:
-    """Let the Tongue (gemma4/Ollama) write good hypothesis/null/answer text + H0/H1/Hn over the
-    deterministic skeleton. Fails closed: Ollama down or bad JSON → chains unchanged, tongue=None."""
+def tongue_enrich(objective: str, purpose: str, fallback: list[Chain],
+                  prior: list[str]) -> tuple[list[Chain], dict | None]:
+    """When the Tongue (gemma4) is up, BUILD the chains from its autonomously-compiled hypothesis set
+    (H0 + H1..Hn, variable count, each grounded in prior art). When down, keep the deterministic
+    `fallback` skeleton (3 lenses). Fail closed — never fabricate."""
     try:
         import lgwks_tongue
     except Exception:
-        return chains, None
-    labels = [c.label for c in chains]
-    enriched = lgwks_tongue.enrich_chains(objective, purpose, labels)
-    hyps = lgwks_tongue.hypotheses(objective, purpose)
-    if enriched and isinstance(enriched.get("chains"), list):
-        by_label = {c.get("label"): c for c in enriched["chains"] if isinstance(c, dict)}
-        for ch in chains:                       # graft text onto the deterministic structure only
-            e = by_label.get(ch.label)
-            if e:
-                ch.hypothesis = e.get("hypothesis") or ch.hypothesis
-                ch.null = e.get("null") or ch.null
-                if isinstance(e.get("keywords"), list) and e["keywords"]:
-                    ch.keywords = [str(k) for k in e["keywords"]][:6]
-    return chains, {"hypotheses": hyps, "question": (enriched or {}).get("question")}
+        return fallback, None
+    compiled = lgwks_tongue.compile_hypotheses(objective, purpose)
+    if not compiled:
+        return fallback, None
+    seeds = tokens(objective) + tokens(purpose)
+    path = list(dict.fromkeys((prior or []) + seeds))[:5] or [seeds[0] if seeds else "topic"]
+    chains: list[Chain] = []
+    for h in compiled["hypotheses"]:                       # one chain per AUTONOMOUS hypothesis
+        kw = list(dict.fromkeys(h.get("keywords", []) + seeds))[:6]
+        # A null is unproven-by-default (high uncertainty); a well-grounded mechanism scores higher.
+        conf = Confidence(
+            ctx=min(1.0, len(prior) * 0.25 + 0.4),
+            intent=min(1.0, 0.5 + 0.1 * len(set(seeds))),
+            clarity=min(1.0, len(seeds) / 6.0),
+            agreement=0.65 if h.get("builds_on") else 0.45,    # grounded-in-prior-art raises agreement
+            tier_floor="secondary",
+        )
+        chains.append(Chain(label=h["id"], hypothesis=h["claim"], null=h["falsifier"],
+                            nodes=path, edges=[(path[i], "depends_on", path[i + 1]) for i in range(len(path) - 1)],
+                            keywords=kw, confidence=conf, parent=(prior[-1] if prior else None),
+                            builds_on=h.get("builds_on", []), role=h.get("role", "mechanism")))
+    # H0 (null) renders first; then mechanisms by confidence.
+    chains.sort(key=lambda c: (c.role != "null", -c.c))
+    return chains, {"meant": compiled.get("meant"), "question": compiled.get("question"),
+                    "autonomous": True, "count": len(chains)}
 
 
 def run(objective: str, intent: dict, output: str, embed: bool, pick: int | None,
@@ -288,21 +306,22 @@ def run(objective: str, intent: dict, output: str, embed: bool, pick: int | None
     print(_c(f"  constitution: {const.get('version')} · {len(const.get('laws', []))} laws active", DIM))
 
     while True:
-        chains = map_intent(objective, intent["purpose"], intent["tier_floor"],
-                            float(intent.get("novelty", 0.6)), prior=sess.trail)
-        chains, tongue = tongue_enrich(objective, intent["purpose"], chains)  # Tongue or fallback
+        fallback = map_intent(objective, intent["purpose"], intent["tier_floor"],
+                              float(intent.get("novelty", 0.6)), prior=sess.trail)
+        chains, tongue = tongue_enrich(objective, intent["purpose"], fallback, sess.trail)
         ok, reason = conduct_decision(chains)
         print(_c(f"  conduct (L9): {'YES' if ok else 'NO'} — {reason}", BOLD))
         if not ok:
             print(_c("  We're sorry — this intent does not match our code of conduct.", BOLD))
             return 3
-        if tongue and tongue.get("hypotheses"):
-            h = tongue["hypotheses"]
-            print(_c(f"  H0 (null to beat): {h.get('H0', {}).get('claim', '?')}", BOLD))
-            for k in ("H1", "Hn"):
-                if h.get(k, {}).get("claim"):
-                    print(_c(f"  {k}: {h[k]['claim']}", DIM))
+        if tongue and tongue.get("autonomous"):
+            print(_c(f"  Tongue compiled {tongue['count']} hypotheses autonomously · "
+                     f"meant: {tongue.get('meant', '')}", DIM))
+        else:
+            print(_c("  (deterministic skeleton — Tongue offline)", DIM))
         render_map(objective, chains)
+        if tongue and tongue.get("question"):
+            print(_c(f"  ◆ elimination Q: {tongue['question']}", BOLD))
 
         if output in ("graph", "all"):
             mmd = write_mermaid(objective, chains, ROOT / "research-map.mmd")
