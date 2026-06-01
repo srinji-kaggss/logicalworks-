@@ -16,6 +16,7 @@ clean: animation + colour auto-off when not a TTY or NO_COLOR.
 
 from __future__ import annotations
 
+import subprocess
 import sys
 import time
 from pathlib import Path
@@ -77,7 +78,7 @@ def _banner(on: bool, anim: bool) -> None:
             time.sleep(0.08)
         sys.stdout.write("\r")
     print("  " + fg("◇◈◆✦", EMERALD, on=on, bold=True)
-          + fg("  lgwks", CREAM, on=on, bold=True)
+          + fg("  Logical Works", CREAM, on=on, bold=True)
           + fg("  · research co-processor", CREAM_DIM, on=on))
     _sleep(40, anim)
 
@@ -216,11 +217,101 @@ def render_home(no_anim: bool = False) -> int:
           curious, CREAM, on=on, anim=anim)
 
     lore = _LORE[run_count % len(_LORE)]
-    print("  " + fg("◆ lgwks", SLATE_DIM, on=on)
+    print("  " + fg("◆ Logical Works", SLATE_DIM, on=on)
           + fg("  forged by Logical Claude with Codex", SLATE_DIM, on=on)
           + fg(f"   {lore}", SLATE_DIM, on=on))
     print()
-    return 0
+    return _entryway(on)
+
+
+# ── the entryway ─────────────────────────────────────────────────────────────────────────────────
+# After the dashboard, drop into the first question set (like `claude` on launch) — an interactive prompt
+# that opens the rest of the options. TTY-only: piped/non-interactive callers get the dashboard and exit
+# clean (the machine surface is never blocked on input).
+
+def _menu(on: bool) -> None:
+    print(ui.spine(fg("where to?", EMERALD_DIM, on=on)
+                   + fg("   — type an intent, or pick", CREAM_DIM, on=on), on=on))
+    rows = [
+        ("›", "your intent", "research it — I'll ask the question behind it, then ground it"),
+        ("1", "solve git", "prove what happened in a repo (read-only, no tokens)"),
+        ("2", "demo", "watch the full loop, offline, no tokens"),
+        ("3", "doctor", "what's wired on this machine"),
+        ("q", "quit", ""),
+    ]
+    for key, name, why in rows:
+        line = ("  " + fg(f"{key} ", EMERALD, on=on, bold=True)
+                + fg(f"{name:<13}", CREAM, on=on)
+                + (fg(why, CREAM_DIM, on=on) if why else ""))
+        print(ui.spine(line, on=on))
+    print(ui.spine(on=on))
+
+
+def _ask(prompt: str, on: bool) -> str:
+    try:
+        return input("  " + fg("❯ ", EMERALD, on=on, bold=True) + prompt).strip()
+    except (EOFError, KeyboardInterrupt):
+        return "q"
+
+
+def _run(argv: list[str]) -> None:
+    """Route into a sibling verb in its own process (clean stdout, isolated failure)."""
+    try:
+        subprocess.run([sys.executable, str(ROOT / argv[0]), *argv[1:]])
+    except Exception as e:
+        print(fg(f"  · couldn't launch {argv[0]}: {type(e).__name__}", AMBER, on=ui.color_on()))
+
+
+def _intent_flow(intent: str, on: bool) -> None:
+    """The first question set: intent → the question behind it (L1 gate) → confirm → grounded run.
+    The human stands in for the not-yet-built Machine refinement (build #3) — same contract, by hand."""
+    purpose = _ask(fg("the question behind it (why)?  ", CREAM_DIM, on=on), on)
+    try:
+        import lgwks_steering as st
+        missing = st.require_context({"objective": intent, "purpose": purpose}, ["objective", "purpose"])
+    except Exception:
+        missing = [] if purpose else ["purpose"]
+    if missing:   # honest L1 bounce — don't spend tokens on an underspecified question
+        print(ui.spine(fg(f"need {', '.join(missing)} to spend tokens — bouncing back to you", AMBER, on=on), on=on))
+        return
+    print(ui.spine(fg("this runs a grounded research pass — it spends Tongue tokens.", CREAM_DIM, on=on), on=on))
+    if _ask(fg("go? [y/N]  ", CREAM_DIM, on=on), on).lower() not in ("y", "yes"):
+        print(ui.spine(fg("held.", CREAM_DIM, on=on), on=on))
+        return
+    _run(["lgwks-akinator", intent, "--purpose", purpose, "--auto", "--crawl", "ground"])
+
+
+def _entryway(on: bool) -> int:
+    if not sys.stdin.isatty():
+        return 0   # piped / non-interactive — dashboard only, never block on input
+    _menu(on)
+    while True:
+        choice = _ask("", on)
+        low = choice.lower()
+        if low in ("q", "quit", "exit", ""):
+            print(ui.spine(fg("← stay curious.", EMERALD_DIM, on=on), on=on))
+            return 0
+        if low in ("1", "solve", "solve git"):
+            _run(["lgwks", "solve", "git"])
+        elif low in ("2", "demo"):
+            _run(["lgwks-akinator", "--demo"])
+        elif low in ("3", "doctor"):
+            _print_doctor(on)
+        else:
+            _intent_flow(choice, on)   # anything else = an intent
+        print(ui.spine(on=on))
+        _menu(on)
+
+
+def _print_doctor(on: bool) -> None:
+    try:
+        import lgwks_capabilities as cap
+        for r in cap.doctor():
+            mark = fg(r["chosen"], EMERALD, on=on) if r.get("chosen") else fg("MISSING", AMBER, on=on)
+            tail = "" if r.get("chosen") else fg(f"  → {r.get('install','')}", CREAM_DIM, on=on)
+            print(ui.spine(fg(f"{r['capability']:<9}", CREAM, on=on) + mark + tail, on=on))
+    except Exception as e:
+        print(ui.spine(fg(f"doctor unavailable: {type(e).__name__}", AMBER, on=on), on=on))
 
 
 def home_command(args) -> int:
