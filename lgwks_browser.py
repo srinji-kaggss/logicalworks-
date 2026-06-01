@@ -41,9 +41,11 @@ def _text_from(html: str, max_chars: int) -> str:
 
 
 def render(url: str, max_chars: int = 8000, *, use_session: bool = False,
-           wait_ms: int = 1500) -> dict:
+           wait_ms: int = 1500, with_html: bool = False) -> dict:
     """Fetch a JS-rendered page with a real browser. use_session loads the user's saved login
-    (for LinkedIn/auth pages). Returns {ok, text, reason}. ok=False carries an honest reason."""
+    (for LinkedIn/auth pages). with_html also returns the rendered DOM html so a caller can parse
+    links/anchors from what the browser actually saw — the real around-the-block (no re-GET of a
+    blocked endpoint). Returns {ok, text, reason[, html]}. ok=False carries an honest reason."""
     ok, why = available()
     if not ok:
         return {"ok": False, "text": "", "reason": why}
@@ -62,7 +64,10 @@ def render(url: str, max_chars: int = 8000, *, use_session: bool = False,
             page.wait_for_timeout(wait_ms)                   # let client JS render
             html = page.content()
             browser.close()
-            return {"ok": True, "text": _text_from(html, max_chars), "reason": "rendered"}
+            out = {"ok": True, "text": _text_from(html, max_chars), "reason": "rendered"}
+            if with_html:
+                out["html"] = html                           # the DOM the browser saw — parse links here
+            return out
     except Exception as e:
         return {"ok": False, "text": "", "reason": f"render failed: {type(e).__name__}"}
 

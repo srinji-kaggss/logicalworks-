@@ -73,6 +73,53 @@ class TestSearchHygiene(unittest.TestCase):
         wrapped = "//duckduckgo.com/l/?uddg=https%3A%2F%2Fexample.com%2Fpage&rut=abc"
         self.assertEqual(search._unwrap(wrapped), "https://example.com/page")
 
+    def test_parse_links_reads_dom_and_skips_nav(self):
+        # the real around-the-block: parse links from a (browser-rendered) DOM, drop self/nav hosts.
+        dom = ('<a href="https://duckduckgo.com/settings">nav</a>'
+               '<a href="https://greatwestlifeco.com/news/value-partners.html">Value Partners acquisition</a>'
+               '<a href="//duckduckgo.com/l/?uddg=https%3A%2F%2Fquadrus.com%2Fabout">Quadrus about</a>')
+        rows = search._parse_links(dom, k=5, via="rendered")
+        urls = [r["url"] for r in rows]
+        self.assertNotIn("https://duckduckgo.com/settings", urls, "nav/self host must be dropped")
+        self.assertIn("https://greatwestlifeco.com/news/value-partners.html", urls)
+        self.assertIn("https://quadrus.com/about", urls, "wrapped redirect must be unwrapped")
+        self.assertTrue(all(r["via"] == "rendered" for r in rows))
+
+    def test_open_rotates_endpoints_on_empty(self):
+        # the live failure: one endpoint 429s → empty. _open must back off and rotate to the next host.
+        calls = []
+        def fake_curl(url, data=None, timeout=20):
+            calls.append(url)
+            if "html.duckduckgo" in url:
+                return ""                                   # first endpoint blocked/empty
+            return '<a href="https://cl.com/acq">Canada Life acquisition</a>'  # second endpoint answers
+        slept = []
+        orig = search._curl
+        search._curl = fake_curl
+        try:
+            rows = search._open("Canada Life acquisition", k=3, sleep=lambda s: slept.append(s))
+        finally:
+            search._curl = orig
+        self.assertTrue(rows, "rotation must recover when the first endpoint is dry")
+        self.assertEqual(rows[0]["url"], "https://cl.com/acq")
+        self.assertGreaterEqual(len(calls), 2, "must have tried more than one endpoint")
+        self.assertTrue(slept, "must have backed off before rotating")
+
+    def test_mojeek_parser_skips_promo_and_nav(self):
+        # the binning trap: a generic anchor grab conflated Mojeek's own promo links with results.
+        # the targeted parser takes ONLY <a class="title"> result anchors.
+        body = ('<a href="https://buttondown.email/Mojeek">Newsletter</a>'
+                '<ul class="results-standard">'
+                '<a class="title" href="https://deepmind.google/blog/alphaevolve">AlphaEvolve</a>'
+                '</ul>')
+        rows = search._parse_mojeek(body, k=5, via="open")
+        urls = [r["url"] for r in rows]
+        self.assertEqual(urls, ["https://deepmind.google/blog/alphaevolve"], "only result anchors, no promo")
+
+    def test_backoff_monotonic_and_capped(self):
+        self.assertLess(search._backoff(0), search._backoff(2))
+        self.assertLessEqual(search._backoff(10), 2.0, "backoff is capped, never unbounded")
+
 
 class TestSteering(unittest.TestCase):
     def test_nan_and_out_of_range_clamp_to_default(self):

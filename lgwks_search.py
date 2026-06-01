@@ -21,6 +21,7 @@ import concurrent.futures
 import html
 import re
 import subprocess
+import time
 import urllib.parse
 
 try:
@@ -30,9 +31,15 @@ except Exception:
 
 _UA = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36"
 _DDG_HTML = "https://html.duckduckgo.com/html/"
+_DDG_LITE = "https://lite.duckduckgo.com/lite/"   # lighter HTML; different host → independent rate-limit
+_MOJEEK = "https://www.mojeek.com/search"          # independent index (GET ?q=) — endpoint diversity
 # DDG wraps result links as /l/?uddg=<percent-encoded-real-url> — we decode back to the true target.
 _RESULT_A = re.compile(r'<a[^>]*class="result__a"[^>]*href="([^"]+)"[^>]*>(.*?)</a>', re.S)
 _SNIPPET = re.compile(r'class="result__snippet"[^>]*>(.*?)</a>', re.S)
+# Generic anchor parser — robust across lite endpoints AND a browser-rendered DOM (the around-the-block).
+_ANY_A = re.compile(r'<a\b[^>]*href="([^"]+)"[^>]*>(.*?)</a>', re.S)
+_MOJEEK_A = re.compile(r'<a[^>]*class="title"[^>]*href="([^"]+)"[^>]*>(.*?)</a>', re.S)  # mojeek result only
+_NAV_HOSTS = ("duckduckgo.com", "mojeek.com")       # self/nav links, never a result
 _TAG = re.compile(r"<[^>]+>")
 
 
@@ -79,30 +86,90 @@ def _parse_ddg(body: str, k: int, via: str) -> list[dict]:
     return out
 
 
-def _ddg(query: str, k: int) -> list[dict]:
-    """Open HTML search endpoint via http. Free, no key — the always-present floor."""
-    body = _curl(_DDG_HTML, data=urllib.parse.urlencode({"q": query}))
-    return _parse_ddg(body, k, via="open") if body else []
+def _parse_links(body: str, k: int, via: str) -> list[dict]:
+    """Generic anchor parser: pull real result links out of ANY results HTML — a lite endpoint or a
+    browser-rendered DOM. Skips self/nav hosts. This is what makes 'rendered' a TRUE around-the-block:
+    we parse the DOM the browser actually saw, never re-GET a blocked endpoint."""
+    out, seen = [], set()
+    for href, title in _ANY_A.findall(body):
+        url = _unwrap(href)
+        host = urllib.parse.urlparse(url).netloc.lower()
+        if not url.startswith("http") or "." not in host:   # reject relative/self links (e.g. '/lite/')
+            continue
+        if any(nav in host for nav in _NAV_HOSTS):
+            continue
+        t = _clean(title)
+        key = url.split("?")[0].rstrip("/")
+        if len(t) < 3 or key in seen:
+            continue
+        seen.add(key)
+        out.append({"title": t, "url": url, "via": via, "snippet": ""})
+        if len(out) >= k:
+            break
+    return out
+
+
+def _parse_mojeek(body: str, k: int, via: str) -> list[dict]:
+    """Mojeek-targeted: only `<a class="title">` anchors are real results — skips Mojeek's own promo/nav
+    links the generic parser would conflate (the binning trap). Independent index → independent block."""
+    out, seen = [], set()
+    for href, title in _MOJEEK_A.findall(body):
+        if not href.startswith("http"):
+            continue
+        key = href.split("?")[0].rstrip("/")
+        t = _clean(title)
+        if len(t) < 3 or key in seen:
+            continue
+        seen.add(key)
+        out.append({"title": t, "url": href, "via": via, "snippet": ""})
+        if len(out) >= k:
+            break
+    return out
+
+
+def _backoff(attempt: int) -> float:
+    """Deterministic exponential backoff (no RNG — replayable): 0.4·2^n capped at 2s. Fires only on an
+    empty/blocked endpoint, before rotating to the next — turns a transient 429 into a retry, not a blind."""
+    return min(2.0, 0.4 * (2 ** attempt))
+
+
+# Floor endpoints, rotated in order: independent hosts → an independent rate-limit each. One 429 no
+# longer blinds the instrument (the live failure: a single DDG limit zeroed every arm).
+_FLOOR_ENDPOINTS = [
+    ("ddg-html", _DDG_HTML, "post", _parse_ddg),
+    ("ddg-lite", _DDG_LITE, "post", _parse_links),
+    ("mojeek", _MOJEEK, "get", _parse_mojeek),
+]
+
+
+def _open(query: str, k: int, *, sleep=time.sleep) -> list[dict]:
+    """Open HTML floor with endpoint ROTATION + backoff. Tries each independent endpoint; on empty
+    (likely a rate-limit) it backs off then rotates to the next host. Returns [] only if ALL are dry."""
+    qs = urllib.parse.urlencode({"q": query})
+    for attempt, (_name, base, method, parser) in enumerate(_FLOOR_ENDPOINTS):
+        body = _curl(base, data=qs) if method == "post" else _curl(base + "?" + qs)
+        rows = parser(body, k, via="open") if body else []
+        if rows:
+            return rows
+        sleep(_backoff(attempt))   # empty/blocked — wait, then rotate to the next independent endpoint
+    return []
 
 
 def _rendered(query: str, k: int) -> list[dict]:
-    """The around-the-block path: render the open search-results page in a REAL browser (looks human,
-    survives the blocks that 429 a scraper) and parse it. Used when the http floor is blocked/empty."""
+    """The TRUE around-the-block: render the results page in a REAL browser (looks human, survives the
+    blocks that 429 a scraper) and parse links from the DOM the browser saw — no re-GET of the blocked
+    endpoint (the bug that made this hollow). Lite page is lighter to render."""
     try:
         import lgwks_browser
     except Exception:
         return []
     if not lgwks_browser.available()[0]:
         return []
-    url = _DDG_HTML + "?" + urllib.parse.urlencode({"q": query})
-    r = lgwks_browser.render(url, max_chars=20000)
-    if not r.get("ok"):
+    url = _DDG_LITE + "?" + urllib.parse.urlencode({"q": query})
+    r = lgwks_browser.render(url, max_chars=40000, with_html=True)
+    if not r.get("ok") or not r.get("html"):
         return []
-    # the rendered text loses anchor hrefs; re-fetch raw for links is wasteful, so parse the rendered
-    # page's visible result lines via the same html the browser exposes is not available here — instead
-    # the browser provider returns text; for links we fall back to the http floor's regex on a re-GET.
-    body = _curl(url)
-    return _parse_ddg(body, k, via="rendered") if body else []
+    return _parse_links(r["html"], k, via="rendered")
 
 
 def _cli(query: str, k: int) -> list[dict]:
@@ -119,11 +186,6 @@ def _cli(query: str, k: int) -> list[dict]:
                  "snippet": r.get("abstract", ""), "via": "cli"} for r in rows if r.get("url")]
     except Exception:
         return []
-
-
-def _open(query: str, k: int) -> list[dict]:
-    """Open HTML endpoint via http — the zero-dependency floor. Always available."""
-    return _ddg(query, k)
 
 
 # Provider chain, best-first, vendor-agnostic ids. Each returns [] on absence/empty → fall through
@@ -190,10 +252,18 @@ def sweep(query: str, k_per_arm: int = 4) -> dict:
 
 
 def fetch(url: str, max_chars: int = 6000) -> str:
-    """Page → markdown via crwl (the crawler). Bounded so the Tongue reads facts, not a whole page."""
+    """Page → text, bounded. Delegates to the extract port (crwl → curl → real-browser escalation on a
+    JS/bot wall), so a SPA or bot-walled page is no longer a silent empty. Falls back to crwl if extract
+    is unavailable. The Tongue reads facts, not a whole page."""
+    try:
+        import lgwks_extract
+        doc = lgwks_extract.extract(url, max_chars=max_chars)
+        if doc.get("ok"):
+            return doc["text"]
+    except Exception:
+        pass
     try:
         p = subprocess.run(["crwl", url, "-o", "md-fit"], capture_output=True, text=True, timeout=40)
-        md = (p.stdout or "").strip()
-        return md[:max_chars]
+        return (p.stdout or "").strip()[:max_chars]
     except Exception:
         return ""
