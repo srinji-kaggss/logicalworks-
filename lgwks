@@ -1108,7 +1108,10 @@ def remap_db_command(args: argparse.Namespace) -> int:
 
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="lgwks")
-    sub = parser.add_subparsers(dest="command", required=True)
+    # bare `lgwks` → the home launcher (the "pop up" experience), so no subcommand is required.
+    parser.add_argument("--no-anim", action="store_true", help="skip the reveal animation")
+    parser.set_defaults(func=_home_dispatch)
+    sub = parser.add_subparsers(dest="command", required=False)
     jarvis = sub.add_parser("jarvis", help="deterministic research graph crawler")
     jarvis_sub = jarvis.add_subparsers(dest="jarvis_command", required=True)
     crawl = jarvis_sub.add_parser("crawl", help="crawl a website or keyword frontier")
@@ -1149,6 +1152,11 @@ def build_parser() -> argparse.ArgumentParser:
 def _solve_dispatch(args) -> int:
     import lgwks_solve  # local module; imported lazily so the head loads without it
     return lgwks_solve.solve_command(args)
+
+
+def _home_dispatch(args) -> int:
+    import lgwks_home  # lazy: the launcher pulls ui/capabilities/steering only when you land on it
+    return lgwks_home.home_command(args)
 
 
 def main(argv: list[str] | None = None) -> int:

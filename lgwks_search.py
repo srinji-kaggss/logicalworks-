@@ -193,6 +193,15 @@ def _cli(query: str, k: int) -> list[dict]:
 _PROVIDERS = [("cli", _cli), ("open", _open), ("rendered", _rendered)]
 
 
+def active_provider() -> str:
+    """The provider tried FIRST given what's present — the HONEST label (liveness still decided at call
+    time: an empty result falls through open→rendered). Not the capability resolver's presence guess,
+    which names 'keyed'/firecrawl though it is unfunded and not wired into this module."""
+    if _cap and (_cap.find_binary("ddgr") or _cap.find_binary("googler")):
+        return "cli"
+    return "open"
+
+
 def _score(r: dict, terms: list[str]) -> int:
     """Relevance hygiene: how many query terms appear in title+snippet+url. Kills off-topic noise
     (e.g. an unrelated API doc) by ranking, not silent dropping — the Tongue still sees the tail."""
