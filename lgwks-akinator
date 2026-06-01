@@ -1,0 +1,389 @@
+#!/usr/bin/env python3
+"""
+lgwks-akinator — the curious research interface (Issue #7, ADR-001).
+
+NOT a chatbot. A bounded *form* + *nodal deep-dive*: you state a 10-40 word intent, the intent-mapper
+math bot derives causal chains, an in-terminal "jarvis" map lights up the nodes, and you dive into a
+node to continue the research with the prior chain as recovered context. Two bots cooperate:
+
+  1. crawler        — the deterministic next-gen crawler (`./lgwks jarvis crawl`, called as a tool).
+  2. intent-mapper  — THIS file: chaos -> causal chains, white-box confidence, the path map.
+
+Ethos: truth-finding over agreement. Every chain ships with its NULL (falsifier) so bias is stripped
+on both sides; the curious agent dives toward what would *disconfirm*, not confirm. We control the
+network PATHS (egress allowlist + gates); we do not constrain the SEARCH — the map is drawn on top.
+
+Runs today with zero models pulled (deterministic fallback). MLX/Qwen providers slot in behind the
+factory seam (LGWK_MAPPER_FACTORY_SPEC); embedding is default-on but skippable (--no-embed → the Eye
+never loads). Constitution-gated: intent bounds (L1) and a yes/no conduct decision (L9) are enforced.
+"""
+
+from __future__ import annotations
+
+import argparse
+import json
+import math
+import re
+import shutil
+import subprocess
+import sys
+from dataclasses import dataclass, field
+from pathlib import Path
+
+ROOT = Path(__file__).resolve().parent
+CONSTITUTION = ROOT / "vision" / "research" / "machine-first-language" / "constitution.json"
+
+# intent-schema/1 — every field bounded; under-specification is unrepresentable (constitution L1).
+INTENT_BOUNDS = {
+    "objective":   {"min_len": 3, "max_len": 240, "required": True},
+    "purpose":     {"min_len": 3, "max_len": 240, "required": True},   # the field "CRM" alone omits
+    "tier_floor":  {"enum": ["any", "secondary", "primary"], "required": True, "default": "secondary"},
+    "max_pages":   {"min": 1, "max": 500, "default": 12},
+    "max_depth":   {"min": 0, "max": 10, "default": 2},
+    "novelty":     {"min": 0.0, "max": 1.0, "default": 0.6},           # explore<->exploit knob
+    "risk_class":  {"enum": ["read_only", "write_quarantine"], "required": True, "default": "read_only"},
+}
+
+STOPWORDS = {"a", "an", "and", "are", "as", "at", "be", "by", "for", "from", "in", "into", "is", "it",
+             "of", "on", "or", "the", "to", "with", "what", "how", "why", "does", "do", "mean", "if",
+             "where", "when", "which", "who", "that", "this", "these", "those", "lives", "live"}
+
+# Typed causal lenses — the intent-mapper proposes edges of these kinds (graph-schema/2 rels).
+LENSES = ("depends_on", "controls", "gates", "implements", "benchmarks", "contains")
+
+# Apple-in-CLI palette: restraint, typographic hierarchy, ANSI only.
+DIM, BOLD, RESET = "\033[2m", "\033[1m", "\033[0m"
+HOT = ("\033[38;5;39m", "\033[38;5;45m", "\033[38;5;51m")  # nodes "light up" by confidence tier
+def _c(s: str, code: str) -> str:
+    return f"{code}{s}{RESET}" if sys.stdout.isatty() else s
+
+
+def tokens(text: str) -> list[str]:
+    return [t for t in re.findall(r"[a-zA-Z][a-zA-Z0-9_+\-.]{1,}", text.lower()) if t not in STOPWORDS]
+
+
+def load_constitution() -> dict:
+    if CONSTITUTION.exists():
+        return json.loads(CONSTITUTION.read_text(encoding="utf-8"))
+    return {"laws": [], "version": "absent"}
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# The confidence formula (ADR-001): C = Tier_cap ⊗ σ(λ·W + (1-λ)·B). White-box only today (λ=1);
+# black-box B activates when the Eye/Sieve/Tongue providers are present. Every term is inspectable.
+# ─────────────────────────────────────────────────────────────────────────────
+TIER_CAP = {"any": 0.50, "secondary": 0.75, "primary": 0.95}
+
+
+def _sigmoid(x: float) -> float:
+    return 1.0 / (1.0 + math.exp(-x))
+
+
+@dataclass
+class Confidence:
+    ctx: float       # context coverage (information-based)
+    intent: float    # intent alignment
+    clarity: float   # 1 - said<->meant divergence
+    agreement: float # source/edge consensus
+    tier_floor: str
+    blackbox: float = 0.0   # B aggregate; 0 until models load
+    lam: float = 1.0        # white-box trust weight; <1 only once B is calibrated
+
+    def score(self) -> float:
+        w = 0.30 * self.ctx + 0.30 * self.intent + 0.20 * self.clarity + 0.20 * self.agreement
+        fused = self.lam * w + (1.0 - self.lam) * self.blackbox
+        raw = _sigmoid(4.0 * (fused - 0.5))          # squash, centered at 0.5
+        return round(min(raw, TIER_CAP[self.tier_floor]), 3)   # label can never exceed evidence (L2)
+
+    def drivers(self) -> str:
+        terms = {"context": self.ctx, "intent": self.intent, "clarity": self.clarity, "agreement": self.agreement}
+        top = sorted(terms.items(), key=lambda kv: kv[1], reverse=True)[:2]
+        return ", ".join(f"{k} {v:.2f}" for k, v in top)
+
+
+@dataclass
+class Chain:
+    """One hypothesis: claim + its NULL (bias-stripping), what it builds on, path, keywords, confidence."""
+    label: str
+    hypothesis: str
+    null: str
+    nodes: list[str]
+    edges: list[tuple[str, str, str]]   # (provider, rel, dependent)
+    keywords: list[str]
+    confidence: Confidence
+    parent: str | None = None           # the node we dived from (chain tracking)
+    builds_on: list[str] = field(default_factory=list)   # prior breakthroughs/frameworks it extends
+    role: str = "mechanism"             # null | mechanism (H0 is the null)
+
+    @property
+    def c(self) -> float:
+        return self.confidence.score()
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Intent-mapper math bot — chaos -> causal chains. Deterministic today; the Tongue enriches later.
+# ─────────────────────────────────────────────────────────────────────────────
+def map_intent(objective: str, purpose: str, tier_floor: str, novelty: float,
+               prior: list[str] | None = None) -> list[Chain]:
+    """Derive up to 3 ranked causal chains. `prior` = the tracked chain from a deep-dive (context recovery)."""
+    seeds = tokens(objective) + tokens(purpose)
+    prior = prior or []
+    # Each lens proposes a distinct causal reading of the seed — distinct, never merged (anti-binning).
+    chains: list[Chain] = []
+    focus = seeds[0] if seeds else "topic"
+    # Three readings: mechanism (depends_on/implements), control (gates/controls), evidence (benchmarks).
+    readings = [
+        ("mechanism", "implements", f"{focus} is best understood through what implements/depends on it",
+         f"{focus}'s behavior is fully explained without any deeper mechanism"),
+        ("control",   "gates",      f"{focus} is gated/controlled by an upstream authority or policy",
+         f"{focus} operates with no gating — control is irrelevant to it"),
+        ("evidence",  "benchmarks", f"{focus} is best constrained by measurement against incumbents",
+         f"no benchmark meaningfully constrains {focus}"),
+    ]
+    for name, rel, hyp, null in readings:
+        # Path nodes: the seed + co-occurring concepts + recovered prior context (continuation).
+        path = list(dict.fromkeys(prior + seeds))[:5] or [focus]
+        edges = [(path[i], rel, path[i + 1]) for i in range(len(path) - 1)]
+        kw = list(dict.fromkeys(seeds + [name] + prior))[:6]
+        # White-box confidence: clarity falls if the ask was thin; context rises with prior recovery.
+        clarity = min(1.0, len(seeds) / 6.0)
+        ctx = min(1.0, (len(prior) * 0.25 + 0.4))
+        intent = min(1.0, 0.5 + 0.1 * len(set(seeds)))
+        agreement = 0.6 if len(path) > 1 else 0.4
+        # Novelty bias: a high novelty knob rewards the lower-prior (more exploratory) reading.
+        if novelty > 0.5 and name == "evidence":
+            intent = min(1.0, intent + 0.1)
+        conf = Confidence(ctx=ctx, intent=intent, clarity=clarity, agreement=agreement, tier_floor=tier_floor)
+        chains.append(Chain(label=name, hypothesis=hyp, null=null, nodes=path, edges=edges,
+                            keywords=kw, confidence=conf, parent=(prior[-1] if prior else None)))
+    chains.sort(key=lambda ch: ch.c, reverse=True)
+    return chains
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# In-terminal "jarvis" viz — the path map drawn on top of the search. Nodes light up by confidence.
+# ─────────────────────────────────────────────────────────────────────────────
+def render_map(objective: str, chains: list[Chain]) -> None:
+    print()
+    print(_c(f"  ◆ {objective}", BOLD))
+    print(_c("  the map (path drawn over the search — you control paths, not the search)", DIM))
+    print()
+    for i, ch in enumerate(chains, 1):
+        tier = HOT[min(2, int(ch.c * 3))]
+        bar = "█" * max(1, round(ch.c * 12))
+        tag = "NULL" if ch.role == "null" else ch.label.upper()
+        print(f"  {_c(str(i), BOLD)}  {_c(tag, tier)}  {_c(bar, tier)} {_c(f'C={ch.c}', DIM)}  {_c(f'({ch.confidence.drivers()})', DIM)}")
+        path = _c(" → ", DIM).join(_c(n, tier) for n in ch.nodes)
+        print(f"      {path}")
+        print(f"      {_c('H', BOLD)} {ch.hypothesis}")
+        print(f"      {_c('Ø', DIM)} {_c(ch.null, DIM)}   {_c('← falsifier we dive toward (strip bias)', DIM)}")
+        if ch.builds_on:
+            print(f"      {_c('⊕ builds on: ' + ', '.join(ch.builds_on), DIM)}")
+        if ch.parent:
+            print(f"      {_c('↑ continues from: ' + ch.parent, DIM)}")
+        print()
+
+
+def write_mermaid(objective: str, chains: list[Chain], out: Path) -> Path:
+    lines = ["graph TD"]
+    for ch in chains:
+        for (a, rel, b) in ch.edges:
+            sa, sb = re.sub(r"\W", "_", a), re.sub(r"\W", "_", b)
+            lines.append(f'  {sa}["{a}"] -->|{rel}| {sb}["{b}"]')
+    out.write_text("\n".join(lines) + "\n", encoding="utf-8")
+    return out
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Constitution gate (L1 bounds, L9 conduct yes/no) + the crawler tool.
+# ─────────────────────────────────────────────────────────────────────────────
+def gate_intent(intent: dict) -> list[str]:
+    """L1: return invalid/missing fields; empty list == admissible. Checks presence AND bounds
+    (min/max, len, enum) — not just presence (closes the M3 L1 gap: max_pages>500 must be rejected)."""
+    bad = []
+    for name, rule in INTENT_BOUNDS.items():
+        val = intent.get(name)
+        if val is None or (isinstance(val, str) and not val.strip()):
+            if rule.get("required"):
+                bad.append(name)
+            continue
+        if "enum" in rule and val not in rule["enum"]:
+            bad.append(name)
+        if "min_len" in rule and isinstance(val, str) and len(val) < rule["min_len"]:
+            bad.append(name)
+        if "max_len" in rule and isinstance(val, str) and len(val) > rule["max_len"]:
+            bad.append(name)
+        if "min" in rule and isinstance(val, (int, float)) and val < rule["min"]:
+            bad.append(name)
+        if "max" in rule and isinstance(val, (int, float)) and val > rule["max"]:
+            bad.append(name)
+    return list(dict.fromkeys(bad))
+
+
+def conduct_decision(chains: list[Chain]) -> tuple[bool, str]:
+    """L9: stateless yes/no over the chains. Deterministic stub until the ConductFactory model lands."""
+    # Today: refuse only if every chain is below the evidence floor (nothing worth crawling / unclear intent).
+    if not chains or max(ch.c for ch in chains) < 0.2:
+        return False, "intent too unclear to map a truthful path"
+    return True, "intent maps to falsifiable causal chains within scope"
+
+
+def crawl_node(keywords: list[str], max_pages: int, embed: bool) -> str:
+    """Call the deterministic crawler bot as a tool. Embedding is default-on, skippable (--no-embed)."""
+    exe = ROOT / "lgwks"
+    if not exe.exists():
+        return "(crawler bot not found — map-only mode)"
+    cmd = [sys.executable, str(exe), "jarvis", "crawl", " ".join(keywords),
+           "--max-pages", str(max_pages), "--estimate-only"]
+    # --estimate-only keeps the core interface runnable offline; a real run drops the flag.
+    try:
+        proc = subprocess.run(cmd, capture_output=True, text=True, timeout=60)
+        note = "embed-on (jarvis viz)" if embed else "embed-off (Eye not loaded)"
+        return f"{proc.stdout.strip() or proc.stderr.strip()}  [{note}]"
+    except Exception as exc:  # tool failure is reported, never hidden
+        return f"(crawler estimate failed: {exc})"
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# The interface: form -> map -> nodal deep-dive (chain-tracked) -> output.
+# ─────────────────────────────────────────────────────────────────────────────
+@dataclass
+class Session:
+    objective: str
+    intent: dict
+    trail: list[str] = field(default_factory=list)   # the tracked chain across deep-dives
+
+
+def tongue_enrich(objective: str, purpose: str, fallback: list[Chain],
+                  prior: list[str]) -> tuple[list[Chain], dict | None]:
+    """When the Tongue (gemma4) is up, BUILD the chains from its autonomously-compiled hypothesis set
+    (H0 + H1..Hn, variable count, each grounded in prior art). When down, keep the deterministic
+    `fallback` skeleton (3 lenses). Fail closed — never fabricate."""
+    try:
+        import lgwks_tongue
+    except Exception:
+        return fallback, None
+    compiled = lgwks_tongue.compile_hypotheses(objective, purpose)
+    if not compiled:
+        return fallback, None
+    seeds = tokens(objective) + tokens(purpose)
+    path = list(dict.fromkeys((prior or []) + seeds))[:5] or [seeds[0] if seeds else "topic"]
+    chains: list[Chain] = []
+    for h in compiled["hypotheses"]:                       # one chain per AUTONOMOUS hypothesis
+        kw = list(dict.fromkeys(h.get("keywords", []) + seeds))[:6]
+        # A null is unproven-by-default (high uncertainty); a well-grounded mechanism scores higher.
+        conf = Confidence(
+            ctx=min(1.0, len(prior) * 0.25 + 0.4),
+            intent=min(1.0, 0.5 + 0.1 * len(set(seeds))),
+            clarity=min(1.0, len(seeds) / 6.0),
+            agreement=0.65 if h.get("builds_on") else 0.45,    # grounded-in-prior-art raises agreement
+            tier_floor="secondary",
+        )
+        chains.append(Chain(label=h["id"], hypothesis=h["claim"], null=h["falsifier"],
+                            nodes=path, edges=[(path[i], "depends_on", path[i + 1]) for i in range(len(path) - 1)],
+                            keywords=kw, confidence=conf, parent=(prior[-1] if prior else None),
+                            builds_on=h.get("builds_on", []), role=h.get("role", "mechanism")))
+    # H0 (null) renders first; then mechanisms by confidence.
+    chains.sort(key=lambda c: (c.role != "null", -c.c))
+    return chains, {"meant": compiled.get("meant"), "question": compiled.get("question"),
+                    "autonomous": True, "count": len(chains)}
+
+
+def run(objective: str, intent: dict, output: str, embed: bool, pick: int | None,
+        interactive: bool) -> int:
+    const = load_constitution()
+    missing = gate_intent(intent)
+    if missing:  # under-specification is unrepresentable — ask the first clarifying question (L1)
+        f = missing[0]
+        print(_c(f"  intent under-specified [missing: {f}]. ", BOLD) +
+              {"purpose": "For what? (what's the question behind it?)",
+               "objective": "What are we researching?",
+               "tier_floor": "What's the minimum source tier (any/secondary/primary)?",
+               "risk_class": "read_only or write_quarantine?"}.get(f, f"Provide {f}."))
+        return 2
+
+    sess = Session(objective=objective, intent=intent)
+    print(_c(f"  constitution: {const.get('version')} · {len(const.get('laws', []))} laws active", DIM))
+
+    while True:
+        fallback = map_intent(objective, intent["purpose"], intent["tier_floor"],
+                              float(intent.get("novelty", 0.6)), prior=sess.trail)
+        chains, tongue = tongue_enrich(objective, intent["purpose"], fallback, sess.trail)
+        ok, reason = conduct_decision(chains)
+        print(_c(f"  conduct (L9): {'YES' if ok else 'NO'} — {reason}", BOLD))
+        if not ok:
+            print(_c("  We're sorry — this intent does not match our code of conduct.", BOLD))
+            return 3
+        if tongue and tongue.get("autonomous"):
+            print(_c(f"  Tongue compiled {tongue['count']} hypotheses autonomously · "
+                     f"meant: {tongue.get('meant', '')}", DIM))
+        else:
+            print(_c("  (deterministic skeleton — Tongue offline)", DIM))
+        render_map(objective, chains)
+        if tongue and tongue.get("question"):
+            print(_c(f"  ◆ elimination Q: {tongue['question']}", BOLD))
+
+        if output in ("graph", "all"):
+            mmd = write_mermaid(objective, chains, ROOT / "research-map.mmd")
+            print(_c(f"  ↳ path map: {mmd}", DIM))
+        if output in ("report", "all"):
+            top = chains[0]
+            print(_c(f"  ↳ crawler bot: {crawl_node(top.keywords, intent['max_pages'], embed)}", DIM))
+
+        if not interactive and pick is None:
+            return 0
+        # Nodal deep-dive — pick a node to continue the research (this is where scope deepens, by design).
+        if pick is not None:
+            choice, pick = pick, None
+        else:
+            raw = input(_c("\n  dive into chain # (1-3), or 'q' to finish: ", BOLD)).strip()
+            if raw.lower() in ("q", ""):
+                return 0
+            if not raw.isdigit():
+                continue
+            choice = int(raw)
+        if not (1 <= choice <= len(chains)):
+            print(_c("  no such chain", DIM)); continue
+        chosen = chains[choice - 1]
+        sess.trail = (sess.trail + chosen.nodes)[-6:]   # recover prior as context; dive into the new
+        objective = f"{chosen.label}: {chosen.nodes[-1]}"
+        print(_c(f"\n  ◆ diving — trail: {' → '.join(sess.trail)}", DIM))
+        if not interactive:
+            return 0
+
+
+def build_parser() -> argparse.ArgumentParser:
+    p = argparse.ArgumentParser(prog="lgwks-akinator", description="the curious research interface (form + nodal deep-dive)")
+    p.add_argument("objective", nargs="?", help="10-40 word intent (e.g. 'CRM')")
+    p.add_argument("--purpose", help="the question behind it (required by L1)")
+    p.add_argument("--tier-floor", default="secondary", choices=["any", "secondary", "primary"])
+    p.add_argument("--max-pages", type=int, default=12)
+    p.add_argument("--max-depth", type=int, default=2)
+    p.add_argument("--novelty", type=float, default=0.6)
+    p.add_argument("--risk-class", default="read_only", choices=["read_only", "write_quarantine"])
+    p.add_argument("--output", default="graph", choices=["graph", "report", "embed", "all"],
+                   help="output type; embed is default-on for the jarvis viz, use --no-embed to skip the Eye")
+    p.add_argument("--no-embed", action="store_true", help="skip embedding (Eye model not loaded)")
+    p.add_argument("--pick", type=int, help="non-interactive: dive into chain N then exit")
+    p.add_argument("--demo", action="store_true", help="run a deterministic sample pass (offline)")
+    return p
+
+
+def main(argv: list[str] | None = None) -> int:
+    args = build_parser().parse_args(argv)
+    if args.demo and not args.objective:
+        args.objective, args.purpose = "CRM", "map how a CRM connects services and where truth lives"
+    if not args.objective:
+        build_parser().print_help()
+        return 1
+    intent = {
+        "objective": args.objective, "purpose": args.purpose, "tier_floor": args.tier_floor,
+        "max_pages": args.max_pages, "max_depth": args.max_depth, "novelty": args.novelty,
+        "risk_class": args.risk_class,
+    }
+    return run(args.objective, intent, args.output, embed=not args.no_embed,
+               pick=args.pick, interactive=(args.pick is None and not args.demo and sys.stdin.isatty()))
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

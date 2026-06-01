@@ -1,0 +1,201 @@
+#!/usr/bin/env python3
+"""
+lgwks-auth — capability vault for the lgwks crawler (Issue #7, ADR-001 §7, AUTH_VAULT_SCHEMA.md).
+
+Secrets live ONLY in the macOS Keychain (human-editable via Passwords.app). This tool stores a
+REFERENCE (`cred_ref`) plus access terms in an append-only, hash-chained registry. It never writes,
+prints, or logs a token. WORM for the bot (append `used|needs_auth|observed` only); the human edits
+by appending `stale|supersede` events the bot cannot author.
+
+Boundary (constitution L8): automate only Director-procured credentials; honor the granted rate;
+never bypass auth not held, paywalls, or CAPTCHA.
+"""
+
+from __future__ import annotations
+
+import argparse
+import hashlib
+import json
+import os
+import subprocess
+import sys
+from datetime import datetime, timezone
+from pathlib import Path
+
+VAULT_DIR = Path(os.environ.get("LGWKS_VAULT_DIR", Path.home() / ".lgwks" / "auth-vault"))
+REGISTRY = VAULT_DIR / "locks.jsonl"
+SCHEMA = "lgwks-auth-vault/1"
+SERVICE_PREFIX = "lgwks:"
+# Hardening target: anchor the signer to the Secure Enclave (ADR-064). Until then it is an
+# unanchored local marker — the prev_hash linkage still detects rewrite/deletion of history.
+SIGNER = os.environ.get("LGWKS_VAULT_SIGNER", "local-unanchored")
+
+BOT_EVENTS = {"used", "needs_auth", "observed"}
+HUMAN_EVENTS = {"lock", "stale", "supersede"}
+
+
+def utc_now() -> str:
+    return datetime.now(timezone.utc).replace(microsecond=0).isoformat()
+
+
+def service_name(site: str) -> str:
+    return f"{SERVICE_PREFIX}{site}"
+
+
+def _read_records() -> list[dict]:
+    if not REGISTRY.exists():
+        return []
+    out: list[dict] = []
+    for line in REGISTRY.read_text(encoding="utf-8").splitlines():
+        line = line.strip()
+        if line:
+            out.append(json.loads(line))
+    return out
+
+
+def _core(record: dict) -> str:
+    # Deterministic serialization of everything except the record's own hash.
+    return json.dumps({k: v for k, v in record.items() if k != "hash"}, sort_keys=True, separators=(",", ":"))
+
+
+def _append(event: str, site: str, by: str, **fields) -> dict:
+    """Append a hash-chained record. Raises on an authority violation (WORM rule)."""
+    if by == "sa-runner" and event not in BOT_EVENTS:
+        raise SystemExit(f"refused: sa-runner may not author '{event}' (human authority only)")
+    if by == "director" and event not in HUMAN_EVENTS | BOT_EVENTS:
+        raise SystemExit(f"refused: unknown event '{event}'")
+    records = _read_records()
+    prev_hash = records[-1]["hash"] if records else ("0" * 64)
+    record = {
+        "seq": len(records) + 1,
+        "ts": utc_now(),
+        "event": event,
+        "site": site,
+        "by": by,
+        "schema": SCHEMA,
+        "prev_hash": prev_hash,
+        **fields,
+    }
+    record["hash"] = hashlib.sha256((_core(record) + prev_hash + SIGNER).encode("utf-8")).hexdigest()
+    VAULT_DIR.mkdir(parents=True, exist_ok=True)
+    with REGISTRY.open("a", encoding="utf-8") as fh:  # O_APPEND; never truncates
+        fh.write(json.dumps(record, sort_keys=True, ensure_ascii=False) + "\n")
+    return record
+
+
+def verify_chain() -> tuple[bool, str]:
+    records = _read_records()
+    prev = "0" * 64
+    for rec in records:
+        expect = hashlib.sha256((_core(rec) + prev + SIGNER).encode("utf-8")).hexdigest()
+        if rec.get("hash") != expect:
+            return False, f"chain broken at seq {rec.get('seq')} (tamper/deletion detected)"
+        prev = rec["hash"]
+    return True, f"intact ({len(records)} records)"
+
+
+def _latest_status(site: str) -> str:
+    status = "absent"
+    for rec in _read_records():
+        if rec.get("site") != site:
+            continue
+        if rec["event"] == "lock":
+            status = "active"
+        elif rec["event"] == "stale":
+            status = "stale"
+    return status
+
+
+def _keychain_has(site: str) -> bool:
+    # Existence check only — NO `-w`, so no secret is ever returned to this process.
+    proc = subprocess.run(
+        ["security", "find-generic-password", "-s", service_name(site)],
+        capture_output=True, text=True,
+    )
+    return proc.returncode == 0
+
+
+def cmd_add(args: argparse.Namespace) -> int:
+    # `security` prompts for the secret interactively (no value on argv → never in `ps`/logs).
+    cmd = ["security", "add-generic-password", "-U", "-a", args.user, "-s", service_name(args.site), "-w"]
+    if args.bot:
+        cmd += ["-T", ""]  # restrict ACL; bot-only items live in their own scope
+    print(f"storing token in Keychain as '{service_name(args.site)}' (you will be prompted; not echoed)…")
+    proc = subprocess.run(cmd)
+    if proc.returncode != 0:
+        raise SystemExit("keychain add failed — nothing recorded")
+    rec = _append(
+        "lock", args.site, by="director",
+        cred_ref=f"keychain://{service_name(args.site)}",
+        rate_from_auth=args.rate, legal_basis=args.basis,
+        procured_by="director", scope=args.scope,
+    )
+    print(f"locked: {args.site}  rate={args.rate}  basis={args.basis!r}  (cred_ref only; no token stored here)")
+    return 0
+
+
+def cmd_stale(args: argparse.Namespace) -> int:
+    if _latest_status(args.site) == "absent":
+        raise SystemExit(f"no lock for {args.site}")
+    _append("stale", args.site, by="director")
+    print(f"marked stale: {args.site} (bot will refuse it and request re-auth)")
+    return 0
+
+
+def cmd_check(args: argparse.Namespace) -> int:
+    # Bot path: usable iff a lock is active AND the Keychain item exists. Never prints a token.
+    usable = _latest_status(args.site) == "active" and _keychain_has(args.site)
+    print("usable" if usable else "needs_auth")
+    if not usable:
+        _append("needs_auth", args.site, by="sa-runner", cred_ref=f"keychain://{service_name(args.site)}")
+    return 0 if usable else 2
+
+
+def cmd_ls(_args: argparse.Namespace) -> int:
+    ok, msg = verify_chain()
+    print(f"chain: {msg}")
+    if not ok:
+        return 1
+    seen: dict[str, dict] = {}
+    for rec in _read_records():
+        seen[rec["site"]] = rec
+    if not seen:
+        print("(no auth locks)")
+        return 0
+    for site in sorted(seen):
+        status = _latest_status(site)
+        present = "keychain✓" if _keychain_has(site) else "keychain✗"
+        rate = seen[site].get("rate_from_auth", "-")
+        print(f"  {site:32}  {status:7}  {present:10}  rate={rate}")
+    return 0
+
+
+def build_parser() -> argparse.ArgumentParser:
+    p = argparse.ArgumentParser(prog="lgwks-auth", description="capability vault (refs only; secrets stay in Keychain)")
+    sub = p.add_subparsers(dest="command", required=True)
+    a = sub.add_parser("add", help="store a Director-procured credential (Keychain) + append a lock")
+    a.add_argument("site")
+    a.add_argument("--user", required=True)
+    a.add_argument("--rate", default="unspecified", help="rate granted by the auth, e.g. 10/min (honored as a hard cap)")
+    a.add_argument("--basis", required=True, help="legal basis, e.g. 'institutional subscription'")
+    a.add_argument("--scope", default="research", choices=["research", "non_commercial"])
+    a.add_argument("--bot", action="store_true", help="bot-only service auth (restricted ACL)")
+    a.set_defaults(func=cmd_add)
+    s = sub.add_parser("stale", help="mark a lock stale (Director authority)")
+    s.add_argument("site")
+    s.set_defaults(func=cmd_stale)
+    c = sub.add_parser("check", help="bot path: is a usable, non-stale cred present? (no token printed)")
+    c.add_argument("site")
+    c.set_defaults(func=cmd_check)
+    ls = sub.add_parser("ls", help="list locks + verify the hash chain")
+    ls.set_defaults(func=cmd_ls)
+    return p
+
+
+def main(argv: list[str] | None = None) -> int:
+    args = build_parser().parse_args(argv)
+    return args.func(args)
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())
