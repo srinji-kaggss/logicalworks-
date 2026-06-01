@@ -8,6 +8,8 @@ from __future__ import annotations
 
 import os
 import sys
+import contextlib
+import io
 import json
 import tempfile
 import unittest
@@ -323,6 +325,85 @@ class TestProjectPlanner(unittest.TestCase):
         self.assertEqual(plan["machine_weight"]["retrieval"], 0.35)
         self.assertIn("Self-RAG", plan["frontier_techniques"])
         self.assertTrue(plan["next_commands"])
+
+    def test_project_deploy_dry_run_writes_machine_native_artifacts(self):
+        import argparse
+        import lgwks_project as proj
+
+        tmp = Path(tempfile.mkdtemp())
+        old = proj.DEPLOY_ROOT
+        proj.DEPLOY_ROOT = tmp / "deploy"
+        args = argparse.Namespace(project="ai-ml-layers",
+                                  prompt="build a one-command research CLI on existing AI research skills",
+                                  reasoning_cycles=None, embedding_rounds=400, max_workers=4,
+                                  tokens_per_cycle=8000, learning_mode="local-only",
+                                  device_consent="local-device", model_spine="oss-coreml",
+                                  dry_run=True, execute=False)
+        try:
+            with contextlib.redirect_stdout(io.StringIO()):
+                self.assertEqual(proj.deploy_command(args), 0)
+            out_dir = proj._deploy_path("ai-ml-layers")
+            for name in ("cycles.jsonl", "leases.jsonl", "token-ledger.jsonl", "model_state.json",
+                         "machine-packets.jsonl", "learning-records.jsonl", "model-lineage.jsonl",
+                         "graph-edges.jsonl", "operator-profile.json"):
+                self.assertTrue((out_dir / name).exists(), name)
+            review = proj.review_project("ai-ml-layers")
+        finally:
+            proj.DEPLOY_ROOT = old
+        self.assertTrue(review["chain_ok"])
+        self.assertEqual(review["cycles"], 5)
+        self.assertEqual(review["token_status"], "ok")
+        self.assertGreaterEqual(review["model_lineage_count"], 3)
+        self.assertEqual(review["machine_packets"], 5)
+        self.assertTrue(review["one_command_replaces_many"])
+        self.assertTrue(review["build_on_existing_work"])
+        self.assertIn("local-only", review["learning_export_policy"])
+
+    def test_project_deploy_tamper_breaks_cycle_chain(self):
+        import argparse
+        import lgwks_project as proj
+
+        tmp = Path(tempfile.mkdtemp())
+        old = proj.DEPLOY_ROOT
+        proj.DEPLOY_ROOT = tmp / "deploy"
+        args = argparse.Namespace(project="tamper-demo", prompt="test tamper chain", reasoning_cycles=2,
+                                  embedding_rounds=400, max_workers=2, tokens_per_cycle=8000,
+                                  learning_mode="local-only", device_consent="research-only",
+                                  model_spine="oss-coreml", dry_run=True, execute=False)
+        try:
+            with contextlib.redirect_stdout(io.StringIO()):
+                proj.deploy_command(args)
+            cycles = proj._deploy_path("tamper-demo") / "cycles.jsonl"
+            lines = cycles.read_text(encoding="utf-8").splitlines()
+            lines[0] = lines[0].replace("neutral_academic", "rewritten")
+            cycles.write_text("\n".join(lines) + "\n", encoding="utf-8")
+            review = proj.review_project("tamper-demo")
+        finally:
+            proj.DEPLOY_ROOT = old
+        self.assertFalse(review["chain_ok"])
+
+    def test_learning_records_do_not_inline_raw_prompt(self):
+        import argparse
+        import lgwks_project as proj
+
+        prompt = "private phrase should not be copied into learning record raw body"
+        tmp = Path(tempfile.mkdtemp())
+        old = proj.DEPLOY_ROOT
+        proj.DEPLOY_ROOT = tmp / "deploy"
+        args = argparse.Namespace(project="privacy-boundary", prompt=prompt, reasoning_cycles=1,
+                                  embedding_rounds=400, max_workers=1, tokens_per_cycle=8000,
+                                  learning_mode="local-only", device_consent="local-device",
+                                  model_spine="oss-coreml", dry_run=True, execute=False)
+        try:
+            with contextlib.redirect_stdout(io.StringIO()):
+                proj.deploy_command(args)
+            learning_text = (proj._deploy_path("privacy-boundary") / "learning-records.jsonl").read_text(encoding="utf-8")
+            packets = json.loads((proj._deploy_path("privacy-boundary") / "machine-packets.jsonl").read_text(
+                encoding="utf-8").splitlines()[0])
+        finally:
+            proj.DEPLOY_ROOT = old
+        self.assertNotIn(prompt, learning_text)
+        self.assertEqual(packets["schema"], "lgwks-machine-packet/1")
 
 
 class TestMultiply(unittest.TestCase):

@@ -71,6 +71,17 @@ _VERBS = [
         "args": {"project": "name", "--prompt": "goal", "--reasoning-cycles": "default 5", "--embedding-rounds": "default 400"},
         "output": "plan.json with budgets, branch workers, frontier techniques, next commands", "tokens": "none",
     },
+    {
+        "verb": "project deploy", "intent": "one-command research orchestrator: plan leases, cycles, packets, learning records",
+        "args": {"project": "name", "--prompt": "goal", "--dry-run": "default-safe artifact run",
+                 "--device-consent": "research-only|local-device", "--model-spine": "deterministic|oss-coreml"},
+        "output": "deploy DAG + cycle/token/critic/model/learning/packet/graph/operator artifacts", "tokens": "bounded by --tokens-per-cycle",
+    },
+    {
+        "verb": "project review", "intent": "read deploy artifacts and report chain, spend, bias, learning, model lineage",
+        "args": {"project": "name"},
+        "output": "machine-readable review with chain_ok, rollback, packet counts, operator stance", "tokens": "none",
+    },
 ]
 
 # Agent-facing usage notes — terse, the things an AI needs to not misuse the tool.
