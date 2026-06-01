@@ -23,6 +23,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import re
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -32,7 +33,33 @@ import lgwks_tongue
 
 ROOT = Path(__file__).resolve().parent
 DRY_LIMIT = 2          # consecutive frontier-dry rounds → converged-by-exhaustion
-EIG_FLOOR = 0.15       # a frontier node below this expected-info-gain is not worth a round
+EIG_FLOOR = 0.15       # a frontier node below this MODEL-ESTIMATED priority is not worth a round
+CONVERGE_STREAK = 2    # converged must hold for ≥2 consecutive EVIDENCE rounds (anti-injection, hacker R1)
+ROUND_CAP = 100        # hard upper bound on --rounds (hacker F8 — unbounded-spend guard)
+BUDGET_CAP = 5_000_000 # hard upper bound on --budget tokens (hacker F8)
+ALLOWED_FUNCTIONS = ("generate", "falsify", "expand", "contrarian")
+# untrusted-content guard (hacker F1/F2): a frontier node is a short, plain label — never prose,
+# never newlines, never prompt/role/JSON structure. Anything else is rejected, not fed back.
+_NODE_OK = re.compile(r"^[A-Za-z0-9 ._:/\-]{1,80}$")
+_INJECT_MARKERS = ("\n\n", "ignore ", "system:", "assistant:", "<", "{", "}", "instruction")
+
+
+def _safe_node(s: str) -> str | None:
+    """Validate an LLM-emitted frontier node before it re-enters a prompt or a crawl target."""
+    s = (s or "").strip()
+    if not s or not _NODE_OK.match(s):
+        return None
+    low = s.lower()
+    return None if any(m in low for m in _INJECT_MARKERS) else s
+
+
+def _sanitize_carry(s: str) -> str:
+    """Strip instruction-shaped content from text carried forward as context (hacker F2)."""
+    s = (s or "").replace("\r", " ")
+    bad = ("ignore all", "ignore previous", "system:", "assistant:", "<UNTRUSTED", "</UNTRUSTED")
+    for b in bad:
+        s = s.replace(b, "·").replace(b.title(), "·")
+    return s[:4000]
 
 
 @dataclass
@@ -45,6 +72,15 @@ class AutoConfig:
     token_budget: int = 120_000                  # hard ceiling on cloud-Tongue tokens
     crawl_mode: str = "estimate"                 # estimate (offline planning) | live (signed spine)
     max_pages: int = 8
+
+    def __post_init__(self):
+        # clamp adversary-supplied bounds (hacker F8) and drop unknown functions (no silent calls).
+        object.__setattr__(self, "max_rounds", max(1, min(ROUND_CAP, int(self.max_rounds))))
+        object.__setattr__(self, "token_budget", max(1, min(BUDGET_CAP, int(self.token_budget))))
+        object.__setattr__(self, "functions",
+                           tuple(f for f in self.functions if f in ALLOWED_FUNCTIONS) or ("generate",))
+        if self.crawl_mode not in ("estimate", "live"):
+            object.__setattr__(self, "crawl_mode", "estimate")
 
 
 @dataclass
@@ -84,18 +120,21 @@ def _run_id(cfg: AutoConfig) -> str:
     return f"auto-{h}"
 
 
-def _crawl(cfg: AutoConfig, frontier: str) -> str:
-    """The crawl step. estimate = offline planning note (no external fetch). live = the signed,
-    scope-frozen spine (lgwks_run) — gated, never silent. Returns the findings text for Reason."""
+def _crawl(cfg: AutoConfig, frontier: str) -> tuple[str, bool]:
+    """The crawl step. Returns (findings_text, has_evidence). has_evidence=False means NO external
+    document content was gathered — the loop must then NOT claim falsifiers/learnings/convergence
+    (epistemics CRITICAL: no evidence → no evidence-bearing claims). estimate = offline PLANNING;
+    live = the signed, scope-frozen spine (gated, not yet provisioned → degrades to planning)."""
     if cfg.crawl_mode == "estimate":
-        return (f"[estimate mode — no document content fetched] frontier node: {frontier!r}. "
-                f"Reason over the hypothesis space and prior learnings; propose what evidence at this "
-                f"node would decide each surviving hypothesis.")
+        return ((f"[PLANNING — no document content fetched] frontier node: {frontier!r}. "
+                 f"Plan only: name what evidence at this node would decide each hypothesis. "
+                 f"You have NO findings, so you cannot confirm or falsify anything this round."), False)
     # live mode is intentionally explicit: it must go through the gated, scope-frozen spine
     # (lgwks_run.execute_plan with signed verdicts). Wiring a per-round frozen URL set is the next
     # gated step (#9 Unit A.live) — until provisioned, live degrades to estimate, never silent crawl.
-    return (f"[live mode requested for node {frontier!r}] live crawl must run through the signed "
-            f"scope-frozen spine with an explicit frozen URL set — not yet provisioned; planning only.")
+    return ((f"[live mode requested for node {frontier!r}] live crawl must run through the signed "
+             f"scope-frozen spine with an explicit frozen URL set — not yet provisioned; planning only."),
+            False)
 
 
 def _canon(obj) -> str:
@@ -115,8 +154,16 @@ def run_auto(cfg: AutoConfig, emit=print) -> AutoResult:
     frontier = cfg.start
     surviving: list[str] = []
     dry_streak = 0
+    conv_streak = 0
+    evidence_rounds = 0
     stop = "max_rounds"
     n = 0
+
+    def _spent_break() -> bool:           # mid-round budget enforcement (hacker F4): break on each charge
+        nonlocal stop
+        if budget.exhausted():
+            stop = "budget_exhausted"; return True
+        return False
 
     emit(f"  ◆ autonomous research · {cfg.objective!r} · start={cfg.start!r}")
     emit(f"    functions={','.join(cfg.functions)} · budget={cfg.token_budget} tok · "
@@ -129,27 +176,41 @@ def run_auto(cfg: AutoConfig, emit=print) -> AutoResult:
             emit(f"\n  ── round {n}/{cfg.max_rounds} · frontier={frontier!r} · "
                  f"spent={budget.spent}/{budget.cap} tok ──")
 
-            # 1. GENERATE — autonomous Hn, building on the rolling digest.
+            # 1. GENERATE — autonomous Hn, building on the (sanitized) rolling digest.
             compiled = lgwks_tongue.compile_hypotheses(cfg.objective, cfg.purpose, context=digest)
             budget.charge()
             if not compiled:
                 stop = "tongue_offline"; emit("    Tongue offline — stopping (fail closed)."); break
+            if _spent_break():
+                emit("    budget hit after generate — stopping."); break
             hyps = compiled["hypotheses"]
-            emit(f"    generate: {len(hyps)} hypotheses (H0 null + {len(hyps)-1} mechanism)")
+            emit(f"    generate: {len(hyps)} hypotheses (H0 null + {len(hyps)-1} mechanism) "
+                 f"· citations UNVERIFIED")
 
-            # 2. CRAWL — frontier node → findings (estimate planning or gated live).
-            findings = _crawl(cfg, frontier)
+            # 2. CRAWL — frontier → (findings, has_evidence). No evidence ⇒ this is a PLANNING round.
+            findings, has_evidence = _crawl(cfg, frontier)
+            if has_evidence:
+                evidence_rounds += 1
 
-            # 3. REASON — falsify + expand folded in: which falsifiers hit, who survives, next frontier.
+            # 3. REASON. Without evidence, the loop MUST NOT claim falsifiers/learnings/convergence
+            #    (epistemics CRITICAL): a planning round plans, it does not conclude.
             reason = lgwks_tongue.reason_over_findings(cfg.objective, hyps, findings, context=digest)
             budget.charge()
             if not reason:
                 stop = "tongue_offline"; emit("    reason step offline — stopping."); break
+            if not has_evidence:                       # strip evidence-bearing claims from a planning round
+                reason["falsifiers_hit"] = []
+                reason["learnings"] = []
+                reason["converged"] = False
             surviving = reason["surviving"] or [h["id"] for h in hyps]
-            emit(f"    falsify: hit={reason['falsifiers_hit'] or '—'} · surviving={surviving}")
-            top = sorted(reason["frontier"], key=lambda f: -f["eig"])
+            mode_tag = "EVIDENCE" if has_evidence else "PLANNING"
+            emit(f"    falsify [{mode_tag}]: hit={reason['falsifiers_hit'] or '—'} · surviving={surviving}")
+            top = sorted(reason["frontier"], key=lambda f: -f["eig"])   # eig = MODEL-ESTIMATED priority
             emit(f"    expand: {len(top)} frontier candidates"
-                 + (f" · top={top[0]['node']!r} (eig {top[0]['eig']:.2f})" if top else " · none"))
+                 + (f" · top={top[0]['node']!r} (eig~{top[0]['eig']:.2f})" if top else " · none"))
+            if _spent_break():
+                _save_round(out_dir, n, frontier, compiled, reason, None, has_evidence)
+                emit("    budget hit after reason — stopping."); break
 
             # 4. CONTRARIAN (optional) — steelman the null / attack the leading H.
             contra = None
@@ -158,50 +219,80 @@ def run_auto(cfg: AutoConfig, emit=print) -> AutoResult:
                 contra = lgwks_tongue.contrarian(cfg.objective, leading, context=digest)
                 budget.charge()
                 if contra:
-                    emit(f"    contrarian: shifts_belief={contra['shifts_belief']} · {contra['attack'][:80]}")
+                    blurb = (contra["attack"] or contra["think"])[:80]   # field-leak tolerant
+                    emit(f"    contrarian: shifts_belief={contra['shifts_belief']} · {blurb}")
 
-            # 5. SAVE round artifacts.
-            rdir = out_dir / f"round-{n:03d}"
-            rdir.mkdir(exist_ok=True)
-            (rdir / "hypotheses.json").write_text(_canon(compiled))
-            (rdir / "reason.json").write_text(_canon(reason))
-            (rdir / "think.md").write_text(
-                f"# Round {n} — reasoning trace\n\n## frontier in\n{frontier}\n\n## think\n{reason['think']}\n"
-                + (f"\n## contrarian\n{contra['attack']}\n" if contra else ""))
-            if contra:
-                (rdir / "contrarian.json").write_text(_canon(contra))
-            (rdir / "digest.md").write_text(f"# Round {n} digest\n\n{reason['digest']}\n")
+            # 5. SAVE round artifacts (stamped planning|evidence).
+            _save_round(out_dir, n, frontier, compiled, reason, contra, has_evidence)
 
             # 6. Hash-chain the round (L5) — tamper breaks the chain.
-            rec = {"n": n, "frontier_in": frontier, "hyp_count": len(hyps),
+            rec = {"n": n, "mode": mode_tag, "evidence": has_evidence, "frontier_in": frontier,
+                   "hyp_count": len(hyps), "citations_verified": False,
                    "falsifiers_hit": reason["falsifiers_hit"], "surviving": surviving,
                    "learnings": reason["learnings"], "digest": reason["digest"],
                    "converged": reason["converged"], "spent": budget.spent, "prev": prev_hash}
             rec["hash"] = lgwks_sign.mac(prev_hash + _canon(rec), key)
             prev_hash = rec["hash"]
             lf.write(_canon(rec) + "\n"); lf.flush()
+            if _spent_break():
+                emit("    budget hit after contrarian — stopping."); break
 
-            # 7. Carry forward + decide next frontier.
-            digest = (digest + "\n" + reason["digest"]).strip()[-6000:]   # window-bounded rolling memory
+            # 7. Carry forward (sanitized) + decide next frontier.
+            digest = _sanitize_carry((digest + "\n" + reason["digest"]).strip())[-6000:]
+            # converged is ADVISORY: honoured only on EVIDENCE rounds, and only after ≥2 consecutive
+            # (anti-injection — a single hostile {"converged":true} cannot end the run; hacker R1).
+            conv_streak = conv_streak + 1 if (has_evidence and reason["converged"]) else 0
+            if conv_streak >= CONVERGE_STREAK:
+                stop = "converged"; emit("\n  ✓ converged — hypotheses resolved on evidence."); break
+            nxt = _safe_node(top[0]["node"]) if top else None    # reject injection-shaped frontier nodes
             top_eig = top[0]["eig"] if top else 0.0
-            if reason["converged"]:
-                stop = "converged"; emit("\n  ✓ converged — hypotheses resolved."); break
-            if not top or top_eig < EIG_FLOOR:
+            if nxt is None or top_eig < EIG_FLOOR:
                 dry_streak += 1
                 if dry_streak >= DRY_LIMIT:
                     stop = "frontier_dry"; emit(f"\n  ✓ frontier dry for {DRY_LIMIT} rounds — stopping."); break
             else:
                 dry_streak = 0
-                frontier = top[0]["node"]
+                frontier = nxt
 
-    intact = _verify_ledger(ledger, key)
+    chain_ok = _verify_ledger(ledger, key)
+    tamper_evident = lgwks_sign.is_keyed(mode)        # honest: chain is tamper-EVIDENT only when keyed
     (out_dir / "result.json").write_text(_canon({
-        "run_id": run_id, "rounds": n, "stop_reason": stop, "surviving": surviving,
-        "spent": budget.spent, "integrity_mode": mode, "ledger_intact": intact,
+        "run_id": run_id, "rounds": n, "evidence_rounds": evidence_rounds, "stop_reason": stop,
+        "surviving": surviving, "spent": budget.spent, "integrity_mode": mode,
+        "chain_consistent": chain_ok,
+        # do NOT claim tamper-evidence in unanchored mode (hacker F3 / epistemics 4b): the signer
+        # constant is in source, so an adversary can recompute the chain. Only keyed mode is evident.
+        "tamper_evident": tamper_evident and chain_ok,
+        "citations_verified": False, "eig_basis": "model-estimated-priority",
         "objective": cfg.objective, "start": cfg.start}))
-    emit(f"\n  ◆ done · {n} rounds · stop={stop} · surviving={surviving} · spent={budget.spent} tok")
-    emit(f"  ↳ artifacts: {out_dir}  (ledger {'intact' if intact else 'BROKEN'} · {mode})")
-    return AutoResult(run_id, n, stop, surviving, budget.spent, str(out_dir), intact, mode)
+    try:
+        import lgwks_context           # LOD spawn-context pack — next spawn reads decaying-resolution context
+        lgwks_context.write_pack(out_dir)
+    except Exception:
+        pass                          # context pack is a convenience, never fails the run
+    integ = f"{mode}·{'tamper-evident' if tamper_evident else 'corruption-only'}"
+    emit(f"\n  ◆ done · {n} rounds ({evidence_rounds} evidence) · stop={stop} · "
+         f"surviving={surviving} · spent={budget.spent} tok")
+    emit(f"  ↳ artifacts: {out_dir}  (chain {'ok' if chain_ok else 'BROKEN'} · {integ})")
+    return AutoResult(run_id, n, stop, surviving, budget.spent, str(out_dir), chain_ok, mode)
+
+
+def _save_round(out_dir: Path, n: int, frontier: str, compiled: dict, reason: dict,
+                contra: dict | None, has_evidence: bool) -> None:
+    """Write one round's artifacts, stamped PLANNING|EVIDENCE so a reader can never mistake a
+    no-evidence planning round for a research finding (epistemics CRITICAL)."""
+    rdir = out_dir / f"round-{n:03d}"
+    rdir.mkdir(exist_ok=True)
+    tag = "EVIDENCE" if has_evidence else "PLANNING (no document content — claims are plans, not findings)"
+    (rdir / "hypotheses.json").write_text(_canon(compiled))
+    (rdir / "reason.json").write_text(_canon({**reason, "mode": tag, "evidence": has_evidence,
+                                              "citations_verified": False}))
+    body = (f"# Round {n} — {tag}\n\n## frontier in\n{frontier}\n\n## think\n{reason['think']}\n"
+            + (f"\n## contrarian\n{contra['attack'] or contra['think']}\n" if contra else ""))
+    (rdir / "think.md").write_text(body)
+    if contra:
+        (rdir / "contrarian.json").write_text(_canon(contra))
+    (rdir / "digest.md").write_text(f"# Round {n} digest [{tag}]\n\n{reason['digest']}\n")
 
 
 def _verify_ledger(ledger: Path, key: bytes) -> bool:

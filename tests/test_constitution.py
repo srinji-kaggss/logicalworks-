@@ -311,5 +311,39 @@ class TestAutonomousLoop(unittest.TestCase):
             self.assertFalse(self.lr._verify_ledger(ledger, key))
 
 
+class TestContextPack(unittest.TestCase):
+    """#9 harness — LOD spawn-context: empty dir → empty; populated → tiers + state matrix + symlinks."""
+
+    def setUp(self):
+        import lgwks_context
+        self.lc = lgwks_context
+
+    def test_empty_when_no_rounds(self):
+        with tempfile.TemporaryDirectory() as d:
+            self.assertEqual(self.lc.assemble(Path(d)), "")
+            self.assertIsNone(self.lc.write_pack(Path(d)))
+
+    def test_pack_has_tiers_and_matrix(self):
+        with tempfile.TemporaryDirectory() as d:
+            rd = Path(d)
+            with (rd / "rounds.ledger.jsonl").open("w") as lf:
+                for n in (1, 2):
+                    (rd / f"round-{n:03d}").mkdir()
+                    (rd / f"round-{n:03d}" / "think.md").write_text(f"think {n}")
+                    (rd / f"round-{n:03d}" / "reason.json").write_text("{}")
+                    lf.write(json.dumps({"n": n, "frontier_in": "x", "surviving": ["H0"],
+                                         "falsifiers_hit": [], "learnings": ["l"], "digest": "dg",
+                                         "converged": False, "spent": n * 100}) + "\n")
+            out = self.lc.write_pack(rd)
+            self.assertIsNotNone(out)
+            txt = out.read_text()
+            self.assertIn("STATE MATRIX", txt)
+            self.assertIn("TIER 0", txt)
+            self.assertIn("TIER 3", txt)
+            # raw symlink to the newest round exists and resolves
+            link = rd / "CONTEXT" / "raw" / f"{rd.name}-R002.reason.json"
+            self.assertTrue(link.is_symlink() and link.resolve().exists())
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)
