@@ -1214,6 +1214,10 @@ def build_parser() -> argparse.ArgumentParser:
     import lgwks_comprehend
     lgwks_comprehend.add_parser(sub)
 
+    # cohere — Coherence Engine pipeline G0→G1→G3→G2
+    import lgwks_cohere
+    lgwks_cohere.add_parser(sub)
+
     # login — capture a user-consented browser session for one host. Secrets/cookies stay in the
     # host-scoped Playwright storage file and are only reused for that same host.
     login = sub.add_parser("login", help="save a host-scoped browser session (human logs in)")
