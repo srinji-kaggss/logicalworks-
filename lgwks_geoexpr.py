@@ -264,14 +264,49 @@ def _load_geoexpr(args) -> dict:
         return _err("geoexpr_unparseable", str(e))
 
 
+def _load_raw(args) -> str:
+    """Read the raw input string without attempting JSON decode.
+
+    Priority: --expr flag > --file flag > stdin.
+    //why --expr is highest priority: an explicit inline expression string is
+    // unambiguous; it avoids reading stdin when the caller is non-interactive.
+    """
+    if getattr(args, "expr", None):
+        return args.expr
+    if getattr(args, "file", None):
+        return open(args.file, encoding="utf-8").read()
+    return sys.stdin.read()
+
+
 def compile_command(args) -> int:
-    loaded = _load_geoexpr(args)
-    if not loaded["ok"]:
-        print(json.dumps(loaded), file=__import__("sys").stderr)
+    # //why probe for expression string before JSON: lgwks-expression/1 strings
+    # are not JSON; a leading identifier (not '{') signals the new layer.
+    # Brace-expansion paths are unchanged — they go through compile_plan as before.
+    raw = _load_raw(args)
+    raw_stripped = raw.strip()
+
+    import lgwks_expression as expr_mod
+    if expr_mod.is_expression_string(raw_stripped):
+        # Route through the lgwks-expression/1 compiler.
+        import lgwks_manifest as man
+        manifest = man.build_manifest()
+        try:
+            plan = expr_mod.compile_from_string(raw_stripped, manifest)
+        except expr_mod.ExpressionParseError as e:
+            print(json.dumps(_err("expression_parse_error", str(e))), file=sys.stderr)
+            return 2
+        print(json.dumps(plan, indent=2, sort_keys=True))
+        return 0
+
+    # Existing GeoExpr JSON path -- preserved unchanged.
+    try:
+        geoexpr_obj = json.loads(raw_stripped)
+    except json.JSONDecodeError as e:
+        print(json.dumps(_err("geoexpr_unparseable", str(e))), file=sys.stderr)
         return 2
-    result = compile_plan(loaded["value"])
+    result = compile_plan(geoexpr_obj)
     if not result["ok"]:
-        print(json.dumps(result), file=__import__("sys").stderr)
+        print(json.dumps(result), file=sys.stderr)
         return 2
     print(json.dumps(result["value"], indent=2, sort_keys=True))
     return 0
@@ -327,8 +362,19 @@ def run_command(args) -> int:
 def add_parser(sub) -> None:
     p = sub.add_parser("geo", help="geometric-CLI translator: typed GeoExpr -> argv plan (no shell)")
     gs = p.add_subparsers(dest="geo_command", required=True)
-    comp = gs.add_parser("compile", help="GeoExpr JSON (--file or stdin) -> CommandPlan")
+    comp = gs.add_parser(
+        "compile",
+        help="GeoExpr JSON (--file or stdin) -> CommandPlan; "
+             "or lgwks-expression/1 string (--expr) -> expression plan",
+    )
     comp.add_argument("--file", help="path to a GeoExpr JSON file; omit to read stdin")
+    # //why --expr on the existing 'geo compile' subparser not a new subparser:
+    # spec §Integration Points says expression routing extends 'geo compile', not a new verb.
+    comp.add_argument(
+        "--expr",
+        metavar="EXPRESSION",
+        help="lgwks-expression/1 pipeline string, e.g. 'extract[target:\"url\"] | store'",
+    )
     comp.set_defaults(func=compile_command)
     prev = gs.add_parser("preview", help="GeoExpr JSON -> HumanPreview projection")
     prev.add_argument("--file", help="path to a GeoExpr JSON file; omit to read stdin")
