@@ -1,0 +1,37 @@
+{
+  "unit_id": "U3",
+  "restated_intent": "Fix three gate-honesty bugs (#29): (1) unbin classifier-unknown from user-vagueness in refine() so high-specificity unknown-intent gets classifier_coverage_gap instead of a blame-question; (2) add a relevance verifier to public search so results below a similarity floor are either filtered or honestly labelled; (3) add a source-validity verifier to the crawl path that rejects CAPTCHA/bot-challenge/login-wall pages before ingest. All three encode the CANNOT_DECIDE discipline: model failure ≠ human fault.",
+  "steps": [
+    {
+      "step": "In lgwks_machine.py refine(): when specificity >= threshold AND intent_class == 'unknown', set abstain=False, tag classifier_coverage_gap, and do NOT emit questions. Keep existing abstain for low-specificity.",
+      "covers": ["refine('Find me machine focused research on how ML to AI training occurs') does NOT abstain blaming the human; it proceeds or returns classifier_coverage_gap"]
+    },
+    {
+      "step": "Log classifier_coverage_gap events to cognition-log as a #27 training signal.",
+      "covers": ["refine('Find me machine focused research on how ML to AI training occurs') does NOT abstain blaming the human; it proceeds or returns classifier_coverage_gap"]
+    },
+    {
+      "step": "In lgwks_public.py: add relevance Verifier that scores query-result topical similarity; filter below floor OR label output with 'ranking': 'citation-canon, not relevance'.",
+      "covers": ["public output is either relevance-filtered above a similarity floor OR carries an explicit ranking label (no silent canon-as-relevance)"]
+    },
+    {
+      "step": "In lgwks_search.py: add source_validity Verifier with known CAPTCHA/bot-challenge/login-wall markers (content heuristics: form with password, 'are you human', empty body, etc.). Returns CANNOT_DECIDE on rejection.",
+      "covers": ["a CAPTCHA/bot-challenge fixture page is rejected by crawl's source-validity gate, not ingested into concepts"]
+    },
+    {
+      "step": "Write tests/test_gates_honesty.py with three regression tests: (a) refine on high-specificity unknown intent, (b) public relevance label/filter, (c) source-validity on CAPTCHA fixture.",
+      "covers": ["refine('Find me machine focused research on how ML to AI training occurs') does NOT abstain blaming the human; it proceeds or returns classifier_coverage_gap", "public output is either relevance-filtered above a similarity floor OR carries an explicit ranking label (no silent canon-as-relevance)", "a CAPTCHA/bot-challenge fixture page is rejected by crawl's source-validity gate, not ingested into concepts"]
+    },
+    {
+      "step": "Run python3 -m unittest discover tests and confirm all green.",
+      "covers": ["self-tests"]
+    }
+  ],
+  "invariants": [
+    "fix targets the refine() function (classifier-unknown-vs-user-vagueness unbind at the gaps-assignment AND the abstain decision AND question-emission), NOT a single line number",
+    "no gate weakening — fix the model under the gate"
+  ],
+  "gates": ["self-tests"],
+  "files_touched": ["lgwks_machine.py", "lgwks_public.py", "lgwks_search.py", "tests/test_gates_honesty.py"],
+  "out_of_scope": ["model-training", "RLVR-loop", "PyTorch-MPS", "CoreML-export", "ModernBERT-finetune", "science-engine", "AI-Lang", "network-egress", "other-units-files", "UI/TTY-rendering", "performance-optimization", "new-CLI-verbs-beyond-this-unit"]
+}

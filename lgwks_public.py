@@ -104,6 +104,32 @@ def _openverse(query: str, limit: int) -> list[dict]:
 _RUNNERS = {"openalex": _openalex, "crossref": _crossref, "openverse": _openverse}
 
 
+def _relevance_score(query: str, record: dict) -> float:
+    """Crude topical similarity: fraction of query terms appearing in title."""
+    qterms = [t for t in query.lower().split() if len(t) > 2]
+    if not qterms:
+        return 0.0
+    title = (record.get("title") or "").lower()
+    hits = sum(1 for t in qterms if t in title)
+    return round(hits / len(qterms), 2)
+
+
+def _label_records(records: list[dict], query: str, floor: float = 0.25) -> list[dict]:
+    """
+    Relevance verifier: either filter below floor OR label honestly.
+    //why: no silent canon-as-relevance. If we cannot prove relevance, we say so.
+    """
+    out: list[dict] = []
+    for r in records:
+        score = _relevance_score(query, r)
+        if score < floor:
+            # honest label: canon ranking, not proven relevance
+            out.append({**r, "ranking": "citation-canon, not relevance", "relevance_score": score})
+        else:
+            out.append({**r, "relevance_score": score})
+    return out
+
+
 def search_public(query: str, source: str = "all", limit: int = 5) -> dict:
     selected = list(_RUNNERS) if source == "all" else [source]
     records: list[dict] = []
@@ -117,6 +143,8 @@ def search_public(query: str, source: str = "all", limit: int = 5) -> dict:
             records.extend(fn(query, limit))
         except Exception as exc:
             errors[name] = type(exc).__name__
+    # relevance gate: label honestly, never silent canon-as-relevance
+    records = _label_records(records, query)
     return {
         "query": query,
         "source": source,
