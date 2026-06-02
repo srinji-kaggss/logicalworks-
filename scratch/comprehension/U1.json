@@ -1,0 +1,46 @@
+{
+  "unit_id": "U1",
+  "restated_intent": "Create the foundational Verifier primitive that every gate implements: a typed interface with three honest outcomes (PASS, FAIL, CANNOT_DECIDE), two classes (HARD blocks ship, ADVISORY accumulates into a report), and a fail-fast pipeline that short-circuits on the first HARD non-PASS. This makes the #29 bug (model failure laundered as human blame) unrepresentable.",
+  "steps": [
+    {
+      "step": "Define Outcome enum with PASS, FAIL, CANNOT_DECIDE",
+      "covers": ["every Verdict is JSON-serialisable for the cognition-log"]
+    },
+    {
+      "step": "Define Klass enum with HARD, ADVISORY",
+      "covers": ["HARD short-circuits on first non-PASS"]
+    },
+    {
+      "step": "Define frozen Verdict dataclass with gate_id, outcome, klass, score, evidence, diagnosis; enforce ADVISORY invariant in __post_init__",
+      "covers": ["ADVISORY outcome ∈ {PASS, CANNOT_DECIDE} only (never FAIL/score-on-undecided)", "every Verdict is JSON-serialisable for the cognition-log"]
+    },
+    {
+      "step": "Define Verifier Protocol with gate_id, klass, check(subject, context) -> Verdict",
+      "covers": ["a verifier raising internally is caught and mapped to CANNOT_DECIDE, never PASS"]
+    },
+    {
+      "step": "Define GateRegistry with hard and advisory lists",
+      "covers": ["HARD short-circuits on first non-PASS", "ADVISORY accumulates"]
+    },
+    {
+      "step": "Implement run_pipeline(subject, context, reg) -> (bool, list[Verdict]): iterate HARD verifiers, short-circuit on first non-PASS; then iterate ADVISORY verifiers, always appending; wrap each verifier call in try/except mapping to CANNOT_DECIDE",
+      "covers": ["run_pipeline returns (False, verdicts) on the first HARD non-PASS verdict", "a verifier raising internally is caught and mapped to CANNOT_DECIDE, never PASS"]
+    },
+    {
+      "step": "Write tests/test_verify.py covering: (a) HARD short-circuit on FAIL, (b) internal exception → CANNOT_DECIDE, (c) Verdict JSON round-trip",
+      "covers": ["run_pipeline returns (False, verdicts) on the first HARD non-PASS verdict", "a verifier raising internally is caught and mapped to CANNOT_DECIDE, never PASS", "every Verdict is JSON-serialisable for the cognition-log"]
+    },
+    {
+      "step": "Run python3 -m unittest discover tests and confirm all green",
+      "covers": ["self-tests"]
+    }
+  ],
+  "invariants": [
+    "HARD short-circuits on first non-PASS",
+    "ADVISORY accumulates",
+    "ADVISORY outcome ∈ {PASS, CANNOT_DECIDE} only (never FAIL/score-on-undecided)"
+  ],
+  "gates": ["self-tests"],
+  "files_touched": ["lgwks_verify.py", "tests/test_verify.py"],
+  "out_of_scope": ["model-training", "RLVR-loop", "PyTorch-MPS", "CoreML-export", "UI/TTY-rendering", "performance-optimization", "new-CLI-verbs-beyond-this-unit"]
+}
