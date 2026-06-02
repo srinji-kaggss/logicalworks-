@@ -97,15 +97,20 @@ def _log_verdicts(verdicts: list[Verdict]) -> None:
         pass  # //why: fail-soft on cognition-log unavailability; pipeline still returns verdicts
 
 
-def cohere(subject: str, crate_dir: Path, rules_path: Path | None = None) -> tuple[bool, list[Verdict], str]:
+def cohere(subject: str | Path, crate_dir: Path, rules_path: Path | None = None) -> tuple[bool, list[Verdict], str]:
     """
     Run the coherence pipeline. Returns (shippable, verdicts, report).
+    subject may be a code string (for in-memory candidates) or a Path (existing file).
     """
     from lgwks_gate_arch import make_arch_verifiers
     from lgwks_gate_framework import G3Verifier
     from lgwks_gate_idiom import IdiomVerifier
 
+    file_path: Path | None = subject if isinstance(subject, Path) else None
     context: dict[str, Any] = {"crate_dir": str(crate_dir)}
+    if file_path:
+        context["file_path"] = str(file_path)
+
     reg = GateRegistry()
     reg.hard.append(G0Verifier(crate_dir=crate_dir))
     for v in make_arch_verifiers(rules_path):
@@ -142,8 +147,9 @@ def cohere_command(args) -> int:
     if not crate_dir.exists():
         print(f"error: crate directory not found: {crate_dir}", file=sys.stderr)
         return 1
-    code = file_path.read_text(encoding="utf-8", errors="replace")
-    ok, verdicts, report = cohere(code, crate_dir)
+    # Pass the file path as subject so G1 (AST scan) and G3 (symbol extraction) get a real path.
+    # Verifiers that need content read it themselves (G2 idiom, G3 parse).
+    ok, verdicts, report = cohere(file_path, crate_dir)
     if getattr(args, "json", False):
         print(json.dumps({
             "shippable": ok,
