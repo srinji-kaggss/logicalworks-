@@ -885,7 +885,7 @@ class TestGroundDegradation(unittest.TestCase):
         self.assertEqual(g["sources"], [])
 
 
-lass TestHomeQuickHints(unittest.TestCase):
+class TestHomeQuickHints(unittest.TestCase):
     """L4 invariant: every verb shown in the `quick` block must exist in the live parser, and the
     block must never contain a separate binary (e.g. `lgwks-akinator`) that the parser can't dispatch.
     Source-of-truth = `lgwks build_parser()` (the same parser `lgwks --help` shows)."""
