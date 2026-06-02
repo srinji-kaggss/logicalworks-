@@ -1259,6 +1259,10 @@ def build_parser() -> argparse.ArgumentParser:
     import lgwks_debug
     lgwks_debug.add_parser(sub)
 
+    # intent — schema-driven intent router: declare, probe, act
+    import lgwks_intent
+    lgwks_intent.add_parser(sub)
+
     return parser
 
 
