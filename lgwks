@@ -1210,6 +1210,10 @@ def build_parser() -> argparse.ArgumentParser:
     import lgwks_geoexpr
     lgwks_geoexpr.add_parser(sub)
 
+    # comprehend — the Comprehension Gate (Intention × Understanding)
+    import lgwks_comprehend
+    lgwks_comprehend.add_parser(sub)
+
     # login — capture a user-consented browser session for one host. Secrets/cookies stay in the
     # host-scoped Playwright storage file and are only reused for that same host.
     login = sub.add_parser("login", help="save a host-scoped browser session (human logs in)")

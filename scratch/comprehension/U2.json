@@ -1,0 +1,49 @@
+{
+  "unit_id": "U2",
+  "restated_intent": "Build the Comprehension Gate — a HARD Verifier that forces an implementing agent to prove understanding of a build unit before writing code. It parses the authoritative units.json, takes an agent's ComprehensionArtifact JSON, and runs four deterministic checks: coverage of acceptance criteria, write-surface containment, invariant/gate subset, and scope-boundary vocabulary. The gate is the anti-drift mechanism: Intention × Understanding encoded as a machine-checked precondition.",
+  "steps": [
+    {
+      "step": "Define ComprehensionArtifact dataclass (unit_id, restated_intent, steps[], invariants[], gates[], files_touched[], out_of_scope[])",
+      "covers": ["lgwks comprehend --unit <id> --file plan.json returns a Verdict object"]
+    },
+    {
+      "step": "Implement coverage check: every acceptance[] entry for the unit must be addressed by ≥1 step's 'covers' mapping; uncovered → FAIL with diagnosis listing them",
+      "covers": ["plan omitting any acceptance[] entry for the unit returns FAIL with diagnosis naming the uncovered criteria"]
+    },
+    {
+      "step": "Implement write-surface check: files_touched ⊆ unit.file_targets; any extra → FAIL",
+      "covers": ["a files_touched entry not in the unit's file_targets returns FAIL"]
+    },
+    {
+      "step": "Implement subset check: invariants ⊇ unit.invariants AND gates ⊇ unit.gates; any missing → FAIL",
+      "covers": ["invariants ⊉ unit.invariants or gates ⊉ unit.gates returns FAIL"]
+    },
+    {
+      "step": "Implement scope-boundary check: out_of_scope non-empty AND every entry ∈ out_of_scope_vocab; empty or unknown token → CANNOT_DECIDE",
+      "covers": ["out_of_scope empty OR containing a token not in out_of_scope_vocab returns CANNOT_DECIDE"]
+    },
+    {
+      "step": "Wire ComprehensionVerifier.check(subject=artifact, context=unit_spec) → Verdict(gate_id='comprehension', klass=HARD)",
+      "covers": ["lgwks comprehend --unit <id> --file plan.json returns a Verdict object"]
+    },
+    {
+      "step": "Add `lgwks comprehend` CLI parser in lgwks binary: --unit, --file, optional --json; dispatch to comprehension_command",
+      "covers": ["lgwks comprehend --unit <id> --file plan.json returns a Verdict object"]
+    },
+    {
+      "step": "Write tests/test_comprehend.py covering: missing acceptance → FAIL, extra file → FAIL, missing invariant → FAIL, empty out_of_scope → CANNOT_DECIDE, unknown vocab → CANNOT_DECIDE, valid plan → PASS",
+      "covers": ["plan omitting any acceptance[] entry for the unit returns FAIL with diagnosis naming the uncovered criteria", "a files_touched entry not in the unit's file_targets returns FAIL", "invariants ⊉ unit.invariants or gates ⊉ unit.gates returns FAIL", "out_of_scope empty OR containing a token not in out_of_scope_vocab returns CANNOT_DECIDE", "lgwks comprehend --unit <id> --file plan.json returns a Verdict object"]
+    },
+    {
+      "step": "Run python3 -m unittest discover tests and confirm all green",
+      "covers": ["self-tests"]
+    }
+  ],
+  "invariants": [
+    "gate reads units.json (this file), not prose markdown",
+    "all checks are coverage/subset tests on arrays — no semantic-similarity heuristic"
+  ],
+  "gates": ["comprehension", "self-tests"],
+  "files_touched": ["lgwks_comprehend.py", "tests/test_comprehend.py", "lgwks"],
+  "out_of_scope": ["model-training", "RLVR-loop", "PyTorch-MPS", "CoreML-export", "ModernBERT-finetune", "science-engine", "AI-Lang", "network-egress", "other-units-files", "UI/TTY-rendering", "performance-optimization", "new-CLI-verbs-beyond-this-unit"]
+}
