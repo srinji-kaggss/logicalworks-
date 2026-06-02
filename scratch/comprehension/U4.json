@@ -1,0 +1,37 @@
+{
+  "unit_id": "U4",
+  "restated_intent": "Build the G3 framework-reality gate: verify that external symbols referenced in candidate code exist in the *installed* dependency surface, catching version-skew hallucinations. The gate uses cargo metadata + rustdoc JSON as ground truth; if rustdoc JSON is unavailable, it abstains (CANNOT_DECIDE) rather than guessing. Bare symbol-existence on compiled Rust is G0's job — G3 only adds version-skew and pre-generation grounding.",
+  "steps": [
+    {
+      "step": "Create tests/fixtures/crate/ as a minimal Rust library crate with a lib.rs exporting some symbols.",
+      "covers": ["candidate referencing a symbol that exists in the crate but at a DIFFERENT installed version than assumed → FAIL with version-skew diagnosis"]
+    },
+    {
+      "step": "Implement lgwks_gate_framework.py with G3Verifier that: (a) runs cargo metadata to discover dependencies, (b) attempts rustdoc JSON generation, (c) parses rustdoc JSON into an installed-symbol set, (d) parses candidate code for external use/path references, (e) checks references against installed set.",
+      "covers": ["candidate referencing a symbol that exists in the crate but at a DIFFERENT installed version than assumed → FAIL with version-skew diagnosis", "pre-generation: emits the installed symbol surface (from cargo metadata + rustdoc JSON) as grounding context", "missing rustdoc JSON → CANNOT_DECIDE, never silently PASS"]
+    },
+    {
+      "step": "Pre-generation grounding: emit installed symbol surface as structured grounding context for the generator.",
+      "covers": ["pre-generation: emits the installed symbol surface (from cargo metadata + rustdoc JSON) as grounding context"]
+    },
+    {
+      "step": "Handle missing rustdoc JSON by returning CANNOT_DECIDE with diagnosis, never silently PASS.",
+      "covers": ["missing rustdoc JSON → CANNOT_DECIDE, never silently PASS"]
+    },
+    {
+      "step": "Write tests/test_gate_framework.py: (a) valid symbol reference → PASS, (b) hallucinated symbol → FAIL with diagnosis, (c) missing rustdoc → CANNOT_DECIDE.",
+      "covers": ["candidate referencing a symbol that exists in the crate but at a DIFFERENT installed version than assumed → FAIL with version-skew diagnosis", "pre-generation: emits the installed symbol surface (from cargo metadata + rustdoc JSON) as grounding context", "missing rustdoc JSON → CANNOT_DECIDE, never silently PASS"]
+    },
+    {
+      "step": "Run python3 -m unittest discover tests and confirm all green.",
+      "covers": ["self-tests"]
+    }
+  ],
+  "invariants": [
+    "G3 covers version-skew + pre-gen grounding ONLY; bare symbol-existence on COMPILED Rust is G0's job (rustc errors E0433/E0425) — do NOT reimplement the compiler",
+    "the path/symbol extractor MUST declare its false-PASS surface (a missed reference = false PASS); if it cannot be bounded complete, the existence portion is ADVISORY"
+  ],
+  "gates": ["self-tests"],
+  "files_touched": ["lgwks_gate_framework.py", "tests/test_gate_framework.py", "tests/fixtures/crate/"],
+  "out_of_scope": ["model-training", "RLVR-loop", "PyTorch-MPS", "CoreML-export", "ModernBERT-finetune", "science-engine", "AI-Lang", "network-egress", "other-units-files", "UI/TTY-rendering", "performance-optimization", "new-CLI-verbs-beyond-this-unit"]
+}
