@@ -1255,6 +1255,10 @@ def build_parser() -> argparse.ArgumentParser:
     import lgwks_gh
     lgwks_gh.add_parser(sub)
 
+    # debug — automated debugging: run, parse, propose fix
+    import lgwks_debug
+    lgwks_debug.add_parser(sub)
+
     return parser
 
 
