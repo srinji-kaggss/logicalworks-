@@ -45,12 +45,17 @@ class RuleVerifier:
         """AST scan: detect forbidden import edges."""
         module_path = Path(subject) if isinstance(subject, (str, Path)) else None
         if module_path is None or not module_path.exists():
-            return Verdict(
-                gate_id=self.gate_id,
-                outcome=Outcome.CANNOT_DECIDE,
-                klass=self.klass,
-                diagnosis="subject is not a file path",
-            )
+            ctx = context if isinstance(context, dict) else {}
+            fallback = ctx.get("file_path")
+            if fallback:
+                module_path = Path(fallback)
+            else:
+                return Verdict(
+                    gate_id=self.gate_id,
+                    outcome=Outcome.CANNOT_DECIDE,
+                    klass=self.klass,
+                    diagnosis="subject is not a file path (no file_path in context)",
+                )
         module_name = module_path.stem
         from_patterns = self.rule.get("from", [])
         if not any(module_name == f or module_path.name == f or str(module_path).endswith(f"/{f}.py") for f in from_patterns):
@@ -92,12 +97,17 @@ class RuleVerifier:
         """AST scan: detect module-level mutable bindings (ADVISORY)."""
         module_path = Path(subject) if isinstance(subject, (str, Path)) else None
         if module_path is None or not module_path.exists():
-            return Verdict(
-                gate_id=self.gate_id,
-                outcome=Outcome.CANNOT_DECIDE,
-                klass=self.klass,
-                diagnosis="subject is not a file path",
-            )
+            ctx = context if isinstance(context, dict) else {}
+            fallback = ctx.get("file_path")
+            if fallback:
+                module_path = Path(fallback)
+            else:
+                return Verdict(
+                    gate_id=self.gate_id,
+                    outcome=Outcome.CANNOT_DECIDE,
+                    klass=self.klass,
+                    diagnosis="subject is not a file path (no file_path in context)",
+                )
         module_name = module_path.stem
         applies = self.rule.get("applies_to", [])
         if not any(module_name == m or module_path.name == m for m in applies):
@@ -139,12 +149,17 @@ class RuleVerifier:
         """AST scan: detect silent except blocks."""
         module_path = Path(subject) if isinstance(subject, (str, Path)) else None
         if module_path is None or not module_path.exists():
-            return Verdict(
-                gate_id=self.gate_id,
-                outcome=Outcome.CANNOT_DECIDE,
-                klass=self.klass,
-                diagnosis="subject is not a file path",
-            )
+            ctx = context if isinstance(context, dict) else {}
+            fallback = ctx.get("file_path")
+            if fallback:
+                module_path = Path(fallback)
+            else:
+                return Verdict(
+                    gate_id=self.gate_id,
+                    outcome=Outcome.CANNOT_DECIDE,
+                    klass=self.klass,
+                    diagnosis="subject is not a file path (no file_path in context)",
+                )
         module_name = module_path.stem
         applies = self.rule.get("applies_to", [])
         if not any(module_name == m or module_path.name == m for m in applies):

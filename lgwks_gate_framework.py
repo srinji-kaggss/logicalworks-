@@ -146,10 +146,15 @@ class G3Verifier:
 
     def check(self, subject: object, context: object) -> Verdict:
         """
-        subject: candidate Rust code (str)
+        subject: candidate Rust code (str) or file path (Path)
         context: dict with optional 'crate_dir' (str|Path); if absent and self.crate_dir unset → CANNOT_DECIDE
         """
-        code = subject if isinstance(subject, str) else str(subject)
+        if isinstance(subject, Path) and subject.exists():
+            code = subject.read_text(encoding="utf-8", errors="replace")
+        elif isinstance(subject, str):
+            code = subject
+        else:
+            code = str(subject)
         ctx = context if isinstance(context, dict) else {}
         crate_dir = ctx.get("crate_dir")
         if crate_dir:
