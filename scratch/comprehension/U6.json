@@ -1,0 +1,33 @@
+{
+  "unit_id": "U6",
+  "restated_intent": "Build the G2 Idiom gate: score how well candidate code matches this repo's conventions using deterministic embedding-distance to the repo corpus. Always ADVISORY — never blocks ship. On embedder failure, return CANNOT_DECIDE (not a 0 score) so it is excluded from report aggregation.",
+  "steps": [
+    {
+      "step": "Implement lgwks_gate_idiom.py with IdiomVerifier (klass=ADVISORY). Scan corpus directory for .py files, embed candidate + corpus using lgwks_embed._embedding, compute cosine similarities.",
+      "covers": ["always returns an ADVISORY verdict (never FAIL, never blocks ship)", "emits a score in 0..1 + an idiom-diff report (nearest in-repo exemplars + deviations)"]
+    },
+    {
+      "step": "Score = mean of top-k similarities to corpus files. Evidence = nearest exemplars (highest similarity files) + deviations (lowest similarity features).",
+      "covers": ["emits a score in 0..1 + an idiom-diff report (nearest in-repo exemplars + deviations)"]
+    },
+    {
+      "step": "On lgwks_embed import failure or empty corpus, return ADVISORY+CANNOT_DECIDE with diagnosis, NOT a 0 score.",
+      "covers": ["on embedder failure returns ADVISORY+CANNOT_DECIDE (excluded from the report's score aggregation, surfaced separately) — NOT a 0 score"]
+    },
+    {
+      "step": "Write tests/test_gate_idiom.py: (a) candidate similar to corpus → PASS with score, (b) embedder failure → CANNOT_DECIDE, (c) verdict klass is always ADVISORY.",
+      "covers": ["always returns an ADVISORY verdict (never FAIL, never blocks ship)", "emits a score in 0..1 + an idiom-diff report (nearest in-repo exemplars + deviations)", "on embedder failure returns ADVISORY+CANNOT_DECIDE (excluded from the report's score aggregation, surfaced separately) — NOT a 0 score"]
+    },
+    {
+      "step": "Run python3 -m unittest discover tests and confirm all green.",
+      "covers": ["self-tests"]
+    }
+  ],
+  "invariants": [
+    "ADVISORY only",
+    "no ECE/calibration acceptance is claimed — there is no held-out idiom-labeled dataset in-repo; calibration is deferred until one is constructed (logged, not asserted)"
+  ],
+  "gates": ["self-tests"],
+  "files_touched": ["lgwks_gate_idiom.py", "tests/test_gate_idiom.py"],
+  "out_of_scope": ["model-training", "RLVR-loop", "PyTorch-MPS", "CoreML-export", "ModernBERT-finetune", "science-engine", "AI-Lang", "network-egress", "other-units-files", "UI/TTY-rendering", "performance-optimization", "new-CLI-verbs-beyond-this-unit"]
+}
