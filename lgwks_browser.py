@@ -77,6 +77,20 @@ def _headers(url: str) -> dict[str, str]:
         return {}
 
 
+def _route_handler(lock_host: str, auth_headers: dict[str, str]):
+    """Return a Playwright route handler that injects auth_headers ONLY when the request host
+    matches the lock host. Cross-origin subresources and redirects to other domains get no creds."""
+    def handler(route, request):
+        req_host = urllib.parse.urlparse(request.url).hostname or ""
+        if lock_host.lower() == req_host.lower():
+            merged = dict(request.headers)
+            merged.update(auth_headers)
+            route.continue_(headers=merged)
+        else:
+            route.continue_()
+    return handler
+
+
 def _session_for_url(url: str) -> Path | None:
     host = urllib.parse.urlparse(url).hostname
     if not host:
@@ -104,15 +118,18 @@ def render(url: str, max_chars: int = 8000, *, use_session: bool = False,
     from playwright.sync_api import sync_playwright
     session_path = _session_for_url(url)
     storage = str(session_path) if (use_session or session_path) and session_path else None
+    lock_host = urllib.parse.urlparse(url).hostname or ""
+    auth_headers = _headers(url)
     try:
         with sync_playwright() as p:
             browser = p.chromium.launch(headless=True)
             ctx = browser.new_context(
                 user_agent=_UA, locale="en-CA", timezone_id="America/Toronto",
                 viewport={"width": 1366, "height": 900},
-                extra_http_headers=_headers(url),
                 storage_state=storage,                       # the user's session, iff present
             )
+            if auth_headers:
+                ctx.route("**/*", _route_handler(lock_host, auth_headers))
             page = ctx.new_page()
             page.goto(url, wait_until="domcontentloaded", timeout=30000)
             page.wait_for_timeout(wait_ms)                   # let client JS render
