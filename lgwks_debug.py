@@ -186,7 +186,7 @@ _PATTERNS: list[tuple[str, str, str, str, str, str]] = [
         "mutate",
     ),
     (
-        r"FATAL: database "([^"]+)" does not exist",
+        r'FATAL: database "([^"]+)" does not exist',
         "missing_db",
         "warn",
         "Database does not exist: {group1}",
