@@ -1,0 +1,41 @@
+{
+  "unit_id": "U7",
+  "restated_intent": "Build the Coherence Engine pipeline `lgwks cohere` that composes G0 (cargo build/test compiler gate) → G1 (architecture) → G3 (framework-reality) → G2 (idiom) via the GateRegistry. HARD non-PASS blocks ship with diagnosis for retry; ADVISORY accumulates into a report. Every Verdict is appended to the cognition-log for audit and replay.",
+  "steps": [
+    {
+      "step": "Implement G0Verifier in lgwks_cohere.py: shell out to `cargo build` and `cargo test` in --crate-dir; compile-error → FAIL with rustc diagnosis; test failure → FAIL.",
+      "covers": ["registers gates in canonical order G0→G1→G3→G2 (G0=cargo build/test, G1, G3 HARD; G2 ADVISORY)", "a hallucinated-API candidate is blocked (by G0 compile-error, surfaced as the G0 verdict) and never ships"]
+    },
+    {
+      "step": "Instantiate G1 (ArchVerifier rules from arch-rules.json), G3 (G3Verifier with --crate-dir), G2 (IdiomVerifier) and register them in GateRegistry with correct klass.",
+      "covers": ["registers gates in canonical order G0→G1→G3→G2 (G0=cargo build/test, G1, G3 HARD; G2 ADVISORY)"]
+    },
+    {
+      "step": "Call run_pipeline(candidate, context, registry). On HARD non-PASS return diagnosis for retry. On all PASS, emit advisory report.",
+      "covers": ["a hallucinated-API candidate is blocked (by G0 compile-error, surfaced as the G0 verdict) and never ships", "an all-pass candidate ships with the advisory report attached and all verdicts appended to the cognition-log"]
+    },
+    {
+      "step": "Append every Verdict to the cognition-log (lgwks_cognition.py) with audit trail.",
+      "covers": ["an all-pass candidate ships with the advisory report attached and all verdicts appended to the cognition-log", "pipeline is deterministic and replayable from the log"]
+    },
+    {
+      "step": "Wire `lgwks cohere --file candidate.rs --crate-dir /path/to/crate [--json]` CLI in lgwks binary.",
+      "covers": ["registers gates in canonical order G0→G1→G3→G2 (G0=cargo build/test, G1, G3 HARD; G2 ADVISORY)"]
+    },
+    {
+      "step": "Write tests/test_cohere.py: (a) hallucinated-API candidate blocked by G0, (b) all-pass candidate ships with report, (c) pipeline deterministic/replayable from log.",
+      "covers": ["a hallucinated-API candidate is blocked (by G0 compile-error, surfaced as the G0 verdict) and never ships", "an all-pass candidate ships with the advisory report attached and all verdicts appended to the cognition-log", "pipeline is deterministic and replayable from the log"]
+    },
+    {
+      "step": "Run python3 -m unittest discover tests and confirm all green.",
+      "covers": ["self-tests"]
+    }
+  ],
+  "invariants": [
+    "the host Rust crate/working-dir for G0+G3 is an explicit --crate-dir argument (the candidate's project); cohere fails CANNOT_DECIDE if no crate context is given — it never guesses",
+    "G0 ownership of symbol-existence; G3 only adds version-skew (per U4)"
+  ],
+  "gates": ["self-tests"],
+  "files_touched": ["lgwks_cohere.py", "lgwks", "tests/test_cohere.py"],
+  "out_of_scope": ["model-training", "RLVR-loop", "PyTorch-MPS", "CoreML-export", "ModernBERT-finetune", "science-engine", "AI-Lang", "network-egress", "other-units-files", "UI/TTY-rendering", "performance-optimization", "new-CLI-verbs-beyond-this-unit"]
+}
