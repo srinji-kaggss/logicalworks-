@@ -1,0 +1,41 @@
+{
+  "unit_id": "U5",
+  "restated_intent": "Build the G1 Architecture gate: read declarative rules from arch-rules.json and apply them as checks over Python source files. HARD rules (forbidden-import edges) block ship; ADVISORY rules (global mutable state, silent except) score and report without blocking. The rule klass is declared in data, never chosen at runtime — this closes the gate-weakening backdoor.",
+  "steps": [
+    {
+      "step": "Implement lgwks_gate_arch.py with ArchVerifier that reads docs/frontier/arch-rules.json and returns a composite Verdict.",
+      "covers": ["reads arch-rules.json; a module violating a HARD forbidden-import rule (e.g. data-boundary-no-network) → FAIL naming the edge", "an ADVISORY rule violation (e.g. no-module-level-mutable-global) → ADVISORY score + note, never FAIL", "a conformant fixture → PASS"]
+    },
+    {
+      "step": "Implement forbidden-import checker using AST: for each 'from' module, parse its AST and detect imports of any 'must_not_import' package.",
+      "covers": ["reads arch-rules.json; a module violating a HARD forbidden-import rule (e.g. data-boundary-no-network) → FAIL naming the edge"]
+    },
+    {
+      "step": "Implement no-global-mutable-state scanner using AST: detect module-level Name/Assign bindings that are not UPPER_CASE constants, frozen dataclasses, or Enum/typing declarations.",
+      "covers": ["an ADVISORY rule violation (e.g. no-module-level-mutable-global) → ADVISORY score + note, never FAIL"]
+    },
+    {
+      "step": "Implement silent-except scanner using AST: detect ExceptHandler bodies containing only Pass or Expr(Constant(...)).",
+      "covers": ["an ADVISORY rule violation (e.g. no-module-level-mutable-global) → ADVISORY score + note, never FAIL"]
+    },
+    {
+      "step": "Ensure rule klass is read from arch-rules.json; HARD violations return FAIL, ADVISORY violations return ADVISORY verdicts.",
+      "covers": ["each rule's HARD|ADVISORY class is read from arch-rules.json, never decided at runtime"]
+    },
+    {
+      "step": "Write tests/test_gate_arch.py with conformant fixture, forbidden-import violation fixture, and advisory violation fixture.",
+      "covers": ["reads arch-rules.json; a module violating a HARD forbidden-import rule (e.g. data-boundary-no-network) → FAIL naming the edge", "an ADVISORY rule violation (e.g. no-module-level-mutable-global) → ADVISORY score + note, never FAIL", "a conformant fixture → PASS"]
+    },
+    {
+      "step": "Run python3 -m unittest discover tests and confirm all green.",
+      "covers": ["self-tests"]
+    }
+  ],
+  "invariants": [
+    "rule source = docs/frontier/arch-rules.json (ships with this spec; canvas-motion Rust rules added later)",
+    "per-rule klass is declared in data, not chosen by the agent (no gate-weakening backdoor)"
+  ],
+  "gates": ["self-tests"],
+  "files_touched": ["lgwks_gate_arch.py", "tests/test_gate_arch.py"],
+  "out_of_scope": ["model-training", "RLVR-loop", "PyTorch-MPS", "CoreML-export", "ModernBERT-finetune", "science-engine", "AI-Lang", "network-egress", "other-units-files", "UI/TTY-rendering", "performance-optimization", "new-CLI-verbs-beyond-this-unit"]
+}
