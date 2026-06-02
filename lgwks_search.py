@@ -30,7 +30,17 @@ try:
 except Exception:
     _cap = None  # resolver optional; without it CLI providers are skipped, DDG floor still works
 
-_UA = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36"
+# Rotating UA pool — deterministic per-call selection based on attempt index.
+_UA_POOL = [
+    "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
+    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36 Edg/124.0.0.0",
+    "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
+    "Mozilla/5.0 (Macintosh; Intel Mac OS X 10.15; rv:125.0) Gecko/20100101 Firefox/125.0",
+]
+
+
+def _pick_ua(seed: int) -> str:
+    return _UA_POOL[seed % len(_UA_POOL)]
 _DDG_HTML = "https://html.duckduckgo.com/html/"
 _DDG_LITE = "https://lite.duckduckgo.com/lite/"   # lighter HTML; different host → independent rate-limit
 _MOJEEK = "https://www.mojeek.com/search"          # independent index (GET ?q=) — endpoint diversity
@@ -44,9 +54,10 @@ _NAV_HOSTS = ("duckduckgo.com", "mojeek.com")       # self/nav links, never a re
 _TAG = re.compile(r"<[^>]+>")
 
 
-def _curl(url: str, data: str | None = None, timeout: int = 20) -> str:
-    """One read-only HTTP GET/POST via curl. Returns body or '' (honest empty, never raises upward)."""
-    cmd = ["curl", "-s", "-L", "--max-time", str(timeout), "-A", _UA]
+def _curl(url: str, data: str | None = None, timeout: int = 20, ua: str = "") -> str:
+    """One read-only HTTP GET/POST via curl. Returns body or '' (honest empty, never raises upward).
+    Accepts an optional UA override; defaults to the first pool entry."""
+    cmd = ["curl", "-s", "-L", "--max-time", str(timeout), "-A", ua or _UA_POOL[0]]
     if data is not None:
         cmd += ["--data", data]
     cmd.append(url)
@@ -129,9 +140,11 @@ def _parse_mojeek(body: str, k: int, via: str) -> list[dict]:
 
 
 def _backoff(attempt: int) -> float:
-    """Deterministic exponential backoff (no RNG — replayable): 0.4·2^n capped at 2s. Fires only on an
-    empty/blocked endpoint, before rotating to the next — turns a transient 429 into a retry, not a blind."""
-    return min(2.0, 0.4 * (2 ** attempt))
+    """Deterministic exponential backoff with small jitter: 0.4·2^n capped at 2s, plus
+    a deterministic perturbation (0–150 ms) so parallel requests don't stampede."""
+    base = min(2.0, 0.4 * (2 ** attempt))
+    jitter = (attempt * 0.071) % 0.15   # deterministic pseudo-random; avoids thundering herd
+    return base + jitter
 
 
 # Floor endpoints, rotated in order: independent hosts → an independent rate-limit each. One 429 no
@@ -143,16 +156,25 @@ _FLOOR_ENDPOINTS = [
 ]
 
 
+# Minimum body length for a plausible results page (shorter = bot-wall or rate-limit)
+_MIN_BODY = 200
+
+
 def _open(query: str, k: int, *, sleep=time.sleep) -> list[dict]:
-    """Open HTML floor with endpoint ROTATION + backoff. Tries each independent endpoint; on empty
-    (likely a rate-limit) it backs off then rotates to the next host. Returns [] only if ALL are dry."""
+    """Open HTML floor with endpoint ROTATION + retry + jitter + UA rotation.
+    Tries each independent endpoint up to 2×; on empty/blocked it backs off with jitter,
+    then rotates. Returns [] only if ALL endpoints are dry after retries."""
     qs = urllib.parse.urlencode({"q": query})
-    for attempt, (_name, base, method, parser) in enumerate(_FLOOR_ENDPOINTS):
-        body = _curl(base, data=qs) if method == "post" else _curl(base + "?" + qs)
-        rows = parser(body, k, via="open") if body else []
-        if rows:
-            return rows
-        sleep(_backoff(attempt))   # empty/blocked — wait, then rotate to the next independent endpoint
+    for ep_idx, (_name, base, method, parser) in enumerate(_FLOOR_ENDPOINTS):
+        for retry in range(2):
+            attempt = ep_idx * 2 + retry
+            ua = _pick_ua(attempt)
+            body = _curl(base, data=qs, ua=ua) if method == "post" else _curl(base + "?" + qs, ua=ua)
+            if body and len(body) > _MIN_BODY:
+                rows = parser(body, k, via="open")
+                if rows:
+                    return rows
+            sleep(_backoff(attempt))
     return []
 
 

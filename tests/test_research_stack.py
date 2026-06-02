@@ -94,11 +94,13 @@ class TestSearchHygiene(unittest.TestCase):
     def test_open_rotates_endpoints_on_empty(self):
         # the live failure: one endpoint 429s → empty. _open must back off and rotate to the next host.
         calls = []
-        def fake_curl(url, data=None, timeout=20):
+        def fake_curl(url, data=None, timeout=20, ua=""):
             calls.append(url)
             if "html.duckduckgo" in url:
                 return ""                                   # first endpoint blocked/empty
-            return '<a href="https://cl.com/acq">Canada Life acquisition</a>'  # second endpoint answers
+            # second endpoint answers — body must be > _MIN_BODY (200) to avoid short-body rejection
+            return ('<a href="https://cl.com/acq">Canada Life acquisition</a>'
+                    + "\n" + "x" * 300)
         slept = []
         orig = search._curl
         search._curl = fake_curl
@@ -108,6 +110,7 @@ class TestSearchHygiene(unittest.TestCase):
             search._curl = orig
         self.assertTrue(rows, "rotation must recover when the first endpoint is dry")
         self.assertEqual(rows[0]["url"], "https://cl.com/acq")
+        # 3 endpoints × 2 retries each = up to 6 calls; first endpoint is empty so at least 2+ calls
         self.assertGreaterEqual(len(calls), 2, "must have tried more than one endpoint")
         self.assertTrue(slept, "must have backed off before rotating")
 
@@ -124,7 +127,7 @@ class TestSearchHygiene(unittest.TestCase):
 
     def test_backoff_monotonic_and_capped(self):
         self.assertLess(search._backoff(0), search._backoff(2))
-        self.assertLessEqual(search._backoff(10), 2.0, "backoff is capped, never unbounded")
+        self.assertLessEqual(search._backoff(10), 2.15, "backoff is capped (base 2.0 + max jitter 0.15), never unbounded")
 
 
 class TestSteering(unittest.TestCase):
