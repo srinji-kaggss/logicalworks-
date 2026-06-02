@@ -99,6 +99,46 @@ def _headers(url: str) -> dict[str, str]:
     return headers
 
 
+# ── Safe redirect handler: strip auth when host changes (issue #14) ──────────────────────────
+class _SafeRedirectHandler(urllib.request.HTTPRedirectHandler):
+    """Follows redirects only when safe: strips Authorization/Cookie on cross-host jumps
+    and re-applies the remote-allowed gate to the redirect destination."""
+
+    def redirect_request(self, req, fp, code, msg, headers, newurl):
+        orig_host = urllib.parse.urlparse(req.full_url).hostname or ""
+        new_host = urllib.parse.urlparse(newurl).hostname or ""
+        # Re-apply host-blocking policy to the destination
+        if not _remote_allowed(newurl):
+            raise urllib.error.HTTPError(
+                newurl, code, f"Redirect to blocked host: {new_host}", headers, fp
+            )
+        # If host changes, strip credential headers before following
+        if orig_host.lower() != new_host.lower():
+            safe_headers = {
+                k: v for k, v in req.headers.items()
+                if k.lower() not in ("authorization", "cookie")
+            }
+            return urllib.request.Request(
+                newurl,
+                data=req.data,
+                headers=safe_headers,
+                origin_req_host=req.origin_req_host,
+                unverifiable=True,
+            )
+        return urllib.request.Request(
+            newurl,
+            data=req.data,
+            headers=dict(req.headers),
+            origin_req_host=req.origin_req_host,
+            unverifiable=True,
+        )
+
+
+def _opener() -> urllib.request.OpenerDirector:
+    """Build an opener with the safe redirect handler installed."""
+    return urllib.request.build_opener(_SafeRedirectHandler())
+
+
 def _pdf(raw: bytes, max_chars: int) -> str:
     """pdftotext (stdin→stdout) first; pymupdf as fallback. Both bounded."""
     exe = _bin("pdftotext")
@@ -149,7 +189,8 @@ def _html(url: str, max_chars: int) -> str:
     if not best:
         try:
             req = urllib.request.Request(url, headers=_headers(url))
-            best = _TAG.sub("", urllib.request.urlopen(req, timeout=25).read().decode("utf-8", "replace"))
+            with _opener().open(req, timeout=25) as resp:
+                best = _TAG.sub("", resp.read().decode("utf-8", "replace"))
         except urllib.error.HTTPError as exc:
             try:
                 import lgwks_auth_runtime
@@ -175,7 +216,8 @@ def _download(url: str) -> bytes:
         return b""
     try:
         req = urllib.request.Request(url, headers=_headers(url))
-        return urllib.request.urlopen(req, timeout=30).read()
+        with _opener().open(req, timeout=30) as resp:
+            return resp.read()
     except urllib.error.HTTPError as exc:
         try:
             import lgwks_auth_runtime
