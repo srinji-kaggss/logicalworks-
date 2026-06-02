@@ -115,10 +115,23 @@ def refine(intent: str, actor: str = "human", depth: float = 0.5, log: bool = Tr
 
     actor=='agent' auto-injects quality/slop intent-keywords (SPEC §6 agent-trigger augmentation)."""
     cls, conf = classify_intent(intent)
-    gaps = detect_gaps(intent, cls) if cls != "unknown" else ["intent_class"]
     spec = specificity(intent)
     threshold = 0.35 + 0.35 * max(0.0, min(1.0, depth))   # deeper stance demands more specificity
-    abstain = spec < threshold or bool(gaps)
+    # //why: unbin classifier-failure from user-vagueness (#29). Two distinct paths:
+    #   - low specificity → legitimate abstain (user was vague)
+    #   - high specificity + unknown class → classifier_coverage_gap, proceed (model limitation, not user fault)
+    coverage_gap = False
+    if cls == "unknown":
+        if spec >= threshold:
+            gaps: list[str] = []
+            abstain = False
+            coverage_gap = True
+        else:
+            gaps = ["intent_class"]
+            abstain = True
+    else:
+        gaps = detect_gaps(intent, cls)
+        abstain = spec < threshold or bool(gaps)
     augmented = intent
     if actor == "agent":   # steer agent-issued queries toward known failure modes (z1 augmentation)
         augmented = f"{intent} [quality:verify-claims, avoid-slop, cite-sources]"
@@ -128,10 +141,25 @@ def refine(intent: str, actor: str = "human", depth: float = 0.5, log: bool = Tr
         "entities": _entities(intent), "gaps": gaps, "specificity": spec,
         "threshold": round(threshold, 2), "abstain": abstain,
         "questions": _questions(gaps) if abstain else [],
+        "classifier_coverage_gap": coverage_gap,
     }
     if log:
         _log_commit(refined)
+        if coverage_gap:
+            _log_coverage_gap(intent, spec, threshold)
     return refined
+
+
+def _log_coverage_gap(intent: str, spec: float, threshold: float) -> None:
+    """Log a classifier_coverage_gap as a #27 training signal."""
+    try:
+        import lgwks_cognition
+        lgwks_cognition.CognitionLog("intent").append("classifier_coverage_gap", {
+            "prompt": intent, "specificity": spec, "threshold": threshold,
+            "why": "high-specificity intent classified as unknown; signal for ml-001/#27 training",
+        })
+    except Exception:
+        pass
 
 
 def _log_commit(refined: dict) -> None:

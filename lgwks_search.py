@@ -9,6 +9,7 @@ and ctx7 only serves library docs, not news/entities. This wires the eyes:
   sweep(query)         → MULTI-MODAL: blind parallel arms (general · news · filings) merged + deduped,
                          each arm blind to the others so each surfaces what the others miss.
   fetch(url)           → page → markdown via the crwl crawler (the acquisition page itself).
+  source_validity      → reject CAPTCHA / bot-challenge / login-wall before ingest (gate #29 fix).
 
 Degrade chain is honest: DuckDuckGo HTML (curl) is primary; if curl/crwl are absent or blocked we
 return [] and say so — never fabricate a result. Provider seam: a real key'd backend (firecrawl when
@@ -260,6 +261,47 @@ def sweep(query: str, k_per_arm: int = 4) -> dict:
             "has_evidence": bool(found)}
 
 
+# ── source-validity verifier (gate-honesty #29) ──────────────────────────────────────────────
+
+_CAPTCHA_MARKERS = [
+    "captcha", "recaptcha", "are you human", "i'm not a robot", "verify you are human",
+    "bot detection", "bot challenge", "cloudflare", "cf-turnstile", "hcaptcha",
+]
+_LOGIN_WALL_MARKERS = [
+    "sign in", "log in", "login", "password", "forgot password", "create account",
+    "register to view", "members only", "subscription required", "paywall",
+]
+_ACCESS_DENIED_MARKERS = [
+    "access denied", "403 forbidden", "blocked", "rate limit exceeded",
+]
+
+
+def source_validity(text: str, url: str = "") -> tuple[bool, str | None]:
+    """
+    Reject CAPTCHA / bot-challenge / empty-result / login-wall pages before ingest.
+    Returns (ok, diagnosis). ok=False means CANNOT_DECIDE — do not map into concepts.
+    """
+    low = text.lower()
+    # empty / near-empty
+    stripped = re.sub(r"\s+", "", low)
+    if len(stripped) < 20:
+        return (False, "empty or near-empty body — likely bot-wall or failed fetch")
+    # known markers
+    for marker in _CAPTCHA_MARKERS:
+        if marker in low:
+            return (False, f"CAPTCHA/bot-challenge marker detected: '{marker}'")
+    for marker in _LOGIN_WALL_MARKERS:
+        if marker in low:
+            return (False, f"login-wall marker detected: '{marker}'")
+    for marker in _ACCESS_DENIED_MARKERS:
+        if marker in low:
+            return (False, f"access-denied marker detected: '{marker}'")
+    # content heuristics: form with password field is a login wall
+    if re.search(r"<input[^>>]*type=[\"']?password[\"']?", low):
+        return (False, "password input field detected — login wall")
+    return (True, None)
+
+
 def fetch(url: str, max_chars: int = 6000) -> str:
     """Page → text, bounded. Delegates to the extract port (crwl → curl → real-browser escalation on a
     JS/bot wall), so a SPA or bot-walled page is no longer a silent empty. Falls back to crwl if extract
@@ -268,11 +310,19 @@ def fetch(url: str, max_chars: int = 6000) -> str:
         import lgwks_extract
         doc = lgwks_extract.extract(url, max_chars=max_chars)
         if doc.get("ok"):
-            return doc["text"]
+            text = doc["text"]
+            ok, diag = source_validity(text, url)
+            if not ok:
+                return f"[source-validity: CANNOT_DECIDE] {diag}"
+            return text
     except Exception:
         pass
     try:
         p = subprocess.run(["crwl", url, "-o", "md-fit"], capture_output=True, text=True, timeout=40)
-        return (p.stdout or "").strip()[:max_chars]
+        text = (p.stdout or "").strip()[:max_chars]
+        ok, diag = source_validity(text, url)
+        if not ok:
+            return f"[source-validity: CANNOT_DECIDE] {diag}"
+        return text
     except Exception:
         return ""
