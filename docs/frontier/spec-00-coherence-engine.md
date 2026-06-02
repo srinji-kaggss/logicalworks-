@@ -40,10 +40,16 @@ candidate ─► G0 compiler/types/formal ─► G1 architecture ─► G3 frame
 | Gate | Checks | Oracle | Class | Forks from |
 |---|---|---|---|---|
 | **G0** Compiler / type / formal | syntax, types, memory safety, functional contracts | `rustc`, `cargo test`, Kani/Creusot/Prusti | **HARD 100%** | existing tools |
-| **G1** Architecture | conforms to the system ER graph + ADR invariants (layering, ownership, trust boundaries) | ER-graph + invariant checker (spec-03 U3) | **HARD** where invariant is machine-checkable; else advisory | `spec/canvas-motion/05` ER model, ADR mandates |
-| **G2** Idiom | matches *this repo's* learned conventions (naming, error style, structure) | embedding-distance to repo corpus + lint profile | **ADVISORY** (calibrated 0–1) | cognition-log, repo embeddings |
-| **G3** Framework-reality | every external symbol exists in the *installed* version's real API; uses current idiom | vendored API surface (`cargo metadata` + rustdoc JSON / ctx7 grounding) | **HARD** (symbol absent → reject) | ctx7, dependency lockfile |
+| **G1** Architecture | conforms to layering / ownership / trust-boundary rules | rule checker over `arch-rules.json` (spec-03 U5) | **per-rule HARD\|ADVISORY declared in `arch-rules.json`** (never chosen at runtime) | `arch-rules.json` (canvas-motion ER rules added later) |
+| **G2** Idiom | matches *this repo's* learned conventions (naming, error style, structure) | embedding-distance to repo corpus + lint profile | **ADVISORY** (score only) | cognition-log, repo embeddings |
+| **G3** Framework-reality | **version-skew** (symbol exists but at a different installed version than assumed) + **pre-generation grounding** (hand the generator the real installed surface) | `cargo metadata` + rustdoc JSON / ctx7 | **HARD** for version-skew where the extractor is complete; ADVISORY where it is not | dependency lockfile, ctx7 |
 | **G4** Intent → spec | the human/AI agrees the spec captures intent | human-in-loop confirmation | **NOT automatable to 100%** | the membrane (model #1) |
+
+> **G3 is NOT "does this symbol exist."** For compiled Rust, `rustc` already rejects a nonexistent symbol
+> (E0433/E0425) at **G0** — G3 must not reimplement the compiler. G3's distinct value is (i) *version-skew*
+> (the symbol exists but the model assumed a signature from a different version) and (ii) *pre-generation
+> grounding* (feed the generator the real surface so it never hallucinates in the first place). On
+> non-compiled surfaces (config keys, env vars, external HTTP APIs) G3 also does existence — but on Rust, G0 owns it.
 
 ## L3 — Structure that makes drift unviolable
 

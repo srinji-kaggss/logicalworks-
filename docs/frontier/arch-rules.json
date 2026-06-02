@@ -1,0 +1,44 @@
+{
+  "schema": "lgwks.arch-rules/1",
+  "purpose": "Declarative architecture conformance rules for the G1 gate (spec-00). Each rule is tagged HARD or ADVISORY HERE, in data — never decided at runtime by the implementing agent (closes the gate-weakening backdoor the review flagged). HARD rules gate ship; ADVISORY rules score+report.",
+  "note": "These rules target THIS repo (Python lgwks modules). The canvas-motion Rust ER model referenced earlier does not yet exist in-repo; when it lands, add its layering rules here under a second ruleset. Until then G1 operates on the rules below.",
+  "false_pass_surface": "Static import/AST scanning has known false negatives: dynamic imports (importlib), global state via closures/class attributes, and macro-equivalent metaprogramming evade the scan. Rules whose false-PASS surface cannot be bounded are tagged ADVISORY, not HARD (per spec-01 soundness obligation).",
+  "rules": [
+    {
+      "id": "data-boundary-no-network",
+      "klass": "HARD",
+      "kind": "forbidden-import",
+      "from": ["lgwks_cache", "lgwks_cognition", "lgwks_vault"],
+      "must_not_import": ["lgwks_search", "lgwks_browser", "lgwks_openrouter", "lgwks_ollama", "lgwks_tongue", "urllib.request", "urllib", "http", "socket", "requests"],
+      "why": "T0 data-boundary: the three trust-boundary stores (untrusted cache, audit cognition, encrypted vault) must never import a network surface. A store that can reach the network can exfiltrate. AST import-edge check is complete for static imports → HARD.",
+      "diagnosis_hint": "found a network import in a data-boundary module; route network through a caller, not the store"
+    },
+    {
+      "id": "verify-core-no-gate-deps",
+      "klass": "HARD",
+      "kind": "forbidden-import",
+      "from": ["lgwks_verify"],
+      "must_not_import": ["lgwks_gate_framework", "lgwks_gate_arch", "lgwks_gate_idiom", "lgwks_cohere", "lgwks_comprehend"],
+      "why": "Layering: the Verifier primitive (spec-01) is the foundation; gates depend on it, never the reverse. A cycle here means the primitive knows its consumers → un-testable in isolation. Static check → HARD.",
+      "diagnosis_hint": "lgwks_verify must not import any gate; invert the dependency"
+    },
+    {
+      "id": "no-module-level-mutable-global",
+      "klass": "ADVISORY",
+      "kind": "no-global-mutable-state",
+      "applies_to": ["lgwks_verify", "lgwks_comprehend", "lgwks_gate_framework", "lgwks_gate_arch", "lgwks_gate_idiom", "lgwks_cohere"],
+      "allow": ["UPPER_CASE constants", "frozen dataclasses", "typing/Enum declarations"],
+      "why": "Determinism + statelessness (T4): core gate modules must hold no mutable module-level state. ADVISORY not HARD because interior mutability via closures/class attributes evades a static scan — false-PASS surface is unbounded, so this scores+warns, it does not certify.",
+      "diagnosis_hint": "module-level mutable binding detected; move state into an explicit parameter or a frozen value"
+    },
+    {
+      "id": "typed-errors-no-silent-except",
+      "klass": "ADVISORY",
+      "kind": "ast-pattern",
+      "forbid_pattern": "except handler whose body is only `pass` or only a bare `...`",
+      "applies_to": ["lgwks_verify", "lgwks_comprehend", "lgwks_gate_framework", "lgwks_gate_arch", "lgwks_gate_idiom", "lgwks_cohere"],
+      "why": "Typed errors / no silent failure (T4). ADVISORY because intent of an empty except can be legitimate (documented graceful-degrade); the gate flags every instance for review rather than blocking, since it cannot read intent.",
+      "diagnosis_hint": "empty except swallows a typed error; return a Verdict/Result or re-raise with a code"
+    }
+  ]
+}

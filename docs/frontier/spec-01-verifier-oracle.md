@@ -50,10 +50,20 @@ class Verifier(Protocol):
 - A `HARD` gate gates `ship()`: ship is reachable **only** if every HARD verifier returns `PASS`.
 - `CANNOT_DECIDE` from a HARD gate **blocks ship and surfaces** (orchestrator/human), never passes.
   It is the model saying "out of my competence" — the opposite of guessing. (Directly fixes #29.)
-- `ADVISORY` verifiers never block; they accumulate into a calibrated report (target ECE < 0.1).
+- **Advisory invariant (enforce in `__post_init__`):** `klass == ADVISORY ⟹ outcome ∈ {PASS, CANNOT_DECIDE}`;
+  an advisory `FAIL` is unrepresentable. An advisory `CANNOT_DECIDE` (e.g. the idiom embedder failed) is
+  **excluded from any score aggregation and surfaced separately** — never averaged as 0. (Closes the leak
+  where an advisory gate's CANNOT_DECIDE silently lands in the report as a score.)
+- `ADVISORY` verifiers never block; they accumulate into a report (scores only where the gate produced one).
+- **Per-HARD-gate soundness obligation:** every HARD verifier must state its **false-PASS surface** and either
+  prove it empty or **downgrade to ADVISORY**. A static scan with unbounded false negatives (e.g. "no global
+  mutable state" via AST) cannot be HARD — see `arch-rules.json`, where each rule's `klass` is declared in data,
+  not chosen at runtime. **Only G0 (compiler/formal) is provably sound today**; G1/G3 must declare their gaps.
+- `run_pipeline` is **fail-fast** on HARD (first non-PASS returns) → diagnosis is single-gate by design; an
+  agent fixes one HARD gate then re-runs for the next. Accepted tradeoff (still never ships wrong).
 - Every `Verdict` is appended to the cognition-log (`lgwks_cognition.py`) → full audit (who/what/gate/outcome).
-- **Sound, not complete:** the engine guarantees "never ships wrong," not "always ships." A subject no
-  HARD gate can pass simply does not ship; the agent is told precisely which gate and why (`diagnosis`).
+- **Sound, not complete:** guarantees "never ships wrong" **for gates with a real oracle**, not "always ships."
+  A subject no HARD gate can pass simply does not ship; the agent is told which gate and why (`diagnosis`).
 
 ## The gate registry + pipeline
 
@@ -94,12 +104,20 @@ class ComprehensionArtifact:        # the agent MUST produce this before coding
     out_of_scope: list[str]         # what it will deliberately NOT do (scope-creep guard, T1)
 ```
 
-**Deterministic checks (HARD — coverage, not vibes):**
-1. Every acceptance criterion in the unit spec is addressed by ≥1 `step`. Missing → `FAIL` + `diagnosis` lists the uncovered criteria.
-2. Every `files_touched` entry matches the unit's declared file targets (no undeclared write surface). Extra/missing → `FAIL`.
-3. `invariants` ⊇ the unit's L4 invariants; `gates` ⊇ the unit's required gates. Missing → `FAIL`.
-4. `out_of_scope` is non-empty (the agent has thought about the boundary). Empty → `CANNOT_DECIDE` (push to think).
-5. `restated_intent` is non-trivial (not a copy of L0 verbatim; semantic overlap, not string identity).
+**The gate's input is `units.json`, NOT prose markdown** — every check is a deterministic coverage/subset
+test over that file's arrays. No semantic-similarity heuristic exists in this gate (that would be the
+unfalsifiable "vibe" the thesis condemns). The four checks:
+1. **Coverage:** every `acceptance[]` entry for the unit is addressed by ≥1 `step`. The mapping must be
+   explicit — each step declares `covers: ["<verbatim acceptance id/text>"]`; an uncovered criterion →
+   `FAIL`, `diagnosis` lists it. (Not fuzzy text-match — a declared, checkable mapping.)
+2. **Write surface:** `files_touched ⊆ unit.file_targets`. Any extra → `FAIL`.
+3. **Subset:** `invariants ⊇ unit.invariants` and `gates ⊇ unit.gates`. Any missing → `FAIL`.
+4. **Scope boundary:** `out_of_scope` is non-empty AND every entry ∈ `units.json.out_of_scope_vocab`
+   (a controlled vocabulary). Empty, or a free-text token like "nothing" → `CANNOT_DECIDE` (push to think).
+
+(Removed: the former "restated_intent semantic-overlap" check — it had no oracle and was gameable by
+reordering words. `restated_intent` is still required in the artifact for the human/orchestrator to read,
+but it is **not** gate-scored. We do not gate on vibes.)
 
 **PASS → the agent may implement. FAIL → bounce with `diagnosis`; the agent revises the artifact.**
 This is `refine` (classify·gap·specificity·abstain) applied to the *implementer's plan* instead of the

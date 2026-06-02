@@ -1,0 +1,102 @@
+{
+  "schema": "lgwks.build-units/1",
+  "purpose": "Machine-readable contract per build unit — the ACTUAL input to the Comprehension Gate (U2) and the source of truth for spec-03. spec-03 prose is the human view; THIS is what the gate parses. Comprehension checks (coverage of acceptance[], files_touched ⊆ file_targets, invariants ⊇, gates ⊇) run against these arrays deterministically.",
+  "pipeline_order_canonical": ["G0", "G1", "G3", "G2"],
+  "out_of_scope_vocab": [
+    "model-training", "RLVR-loop", "PyTorch-MPS", "CoreML-export", "ModernBERT-finetune",
+    "science-engine", "AI-Lang", "network-egress", "other-units-files", "UI/TTY-rendering",
+    "performance-optimization", "new-CLI-verbs-beyond-this-unit"
+  ],
+  "units": [
+    {
+      "id": "U1", "title": "Verifier oracle", "depends": [],
+      "file_targets": ["lgwks_verify.py", "tests/test_verify.py"],
+      "acceptance": [
+        "run_pipeline returns (False, verdicts) on the first HARD non-PASS verdict",
+        "a verifier raising internally is caught and mapped to CANNOT_DECIDE, never PASS",
+        "every Verdict is JSON-serialisable for the cognition-log"
+      ],
+      "invariants": ["HARD short-circuits on first non-PASS", "ADVISORY accumulates", "ADVISORY outcome ∈ {PASS, CANNOT_DECIDE} only (never FAIL/score-on-undecided)"],
+      "gates": ["self-tests"],
+      "commit": "feat(verify): typed Verifier oracle with honest CANNOT_DECIDE verdict (spec-01)"
+    },
+    {
+      "id": "U2", "title": "Comprehension gate", "depends": ["U1"],
+      "file_targets": ["lgwks_comprehend.py", "tests/test_comprehend.py", "lgwks"],
+      "acceptance": [
+        "plan omitting any acceptance[] entry for the unit returns FAIL with diagnosis naming the uncovered criteria",
+        "a files_touched entry not in the unit's file_targets returns FAIL",
+        "invariants ⊉ unit.invariants or gates ⊉ unit.gates returns FAIL",
+        "out_of_scope empty OR containing a token not in out_of_scope_vocab returns CANNOT_DECIDE",
+        "lgwks comprehend --unit <id> --file plan.json returns a Verdict object"
+      ],
+      "invariants": ["gate reads units.json (this file), not prose markdown", "all checks are coverage/subset tests on arrays — no semantic-similarity heuristic"],
+      "gates": ["comprehension", "self-tests"],
+      "commit": "feat(comprehend): Intention×Understanding gate — plan must cover units.json before code (spec-01)"
+    },
+    {
+      "id": "U3", "title": "Fix three gate bugs (#29)", "depends": ["U1"],
+      "file_targets": ["lgwks_machine.py", "lgwks_public.py", "lgwks_search.py", "tests/test_gates_honesty.py"],
+      "acceptance": [
+        "refine('Find me machine focused research on how ML to AI training occurs') does NOT abstain blaming the human; it proceeds or returns classifier_coverage_gap",
+        "a CAPTCHA/bot-challenge fixture page is rejected by crawl's source-validity gate, not ingested into concepts",
+        "public output is either relevance-filtered above a similarity floor OR carries an explicit ranking label (no silent canon-as-relevance)"
+      ],
+      "invariants": ["fix targets the refine() function (classifier-unknown-vs-user-vagueness unbind at the gaps-assignment AND the abstain decision AND question-emission), NOT a single line number", "no gate weakening — fix the model under the gate"],
+      "gates": ["self-tests"],
+      "closes_issue": 29,
+      "commit": "fix(gates): unbin classifier-failure from user-vagueness; add relevance+source-validity gates (#29)"
+    },
+    {
+      "id": "U4", "title": "G3 framework-reality gate", "depends": ["U1"],
+      "file_targets": ["lgwks_gate_framework.py", "tests/test_gate_framework.py", "tests/fixtures/crate/"],
+      "acceptance": [
+        "candidate referencing a symbol that exists in the crate but at a DIFFERENT installed version than assumed → FAIL with version-skew diagnosis",
+        "pre-generation: emits the installed symbol surface (from cargo metadata + rustdoc JSON) as grounding context",
+        "missing rustdoc JSON → CANNOT_DECIDE, never silently PASS"
+      ],
+      "invariants": ["G3 covers version-skew + pre-gen grounding ONLY; bare symbol-existence on COMPILED Rust is G0's job (rustc errors E0433/E0425) — do NOT reimplement the compiler", "the path/symbol extractor MUST declare its false-PASS surface (a missed reference = false PASS); if it cannot be bounded complete, the existence portion is ADVISORY"],
+      "gates": ["self-tests"],
+      "commit": "feat(gate): G3 framework-reality — version-skew + pre-gen grounding vs installed surface (spec-00)"
+    },
+    {
+      "id": "U5", "title": "G1 architecture gate", "depends": ["U1"],
+      "file_targets": ["lgwks_gate_arch.py", "tests/test_gate_arch.py"],
+      "acceptance": [
+        "reads arch-rules.json; a module violating a HARD forbidden-import rule (e.g. data-boundary-no-network) → FAIL naming the edge",
+        "an ADVISORY rule violation (e.g. no-module-level-mutable-global) → ADVISORY score + note, never FAIL",
+        "a conformant fixture → PASS",
+        "each rule's HARD|ADVISORY class is read from arch-rules.json, never decided at runtime"
+      ],
+      "invariants": ["rule source = docs/frontier/arch-rules.json (ships with this spec; canvas-motion Rust rules added later)", "per-rule klass is declared in data, not chosen by the agent (no gate-weakening backdoor)"],
+      "gates": ["self-tests"],
+      "commit": "feat(gate): G1 architecture conformance from arch-rules.json (spec-00)"
+    },
+    {
+      "id": "U6", "title": "G2 idiom gate", "depends": ["U1"],
+      "file_targets": ["lgwks_gate_idiom.py", "tests/test_gate_idiom.py"],
+      "acceptance": [
+        "always returns an ADVISORY verdict (never FAIL, never blocks ship)",
+        "emits a score in 0..1 + an idiom-diff report (nearest in-repo exemplars + deviations)",
+        "on embedder failure returns ADVISORY+CANNOT_DECIDE (excluded from the report's score aggregation, surfaced separately) — NOT a 0 score"
+      ],
+      "invariants": ["ADVISORY only", "no ECE/calibration acceptance is claimed — there is no held-out idiom-labeled dataset in-repo; calibration is deferred until one is constructed (logged, not asserted)"],
+      "gates": ["self-tests"],
+      "commit": "feat(gate): G2 idiom advisory score + idiom-diff report (spec-00)"
+    },
+    {
+      "id": "U7", "title": "Coherence pipeline", "depends": ["U4", "U5", "U6"],
+      "file_targets": ["lgwks_cohere.py", "lgwks", "tests/test_cohere.py"],
+      "acceptance": [
+        "registers gates in canonical order G0→G1→G3→G2 (G0=cargo build/test, G1, G3 HARD; G2 ADVISORY)",
+        "a hallucinated-API candidate is blocked (by G0 compile-error, surfaced as the G0 verdict) and never ships",
+        "an all-pass candidate ships with the advisory report attached and all verdicts appended to the cognition-log",
+        "pipeline is deterministic and replayable from the log"
+      ],
+      "invariants": ["the host Rust crate/working-dir for G0+G3 is an explicit --crate-dir argument (the candidate's project); cohere fails CANNOT_DECIDE if no crate context is given — it never guesses", "G0 ownership of symbol-existence; G3 only adds version-skew (per U4)"],
+      "gates": ["self-tests"],
+      "commit": "feat(cohere): Coherence Engine pipeline G0→G1→G3→G2 with cognition-log audit (spec-00)"
+    }
+  ],
+  "research_track_excluded": ["model-2-coder-training", "model-1-ModernBERT-finetune", "model-3-science-engine", "AI-Lang-verified-lowering"]
+}

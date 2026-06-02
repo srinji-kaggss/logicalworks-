@@ -62,8 +62,10 @@ adapter — never the foundation.
 
 The 100% is a property of the **gate**, not the model — a fallible model searches; only proven-conformant
 output escapes. **Sound, not complete:** never wrong, sometimes abstains (exactly what audit frameworks
-are). The 100% holds **only** on the spec→code edge; **never** on intent→spec (intent is not formalizable
-— the human stays on that edge, G4). Precedent: CompCert (proven C compiler), seL4, RustBelt, Kani/Creusot.
+are). Two scoping limits keep it honest: (1) "proven" = **oracle-backed gates only** (G0 compiler/formal);
+the heuristic HARD gates (G1/G3) carry a stated false-PASS surface and are not "proofs" — see spec-01's
+soundness obligation. (2) The 100% holds **only** on the spec→code edge; **never** on intent→spec (intent is
+not formalizable — the human stays on that edge, G4). Precedent: CompCert (proven C compiler), seL4, RustBelt.
 
 **AI-Lang ↔ Human-CS-lang:** a provable intermediate language where AI operates, with **verified lowering**
 to Rust (the human projection). 100% propagates down the stack as long as each arrow is a proven compiler.
