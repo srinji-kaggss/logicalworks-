@@ -85,6 +85,13 @@ _CAPABILITIES: dict[str, dict] = {
         ],
         "install": "brew install poppler && pipx install markitdown",
     },
+    "github": {
+        "why": "GitHub surface — issues, PRs, state maps, hardening, what's next",
+        "providers": [
+            {"id": "cli", "kind": "bin", "bin": "gh", "note": "GitHub CLI — auth-gated API access"},
+        ],
+        "install": "brew install gh && gh auth login",
+    },
 }
 
 
