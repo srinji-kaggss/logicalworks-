@@ -15,10 +15,16 @@ the **Coherence Engine** disposes. What ships is coherent and, where an oracle e
 
 ## 1. The central instrument: the verifiability axis
 
-Everything sorts on one axis — **how checkable an output is** — and that axis *is* the line where
-ML becomes AI. **AI begins where verification ends.** While an oracle can check every output, the
-thing stays ML: bounded, instrumentable, turn-back-able. When output must exceed what can be
-checked, it crosses into AI: generative, blackbox, gated.
+Everything sorts on one axis — **how checkable a given (output, gate) pair is.** The further right, the
+less an oracle can decide and the more we rely on a fallible generator + human.
+
+> **Framing caveat (non-normative):** "AI begins where verification ends" is a useful *metaphor* for the
+> axis, not an identity. The axis sorts (output, gate) pairs by checkability — it does NOT equal the
+> ML-vs-AI (discriminative-vs-generative) distinction. Counter-examples in our own design: model #1 is a
+> *discriminative* classifier whose per-instance intent is *uncheckable* (LOW), and model #2 is a
+> *generative* coder that is *highly checkable* (compiler/formal). So checkability ≠ "ML vs AI." The axis
+> is an engineering sort over gates; do not build logic on the slogan. Pipeline order is canonical
+> **G0 → G1 → G3 → G2** (see `units.json`).
 
 ```
   more checkable  ────────────────────────────────────────────►  less checkable
@@ -66,14 +72,22 @@ Comprehension Gate loop, implement → commit). The specs, in reading order:
    why honest gates (#29) are the precondition for the CLI to absorb tool calls.
 6. `BUILD.md` — operational entry for the implementing agent.
 
+Machine-readable contracts (the gates' actual inputs, authoritative over prose):
+7. `units.json` — per-unit `acceptance[]`/`file_targets[]`/`invariants[]`/`gates[]` + `out_of_scope_vocab` (Comprehension Gate input).
+8. `arch-rules.json` — G1 rules, each tagged HARD\|ADVISORY in data.
+
 ## 5. The marketable claim (the boundary that must be enforced in code, not prose)
 
-> "Every line we emit is machine-proven conformant to the supplied spec — or we emit nothing."
+> "Every line we emit is machine-**proven** conformant to the supplied spec — or we emit nothing."
 
-Sound, not complete: **never wrong; sometimes abstains.** The 100% is a property of the *gate*,
-not the model. The single way this becomes a lie is scope-bleed across the intent→spec edge
-(G4): the day the API accepts "just describe what you want" instead of a typed spec, soundness
-is gone. The spec requirement is enforced at the API boundary (spec-01 §4), never in a disclaimer.
+Sound, not complete: **never wrong; sometimes abstains.** Two honesty boundaries:
+- **"Proven" means oracle-backed.** The claim is only true for gates with a real oracle — **G0
+  (compiler/formal)** today. G1/G3 are heuristic HARD gates with a stated false-PASS surface
+  (spec-01 soundness obligation); a rule that cannot be proven complete is ADVISORY in `arch-rules.json`,
+  not part of "proven." Marketing must say *"proven against the compiler and the supplied spec,"* not
+  imply the heuristic gates are proofs.
+- **The intent→spec edge (G4) is never 100%.** The day the API accepts "just describe what you want"
+  instead of a typed spec, soundness is gone. Enforced at the API boundary (spec-01), never in a disclaimer.
 
 ## 6. How this outgrows the wall
 

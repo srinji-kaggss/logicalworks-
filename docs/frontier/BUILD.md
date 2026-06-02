@@ -20,13 +20,17 @@
 ┌─ (a) COMPREHEND  — prove you understand BEFORE you code
 │      Produce a ComprehensionArtifact (spec-01) for the unit as JSON:
 │        { unit_id, restated_intent, steps[], invariants[], gates[], files_touched[], out_of_scope[] }
-│      • restated_intent: the unit's L0 in YOUR OWN words (not a copy).
-│      • steps: concrete, file-level, covering EVERY acceptance criterion in the unit.
-│      • invariants ⊇ the unit's L4; gates ⊇ the unit's required gates.
-│      • files_touched ⊆ the unit's declared file targets (no undeclared writes).
-│      • out_of_scope: what you will deliberately NOT do (must be non-empty).
+│      The unit's contract is `units.json` (authoritative). Each step declares `covers: [...]` mapping
+│      it to the acceptance[] entries it satisfies — the gate checks coverage against that mapping, not
+│      by fuzzy text-match.
+│      • restated_intent: the unit's intent in YOUR OWN words (kept for the human; NOT gate-scored).
+│      • steps: concrete, file-level; together their `covers` must hit EVERY acceptance[] entry in units.json.
+│      • invariants ⊇ units.json unit.invariants; gates ⊇ units.json unit.gates.
+│      • files_touched ⊆ units.json unit.file_targets (no undeclared writes).
+│      • out_of_scope: non-empty AND every entry drawn from units.json.out_of_scope_vocab (a controlled
+│        vocabulary — "nothing"/free text fails the gate as CANNOT_DECIDE).
 │      GATE: once U2 exists → `lgwks comprehend --unit <id> --file plan.json` must return PASS.
-│            Before U2 exists (U1 only) → self-check the artifact against the unit's acceptance list
+│            Before U2 exists (U1 only) → self-check the artifact against units.json
 │            and write it to `scratch/comprehension/<unit>.json` as your committed evidence of thinking.
 │      If the gate/your-check fails: REVISE the artifact. Do not start coding on a failing plan.
 │      //why this step exists: tokens spent understanding now prevent architectural drift later. This

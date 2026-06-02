@@ -3,6 +3,16 @@
 > THE plan. Deterministic enough for a Kimi/lower agent to implement unit-by-unit.
 > Read MAP.md → spec-00 → spec-01 → spec-02 first. Then follow BUILD.md's loop for each unit.
 > **Before implementing any unit you MUST pass its Comprehension Gate (spec-01).** No exceptions.
+>
+> **AUTHORITATIVE CONTRACT = `units.json`.** This prose is the human view. Where prose and `units.json`
+> disagree, `units.json` wins — it is what the Comprehension Gate parses. Corrections already applied there
+> and superseding any stale prose below: U3 targets the **`refine()` function** (not a line number — the
+> unbind spans the gaps-assignment, the abstain decision, and the question-emission); U4/G3 = **version-skew +
+> pre-gen grounding only** (bare symbol-existence on Rust is G0's job — do not reimplement the compiler);
+> U5 rule source = **`arch-rules.json`** (ships here; `spec/canvas-motion` does not exist yet); U6 makes **no
+> ECE claim** (no held-out idiom dataset exists — calibration deferred, logged not asserted); U7 requires an
+> explicit **`--crate-dir`** for G0/G3 (no Rust crate exists in-repo beyond the U4 fixture — cohere abstains
+> with CANNOT_DECIDE if no crate context is given, never guesses). Canonical pipeline order: **G0→G1→G3→G2**.
 
 ## Conventions (apply to every unit)
 
