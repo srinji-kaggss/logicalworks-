@@ -1234,6 +1234,23 @@ def build_parser() -> argparse.ArgumentParser:
     solve.add_argument("--lens", type=float, metavar="-1..1", help="philosophy(-1) <-> science(+1)")
     solve.add_argument("--depth", type=float, metavar="0..1", help="shallow(0) <-> deep(1)")
     solve.set_defaults(func=_solve_dispatch)
+
+    # repo — lifecycle hygiene: audit, recover, cleanup, merge, handoff, graph
+    import lgwks_repo
+    lgwks_repo.add_parser(sub)
+
+    # review — graph-aware code review + proposed git actions
+    import lgwks_review
+    lgwks_review.add_parser(sub)
+
+    # session — session boundary analyzer (begin / end / summary)
+    import lgwks_session
+    lgwks_session.add_parser(sub)
+
+    # crawl — stealth browser crawl, bot-resilient extraction
+    import lgwks_crawl
+    lgwks_crawl.add_parser(sub)
+
     return parser
 
 
