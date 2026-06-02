@@ -43,7 +43,8 @@ def _pick_ua(seed: int) -> str:
     return _UA_POOL[seed % len(_UA_POOL)]
 _DDG_HTML = "https://html.duckduckgo.com/html/"
 _DDG_LITE = "https://lite.duckduckgo.com/lite/"   # lighter HTML; different host → independent rate-limit
-_MOJEEK = "https://www.mojeek.com/search"          # independent index (GET ?q=) — endpoint diversity
+_MOJEEK = "https://www.mojeek.com/search"
+_SCHOLAR = "https://scholar.google.com/scholar"          # independent index (GET ?q=) — endpoint diversity
 # DDG wraps result links as /l/?uddg=<percent-encoded-real-url> — we decode back to the true target.
 _RESULT_A = re.compile(r'<a[^>]*class="result__a"[^>]*href="([^"]+)"[^>]*>(.*?)</a>', re.S)
 _SNIPPET = re.compile(r'class="result__snippet"[^>]*>(.*?)</a>', re.S)
@@ -232,6 +233,50 @@ def _score(r: dict, terms: list[str]) -> int:
     return sum(1 for t in terms if t in hay)
 
 
+# ── Google Scholar support ───────────────────────────────────────────────────
+
+def _parse_scholar(body: str, k: int, via: str) -> list[dict]:
+    """Parse Google Scholar results HTML into [{title,url,snippet,via}].
+    Each result is a <div class="gs_r"> block with title, authors, and snippet."""
+    out: list[dict] = []
+    # Scholar splits results into <div class="gs_r ..."> containers
+    blocks = re.split(r'<div class="gs_r[^"]*"[^>]*>', body)[1:]
+    for block in blocks[:k]:
+        # title + URL from the first anchor inside h3.gs_rt
+        tm = re.search(r'<h3 class="gs_rt"[^>]*>.*?<a href="([^"]+)"[^>]*>(.*?)</a>.*?</h3>', block, re.S | re.I)
+        if not tm:
+            continue
+        url = tm.group(1)
+        title = _clean(tm.group(2))
+        # authors / venue / year
+        am = re.search(r'<div class="gs_a"[^>]*>(.*?)</div>', block, re.S | re.I)
+        authors = _clean(am.group(1)) if am else ""
+        # snippet
+        sm = re.search(r'<div class="gs_rs"[^>]*>(.*?)</div>', block, re.S | re.I)
+        snippet = _clean(sm.group(1)) if sm else ""
+        out.append({
+            "title": title,
+            "url": url,
+            "via": via,
+            "snippet": f"{authors} — {snippet}" if (authors and snippet) else (authors or snippet),
+        })
+    return out
+
+
+def scholar(query: str, k: int = 6) -> list[dict]:
+    """Search Google Scholar for academic papers. Returns [{title,url,snippet,via}].
+    Uses the same UA rotation and retry logic as the open floor."""
+    qs = urllib.parse.urlencode({"q": query, "hl": "en"})
+    for attempt in range(3):
+        ua = _pick_ua(attempt + 100)  # offset from web-search UA cycle
+        body = _curl(_SCHOLAR + "?" + qs, ua=ua)
+        if body and len(body) > _MIN_BODY and "gs_r" in body:
+            rows = _parse_scholar(body, k, via="scholar")
+            if rows:
+                return rows
+    return []
+
+
 def search(query: str, k: int = 6) -> list[dict]:
     """Best present provider, FALLING THROUGH on empty (robust to broken/absent providers), then
     deduped-by-URL and relevance-ranked against the query. Reports which provider (`via`) won."""
@@ -260,16 +305,26 @@ _ARMS = {
     "people": lambda q: f"{q} site:linkedin.com/company OR leadership OR executive",
 }
 
+# Scholar arm uses a dedicated academic endpoint, not the general web search providers.
+_SCHOLAR_ARMS = {
+    "academic": lambda q: q,
+}
+
 
 def sweep(query: str, k_per_arm: int = 4) -> dict:
     """Blind multi-modal sweep → merged, deduped-by-URL results + which arms found each. The completeness
     surface: every arm runs, and we report which arms returned nothing (no silent coverage gap)."""
     def run(name: str) -> tuple[str, list[dict]]:
         return name, search(_ARMS[name](query), k=k_per_arm)
+
+    def run_scholar(name: str) -> tuple[str, list[dict]]:
+        return name, scholar(_SCHOLAR_ARMS[name](query), k=k_per_arm)
+
     found: dict[str, dict] = {}
     arms_hit: dict[str, int] = {}
-    with concurrent.futures.ThreadPoolExecutor(max_workers=len(_ARMS)) as ex:
-        for name, results in ex.map(lambda n: run(n), list(_ARMS)):
+    all_runs = [(n, run) for n in _ARMS] + [(n, run_scholar) for n in _SCHOLAR_ARMS]
+    with concurrent.futures.ThreadPoolExecutor(max_workers=len(all_runs)) as ex:
+        for name, results in ex.map(lambda item: item[1](item[0]), all_runs):
             arms_hit[name] = len(results)
             for r in results:
                 key = r["url"].split("?")[0].rstrip("/")
@@ -279,7 +334,7 @@ def sweep(query: str, k_per_arm: int = 4) -> dict:
                     found[key] = {**r, "arms": [name]}
     empty = [n for n, c in arms_hit.items() if c == 0]
     return {"query": query, "results": list(found.values()),
-            "arms_hit": arms_hit, "arms_empty": empty,  # arms_empty = the honest coverage gap
+            "arms_hit": arms_hit, "arms_empty": empty,
             "has_evidence": bool(found)}
 
 

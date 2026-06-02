@@ -93,6 +93,53 @@ class TestSourceValidity(unittest.TestCase):
         assert diag is None
 
 
+class TestScholarParsing(unittest.TestCase):
+    def test_extracts_result_blocks(self):
+        html = (
+            '<div class="gs_r"><div class="gs_ri">'
+            '<h3 class="gs_rt"><a href="https://example.com/paper">Attention Is All You Need</a></h3>'
+            '<div class="gs_a">A Vaswani et al. - NeurIPS 2017</div>'
+            '<div class="gs_rs">We propose a new simple network architecture...</div>'
+            '</div></div>'
+            '<div class="gs_r"><div class="gs_ri">'
+            '<h3 class="gs_rt"><a href="https://example.com/paper2">BERT: Pre-training</a></h3>'
+            '<div class="gs_a">J Devlin et al. - NAACL 2019</div>'
+            '<div class="gs_rs">We introduce a new language representation model...</div>'
+            '</div></div>'
+        )
+        rows = search._parse_scholar(html, k=4, via="scholar")
+        self.assertGreaterEqual(len(rows), 1)
+        self.assertEqual(rows[0]["title"], "Attention Is All You Need")
+        self.assertEqual(rows[0]["url"], "https://example.com/paper")
+        self.assertIn("Vaswani", rows[0]["snippet"])
+        if len(rows) >= 2:
+            self.assertEqual(rows[1]["title"], "BERT: Pre-training")
+
+    def test_skips_malformed_blocks(self):
+        html = '<div class="gs_r"><div class="gs_ri">no link here</div></div>'
+        rows = search._parse_scholar(html, k=4, via="scholar")
+        self.assertEqual(rows, [])
+
+
+class TestScholarSearch(unittest.TestCase):
+    @patch.object(search, "_curl", return_value="")
+    def test_returns_empty_when_blocked(self, mock_curl):
+        rows = search.scholar("machine learning", k=3)
+        self.assertEqual(rows, [])
+        self.assertTrue(mock_curl.call_count <= 3)
+
+
+class TestSweepIncludesAcademic(unittest.TestCase):
+    @patch.object(search, "search", return_value=[{"title": "Web result", "url": "https://example.com"}])
+    @patch.object(search, "scholar", return_value=[{"title": "Paper result", "url": "https://scholar.example.com"}])
+    def test_scholar_arm_included(self, mock_scholar, mock_search):
+        result = search.sweep("machine learning", k_per_arm=2)
+        self.assertIn("academic", result["arms_hit"])
+        self.assertEqual(result["arms_hit"]["academic"], 1)
+        urls = [r["url"] for r in result["results"]]
+        self.assertIn("https://scholar.example.com", urls)
+
+
 class TestUnwrap(unittest.TestCase):
     def test_ddg_redirect(self):
         assert search._unwrap("https://duckduckgo.com/l/?uddg=https%3A%2F%2Fexample.com%2Fpath") == "https://example.com/path"
