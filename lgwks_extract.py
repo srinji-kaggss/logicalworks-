@@ -260,4 +260,17 @@ def extract(target: str, max_chars: int = 8000) -> dict:
         text = _html(target, max_chars) if is_url else (
             _trim(Path(target).read_text(errors="replace"), max_chars) if Path(target).exists() else "")
 
-    return {"source": target, "kind": kind, "ok": bool(text), "text": text}
+    result = {"source": target, "kind": kind, "ok": bool(text), "text": text}
+    # Site-aware enrichment for supported platforms (Twitter/X, Reddit, Scholar)
+    if is_url and text:
+        try:
+            import lgwks_sites
+            site_data = lgwks_sites.extract_for_site(target, text)
+            if site_data:
+                result["site_data"] = site_data
+                # If site extraction succeeded, update the text with the structured body
+                if site_data.get("ok") and site_data.get("body"):
+                    result["text"] = site_data["body"]
+        except Exception:
+            pass  # degrade gracefully — generic text is still useful
+    return result
