@@ -1,0 +1,141 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://logicalworks.ca/schemas/lgwks-expression-v1.schema.json",
+  "title": "lgwks-expression/1 Plan",
+  "description": "Compiled plan produced by the lgwks expression compiler. plan_id is SHA-256 of the canonical expression string, not the compiled object, so it is portable across machines with different capability wiring.",
+  "type": "object",
+  "required": ["schema", "plan_id", "expression", "canonical_expression", "manifest_version", "steps", "risk_class", "compile_policy"],
+  "additionalProperties": false,
+  "properties": {
+    "schema": {
+      "type": "string",
+      "const": "lgwks-expression/1",
+      "description": "Schema discriminator. Must be exactly 'lgwks-expression/1'."
+    },
+    "plan_id": {
+      "$ref": "#/$defs/PlanId"
+    },
+    "expression": {
+      "type": "string",
+      "minLength": 1,
+      "description": "Original expression string as supplied by the caller, before canonicalisation."
+    },
+    "canonical_expression": {
+      "type": "string",
+      "minLength": 1,
+      "description": "Normalised expression: whitespace collapsed, args sorted by key, verb_id lowercased. SHA-256 of this string is plan_id."
+    },
+    "manifest_version": {
+      "type": "string",
+      "minLength": 1,
+      "description": "Value of the 'manifest' field from build_manifest() at compile time. Allows replay to detect resolver drift."
+    },
+    "steps": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "$ref": "#/$defs/Step"
+      },
+      "description": "Ordered pipeline steps. Step N output feeds step N+1 input."
+    },
+    "risk_class": {
+      "$ref": "#/$defs/RiskClass",
+      "description": "Maximum risk_class across all steps. Invariant: equals max(step.risk_class)."
+    },
+    "compile_policy": {
+      "type": "object",
+      "required": ["shell", "unknown_requires_review", "destructive_requires_force"],
+      "additionalProperties": false,
+      "properties": {
+        "shell": {
+          "type": "boolean",
+          "const": false,
+          "description": "Must always be false. No step may execute through a shell interpreter."
+        },
+        "unknown_requires_review": {
+          "type": "boolean",
+          "description": "Steps with needs_review=true block auto-execution."
+        },
+        "destructive_requires_force": {
+          "type": "boolean",
+          "description": "Destructive-class steps require an explicit force gate."
+        }
+      }
+    },
+    "warnings": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      },
+      "default": [],
+      "description": "Non-fatal compile conditions: schema_unknown, primitive_unresolved, type_compat_assumed, etc."
+    }
+  },
+  "$defs": {
+    "PlanId": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$",
+      "description": "SHA-256 hex digest (64 lowercase hex chars) of the canonical_expression string."
+    },
+    "VerbId": {
+      "type": "string",
+      "pattern": "^[a-z][a-z0-9_]*(\\.[a-z][a-z0-9_]*)*$",
+      "description": "Dot-delimited agnostic verb identifier. No bash paths, no tool names. Examples: 'extract', 'geo.compile', 'memory.remember', 'jarvis.crawl'."
+    },
+    "RiskClass": {
+      "type": "string",
+      "enum": ["read", "mutate", "unknown", "destructive"],
+      "description": "Ordered risk classes: read < mutate < unknown < destructive. Mirrors _RISK_ORDER in lgwks_multiply."
+    },
+    "PrimitiveRef": {
+      "type": ["string", "null"],
+      "pattern": "^(cli:|mcp:|skill:|agent:).+$",
+      "description": "Resolved primitive reference. Format: '<namespace>:<target>'. Null when verb_id is unresolved; forces needs_review=true. Examples: 'cli:extract', 'cli:geo compile', 'mcp:embed', 'skill:graphify', 'agent:coder'."
+    },
+    "Step": {
+      "type": "object",
+      "required": ["index", "verb_id", "resolved_primitive", "args", "input_schema", "output_schema", "risk_class", "needs_review"],
+      "additionalProperties": false,
+      "properties": {
+        "index": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Zero-based position in the pipeline. Step 0 is the source; last step is the sink."
+        },
+        "verb_id": {
+          "$ref": "#/$defs/VerbId"
+        },
+        "resolved_primitive": {
+          "$ref": "#/$defs/PrimitiveRef"
+        },
+        "args": {
+          "type": "object",
+          "additionalProperties": {
+            "oneOf": [
+              {"type": "string"},
+              {"type": "number"},
+              {"type": "boolean"},
+              {"type": "null"}
+            ]
+          },
+          "description": "Key-value args for this step. Scalar values only; no nested objects."
+        },
+        "input_schema": {
+          "type": "object",
+          "description": "JSON Schema fragment describing the expected input type. {} means any."
+        },
+        "output_schema": {
+          "type": "object",
+          "description": "JSON Schema fragment describing the emitted output type. {} means any."
+        },
+        "risk_class": {
+          "$ref": "#/$defs/RiskClass"
+        },
+        "needs_review": {
+          "type": "boolean",
+          "description": "True when the verb_id is unresolved or the primitive namespace is agent:/skill:. Blocks auto_allowed approval at plan level."
+        }
+      }
+    }
+  }
+}
