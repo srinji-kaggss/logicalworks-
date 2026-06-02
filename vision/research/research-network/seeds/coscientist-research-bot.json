@@ -1,0 +1,76 @@
+{
+  "name": "coscientist-research-bot",
+  "description": "Research AI bot architecture sources: Google co-scientist, DeepMind algorithm discovery, Anthropic Constitutional AI, tabula-rasa evidence discipline, and deterministic graph compilation.",
+  "sources": [
+    {
+      "url": "https://research.google/blog/accelerating-scientific-breakthroughs-with-an-ai-co-scientist/",
+      "title": "Google Research: Accelerating scientific breakthroughs with an AI co-scientist",
+      "axis": "research_governance",
+      "tier": "primary",
+      "notes": "Hypothesis generation, reflection, ranking, evolution, grounding, and expert feedback loop."
+    },
+    {
+      "url": "https://arxiv.org/abs/2502.18864",
+      "title": "Towards an AI co-scientist",
+      "axis": "research_governance",
+      "tier": "primary",
+      "notes": "Technical paper for co-scientist architecture."
+    },
+    {
+      "url": "https://deepmind.google/discover/blog/alphaevolve-a-gemini-powered-coding-agent-for-designing-advanced-algorithms/",
+      "title": "Google DeepMind AlphaEvolve",
+      "axis": "neural_program_synthesis",
+      "tier": "primary",
+      "notes": "Evolutionary algorithm-discovery pattern relevant to research-bot self-improvement."
+    },
+    {
+      "url": "https://arxiv.org/abs/2212.08073",
+      "title": "Constitutional AI: Harmlessness from AI Feedback",
+      "axis": "research_governance",
+      "tier": "primary",
+      "notes": "Critique and revision pattern for AI advisory outputs."
+    },
+    {
+      "url": "https://www.anthropic.com/research/constitutional-ai-harmlessness-from-ai-feedback",
+      "title": "Anthropic Constitutional AI",
+      "axis": "research_governance",
+      "tier": "primary",
+      "notes": "Official explanation of Constitutional AI."
+    },
+    {
+      "url": "https://distill.pub/2021/gnn-intro/",
+      "title": "A Gentle Introduction to Graph Neural Networks",
+      "axis": "gnn_foundations",
+      "tier": "primary",
+      "notes": "Visual GNN explanation for independent graph visualization principles."
+    },
+    {
+      "url": "https://pytorch-geometric.readthedocs.io/en/latest/",
+      "title": "PyTorch Geometric documentation",
+      "axis": "graph_representation_learning",
+      "tier": "primary",
+      "notes": "GNN framework substrate for future tensor activation."
+    },
+    {
+      "url": "https://www.dgl.ai/dgl_docs/",
+      "title": "Deep Graph Library documentation",
+      "axis": "graph_representation_learning",
+      "tier": "primary",
+      "notes": "Alternative GNN framework substrate."
+    },
+    {
+      "url": "https://mlir.llvm.org/docs/",
+      "title": "MLIR documentation",
+      "axis": "compiler_ir",
+      "tier": "primary",
+      "notes": "Dialect and deterministic compiler-layer architecture."
+    },
+    {
+      "url": "https://www.w3.org/TR/shacl/",
+      "title": "SHACL",
+      "axis": "schema_validation",
+      "tier": "primary",
+      "notes": "Graph constraint validation."
+    }
+  ]
+}

@@ -1,0 +1,36 @@
+name: "lgwks-research-bot"
+command: "./lgwks"
+enabled: true
+short_description: "Crawl websites into a local research DB, graph map, and GNN tensor export"
+description: |
+  LGWKS local research network command.
+
+  The bot accepts an architectural framework, creates a source seed, crawls with crwl,
+  stores raw artifacts, embeds chunks locally, compiles deterministic graph artifacts,
+  and exports GNN-ready tensors.
+
+  AI advisory is separated from graph compilation:
+  - `bot plan` may propose crawl seeds.
+  - `website` crawls and compiles deterministic artifacts.
+  - `graph export` rebuilds visualizations from SQLite.
+  - `graph tensorize` exports GNN-ready files.
+  - `expert` writes advisory output only and cannot mutate graph facts.
+parameters:
+  - name: "mode"
+    type: "string"
+    description: "Command family: bot, website, graph, expert, or drive."
+    required: true
+    position: 0
+    format: "positional"
+  - name: "target"
+    type: "string"
+    description: "Framework text, URL, run directory, or subcommand depending on mode."
+    required: false
+    position: 1
+    format: "positional"
+  - name: "additional_args"
+    type: "string"
+    description: "Additional command arguments. Keep graph compilation deterministic; do not pass AI output as compiled graph facts."
+    required: false
+    default: ""
+    format: "positional"

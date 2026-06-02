@@ -1,0 +1,24 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "LGWKS Research Run",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["run_id", "created_at", "name", "sources", "models", "artifacts"],
+  "properties": {
+    "run_id": { "type": "string" },
+    "created_at": { "type": "string" },
+    "name": { "type": "string" },
+    "sources": { "type": "array", "items": { "$ref": "research-source.schema.json" } },
+    "models": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["embedding", "reasoning"],
+      "properties": {
+        "embedding": { "type": "string" },
+        "reasoning": { "type": "string" }
+      }
+    },
+    "limits": { "type": "object" },
+    "artifacts": { "type": "object" }
+  }
+}

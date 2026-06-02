@@ -1,0 +1,18 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "LGWKS Research Advisory",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["created_at", "run_id", "model", "question", "output_path", "boundary"],
+  "properties": {
+    "created_at": { "type": "string" },
+    "run_id": { "type": "string" },
+    "model": { "type": "string" },
+    "question": { "type": "string" },
+    "output_path": { "type": "string" },
+    "boundary": {
+      "type": "string",
+      "const": "AI advisory output cannot mutate compiled graph facts."
+    }
+  }
+}

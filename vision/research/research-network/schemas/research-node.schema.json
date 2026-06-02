@@ -1,0 +1,18 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "LGWKS Research Node",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["id", "kind", "label", "weight"],
+  "properties": {
+    "id": { "type": "string" },
+    "kind": {
+      "type": "string",
+      "enum": ["source", "document", "chunk", "concept", "cluster", "gap", "claim"]
+    },
+    "label": { "type": "string" },
+    "weight": { "type": "number" },
+    "source": { "type": "string" },
+    "metadata": { "type": "object" }
+  }
+}

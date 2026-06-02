@@ -1,0 +1,80 @@
+[
+  {
+    "lesson_id": "L01",
+    "claim_ref": "PIF-C01",
+    "type": "belief_revised",
+    "before": "An E2EE content-addressed fact-log plus local intent engine is the main privacy answer for an intent-driven OS.",
+    "after": "The fact-log is necessary but not sufficient; the decisive privacy boundary is derived structure: embeddings, brief catalogues, slug resolvers, cross-device gaps, speculative branches, and egress deltas.",
+    "evidence_span": "Apple PCC makes private cloud AI credible only through statelessness, no privileged runtime access, non-targetability, and verifiable transparency; NIST frames privacy as risk management rather than encryption alone.",
+    "sources": [
+      {"url": "https://security.apple.com/blog/private-cloud-compute/", "tier": "primary", "figure": "PCC requirements: stateless computation, enforceable guarantees, no privileged access, non-targetability, verifiable transparency"},
+      {"url": "https://www.nist.gov/privacy-framework", "tier": "primary", "figure": "privacy risk management framework"}
+    ],
+    "confidence": 0.84,
+    "confidence_basis": "primary-source grounding plus direct fit to ADR-068 risk surface",
+    "falsifier": "A prototype proves useful intent assistance without persistent derived projections or egress learning channels.",
+    "residual_disagreement": "How much local telemetry is required for product-grade intent remains unmeasured.",
+    "hallucination_risk": "low - the lesson is a design inference from primary security/privacy sources and local architecture documents",
+    "decision_weight": "high",
+    "maps_to_vision": ["gate", "tape", "ml", "sovereignty"]
+  },
+  {
+    "lesson_id": "L02",
+    "claim_ref": "PIF-C02",
+    "type": "belief_confirmed",
+    "before": "Capability Vocabulary can be a typed permission registry around actions.",
+    "after": "For an OS layer, capabilities need to act more like seL4/Fuchsia authority objects: typed, rights-bearing, revocable, TTL-bound handles rather than labels.",
+    "evidence_span": "seL4 defines capabilities as unforgeable tokens with access rights; Fuchsia kernel syscalls check handle type and rights.",
+    "sources": [
+      {"url": "https://docs.sel4.systems/Tutorials/capabilities", "tier": "primary", "figure": "capability = unique unforgeable token with access rights"},
+      {"url": "https://fuchsia.dev/fuchsia-src/concepts/kernel/concepts", "tier": "primary", "figure": "kernel checks handle type and rights"}
+    ],
+    "confidence": 0.86,
+    "confidence_basis": "primary OS design sources and direct mapping to CODEBOOK capability-grant needs",
+    "falsifier": "A simpler permission-label model can prove non-bypassable enforcement, revocation, and scoped delegation across apps, agents, projections, sync, and cloud inference.",
+    "residual_disagreement": "How close the implementation should get to true object-capability semantics in the first product increment.",
+    "hallucination_risk": "low - authority-object inference is grounded in primary OS docs",
+    "decision_weight": "high",
+    "maps_to_vision": ["protocol", "gate", "sovereignty"]
+  },
+  {
+    "lesson_id": "L03",
+    "claim_ref": "PIF-C03",
+    "type": "myth_dispelled",
+    "before": "Differential privacy egress can be treated as the single safe learning door once raw data stays local.",
+    "after": "DP egress is only safe if the OS owns a privacy budget/accountant, model-specific ledger, reset policy, and adversarial memorization/inversion tests.",
+    "evidence_span": "NIST positions differential privacy as a privacy-preserving data analysis technique inside privacy risk management, which implies quantification and governance rather than a blanket privacy claim.",
+    "sources": [
+      {"url": "https://www.nist.gov/blogs/cybersecurity-insights/differential-privacy-privacy-preserving-data-analysis", "tier": "primary", "figure": "differential privacy as privacy-preserving analysis"},
+      {"url": "https://www.nist.gov/privacy-framework", "tier": "primary", "figure": "privacy risk management"}
+    ],
+    "confidence": 0.8,
+    "confidence_basis": "primary-source privacy framing plus known DP budget requirement; implementation details still need prototype validation",
+    "falsifier": "A DP egress design is formally specified and reviewed with no persistent budget/accounting object yet still prevents cumulative leakage.",
+    "residual_disagreement": "Exact epsilon budget policy is domain-specific and unmeasured.",
+    "hallucination_risk": "medium - budget architecture is a design recommendation, not yet measured in Logic OS",
+    "decision_weight": "high",
+    "maps_to_vision": ["ml", "tape", "sovereignty"]
+  },
+  {
+    "lesson_id": "L04",
+    "claim_ref": "PIF-C04",
+    "type": "belief_confirmed",
+    "before": "The intent engine can be framed mostly as local inference plus capability-gated execution.",
+    "after": "The intent engine needs an explicit compiler/manifest layer: natural language compiles into typed action graphs, and agents are app-like principals with manifests, knowledge sources, actions, data boundaries, and review gates.",
+    "evidence_span": "Microsoft 365 agents are documented around instructions, knowledge, actions, and app packages; Google's App Actions require declared capabilities in shortcuts.xml mapped to built-in intents and fulfillment. The downloaded research pack identifies the same cross-vendor pattern and flags untyped delegation as a failure class.",
+    "sources": [
+      {"url": "https://learn.microsoft.com/en-us/microsoft-365/copilot/extensibility/agents-overview", "tier": "primary", "figure": "agent components: knowledge and actions; declarative vs custom engine agents"},
+      {"url": "https://learn.microsoft.com/en-us/microsoft-365-copilot/extensibility/agents-are-apps", "tier": "primary", "figure": "agents are app packages with manifests"},
+      {"url": "https://developer.android.com/guide/app-actions/action-schema", "tier": "primary", "figure": "App Actions declare capabilities in shortcuts.xml"},
+      {"url": "/Users/srinji/Downloads/Claude Research/ai_os_agent_handoff_pack/deep-research-report-2.md", "tier": "primary", "figure": "local research synthesis: typed tool/action surfaces before autonomy"}
+    ],
+    "confidence": 0.85,
+    "confidence_basis": "multiple official platform docs plus local synthesis converge on typed action surfaces",
+    "falsifier": "A production-grade assistant platform demonstrates reliable, auditable cross-app execution from free-form text without a typed manifest/action layer.",
+    "residual_disagreement": "Exact manifest fields for Logic OS should be prototyped against one native app, one browser extension, and one backend action.",
+    "hallucination_risk": "low - the lesson is grounded in official Microsoft and Google docs plus local research",
+    "decision_weight": "high",
+    "maps_to_vision": ["protocol", "gate", "ml", "distribution"]
+  }
+]
