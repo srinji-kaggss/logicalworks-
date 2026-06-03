@@ -26,6 +26,7 @@ from pathlib import Path
 from typing import Any
 
 import lgwks_ui as ui
+import lgwks_graph as graph_engine
 from lgwks_solve import _diagnose as _git_diagnose
 from lgwks_steering import Steering
 
@@ -406,45 +407,31 @@ def repo_handoff(repo: Path) -> dict[str, Any]:
 
 
 def repo_graph(repo: Path) -> dict[str, Any]:
-    """Lightweight codebase graph: files, imports, definitions, adjacency. Seed for structural review."""
+    """Lightweight codebase graph: files, imports, definitions, adjacency. Seed for structural review.
+
+    //why: Previously a flat dict with linear scan. Now delegates to lgwks_graph engine for
+    traversable, queryable graph with adjacency indexes, reverse dependency cones, and caching.
+    Backward-compatible dict return so existing callers (review, tests) keep working.
+    """
+    g = graph_engine.get_graph(repo)
+    # Convert back to legacy flat dict for backward compatibility
     files: dict[str, Any] = {}
     edges: list[dict[str, str]] = []
-    # respect .gitignore by using git ls-files
-    rc, out = _git(repo, "ls-files")
-    paths = out.splitlines() if out else []
-    for p in paths:
-        if not p.endswith(".py"):
-            continue
-        fpath = repo / p
-        if not fpath.exists():
-            continue
-        try:
-            source = fpath.read_text(encoding="utf-8")
-        except Exception:
-            continue
-        try:
-            tree = ast.parse(source)
-        except SyntaxError:
-            continue
-        imports: list[str] = []
-        defines: list[str] = []
-        for node in ast.iter_child_nodes(tree):
-            if isinstance(node, ast.Import):
-                for alias in node.names:
-                    imports.append(alias.name)
-            elif isinstance(node, ast.ImportFrom):
-                mod = node.module or ""
-                for alias in node.names:
-                    imports.append(f"{mod}.{alias.name}" if mod else alias.name)
-            elif isinstance(node, ast.ClassDef):
-                defines.append(f"class {node.name}")
-            elif isinstance(node, ast.FunctionDef):
-                defines.append(f"def {node.name}")
-        files[p] = {"imports": imports, "defines": defines}
-        for imp in imports:
-            edges.append({"from": p, "to": imp, "type": "import"})
-    # also add call-graph edges via simple grep for now (lightweight)
-    return {"schema": "lgwks.repo.graph.v0", "repo": str(repo), "files": files, "edges": edges, "file_count": len(files), "edge_count": len(edges)}
+    for nid, node in g.nodes.items():
+        files[nid] = {"imports": list(node.imports), "defines": list(node.defines)}
+        for e in g.edges:
+            if e.source == nid:
+                edges.append({"from": e.source, "to": e.target, "type": e.kind})
+    return {
+        "schema": "lgwks.repo.graph.v0",
+        "repo": str(repo),
+        "files": files,
+        "edges": edges,
+        "file_count": len(files),
+        "edge_count": len(edges),
+        "_engine": "lgwks_graph",
+        "_stats": g.stats(),
+    }
 
 
 # ── CLI surfaces ──

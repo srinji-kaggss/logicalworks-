@@ -24,6 +24,7 @@ from pathlib import Path
 from typing import Any
 
 import lgwks_ui as ui
+import lgwks_graph as graph_engine
 from lgwks_repo import _git, _is_repo, repo_graph
 
 
@@ -111,22 +112,54 @@ def _heuristic_scan(path: Path, rel: str) -> list[ReviewFinding]:
 
 
 def _impact_analysis(repo: Path, files: list[str], graph: dict[str, Any]) -> list[dict[str, Any]]:
-    """Cross-reference changed files with the codebase graph to find callers and analogs."""
+    """Cross-reference changed files with the codebase graph to find callers and analogs.
+
+    DiD: T0 schema — validates graph has expected keys before traversal.
+    T1 query — uses lgwks_graph engine for reverse dependency cones (not linear scan).
+    """
     impacts: list[dict[str, Any]] = []
     file_set = set(files)
-    # Find callers: edges where `to` is an import from a changed file
-    changed_modules = {f.replace("/", ".").replace(".py", "") for f in files if f.endswith(".py")}
-    for edge in graph.get("edges", []):
-        if edge.get("type") == "import" and edge.get("from") not in file_set:
-            imp = edge.get("to", "")
-            for cm in changed_modules:
-                if imp == cm or imp.startswith(cm + "."):
+
+    # Try to use the functional graph engine if available
+    try:
+        g = graph_engine.get_graph(repo)
+        for f in files:
+            if f not in g.nodes:
+                continue
+            # Direct callers (predecessors)
+            for caller in g.predecessors(f):
+                if caller not in file_set:
                     impacts.append({
                         "kind": "caller",
-                        "changed": cm,
-                        "caller": edge["from"],
-                        "note": f"{edge['from']} imports from changed module {cm}",
+                        "changed": f,
+                        "caller": caller,
+                        "note": f"{caller} imports from changed module {f}",
                     })
+            # Transitive impacted files (reverse dependency cone, radius 2)
+            impacted = g.reverse_deps(f, max_depth=2)
+            for impacted_file in impacted:
+                if impacted_file not in file_set and impacted_file not in {i["caller"] for i in impacts}:
+                    impacts.append({
+                        "kind": "transitive",
+                        "changed": f,
+                        "caller": impacted_file,
+                        "note": f"{impacted_file} transitively depends on changed module {f}",
+                    })
+    except Exception:
+        # Fallback to legacy flat graph scan (backward compatible)
+        changed_modules = {f.replace("/", ".").replace(".py", "") for f in files if f.endswith(".py")}
+        for edge in graph.get("edges", []):
+            if edge.get("type") == "import" and edge.get("from") not in file_set:
+                imp = edge.get("to", "")
+                for cm in changed_modules:
+                    if imp == cm or imp.startswith(cm + "."):
+                        impacts.append({
+                            "kind": "caller",
+                            "changed": cm,
+                            "caller": edge["from"],
+                            "note": f"{edge['from']} imports from changed module {cm}",
+                        })
+
     # De-duplicate
     seen: set[str] = set()
     uniq: list[dict[str, Any]] = []
