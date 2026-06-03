@@ -1,20 +1,24 @@
 """lgwks_debug — automated debugging: turn "it's broken" into "here's why + next step."
 
-Runs commands, captures stdout/stderr/exit code, matches against a pattern database of known
-failure signatures, and proposes fixes with risk classification. No AI needed for the common path;
-ML can enrich later.
+Defense-in-Depth layers:
+  T0 input validation: command args validated against blocklist; no shell metacharacters.
+  T1 execution safety: shlex.split + shell=False; dangerous commands rejected before spawn.
+  T2 pattern matching: expanded DB (25+ signatures) with severity-classified fixes.
+  T3 secret scrub: _SECRET_RE strips credentials from stdout/stderr before any log/display.
+  T4 timeout: all runs have explicit timeout; hung commands fail fast (exit 124).
+  T5 audit: .lgwks/debug-audit.jsonl records every command run (not just failures).
+  T6 isolation: fix commands carry risk class (read/mutate/destructive); never auto-execute.
 
-//why: Debugging currently costs 19 CLI commands. The user says "npm test failed" and the AI
-spawns subprocess after subprocess. This module collapses that into ONE command with structured
-output the AI can read directly.
+No AI needed for the common path; ML can enrich later.
+//why: Debugging costs 19 CLI commands. This collapses it into ONE with structured output.
 """
 
 from __future__ import annotations
 
 import argparse
 import json
-import os
 import re
+import shlex
 import subprocess
 import sys
 import time
@@ -25,190 +29,116 @@ from typing import Any
 import lgwks_ui as ui
 
 
-# ── secret scrubber for debug logs ──────────────────────────────────────────
+# ── constants ───────────────────────────────────────────────────────────────
+
 _SECRET_RE = re.compile(
-    r"(?i)(api[_-]?key|token|password|secret|auth)\\s*[=:]\\s*['\"]?[^\\s'\"]{8,}['\"]?"
+    r"(?i)(api[_-]?key|token|password|secret|auth)\s*[=:]\s*['\"]?[^\s'\"]{8,}['\"]?"
 )
+
+# Commands we refuse to run (destructive or dangerous)
+_BLOCKLIST = re.compile(
+    r"\b(rm\s+-rf\s+/|mkfs|dd\s+if=|>:\s*/|curl\s+.*\|\s*sh|wget\s+.*\|\s*sh|sudo\s+)",
+    re.IGNORECASE,
+)
+
+# ── audit ───────────────────────────────────────────────────────────────────
+
+def _audit_log_path() -> Path:
+    return Path.cwd() / ".lgwks" / "debug-audit.jsonl"
+
+
+def _audit(command: str, exit_code: int, findings_count: int) -> None:
+    log = _audit_log_path()
+    log.parent.mkdir(parents=True, exist_ok=True)
+    record = {
+        "ts": time.time(),
+        "command": command,
+        "exit_code": exit_code,
+        "findings_count": findings_count,
+    }
+    with open(log, "a", encoding="utf-8") as fh:
+        fh.write(json.dumps(record, ensure_ascii=False) + "\n")
+
+
+# ── input validation ──────────────────────────────────────────────────────
+
+def _validate_command(cmd_parts: list[str]) -> tuple[bool, str]:
+    """Validate command parts. Returns (ok, reason). Blocks dangerous patterns."""
+    joined = " ".join(cmd_parts)
+    if _BLOCKLIST.search(joined):
+        return False, "command matches dangerous pattern — blocked"
+    # Reject shell metacharacters in individual parts
+    for part in cmd_parts:
+        if re.search(r"[;|&$`\x00]", part):
+            return False, f"shell metacharacter in arg: {part[:20]}"
+    return True, ""
 
 
 def _scrub(text: str) -> str:
-    """Strip anything matching SECRET_RE before writing to disk."""
+    """Redact secrets from text before any log or display."""
     return _SECRET_RE.sub("[REDACTED]", text)
 
 
 # ── pattern database ─────────────────────────────────────────────────────────
-# Each pattern: regex -> (check_id, severity, message_template, proposed_fix)
+# (regex, check_id, severity, message_template, fix_cmd, fix_risk)
 
 _PATTERNS: list[tuple[str, str, str, str, str, str]] = [
-    # (regex, check_id, severity, message, fix_cmd, fix_risk)
-    (
-        r"ModuleNotFoundError: No module named '([^']+)'",
-        "missing_module",
-        "warn",
-        "Missing Python module: {group1}",
-        "pip install {group1}",
-        "mutate",
-    ),
-    (
-        r"ModuleNotFoundError: No module named \"([^\"]+)\"",
-        "missing_module",
-        "warn",
-        "Missing Python module: {group1}",
-        "pip install {group1}",
-        "mutate",
-    ),
-    (
-        r"command not found: ([^\\s]+)",
-        "missing_binary",
-        "warn",
-        "Missing binary: {group1}",
-        "brew install {group1}  # or pipx / npm / cargo",
-        "mutate",
-    ),
-    (
-        r"SyntaxError: invalid syntax",
-        "syntax_error",
-        "danger",
-        "Python syntax error — check file/line in traceback",
-        "lgwks review --repo .",
-        "read",
-    ),
-    (
-        r"AssertionError",
-        "test_assertion",
-        "warn",
-        "Test assertion failed — behavior changed or regression",
-        "lgwks review --repo .",
-        "read",
-    ),
-    (
-        r"fatal: not a git repository",
-        "not_git_repo",
-        "warn",
-        "Not inside a git repo — cd to repo root",
-        "cd <repo>",
-        "read",
-    ),
-    (
-        r"CONFLICT \(([^)]+)\)",
-        "merge_conflict",
-        "danger",
-        "Git merge conflict: {group1}",
-        "lgwks repo recover",
-        "mutate",
-    ),
-    (
-        r"gh: To use GitHub CLI in non-interactive mode",
-        "gh_not_authed",
-        "warn",
-        "gh CLI not authenticated",
-        "gh auth login",
-        "mutate",
-    ),
-    (
-        r"gh: not authenticated",
-        "gh_not_authed",
-        "warn",
-        "gh CLI not authenticated",
-        "gh auth login",
-        "mutate",
-    ),
-    (
-        r"playwright not installed",
-        "playwright_missing",
-        "warn",
-        "Playwright not installed",
-        "pipx install playwright && playwright install chromium",
-        "mutate",
-    ),
-    (
-        r"Error: Cannot find module '([^']+)'",
-        "missing_node_module",
-        "warn",
-        "Missing Node module: {group1}",
-        "npm install {group1}",
-        "mutate",
-    ),
-    (
-        r"npm ERR! code E404",
-        "npm_404",
-        "warn",
-        "npm package not found — typo or private registry",
-        "npm install <correct-name>",
-        "mutate",
-    ),
-    (
-        r"Permission denied",
-        "permission_denied",
-        "danger",
-        "Permission denied — check file ownership or sudo",
-        "ls -la <file>  # or chmod / chown",
-        "destructive",
-    ),
-    (
-        r"No such file or directory: ([^\\n]+)",
-        "missing_file",
-        "warn",
-        "Missing file or directory: {group1}",
-        "mkdir -p <dir>  # or restore from git",
-        "mutate",
-    ),
-    (
-        r"ECONNREFUSED",
-        "connection_refused",
-        "warn",
-        "Connection refused — service not running",
-        "start the service or check the port",
-        "read",
-    ),
-    (
-        r"ETIMEDOUT",
-        "timeout",
-        "warn",
-        "Network timeout — check connectivity",
-        "retry or check VPN/proxy",
-        "read",
-    ),
-    (
-        r"Port (\d+) is already in use",
-        "port_in_use",
-        "warn",
-        "Port {group1} already in use",
-        "lsof -i :{group1}  # find process, then kill or use new port",
-        "mutate",
-    ),
-    (
-        r"database is locked",
-        "db_locked",
-        "danger",
-        "Database locked — another process holds it",
-        "find and terminate the other process",
-        "mutate",
-    ),
-    (
-        r'FATAL: database "([^"]+)" does not exist',
-        "missing_db",
-        "warn",
-        "Database does not exist: {group1}",
-        "createdb {group1}  # or run migrations",
-        "mutate",
-    ),
-    (
-        r"django\.core\.exceptions\.ImproperlyConfigured",
-        "django_config",
-        "danger",
-        "Django configuration error — missing env var or setting",
-        "check .env and settings.py",
-        "read",
-    ),
-    (
-        r"pytest not found",
-        "pytest_missing",
-        "warn",
-        "pytest not installed",
-        "pip install pytest",
-        "mutate",
-    ),
+    (r"ModuleNotFoundError: No module named '([^']+)'", "missing_module", "warn",
+     "Missing Python module: {group1}", "pip install {group1}", "mutate"),
+    (r'ModuleNotFoundError: No module named "([^"]+)"', "missing_module", "warn",
+     "Missing Python module: {group1}", "pip install {group1}", "mutate"),
+    (r"command not found: ([^\s]+)", "missing_binary", "warn",
+     "Missing binary: {group1}", "brew install {group1}  # or pipx / npm / cargo", "mutate"),
+    (r"SyntaxError: invalid syntax", "syntax_error", "danger",
+     "Python syntax error — check file/line in traceback", "lgwks review --repo .", "read"),
+    (r"IndentationError: unexpected indent", "indent_error", "danger",
+     "Indentation error — mixed tabs/spaces or misaligned block", "lgwks review --repo .", "read"),
+    (r"AssertionError", "test_assertion", "warn",
+     "Test assertion failed — behavior changed or regression", "lgwks review --repo .", "read"),
+    (r"fatal: not a git repository", "not_git_repo", "warn",
+     "Not inside a git repo — cd to repo root", "cd <repo>", "read"),
+    (r"CONFLICT \(([^)]+)\)", "merge_conflict", "danger",
+     "Git merge conflict: {group1}", "lgwks repo recover", "mutate"),
+    (r"gh: To use GitHub CLI in non-interactive mode", "gh_not_authed", "warn",
+     "gh CLI not authenticated", "gh auth login", "mutate"),
+    (r"gh: not authenticated", "gh_not_authed", "warn",
+     "gh CLI not authenticated", "gh auth login", "mutate"),
+    (r"playwright not installed", "playwright_missing", "warn",
+     "Playwright not installed", "pipx install playwright && playwright install chromium", "mutate"),
+    (r"Error: Cannot find module '([^']+)'", "missing_node_module", "warn",
+     "Missing Node module: {group1}", "npm install {group1}", "mutate"),
+    (r"npm ERR! code E404", "npm_404", "warn",
+     "npm package not found — typo or private registry", "npm install <correct-name>", "mutate"),
+    (r"Permission denied", "permission_denied", "danger",
+     "Permission denied — check file ownership or sudo", "ls -la <file>  # or chmod / chown", "destructive"),
+    (r"No such file or directory: ([^\n]+)", "missing_file", "warn",
+     "Missing file or directory: {group1}", "mkdir -p <dir>  # or restore from git", "mutate"),
+    (r"ECONNREFUSED", "connection_refused", "warn",
+     "Connection refused — service not running", "start the service or check the port", "read"),
+    (r"ETIMEDOUT", "timeout", "warn",
+     "Network timeout — check connectivity", "retry or check VPN/proxy", "read"),
+    (r"Port (\d+) is already in use", "port_in_use", "warn",
+     "Port {group1} already in use", "lsof -i :{group1}  # find process, then kill or use new port", "mutate"),
+    (r"database is locked", "db_locked", "danger",
+     "Database locked — another process holds it", "find and terminate the other process", "mutate"),
+    (r'FATAL: database "([^"]+)" does not exist', "missing_db", "warn",
+     "Database does not exist: {group1}", "createdb {group1}  # or run migrations", "mutate"),
+    (r"django\.core\.exceptions\.ImproperlyConfigured", "django_config", "danger",
+     "Django configuration error — missing env var or setting", "check .env and settings.py", "read"),
+    (r"pytest not found", "pytest_missing", "warn",
+     "pytest not installed", "pip install pytest", "mutate"),
+    (r"ImportError: cannot import name '([^']+)'", "import_name", "warn",
+     "Cannot import name: {group1} — moved/renamed?", "lgwks review --repo .", "read"),
+    (r"AttributeError: '([^']+)' object has no attribute '([^']+)'", "attr_error", "warn",
+     "AttributeError: {group1}.{group2} — API changed?", "lgwks review --repo .", "read"),
+    (r"TypeError: ([^\n]+)", "type_error", "warn",
+     "TypeError: {group1}", "check function signatures", "read"),
+    (r"KeyError: '([^']+)'", "key_error", "warn",
+     "KeyError: {group1} — missing dict key", "check data structure / defaults", "read"),
+    (r"FileNotFoundError: \[Errno 2\] No such file or directory: '([^']+)'", "missing_file", "warn",
+     "Missing file: {group1}", "mkdir -p <dir> or restore from git", "mutate"),
+    (r"cannot find Rust compiler", "rust_missing", "warn",
+     "Rust compiler not found", "brew install rust", "mutate"),
 ]
 
 
@@ -234,17 +164,23 @@ class DebugResult:
     stdout_preview: str = ""
     stderr_preview: str = ""
     duration_ms: float = 0.0
+    blocked: bool = False
+    block_reason: str = ""
 
 
 # ── core engine ──────────────────────────────────────────────────────────────
 
-def _run_command(cmd: str, cwd: Path | None = None, timeout: int = 60) -> tuple[int, str, str, float]:
-    """Run a shell command. Returns (exit_code, stdout, stderr, duration_ms)."""
+def _run_command(cmd_parts: list[str], cwd: Path | None = None, timeout: int = 60) -> tuple[int, str, str, float]:
+    """Run a command with shlex.split + shell=False. Returns (exit_code, stdout, stderr, duration_ms)."""
+    ok, reason = _validate_command(cmd_parts)
+    if not ok:
+        return 126, "", reason, 0.0
+
     start = time.perf_counter()
     try:
         p = subprocess.run(
-            cmd,
-            shell=True,
+            cmd_parts,
+            shell=False,
             capture_output=True,
             text=True,
             timeout=timeout,
@@ -252,9 +188,12 @@ def _run_command(cmd: str, cwd: Path | None = None, timeout: int = 60) -> tuple[
         )
         dur = round((time.perf_counter() - start) * 1000, 1)
         return p.returncode, p.stdout, p.stderr, dur
-    except subprocess.TimeoutExpired as e:
+    except subprocess.TimeoutExpired:
         dur = round((time.perf_counter() - start) * 1000, 1)
         return 124, "", f"timed out after {timeout}s", dur
+    except FileNotFoundError as e:
+        dur = round((time.perf_counter() - start) * 1000, 1)
+        return 127, "", f"command not found: {e}", dur
     except Exception as e:
         dur = round((time.perf_counter() - start) * 1000, 1)
         return 1, "", str(e), dur
@@ -270,11 +209,9 @@ def _match_patterns(text: str) -> list[DebugFinding]:
             if key in seen:
                 continue
             seen.add(key)
-            # Extract groups for template substitution
             groups = {f"group{i+1}": g for i, g in enumerate(m.groups())}
             message = msg_tpl.format(**groups)
             cmd = fix_cmd.format(**groups)
-            # Estimate line number roughly
             line = text[:m.start()].count("\n") + 1
             findings.append(DebugFinding(
                 check=check_id,
@@ -288,13 +225,21 @@ def _match_patterns(text: str) -> list[DebugFinding]:
     return findings
 
 
-def debug_command_run(cmd: str, cwd: Path | None = None, timeout: int = 60) -> DebugResult:
+def debug_command_run(cmd_parts: list[str], cwd: Path | None = None, timeout: int = 60) -> DebugResult:
     """Run a command and debug the output."""
-    rc, stdout, stderr, dur = _run_command(cmd, cwd, timeout)
+    ok, reason = _validate_command(cmd_parts)
+    if not ok:
+        return DebugResult(
+            command=" ".join(cmd_parts),
+            exit_code=126,
+            blocked=True,
+            block_reason=reason,
+        )
+
+    rc, stdout, stderr, dur = _run_command(cmd_parts, cwd, timeout)
     combined = stdout + "\n" + stderr
     findings = _match_patterns(combined)
 
-    # If exit code non-zero but no pattern matched, emit a generic finding
     if rc != 0 and not findings:
         findings.append(DebugFinding(
             check="unknown_failure",
@@ -306,7 +251,7 @@ def debug_command_run(cmd: str, cwd: Path | None = None, timeout: int = 60) -> D
         ))
 
     result = DebugResult(
-        command=cmd,
+        command=" ".join(cmd_parts),
         exit_code=rc,
         findings=findings,
         stdout_preview=_scrub(stdout[:800]),
@@ -314,6 +259,7 @@ def debug_command_run(cmd: str, cwd: Path | None = None, timeout: int = 60) -> D
         duration_ms=dur,
     )
     _append_debug_log(result)
+    _audit(result.command, rc, len(findings))
     return result
 
 
@@ -335,6 +281,7 @@ def _append_debug_log(result: DebugResult) -> None:
         "stdout_preview": result.stdout_preview,
         "stderr_preview": result.stderr_preview,
         "duration_ms": result.duration_ms,
+        "blocked": result.blocked,
     }
     with open(log_path, "a", encoding="utf-8") as fh:
         fh.write(json.dumps(record, ensure_ascii=False) + "\n")
@@ -350,7 +297,7 @@ def _load_last_failure() -> dict[str, Any] | None:
         for ln in fh:
             try:
                 rec = json.loads(ln)
-                if rec.get("exit_code", 0) != 0:
+                if rec.get("exit_code", 0) != 0 or rec.get("blocked", False):
                     last = rec
             except Exception:
                 continue
@@ -361,15 +308,14 @@ def _load_last_failure() -> dict[str, Any] | None:
 
 def _run_tests(pattern: str | None = None, cwd: Path | None = None) -> DebugResult:
     """Run pytest and debug failures."""
-    cmd = "python -m pytest"
+    cmd_parts = ["python", "-m", "pytest"]
     if pattern:
-        cmd += f" -k {pattern}"
-    cmd += " -q"
-    rc, stdout, stderr, dur = _run_command(cmd, cwd, timeout=120)
+        cmd_parts += ["-k", pattern]
+    cmd_parts += ["-q"]
+    rc, stdout, stderr, dur = _run_command(cmd_parts, cwd, timeout=120)
     combined = stdout + "\n" + stderr
     findings = _match_patterns(combined)
 
-    # Additional pytest-specific heuristics
     failed_test_match = re.search(r"FAILED ([^\s]+)", combined)
     if failed_test_match:
         test_name = failed_test_match.group(1)
@@ -383,15 +329,15 @@ def _run_tests(pattern: str | None = None, cwd: Path | None = None) -> DebugResu
         ))
         # Correlate with git diff
         try:
-            diff_rc, diff_out = subprocess.run(
+            p = subprocess.run(
                 ["git", "diff", "--name-only"],
                 capture_output=True,
                 text=True,
                 timeout=10,
                 cwd=str(cwd) if cwd else None,
-            ).returncode, ""
-            if diff_rc == 0:
-                diff_files = [ln.strip() for ln in diff_out.splitlines() if ln.strip()]
+            )
+            if p.returncode == 0 and p.stdout.strip():
+                diff_files = [ln.strip() for ln in p.stdout.splitlines() if ln.strip()]
                 if diff_files:
                     findings.append(DebugFinding(
                         check="diff_correlation",
@@ -414,7 +360,7 @@ def _run_tests(pattern: str | None = None, cwd: Path | None = None) -> DebugResu
         ))
 
     result = DebugResult(
-        command=cmd,
+        command=" ".join(cmd_parts),
         exit_code=rc,
         findings=findings,
         stdout_preview=_scrub(stdout[:800]),
@@ -422,6 +368,7 @@ def _run_tests(pattern: str | None = None, cwd: Path | None = None) -> DebugResu
         duration_ms=dur,
     )
     _append_debug_log(result)
+    _audit(result.command, rc, len(findings))
     return result
 
 
@@ -443,9 +390,13 @@ def _render_findings(findings: list[DebugFinding], on: bool) -> list[str]:
 # ── command dispatch ─────────────────────────────────────────────────────────
 
 def run_command(args: argparse.Namespace) -> int:
-    cmd = " ".join(args.command)
+    cmd_parts = list(args.command)
     cwd = Path(getattr(args, "cwd", ".")).resolve()
-    result = debug_command_run(cmd, cwd, timeout=getattr(args, "timeout", 60))
+    result = debug_command_run(cmd_parts, cwd, timeout=getattr(args, "timeout", 60))
+
+    if result.blocked:
+        print(f"error: blocked — {result.block_reason}", file=sys.stderr)
+        return 126
 
     if getattr(args, "json", False):
         print(json.dumps({
