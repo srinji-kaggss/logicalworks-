@@ -33,7 +33,7 @@ import lgwks_ui as ui
 
 _SLUG_RE = re.compile(r"^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$")
 _SECRET_RE = re.compile(
-    r"(?i)(api[_-]?key|token|password|secret|auth)\s*[=:]\s*['\"]?[^\s'\"]{8,}['\"]?"
+    r"(?i)(api[_-]?key\w*|token\w*|password\w*|secret\w*|auth\w*)\s*([=:]\s*(bearer|token)?|(bearer|token))\s*['\"]?[^\s'\"]{8,}['\"]?"
 )
 _RATE_LIMIT_RE = re.compile(r"rate limit|API rate limit exceeded|403 Forbidden", re.IGNORECASE)
 

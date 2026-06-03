@@ -1423,17 +1423,22 @@ def _doctor_dispatch(args) -> int:
         ok = False
 
     # 7. CoreML (optional but reported)
-    _stderr = sys.stderr
+    # //why: coremltools prints noisy binary-extension warnings on Python 3.13+.
+    # We suppress *only* that module's logger, not global stderr, to stay thread-safe.
     try:
-        import io
-        # coremltools prints noisy binary-extension warnings on Python 3.13+
-        sys.stderr = io.StringIO()
+        import logging as _logging
+        _cl = _logging.getLogger("coremltools")
+        _old_level = _cl.level
+        _cl.setLevel(_logging.CRITICAL)
         import coremltools as ct
         checks.append({"name": "coremltools", "want": "optional", "got": ct.__version__, "ok": True})
     except Exception:
         checks.append({"name": "coremltools", "want": "optional", "got": "not installed", "ok": True})
     finally:
-        sys.stderr = _stderr
+        try:
+            _cl.setLevel(_old_level)
+        except Exception:
+            pass
 
     # 8. Transformers (optional but reported)
     try:

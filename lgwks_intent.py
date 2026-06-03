@@ -39,7 +39,7 @@ _MAX_ISSUE = 9_999_999
 _MAX_PR = 9_999_999
 
 _SECRET_RE = re.compile(
-    r"(?i)(api[_-]?key|token|password|secret|auth)\s*[=:]\s*['\"]?[^\s'\"]{8,}['\"]?"
+    r"(?i)(api[_-]?key\w*|token\w*|password\w*|secret\w*|auth\w*)\s*([=:]\s*(bearer|token)?|(bearer|token))\s*['\"]?[^\s'\"]{8,}['\"]?"
 )
 
 _SLUG_RE = re.compile(r"^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$")

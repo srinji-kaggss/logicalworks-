@@ -14,14 +14,15 @@ from unittest.mock import patch
 import lgwks_gh as gh
 
 
-def _make_run(returncode: int = 0, stdout: str = "", stderr: str = ""):
+def _make_run(returncode_val: int = 0, stdout_val: str = "", stderr_val: str = ""):
     def _run(*args, **kwargs):
         class _Result:
-            returncode = returncode
-            stdout = stdout
-            stderr = stderr
+            returncode = returncode_val
+            stdout = stdout_val
+            stderr = stderr_val
         return _Result()
     return _run
+
 
 
 # ── input validation ─────────────────────────────────────────────────────────
@@ -230,7 +231,7 @@ def test_issue_view_fallback_parse():
 # ── issue list parse ─────────────────────────────────────────────────────────
 
 def test_issues_list_parse():
-    stdout = "\n  #42  Bug in parser\n  #43  Feature request\n"
+    stdout = "\nNUMBER  TITLE\n  #42  Bug in parser\n  #43  Feature request\n"
     with patch("subprocess.run", side_effect=_make_run(0, stdout)):
         issues = gh._issues_list(None, "open", None)
     assert len(issues) == 2
@@ -240,7 +241,7 @@ def test_issues_list_parse():
 # ── PR list parse ────────────────────────────────────────────────────────────
 
 def test_prs_list_parse():
-    stdout = "\n  #7  Add gh module\n  #8  Fix typo\n"
+    stdout = "\nNUMBER  TITLE\n  #7  Add gh module\n  #8  Fix typo\n"
     with patch("subprocess.run", side_effect=_make_run(0, stdout)):
         prs = gh._prs_list(None, "open")
     assert len(prs) == 2

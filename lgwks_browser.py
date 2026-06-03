@@ -61,6 +61,9 @@ def _remote_allowed(url: str) -> bool:
             ip = ipaddress.ip_address(candidate)
         except ValueError:
             continue
+        # //why: IPv4-mapped IPv6 addresses (e.g. ::ffff:127.0.0.1) must resolve to their IPv4 counterpart
+        if hasattr(ip, "ipv4_mapped") and ip.ipv4_mapped is not None:
+            ip = ip.ipv4_mapped
         if any((ip.is_private, ip.is_loopback, ip.is_link_local, ip.is_multicast,
                 ip.is_reserved, ip.is_unspecified)):
             return False
@@ -180,15 +183,15 @@ def save_session(
     session_path.parent.mkdir(parents=True, exist_ok=True)
 
     # Auto-detect selectors if none provided
+    # //why: these selectors must be UNLIKELY on a pre-auth page.
+    # Generic tags like "main" or "article" or "#app" appear on login pages too,
+    # so they are excluded from auto-detect; use only specific post-auth signals.
     _AUTO_SELECTORS = [
         # Angular / React / Vue dashboards
         "app-dashboard", "[data-testid='dashboard']", ".dashboard", "#dashboard",
-        "[role='main']", "main", "article",
         # User menus / profiles (signals auth success)
         ".user-menu", "[data-testid='user-menu']", "#userMenu",
         "[aria-label*='account' i]", "[aria-label*='profile' i]",
-        # Generic app shells
-        "#app", ".app-shell", "[id='app']",
     ]
 
     try:

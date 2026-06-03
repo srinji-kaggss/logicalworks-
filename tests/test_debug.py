@@ -14,14 +14,15 @@ from unittest.mock import patch
 import lgwks_debug as dbg
 
 
-def _make_run(returncode: int = 0, stdout: str = "", stderr: str = ""):
+def _make_run(returncode_val: int = 0, stdout_val: str = "", stderr_val: str = ""):
     def _run(cmd_parts, **kwargs):
         class _Result:
-            returncode = returncode
-            stdout = stdout
-            stderr = stderr
+            returncode = returncode_val
+            stdout = stdout_val
+            stderr = stderr_val
         return _Result()
     return _run
+
 
 
 # ── pattern matching ─────────────────────────────────────────────────────────

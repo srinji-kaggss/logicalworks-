@@ -58,6 +58,24 @@ def _run(cmd: list[str], cwd: Path | None = None) -> subprocess.CompletedProcess
     return subprocess.run(cmd, capture_output=True, text=True, check=False, cwd=cwd)
 
 
+def _safe_name(name: str) -> str:
+    """Sanitize a user-supplied model/output name for filesystem use.
+    Rejects path separators, leading dots, and absolute paths."""
+    if not name:
+        raise ValueError("name must be non-empty")
+    if os.path.isabs(name) or "/" in name or "\\" in name or name.startswith("."):
+        raise ValueError(f"invalid model name: {name!r}")
+    return name
+
+
+def _assert_under(parent: Path, child: Path) -> Path:
+    """Verify child resolves inside parent. Raises ValueError if not."""
+    resolved = child.resolve()
+    if not str(resolved).startswith(str(parent.resolve())):
+        raise ValueError(f"path {child} escapes allowed directory {parent}")
+    return resolved
+
+
 def list_models() -> list[dict[str, Any]]:
     """Return the scrubbed model catalog."""
     return [{"name": k, **v} for k, v in _MODEL_CATALOG.items()]
@@ -65,7 +83,8 @@ def list_models() -> list[dict[str, Any]]:
 
 def find_model_dir(name: str) -> Path | None:
     """Return the repo-resident model directory if it exists, else None."""
-    candidate = _models_dir() / name
+    safe = _safe_name(name)
+    candidate = _models_dir() / safe
     return candidate if candidate.exists() else None
 
 
@@ -265,11 +284,12 @@ def train_text_classifier(
         preds = trainer.predict(test_ds)
         acc = accuracy_score(preds.label_ids, preds.predictions.argmax(-1))
 
-        ft_dir = _models_dir() / f"{output_name}_torch"
+        safe_output = _safe_name(output_name)
+        ft_dir = _assert_under(_models_dir(), _models_dir() / f"{safe_output}_torch")
         model.save_pretrained(str(ft_dir))
         tokenizer.save_pretrained(str(ft_dir))
 
-        coreml_out = _models_dir() / f"{output_name}.mlpackage"
+        coreml_out = _assert_under(_models_dir(), _models_dir() / f"{safe_output}.mlpackage")
         result = convert_to_coreml(ft_dir, output_path=coreml_out, classifier_labels=unique_labels)
         result["accuracy"] = round(float(acc), 4)
         return result

@@ -14,14 +14,15 @@ from unittest.mock import patch
 import lgwks_intent as intent
 
 
-def _make_run(returncode: int = 0, stdout: str = "", stderr: str = ""):
+def _make_run(returncode_val: int = 0, stdout_val: str = "", stderr_val: str = ""):
     def _run(cmd_parts, **kwargs):
         class _Result:
-            returncode = returncode
-            stdout = stdout
-            stderr = stderr
+            returncode = returncode_val
+            stdout = stdout_val
+            stderr = stderr_val
         return _Result()
     return _run
+
 
 
 # ── intent resolution ────────────────────────────────────────────────────────
@@ -242,8 +243,13 @@ def test_route_probe_limit():
                  "dirty": "e", "clean": "f", "pr.draft": "g", "pr.open": "h", "pr.closed": "i",
                  "review.danger": "j", "review.warn": "k", "default": "z"},
     )
-    with patch("subprocess.run", side_effect=_make_run(0, "")):
-        result = intent._route(doc, Path("/tmp"), "intent.json")
+    old_limit = intent._MAX_PROBES_PER_ROUTE
+    intent._MAX_PROBES_PER_ROUTE = 2
+    try:
+        with patch("subprocess.run", side_effect=_make_run(0, "")):
+            result = intent._route(doc, Path("/tmp"), "intent.json")
+    finally:
+        intent._MAX_PROBES_PER_ROUTE = old_limit
     assert result.blocked
     assert "probe limit" in result.block_reason
 

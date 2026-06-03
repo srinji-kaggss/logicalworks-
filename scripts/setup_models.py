@@ -39,12 +39,31 @@ def _run(cmd: list[str], cwd: Path | None = None) -> subprocess.CompletedProcess
     return subprocess.run(cmd, capture_output=True, text=True, check=False, cwd=cwd)
 
 
+def _safe_name(name: str) -> str:
+    """Sanitize a user-supplied model name for filesystem use."""
+    import os as _os
+    if not name:
+        raise ValueError("name must be non-empty")
+    if _os.path.isabs(name) or "/" in name or "\\" in name or name.startswith("."):
+        raise ValueError(f"invalid model name: {name!r}")
+    return name
+
+
+def _assert_under(parent: Path, child: Path) -> Path:
+    """Verify child resolves inside parent. Raises ValueError if not."""
+    resolved = child.resolve()
+    if not str(resolved).startswith(str(parent.resolve())):
+        raise ValueError(f"path {child} escapes allowed directory {parent}")
+    return resolved
+
+
 def download(name: str) -> dict[str, Any]:
     if name not in _MODEL_CATALOG:
         return {"ok": False, "reason": f"unknown model: {name}"}
 
     meta = _MODEL_CATALOG[name]
-    dest = MODELS_DIR / name
+    safe = _safe_name(name)
+    dest = _assert_under(MODELS_DIR, MODELS_DIR / safe)
     # A model dir is "complete" if it has config.json + weights
     has_config = (dest / "config.json").exists()
     has_weights = any((dest).glob("*.bin")) or any((dest).glob("*.safetensors"))
@@ -82,7 +101,8 @@ def download(name: str) -> dict[str, Any]:
 
 
 def scrub(name: str) -> dict[str, Any]:
-    model_dir = MODELS_DIR / name
+    safe = _safe_name(name)
+    model_dir = _assert_under(MODELS_DIR, MODELS_DIR / safe)
     if not model_dir.exists():
         return {"ok": False, "reason": f"model {name} not found in {model_dir}"}
 
@@ -113,63 +133,17 @@ def scrub(name: str) -> dict[str, Any]:
 
 
 def convert(name: str) -> dict[str, Any]:
-    model_dir = MODELS_DIR / name
+    safe = _safe_name(name)
+    model_dir = _assert_under(MODELS_DIR, MODELS_DIR / safe)
     if not model_dir.exists():
         return {"ok": False, "reason": f"model {name} not found"}
 
-    # coremltools binary wheels are not available for Python 3.13+ as of 2024-Q2.
-    if sys.version_info >= (3, 13):
-        return {
-            "ok": True,
-            "path": "",
-            "reason": "skipped: CoreML conversion requires Python <=3.12 (detected {}.{}).".format(
-                sys.version_info.major, sys.version_info.minor
-            ),
-        }
+    output_path = _assert_under(MODELS_DIR, MODELS_DIR / f"{safe}.mlpackage")
 
+    # Deduplicate: delegate to the canonical converter in lgwks_model_hub
     try:
-        import coremltools as ct  # type: ignore[import]
-    except ImportError:
-        return {"ok": False, "reason": "coremltools not installed"}
-
-    try:
-        import torch  # type: ignore[import]
-        from transformers import AutoModel, BertTokenizer  # type: ignore[import]
-    except ImportError:
-        return {"ok": False, "reason": "transformers + torch required"}
-
-    try:
-        tokenizer = BertTokenizer.from_pretrained(str(model_dir))
-        model = AutoModel.from_pretrained(str(model_dir))
-        model.eval()
-
-        dummy_text = "This is a sample input for tracing the model."
-        inputs = tokenizer(dummy_text, return_tensors="pt", padding="max_length", truncation=True, max_length=128)
-
-        class _MeanWrapper(torch.nn.Module):  # type: ignore[no-any-unimported]
-            def __init__(self, m: torch.nn.Module) -> None:
-                super().__init__()
-                self.m = m
-
-            def forward(self, input_ids: torch.Tensor, attention_mask: torch.Tensor) -> torch.Tensor:
-                return self.m(input_ids=input_ids, attention_mask=attention_mask).last_hidden_state.mean(dim=1)
-
-        wrapper = _MeanWrapper(model)
-        wrapper.eval()
-        with torch.no_grad():
-            traced = torch.jit.trace(wrapper, (inputs["input_ids"], inputs["attention_mask"]))
-
-        output_path = MODELS_DIR / f"{name}.mlpackage"
-        mlmodel = ct.convert(
-            traced,
-            inputs=[
-                ct.TensorType(name="input_ids", shape=(1, 128), dtype=int),
-                ct.TensorType(name="attention_mask", shape=(1, 128), dtype=int),
-            ],
-            minimum_deployment_target=ct.target.iOS16,
-        )
-        mlmodel.save(str(output_path))
-        return {"ok": True, "path": str(output_path), "reason": "converted to CoreML"}
+        import lgwks_model_hub as mh
+        return mh.convert_to_coreml(model_dir, output_path=output_path)
     except Exception as exc:
         return {"ok": False, "reason": f"conversion failed: {type(exc).__name__}: {exc}"}
 

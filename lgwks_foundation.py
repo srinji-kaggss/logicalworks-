@@ -80,9 +80,14 @@ def _extract_with_nl(text: str, entity_types: list[str]) -> ExtractionResult:
         tagger.string = text
         # Python API for enumerateTags is not closure-based like Swift.
         # Use tags(in:unit:scheme:options:) which returns a list of (tag, range) tuples.
+        # //why: NLTaggerOptions bitflags vary by macOS version; build mask defensively.
+        _opt_mask = 0
+        for _opt_name in ("omitPunctuation", "omitWhitespace", "joinContractions"):
+            if hasattr(NL.NLTaggerOptions, _opt_name):
+                _opt_mask |= getattr(NL.NLTaggerOptions, _opt_name)
         for scheme in [NL.NLTagScheme.nameType, NL.NLTagScheme.lexicalClass]:
             tagger.setLanguage(NL.NLLanguage.english, range=(0, len(text)))
-            tags = tagger.tags(inRange=(0, len(text)), unit=NL.NLTokenUnit.word, scheme=scheme, options=NL.NLTaggerOptions.omitPunctuation | NL.NLTaggerOptions.omitWhitespace | NL.NLTaggerOptions.joinContractions)
+            tags = tagger.tags(inRange=(0, len(text)), unit=NL.NLTokenUnit.word, scheme=scheme, options=_opt_mask)
             for tag, token_range in tags:
                 if tag is None:
                     continue
@@ -91,12 +96,15 @@ def _extract_with_nl(text: str, entity_types: list[str]) -> ExtractionResult:
                     continue
                 start = token_range[0] if isinstance(token_range, (tuple, list)) else token_range.location
                 length = token_range[1] if isinstance(token_range, (tuple, list)) else token_range.length
+                # Bounds clamp: text may have been mutated or API may return stale ranges
+                end = min(start + length, len(text))
+                start = max(0, min(start, len(text)))
                 entities.append(ExtractedEntity(
-                    text=text[start:start + length],
+                    text=text[start:end],
                     type=entity_type,
                     confidence=1.0,
                     start=start,
-                    end=start + length,
+                    end=end,
                 ))
     except Exception as exc:
         logger.warning("NaturalLanguage extraction failed: %s", exc)
