@@ -13,7 +13,8 @@ import lgwks_extract as extract
 
 
 class MockFp:
-    pass
+    def close(self) -> None:
+        return None
 
 
 def _make_request(url: str, headers: dict | None = None) -> urllib.request.Request:
