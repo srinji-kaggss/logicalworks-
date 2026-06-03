@@ -16,3 +16,6 @@ store/
 
 # hermetic test / CI: force deterministic fallbacks (no Ollama)
 # LGWKS_NO_MODELS=1
+
+# Claude Code local settings + worktrees — never source of truth
+.claude/
