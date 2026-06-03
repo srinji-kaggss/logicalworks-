@@ -51,3 +51,26 @@ GitHub** before absorbing the new work. Do not silently swallow scope. Decompose
 Any agent may challenge strategy, assumptions, or unsafe directives. Block and escalate when risk
 exceeds accepted posture. Unresolved product/security calls go to the Director with concrete
 alternatives.
+
+## 9. Coder prompt as spec — the prompt is the invariant
+
+A coder agent executes the prompt faithfully. It does not second-guess the spec. If the prompt contains an insecure instruction, the code will be insecure.
+
+### Rules
+1. **State invariants explicitly, not implicitly.**  
+   Bad: *"Return `Ok(())` on timeout."*  
+   Good: *"If timeout or closed channel, return `Err(AuditDrainError::...)`. Invariant: audit events must never be silently lost."*
+2. **Scope tightly — one fix or one invariant per pass.** Breadth trades depth. A prompt with 10 fixes produces shallow, bug-prone output.
+3. **Mandatory adversarial self-check in the prompt.** End every coder prompt with: *"Before finishing, read every `Ok(())` path and ask: does this fail open? Does this lose data? Does this panic? Does this introduce a TOCTOU?"*
+4. **Hacker pass catches prompt bugs, not agent creativity bugs.** The adversarial review validates the **spec**, not just the code. Never skip it.
+
+### Anti-pattern
+Blaming the agent for a bug that was in the prompt. The failure mode is "the agent did what I told it to do." The fix is better prompting, not a smarter agent.
+
+### Evidence
+A0·L4 WORM sink (2026-06-02): coder agent introduced three CRITICAL findings (`strict_send` silent drop, `assert!` panic, `0o600` on creation only). All three were **specified in the prompt**.
+
+### Related
+- `feedback_spec_implement_harden_loop` — the 3-agent loop that caught this
+- `feedback_no_gate_weakening` — gate fails → fix the thing under test
+- `feedback_agent_output_for_ai` — dense returns so the orchestrator spots spec drift

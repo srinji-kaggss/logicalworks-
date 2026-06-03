@@ -83,5 +83,52 @@ class TestGovernance(unittest.TestCase):
         self.assertEqual(machine.freeze(a["hash"])["frozen"], a["hash"])
 
 
+class TestAuthoritySignal(unittest.TestCase):
+    """The explicit authority gate: 'execute' must require a known class (the #29-shape fix)."""
+
+    def test_thin_intent_abstains(self):
+        r = machine.refine("do stuff", log=False)
+        self.assertTrue(r["abstain"])
+        self.assertEqual(r["authority"], "abstain")
+
+    def test_high_spec_unknown_is_assist_not_execute(self):
+        # //why: long + capitalised + a digit → high specificity, but the class is
+        # unknown. It proceeds (coverage gap) to HELP, but must not be 'execute'.
+        # (avoid substrings like "for " which contains the comparison keyword "or ")
+        intent = "Tabulate Seventeen Discrete Telemetry Samples Numbered 2026 Precisely"
+        r = machine.refine(intent, log=False)
+        self.assertEqual(r["intent_class"], "unknown")
+        self.assertFalse(r["abstain"])
+        self.assertTrue(r["classifier_coverage_gap"])
+        self.assertEqual(r["authority"], "assist")
+
+    def test_known_specified_intent_executes(self):
+        intent = "should I buy Canada Life stock over a 3 year horizon given 2025 revenue"
+        r = machine.refine(intent, log=False)
+        self.assertNotEqual(r["intent_class"], "unknown")
+        self.assertFalse(r["abstain"])
+        self.assertEqual(r["authority"], "execute")
+
+    def test_execute_implies_known_class_and_not_abstain(self):
+        # The invariant, swept over a mix of inputs.
+        probes = [
+            "do stuff", "things", "fix everything",
+            "Process the Quarterly Telemetry Records for Fiscal Period 2026 Thoroughly",
+            "should I buy Canada Life stock over a 3 year horizon given 2025 revenue",
+            "review the auth.py module for security correctness in the repo",
+            "why does the build crash after running the migration steps",
+            "", "?????",
+        ]
+        for intent in probes:
+            r = machine.refine(intent, log=False)
+            if r["authority"] == "execute":
+                self.assertNotEqual(r["intent_class"], "unknown", intent)
+                self.assertFalse(r["abstain"], intent)
+
+    def test_authority_is_one_of_three(self):
+        for intent in ["do stuff", "compare X vs Y on cost", "Telemetry Records 2026 Process"]:
+            self.assertIn(machine.refine(intent, log=False)["authority"], {"abstain", "assist", "execute"})
+
+
 if __name__ == "__main__":
     unittest.main()

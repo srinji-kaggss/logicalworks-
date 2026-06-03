@@ -109,6 +109,28 @@ def _questions(gaps: list[str]) -> list[str]:
     return [phrasing.get(g, f"please specify: {g}") for g in gaps]
 
 
+def _authority(cls: str, abstain: bool, coverage_gap: bool) -> str:
+    """The explicit authority signal — what a downstream consumer may DO with this intent.
+
+    //why explicit, not inferred from `abstain`: `abstain` answers only "bounce to
+    the human?". Consumers were left to read execution-trust off it, but the
+    coverage_gap branch proceeds (abstain=False) on a non-semantic specificity
+    score for an UNKNOWN class — exactly the #29 shape where a non-meaning signal
+    could unlock action. So we name three levels and bind the strong one to a
+    real classification:
+      abstain — intent too thin; bounce to human with leading questions
+      assist  — proceed to HELP, but reduced authority (unknown class / coverage
+                gap): shape, suggest, gather — do not treat as a confident command
+      execute — known class, not abstaining: full authority to act
+    Invariant: authority == 'execute'  ⟹  cls != 'unknown' AND not abstain.
+    """
+    if abstain:
+        return "abstain"
+    if coverage_gap or cls == "unknown":
+        return "assist"
+    return "execute"
+
+
 def refine(intent: str, actor: str = "human", depth: float = 0.5, log: bool = True) -> dict:
     """The full cold-start pass. Returns a RefinedIntent. ABSTAINS (bounces to human) when intent is too
     thin for the steering Depth — never guesses. Logs an intent_commit to the cognition-log (the corpus).
@@ -140,6 +162,7 @@ def refine(intent: str, actor: str = "human", depth: float = 0.5, log: bool = Tr
         "intent_class": cls, "class_confidence": conf,
         "entities": _entities(intent), "gaps": gaps, "specificity": spec,
         "threshold": round(threshold, 2), "abstain": abstain,
+        "authority": _authority(cls, abstain, coverage_gap),
         "questions": _questions(gaps) if abstain else [],
         "classifier_coverage_gap": coverage_gap,
     }

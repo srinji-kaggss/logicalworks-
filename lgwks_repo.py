@@ -414,14 +414,26 @@ def repo_graph(repo: Path) -> dict[str, Any]:
     Backward-compatible dict return so existing callers (review, tests) keep working.
     """
     g = graph_engine.get_graph(repo)
-    # Convert back to legacy flat dict for backward compatibility
+    # Convert engine graph → the v0 contract. //why this translation is the actual
+    # job of this adapter: the engine stores defines as "class:Foo"/"def:bar" and
+    # resolves import edges to internal FILE paths. The v0 schema (lgwks.repo.graph.v0)
+    # that review + tests depend on is different: defines are "class Foo"/"def bar",
+    # and edges carry the IMPORT NAME as `to` (e.g. "os", "pkg.mod") — lgwks_review's
+    # legacy fallback matches edge["to"] against dotted module names, not file paths.
+    # The prior refactor dropped this translation and silently broke both consumers
+    # (empty/file-path edges, colon-prefixed defines) while claiming compatibility.
     files: dict[str, Any] = {}
     edges: list[dict[str, str]] = []
     for nid, node in g.nodes.items():
-        files[nid] = {"imports": list(node.imports), "defines": list(node.defines)}
-        for e in g.edges:
-            if e.source == nid:
-                edges.append({"from": e.source, "to": e.target, "type": e.kind})
+        files[nid] = {
+            "imports": list(node.imports),
+            "defines": [_v0_define(d) for d in node.defines],
+        }
+        # //why edges from node.imports, not g.edges: the v0 edge is the raw import
+        # relation (file → imported module name), which includes EXTERNAL imports
+        # ("os") that the engine never turns into internal file→file edges.
+        for imp in node.imports:
+            edges.append({"from": nid, "to": imp, "type": "import"})
     return {
         "schema": "lgwks.repo.graph.v0",
         "repo": str(repo),
@@ -432,6 +444,16 @@ def repo_graph(repo: Path) -> dict[str, Any]:
         "_engine": "lgwks_graph",
         "_stats": g.stats(),
     }
+
+
+def _v0_define(d: str) -> str:
+    # //why: engine emits "class:Foo"/"def:bar"; the v0 contract is space-separated
+    # "class Foo"/"def bar". Translate the two known kinds, pass anything else through.
+    if d.startswith("class:"):
+        return "class " + d[len("class:"):]
+    if d.startswith("def:"):
+        return "def " + d[len("def:"):]
+    return d
 
 
 # ── CLI surfaces ──

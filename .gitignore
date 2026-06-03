@@ -13,6 +13,7 @@ runs/
 
 # lgwks runtime output (project deploys, geo runs, embeddings). Never source of truth.
 store/
+.lgwks/
 
 # hermetic test / CI: force deterministic fallbacks (no Ollama)
 # LGWKS_NO_MODELS=1
