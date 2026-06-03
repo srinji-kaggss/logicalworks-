@@ -559,8 +559,113 @@ def graph_command(args: argparse.Namespace) -> int:
     return 0
 
 
+def repo_sync(repo: Path, push: bool = True) -> dict[str, Any]:
+    """Push current branch, delete merged branches + worktrees, gc, verify.
+
+    This is the command I should have run instead of 15 manual bash commands.
+    """
+    actions: list[str] = []
+    skipped: list[str] = []
+
+    # 1) verify repo + branch
+    rc, out = _git(repo, "rev-parse", "--is-inside-work-tree")
+    if rc != 0 or out != "true":
+        return {"error": f"{repo} is not a git repo"}
+    rc, branch = _git(repo, "branch", "--show-current")
+    if rc != 0 or not branch:
+        return {"error": "detached HEAD — cannot sync"}
+
+    # 2) working tree must be clean
+    rc, out = _git(repo, "status", "--short")
+    if out.strip():
+        return {"error": f"working tree dirty ({len(out.splitlines())} changes) — commit or stash first", "uncommitted": out.splitlines()}
+
+    # 3) push current branch to origin
+    if push:
+        rc, out = _git(repo, "push", "origin", branch)
+        if rc != 0:
+            return {"error": f"push failed: {out}"}
+        actions.append(f"pushed {branch} to origin")
+
+    # 4) find merged branches
+    rc, out = _git(repo, "branch", "--merged", "HEAD")
+    merged = [ln.strip().lstrip("* ") for ln in out.splitlines() if ln.strip() and not ln.strip().startswith("*") and ln.strip() != "HEAD" and ln.strip() != branch]
+
+    # 5) find worktrees + remove merged ones
+    rc, out = _git(repo, "worktree", "list", "--porcelain")
+    wt_map: dict[str, str] = {}  # branch -> path
+    current_wt = None
+    for line in out.splitlines():
+        if line.startswith("worktree "):
+            current_wt = line[9:]
+        if line.startswith("branch ") and current_wt:
+            bname = line[7:]  # refs/heads/...
+            if bname.startswith("refs/heads/"):
+                bname = bname[11:]
+            wt_map[bname] = current_wt
+
+    for b in merged:
+        if b in wt_map:
+            wt_path = Path(wt_map[b])
+            if wt_path.resolve() == repo.resolve():
+                continue
+            rc2, dirty = _git(wt_path, "status", "--short")
+            if dirty.strip():
+                skipped.append(f"worktree {wt_path} for branch {b} has uncommitted changes")
+                continue
+            _git(repo, "worktree", "remove", "-f", str(wt_path))
+            actions.append(f"removed worktree {wt_path}")
+        _git(repo, "branch", "-d", b)
+        actions.append(f"deleted merged branch {b}")
+        # attempt remote deletion
+        rc2, _ = _git(repo, "push", "origin", "--delete", b)
+        if rc2 == 0:
+            actions.append(f"deleted remote branch origin/{b}")
+
+    # 6) gc + reflog
+    _git(repo, "reflog", "expire", "--expire=now", "--all")
+    _git(repo, "gc", "--prune=now")
+    actions.append("ran reflog expire + gc")
+
+    # 7) final verification
+    rc, out = _git(repo, "status", "--short")
+    rc2, ahead = _git(repo, "rev-list", "--count", "@{u}..HEAD")
+    ahead_behind = int(ahead) if ahead.isdigit() else 0
+    rc3, behind = _git(repo, "rev-list", "--count", "HEAD..@{u}")
+    ahead_behind += int(behind) if behind.isdigit() else 0
+
+    return {
+        "branch": branch,
+        "actions": actions,
+        "skipped": skipped,
+        "clean": out.strip() == "",
+        "aligned": ahead_behind == 0,
+        "ahead_behind": ahead_behind,
+    }
+
+
+def sync_command(args: argparse.Namespace) -> int:
+    repo = Path(getattr(args, "repo", ".")).resolve()
+    result = repo_sync(repo, push=not getattr(args, "no_push", False))
+    if getattr(args, "json", False):
+        print(json.dumps({"schema": "lgwks.repo.sync.v0", **result}, indent=2))
+        return 0 if "error" not in result and result.get("clean") and result.get("aligned") else 1
+    if "error" in result:
+        print(f"error: {result['error']}", file=sys.stderr)
+        return 1
+    for a in result["actions"]:
+        print(f"  ✓ {a}")
+    for s in result["skipped"]:
+        print(f"  ⚠ skipped: {s}")
+    if result["clean"] and result["aligned"]:
+        print(f"  ✓ {result['branch']} clean and aligned with origin")
+        return 0
+    print(f"  ✗ {result['branch']} not fully aligned (ahead/behind: {result['ahead_behind']})", file=sys.stderr)
+    return 1
+
+
 def add_parser(sub) -> None:
-    p = sub.add_parser("repo", help="repo lifecycle: audit, recover, cleanup, merge, handoff, graph")
+    p = sub.add_parser("repo", help="repo lifecycle: audit, recover, cleanup, merge, handoff, graph, sync")
     ps = p.add_subparsers(dest="repo_command", required=True)
 
     audit = ps.add_parser("audit", help="health check — six zeros + pathologies")
@@ -594,3 +699,9 @@ def add_parser(sub) -> None:
     graph.add_argument("--repo", default=".", help="path to repo")
     graph.add_argument("--json", action="store_true", help="structured output")
     graph.set_defaults(func=graph_command)
+
+    sync = ps.add_parser("sync", help="push, clean merged branches/worktrees, gc, verify alignment")
+    sync.add_argument("--repo", default=".", help="path to repo")
+    sync.add_argument("--no-push", action="store_true", help="skip push to origin")
+    sync.add_argument("--json", action="store_true", help="structured output")
+    sync.set_defaults(func=sync_command)
