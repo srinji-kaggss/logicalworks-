@@ -105,16 +105,22 @@ def _session_for_url(url: str) -> Path | None:
 
 
 def render(url: str, max_chars: int = 8000, *, use_session: bool = False,
-           wait_ms: int = 1500, with_html: bool = False) -> dict:
-    """Fetch a JS-rendered page with a real browser. use_session loads the user's saved login
-    (for LinkedIn/auth pages). with_html also returns the rendered DOM html so a caller can parse
-    links/anchors from what the browser actually saw — the real around-the-block (no re-GET of a
-    blocked endpoint). Returns {ok, text, reason[, html]}. ok=False carries an honest reason."""
+           wait_ms: int = 1500, with_html: bool = False,
+           browser_engine: str = "chromium") -> dict:
+    """Fetch a JS-rendered page with a real browser.
+
+    browser_engine: "chromium" (default) or "webkit" (Safari engine — use for sites that
+    require Safari cookies, e.g. after a Safari extension session capture via lgwks login).
+    use_session loads the saved session for this host from ~/.config/lgwks/sessions/.
+    with_html also returns the rendered DOM. Returns {ok, text, reason[, html]}.
+    """
     if not _remote_allowed(url):
         return {"ok": False, "text": "", "reason": "blocked URL"}
     ok, why = available()
     if not ok:
         return {"ok": False, "text": "", "reason": why}
+    if browser_engine not in ("chromium", "webkit"):
+        return {"ok": False, "text": "", "reason": f"unknown browser_engine: {browser_engine!r} — use 'chromium' or 'webkit'"}
     from playwright.sync_api import sync_playwright
     session_path = _session_for_url(url)
     storage = str(session_path) if (use_session or session_path) and session_path else None
@@ -122,7 +128,12 @@ def render(url: str, max_chars: int = 8000, *, use_session: bool = False,
     auth_headers = _headers(url)
     try:
         with sync_playwright() as p:
-            browser = p.chromium.launch(headless=True)
+            engine = p.webkit if browser_engine == "webkit" else p.chromium
+            # //why: webkit launch takes no chromium-specific flags; keep args clean per engine
+            launch_kwargs: dict = {"headless": True}
+            if browser_engine == "chromium":
+                launch_kwargs["args"] = ["--disable-blink-features=AutomationControlled"]
+            browser = engine.launch(**launch_kwargs)
             ctx = browser.new_context(
                 user_agent=_UA, locale="en-CA", timezone_id="America/Toronto",
                 viewport={"width": 1366, "height": 900},
@@ -135,7 +146,7 @@ def render(url: str, max_chars: int = 8000, *, use_session: bool = False,
             page.wait_for_timeout(wait_ms)                   # let client JS render
             html = page.content()
             browser.close()
-            out = {"ok": True, "text": _text_from(html, max_chars), "reason": "rendered"}
+            out = {"ok": True, "text": _text_from(html, max_chars), "reason": f"rendered:{browser_engine}"}
             if with_html:
                 out["html"] = html                           # the DOM the browser saw — parse links here
             return out

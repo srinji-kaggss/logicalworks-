@@ -113,6 +113,7 @@ def crawl_page(
     seed: int = 0,
     scroll: bool = True,
     timeout: int = 30000,
+    browser_engine: str = "chromium",
 ) -> CrawlResult:
     """Crawl a single page with stealth browser."""
     if not _remote_allowed(url):
@@ -129,14 +130,16 @@ def crawl_page(
 
     try:
         with sync_playwright() as p:
-            browser = p.chromium.launch(
-                headless=True,
-                args=[
+            # //why: webkit doesn't accept chromium blink flags; keep args engine-specific
+            engine = p.webkit if browser_engine == "webkit" else p.chromium
+            launch_kwargs: dict[str, Any] = {"headless": True}
+            if browser_engine == "chromium":
+                launch_kwargs["args"] = [
                     "--disable-blink-features=AutomationControlled",
                     "--disable-web-security",
                     "--disable-features=IsolateOrigins,site-per-process",
-                ],
-            )
+                ]
+            browser = engine.launch(**launch_kwargs)
             ctx = browser.new_context(
                 user_agent=fp["user_agent"],
                 viewport=fp["viewport"],
@@ -201,6 +204,7 @@ def crawl_command(args: argparse.Namespace) -> int:
         with_links=getattr(args, "links", True),
         seed=getattr(args, "seed", 0),
         scroll=getattr(args, "scroll", True),
+        browser_engine=getattr(args, "browser_engine", "chromium"),
     )
     if getattr(args, "json", False):
         print(json.dumps({
@@ -248,5 +252,7 @@ def add_parser(sub) -> None:
     p.add_argument("--no-links", dest="links", action="store_false", help="skip link extraction")
     p.add_argument("--seed", type=int, default=0, help="fingerprint seed (deterministic)")
     p.add_argument("--no-scroll", dest="scroll", action="store_false", help="skip scroll trigger")
+    p.add_argument("--webkit", dest="browser_engine", action="store_const", const="webkit",
+                   default="chromium", help="use WebKit (Safari) engine — required for sites captured via lgwks login with the Safari extension")
     p.add_argument("--json", action="store_true", help="structured output")
     p.set_defaults(func=crawl_command)
