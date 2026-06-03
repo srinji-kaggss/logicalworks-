@@ -1,0 +1,39 @@
+{
+  "host": "fundserv.com",
+  "dom": {
+    "chrome_tags": [
+      "nav",
+      "header",
+      "footer",
+      "script",
+      "style",
+      "noscript",
+      "iframe"
+    ],
+    "chrome_class_patterns": [
+      "topnav",
+      "dropdown",
+      "toolbar",
+      "breadcrumb",
+      "sidebar",
+      "banner",
+      "cookie",
+      "gdpr",
+      "modal",
+      "popup"
+    ],
+    "heading_tags": [
+      "h1",
+      "h2",
+      "h3",
+      "h4",
+      "h5"
+    ]
+  },
+  "crawl": {
+    "scope_prefix": "/secure/",
+    "max_depth": 5,
+    "delay_s": 1.5,
+    "respect_robots": false
+  }
+}

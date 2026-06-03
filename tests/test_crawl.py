@@ -34,7 +34,7 @@ class TestFingerprint(unittest.TestCase):
 class TestTextExtraction(unittest.TestCase):
     def test_strips_tags(self):
         html = "<html><body><p>Hello <b>world</b></p></body></html>"
-        self.assertEqual(crawl._text_from_html(html, 1000), "Hello world")
+        self.assertEqual(crawl._text_from_html(html, 1000), "Hello **world**")
 
     def test_collapses_whitespace(self):
         html = "<p>A</p>\n\n\n\n<p>B</p>"

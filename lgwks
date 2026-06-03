@@ -1271,6 +1271,10 @@ def build_parser() -> argparse.ArgumentParser:
     import lgwks_entity_graph
     lgwks_entity_graph.add_parser(sub)
 
+    # refactor — deterministic AST-based code refactoring
+    import lgwks_refactor
+    lgwks_refactor.add_parser(sub)
+
     # doctor — self-test: verify environment, deps, models, and PATH
     doctor = sub.add_parser("doctor", help="self-test: verify install health")
     doctor.set_defaults(func=_doctor_dispatch)

@@ -21,6 +21,7 @@ from typing import Any
 
 import lgwks_ui as ui
 from lgwks_browser import _remote_allowed, available as _browser_available
+from lgwks_html import html_to_markdown
 
 
 _UA_POOL = [
@@ -55,29 +56,15 @@ def _pick_fingerprint(seed: int = 0) -> dict[str, Any]:
     }
 
 
-def _text_from_html(html: str, max_chars: int = 8000) -> str:
+def _text_from_html(html: str, max_chars: int = 8000, base_url: str = "") -> str:
     """Extract readable text from rendered HTML."""
-    tag = re.compile(r"<[^>]+>")
-    ws = re.compile(r"\n{3,}")
-    return ws.sub("\n\n", tag.sub("", html)).strip()[:max_chars]
+    text, _, _ = html_to_markdown(html, base_url)
+    return text[:max_chars]
 
 
 def _extract_links(html: str, base: str) -> list[dict[str, str]]:
     """Extract anchor links from rendered HTML."""
-    links: list[dict[str, str]] = []
-    seen: set[str] = set()
-    for m in re.finditer(r'<a[^>]+href\s*=\s*["\']([^"\']+)["\'][^>]*>(.*?)</a>', html, re.DOTALL | re.IGNORECASE):
-        href = m.group(1).strip()
-        text = re.sub(r"<[^>]+>", "", m.group(2)).strip()
-        if href.startswith(("javascript:", "mailto:", "tel:")):
-            continue
-        if href.startswith("/"):
-            from urllib.parse import urljoin
-            href = urljoin(base, href)
-        if href in seen:
-            continue
-        seen.add(href)
-        links.append({"href": href, "text": text[:80]})
+    _, _, links = html_to_markdown(html, base)
     return links
 
 
@@ -174,7 +161,7 @@ def crawl_page(
             title = page.title()
             browser.close()
 
-            text = _text_from_html(html, max_chars)
+            text = _text_from_html(html, max_chars, base_url=url)
             links = _extract_links(html, url) if with_links else []
 
             return CrawlResult(

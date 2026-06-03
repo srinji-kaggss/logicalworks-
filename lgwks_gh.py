@@ -114,9 +114,9 @@ def _gh(*args: str, cwd: str | Path | None = None, timeout: int = 30) -> tuple[i
         return 1, f"gh failed: {e}"
 
 
-def _gh_json(*args: str, cwd: str | Path | None = None, timeout: int = 30) -> dict[str, Any]:
+def _gh_json(cmd: str, subcommand: str, target: str, fields: str, *extra_args: str, cwd: str | Path | None = None, timeout: int = 30) -> dict[str, Any]:
     """Run gh with --json and return parsed dict."""
-    rc, out = _gh(*args, "--json", cwd=cwd, timeout=timeout)
+    rc, out = _gh(cmd, subcommand, target, "--json", fields, *extra_args, cwd=cwd, timeout=timeout)
     if rc != 0:
         return {"_error": out}
     try:
@@ -322,17 +322,24 @@ def _pr_view(number: int, repo: str | None, with_diff: bool = False) -> dict[str
 
 def _repo_state(repo: str | None) -> RepoState:
     slug = repo or _current_repo_slug()
-    state = RepoState(slug=slug or "unknown")
+    try:
+        validated = _validate_slug(slug)
+    except ValueError:
+        validated = None
+    state = RepoState(slug=validated or "unknown")
 
-    rc, out = _gh("issue", "list", "--state", "open", "--limit", "1", *_repo_slug_args(repo))
-    if rc == 0:
-        m = re.search(r"Showing\s+\d+\s+of\s+(\d+)", out)
-        state.open_issues = int(m.group(1)) if m else max(0, len([l for l in out.splitlines() if l.strip()]) - 1)
+    view_args = ["repo", "view"]
+    if validated:
+        view_args.append(validated)
 
-    rc, out = _gh("pr", "list", "--state", "open", "--limit", "1", *_repo_slug_args(repo))
+    rc, out = _gh(*view_args, "--json", "issues,pullRequests")
     if rc == 0:
-        m = re.search(r"Showing\s+\d+\s+of\s+(\d+)", out)
-        state.open_prs = int(m.group(1)) if m else max(0, len([l for l in out.splitlines() if l.strip()]) - 1)
+        try:
+            data = json.loads(out)
+            state.open_issues = data.get("issues", {}).get("totalCount", 0)
+            state.open_prs = data.get("pullRequests", {}).get("totalCount", 0)
+        except Exception:
+            pass
 
     rc, out = _gh("release", "view", "--json", "tagName", *_repo_slug_args(repo))
     if rc == 0:

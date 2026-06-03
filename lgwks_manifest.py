@@ -277,6 +277,41 @@ _VERB_META: dict[str, dict] = {
         "output": "{schema, repo, findings[{check, severity, message, evidence, fix}], stats}; graph-traversable",
         "tokens": "none (deterministic AST + pattern scan)",
     },
+    "doctor": {
+        "intent": "self-test: verify environment installation health (Python, Playwright, DB, ML models)",
+        "args": {},
+        "output": "{ok, checks[{name, want, got, ok}]}",
+        "tokens": "none",
+    },
+    "entity-graph": {
+        "intent": "build or query local entity graph from parsed document chunks",
+        "args": {"--chunks": "JSONL file of parsed chunks to ingest", "--db": "SQLite database path",
+                 "--export": "export graph to JSON file", "--mermaid": "export Mermaid diagram path",
+                 "--stats": "print graph statistics and exit", "--sync": "git add/commit/push after ingest",
+                 "--sync-repo": "repo root for git sync"},
+        "output": "structured JSON stats or diagram file",
+        "tokens": "none (local SQLite)",
+    },
+    "refactor add_types": {
+        "intent": "annotate Python function arguments with type annotations",
+        "args": {"--file": "target Python file", "--preview": "dry-run preview",
+                 "--type-map": "JSON string mapping parameters to types"},
+        "output": "preview diff or modified file",
+        "tokens": "none (deterministic AST)",
+    },
+    "refactor remove_unused_imports": {
+        "intent": "strip unused imports from a Python source file",
+        "args": {"--file": "target Python file", "--preview": "dry-run preview"},
+        "output": "preview diff or modified file",
+        "tokens": "none (deterministic AST)",
+    },
+    "refactor rename": {
+        "intent": "rename a symbol inside a Python source file using AST-based renaming",
+        "args": {"--file": "target Python file", "--preview": "dry-run preview",
+                 "--old": "original name", "--new": "new name"},
+        "output": "preview diff or modified file",
+        "tokens": "none (deterministic AST)",
+    },
     # ── session ──
     "session begin": {
         "intent": "begin a new session with deterministic parameters and goal",

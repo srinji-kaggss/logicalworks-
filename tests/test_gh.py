@@ -183,6 +183,39 @@ def test_repo_state_inference_ssh():
     assert slug == "acme/widget"
 
 
+def test_repo_state_counts():
+    def _mock_run(cmd, **kwargs):
+        args = cmd
+        class _Result:
+            returncode = 0
+            stdout = ""
+            stderr = ""
+        res = _Result()
+        if "repo" in args and "view" in args and "issues,pullRequests" in args:
+            res.stdout = json.dumps({"issues": {"totalCount": 15}, "pullRequests": {"totalCount": 3}})
+        elif "release" in args and "view" in args:
+            res.stdout = json.dumps({"tagName": "v2.0.0"})
+        elif "api" in args and "branches" in args:
+            res.stdout = "[]"
+        elif "repo" in args and "view" in args and "defaultBranchRef" in args:
+            res.stdout = json.dumps({
+                "defaultBranchRef": {
+                    "target": {
+                        "pushedDate": "2026-06-03T12:00:00Z"
+                    }
+                }
+            })
+        return res
+
+    with patch("subprocess.run", side_effect=_mock_run):
+        state = gh._repo_state("acme/widget")
+    
+    assert state.slug == "acme/widget"
+    assert state.open_issues == 15
+    assert state.open_prs == 3
+    assert state.latest_release == "v2.0.0"
+
+
 # ── harden ───────────────────────────────────────────────────────────────────
 
 def test_harden_schema():
@@ -226,6 +259,45 @@ def test_issue_view_fallback_parse():
     assert issue.title == "Bug in parser"
     assert issue.state == "open"
     assert "bug" in issue.labels
+
+
+def test_issue_view_json_success():
+    issue_data = {
+        "number": 42,
+        "title": "Bug in parser",
+        "state": "open",
+        "labels": [{"name": "bug"}, {"name": "priority"}],
+        "assignees": [{"login": "bob"}],
+        "body": "This is a detailed description.",
+        "url": "https://github.com/acme/widget/issues/42",
+        "comments": [{"body": "first comment"}]
+    }
+    
+    def _mock_run(cmd, **kwargs):
+        class _Result:
+            returncode = 0
+            stdout = ""
+            stderr = ""
+        res = _Result()
+        if "--json" in cmd:
+            res.stdout = json.dumps(issue_data)
+        else:
+            res.stdout = "fallback stdout"
+        return res
+        
+    with patch("subprocess.run", side_effect=_mock_run):
+        issue = gh._issue_view(42, None)
+        
+    assert issue.number == 42
+    assert issue.title == "Bug in parser"
+    assert issue.state == "open"
+    assert "bug" in issue.labels
+    assert "priority" in issue.labels
+    assert issue.assignees == ["bob"]
+    assert issue.body == "This is a detailed description."
+    assert issue.url == "https://github.com/acme/widget/issues/42"
+    assert issue.comments_count == 1
+    assert not any(a.verb == "assign" for a in issue.next_actions)
 
 
 # ── issue list parse ─────────────────────────────────────────────────────────
