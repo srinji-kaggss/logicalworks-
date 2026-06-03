@@ -358,6 +358,29 @@ class TestProjectMemory(unittest.TestCase):
         self.assertIn("deterministic", labels)
         self.assertTrue(ctx["chain_head"])
 
+    def test_remember_verbose_embeddings(self):
+        import lgwks_memory as mem
+
+        tmp = Path(tempfile.mkdtemp())
+        mem._DIR = tmp / "projects"
+        mem.init_project("project 2", "openalex.org", "test remember verbose embeddings")
+        
+        # Test default remember (verbose_embeddings = False) -> embeddings omitted from returned themes
+        res_default = mem.remember("project 2", "machine learning search algorithms")
+        self.assertIn("chain_head", res_default)
+        self.assertGreater(len(res_default["themes"]), 0)
+        for t in res_default["themes"]:
+            self.assertNotIn("embedding", t)
+            
+        # Test verbose remember (verbose_embeddings = True) -> embeddings included
+        res_verbose = mem.remember("project 2", "machine learning search algorithms", verbose_embeddings=True)
+        self.assertIn("chain_head", res_verbose)
+        self.assertGreater(len(res_verbose["themes"]), 0)
+        for t in res_verbose["themes"]:
+            self.assertIn("embedding", t)
+            self.assertEqual(len(t["embedding"]), 128)
+
+
 
 class TestPublicSources(unittest.TestCase):
     def test_public_search_carries_license_basis(self):
@@ -622,6 +645,71 @@ class TestProjectPlanner(unittest.TestCase):
         self.assertIn("skipped", review["execution_status_counts"])
         self.assertEqual({e["step"] for e in events},
                          {"memory", "public_search", "embed", "auth_private_crawl"})
+
+    def test_device_consent_research_only_suppression(self):
+        import argparse
+        import lgwks_embed as emb
+        import lgwks_memory as mem
+        import lgwks_project as proj
+        import lgwks_public as pub
+
+        tmp = Path(tempfile.mkdtemp())
+        old_deploy, old_mem, old_vectors = proj.DEPLOY_ROOT, mem._DIR, emb.VAULT_ROOT
+        old_fetch = pub._fetch_json
+        proj.DEPLOY_ROOT = tmp / "deploy"
+        mem._DIR = tmp / "projects"
+        emb.VAULT_ROOT = tmp / "vectors"
+        folder = tmp / "src"
+        folder.mkdir()
+        (folder / "notes.md").write_text("salesforce ai operating system agent runtime evidence", encoding="utf-8")
+
+        def fake_fetch(url, timeout=20):
+            if "openalex" in url:
+                return {"results": [{"display_name": "Agent runtime evidence", "id": "https://openalex.org/W1",
+                                     "publication_year": 2026,
+                                     "best_oa_location": {"landing_page_url": "https://example.org/p",
+                                                           "license": "cc-by"}}]}
+            if "crossref" in url:
+                return {"message": {"items": [{"title": ["Open metadata"], "URL": "https://doi.org/10/x",
+                                                "license": [{"URL": "https://creativecommons.org/publicdomain/zero/1.0/"}],
+                                                "published-online": {"date-parts": [[2025]]}}]}}
+            return {"results": [{"title": "Open diagram", "url": "https://img.example/x.jpg",
+                                 "foreign_landing_url": "https://example.org/x", "license": "cc0",
+                                 "license_url": "https://creativecommons.org/publicdomain/zero/1.0/"}]}
+
+        pub._fetch_json = fake_fetch
+        args = argparse.Namespace(project="consent-demo", prompt="map salesforce ai os", reasoning_cycles=2,
+                                  embedding_rounds=400, max_workers=4, tokens_per_cycle=8000,
+                                  site="open-public-sources", folder=str(folder), source="all", source_limit=1,
+                                  embed_cycles=1, max_files=10, learning_mode="local-only",
+                                  device_consent="research-only", model_spine="oss-coreml",
+                                  dry_run=False, execute=True)
+        try:
+            with contextlib.redirect_stdout(io.StringIO()):
+                self.assertEqual(proj.deploy_command(args), 0)
+            review = proj.review_project("consent-demo")
+            out_dir = proj._deploy_path("consent-demo")
+            
+            # Assert suppression
+            self.assertFalse((out_dir / "public-search.json").exists())
+            self.assertFalse((out_dir / "memory-context.json").exists())
+            
+            # Assert derived artifacts are still produced and valid
+            self.assertTrue((out_dir / "source-records.jsonl").exists())
+            self.assertTrue((out_dir / "artifact-embeddings.jsonl").exists())
+            
+            # Assert review still passes
+            self.assertTrue(review["chain_ok"])
+            self.assertEqual(review["source_records"], 3)
+            
+            # Check learning-records derived_only properties
+            learning_rows = [json.loads(line) for line in (out_dir / "learning-records.jsonl").read_text(encoding="utf-8").splitlines()]
+            for row in learning_rows:
+                self.assertEqual(row["redaction_status"], "derived_only")
+                self.assertTrue(row["derived_only_enforced"])
+        finally:
+            proj.DEPLOY_ROOT, mem._DIR, emb.VAULT_ROOT = old_deploy, old_mem, old_vectors
+            pub._fetch_json = old_fetch
 
     def test_project_review_render_is_projection(self):
         import lgwks_project as proj

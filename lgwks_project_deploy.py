@@ -218,11 +218,10 @@ def _learning_records(project: str, prompt: str, cycles: list[dict], learning_mo
             "source_scope": "transcript" if row["seq"] == 1 else "critic",
             "consent": learning_mode,
             "device_consent": device_consent,
-            # //why honest label (issue #12): the execute path writes raw public-search.json + memory-context.json
-            # to disk regardless of consent, so claiming "derived_only" under research-only was false. Report the
-            # actual retention (raw) + an explicit enforcement flag. Real suppression of raw writes is deferred.
-            "redaction_status": "raw_vaulted",
-            "derived_only_enforced": False,
+            # //why honest label (issue #12): when device_consent == "research-only", we suppress
+            # the raw public-search.json and memory-context.json writes, thus derived_only_enforced is True.
+            "redaction_status": "derived_only" if device_consent == "research-only" else "raw_vaulted",
+            "derived_only_enforced": device_consent == "research-only",
             "said": said_ref,
             "meant": {"intent_class": "research_orchestration", "entities": _terms(prompt)[:8], "gaps": []},
             "assumed": ["CLI should act as an automated research operator"],
@@ -391,9 +390,10 @@ def _run_non_ml_execution(args: argparse.Namespace, prompt: str, keywords: list[
         import lgwks_memory
         lgwks_memory.init_project(args.project, site, prompt)
         memory_context = lgwks_memory.context(args.project, query=" ".join(keywords[:8]))
-        write_json(out_dir / "memory-context.json", memory_context)
+        if args.device_consent != "research-only":
+            write_json(out_dir / "memory-context.json", memory_context)
         events.append(_event(args.project, "memory", "ok", started,
-                             inputs={"site": site}, outputs={"artifact": "memory-context.json",
+                             inputs={"site": site}, outputs={"artifact": "memory-context.json" if args.device_consent != "research-only" else "derived_only_suppressed",
                                                              "events": memory_context.get("events", 0)}))
     except Exception as exc:
         events.append(_event(args.project, "memory", "error", started,
@@ -406,7 +406,8 @@ def _run_non_ml_execution(args: argparse.Namespace, prompt: str, keywords: list[
         public_payload = lgwks_public.search_public(query, source=args.source, limit=args.source_limit)
         source_rows = _source_records(args.project, public_payload)
         jsonl(out_dir / "source-records.jsonl", source_rows)
-        write_json(out_dir / "public-search.json", public_payload)
+        if args.device_consent != "research-only":
+            write_json(out_dir / "public-search.json", public_payload)
         events.append(_event(args.project, "public_search", "ok", started,
                              inputs={"query": query, "source": args.source, "limit": args.source_limit},
                              outputs={"records": len(source_rows), "artifact": "source-records.jsonl",

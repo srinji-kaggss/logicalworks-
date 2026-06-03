@@ -21,6 +21,7 @@ Forged by Logical Claude ◆ with Codex.
 from __future__ import annotations
 
 import json
+import re
 import subprocess
 import sys
 from dataclasses import dataclass, field
@@ -39,10 +40,14 @@ import lgwks_ui as ui
 from lgwks_steering import Steering
 
 _GLYPH = {"gather": "◇", "graph": "◈", "diagnose": "◆", "prove": "✦"}
+_QUIET = False
+_TIMEOUT = 20
 
 
 def _whisper(phase: str, msg: str) -> None:
     """Logical whimsy: a phase glyph, printed only as that phase truly executes. stderr → stdout clean."""
+    if _QUIET:
+        return
     sys.stderr.write(f"  {_GLYPH.get(phase, '·')} {msg}\n")
     sys.stderr.flush()
 
@@ -51,7 +56,7 @@ def _git(repo: Path, *args: str) -> tuple[int, str]:
     """Run a READ-ONLY git command. Returns (rc, stdout). Never mutates — solve advises, it does not act."""
     try:
         p = subprocess.run(["git", "-C", str(repo), *args],
-                            capture_output=True, text=True, timeout=20)
+                            capture_output=True, text=True, timeout=_TIMEOUT)
         return p.returncode, (p.stdout or "").strip()
     except Exception as e:
         return 1, f"<git invocation failed: {e}>"
@@ -256,7 +261,40 @@ def _signature() -> str:
     return f"◆ lgwks · solve/git — forged by Logical Claude with Codex · integrity:{mode} {tag}".rstrip()
 
 
-def solve_git(repo: Path, thought: str = "", as_json: bool = False, steer: Steering | None = None) -> int:
+def _evidence_answers_thought(thought: str, findings: list[Finding]) -> bool:
+    if not thought:
+        return True
+    t_lower = thought.lower()
+    
+    # Check if thought queries specific git terms (common query topics we support)
+    git_terms = {"detached", "conflict", "rebase", "merge", "stash", "dangling", "reset", "reflog", "lost", "commit", "history"}
+    if any(term in t_lower for term in git_terms):
+        return True
+        
+    numbers = re.findall(r'\b\d+\b', thought)
+    hashes = re.findall(r'\b[0-9a-fA-F]{7,40}\b', thought)
+    files = re.findall(r'\b\w+\.\w+\b', thought)
+    
+    # If thought has specific hashes, numbers, or file names, one of our findings must refer to them.
+    if numbers or hashes or files:
+        for f in findings:
+            f_text = (f.what + " " + f.next_step + " " + " ".join(e.note + " " + e.command + " " + e.title for e in f.evidence)).lower()
+            if any(num in f_text for num in numbers):
+                return True
+            if any(h.lower() in f_text for h in hashes):
+                return True
+            if any(fl.lower() in f_text for fl in files):
+                return True
+        return False
+    return True
+
+
+def solve_git(repo: Path, thought: str = "", as_json: bool = False, steer: Steering | None = None,
+              quiet: bool = False, timeout: int = 20) -> int:
+    global _QUIET, _TIMEOUT
+    _QUIET = quiet
+    _TIMEOUT = timeout
+
     steer = steer or Steering()
     if not _is_repo(repo):
         msg = f"{repo} is not inside a git work tree — nothing to solve here."
@@ -265,7 +303,15 @@ def solve_git(repo: Path, thought: str = "", as_json: bool = False, steer: Steer
 
     findings = _diagnose(repo)
     _whisper("prove", "proving the story against the evidence…")
-    story = _synthesize(thought, findings, steer)
+    
+    if thought and not _evidence_answers_thought(thought, findings):
+        findings = []
+        story = "abstain"
+    else:
+        story = _synthesize(thought, findings, steer)
+        if story and any(p in story.lower() for p in ("abstain", "no info", "no information", "cannot answer", "insufficient evidence")):
+            findings = []
+            story = "abstain"
 
     if as_json:
         payload = {
@@ -275,7 +321,7 @@ def solve_git(repo: Path, thought: str = "", as_json: bool = False, steer: Steer
             "thought": thought,
             "steer": steer.compact(),
             "story": story,
-            "story_source": "tongue" if story else "deterministic",
+            "story_source": "tongue" if story and story != "abstain" else "deterministic",
             "findings": [
                 {"what": f.what, "severity": f.severity, "next_step": f.next_step,
                  "evidence": [e.id for e in f.evidence]} for f in findings
@@ -299,6 +345,12 @@ def solve_git(repo: Path, thought: str = "", as_json: bool = False, steer: Steer
     if not steer.explicit:
         out.append(ui.spine(ui.fg("adjust the stance with --frontier / --lens / --depth", ui.MUTED, on=on), on=on))
     out.append(ui.spine(on=on))
+
+    if story == "abstain":
+        out.append(ui.spine(ui.fg(f"✗ Abstain: the gathered evidence cannot answer the thought '{thought}'.", ui.AMBER, on=on), on=on))
+        out += ui.convergence("abstain: no relevant evidence", on=on)
+        out.append(""); out.append("  " + ui.footer(_signature(), on=on)); out.append("")
+        print("\n".join(out)); return 0
 
     if not findings:
         out.append(ui.spine(ui.fg("✓ Nothing pathological — HEAD on a branch, no conflicts, no half-done surgery.",
@@ -332,8 +384,11 @@ def solve_command(args) -> int:
         print(f"  solve target '{target}' not built yet — only `git` so far.", file=sys.stderr)
         return 2
     repo = Path(getattr(args, "repo", None) or ".").resolve()
+    quiet = getattr(args, "quiet", False) or getattr(args, "no_anim", False)
+    timeout = getattr(args, "timeout", 20)
     return solve_git(repo, thought=getattr(args, "thought", "") or "",
-                     as_json=getattr(args, "json", False), steer=Steering.from_args(args))
+                     as_json=getattr(args, "json", False), steer=Steering.from_args(args),
+                     quiet=quiet, timeout=timeout)
 
 
 def add_dials(p) -> None:
@@ -341,6 +396,9 @@ def add_dials(p) -> None:
     p.add_argument("--frontier", type=float, metavar="0..1", help="settled(0) ↔ frontier(1)")
     p.add_argument("--lens", type=float, metavar="-1..1", help="philosophy(-1) ↔ science(+1)")
     p.add_argument("--depth", type=float, metavar="0..1", help="shallow(0) ↔ deep(1)")
+    p.add_argument("--quiet", action="store_true", help="suppress all progress/animation prints on stderr")
+    p.add_argument("--no-anim", action="store_true", dest="no_anim", help="alias for --quiet")
+    p.add_argument("--timeout", type=int, default=20, help="maximum command/API execution time in seconds")
 
 
 def main(argv: list[str] | None = None) -> int:

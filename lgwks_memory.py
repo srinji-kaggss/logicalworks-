@@ -119,11 +119,15 @@ def _cos(a: list[float], b: list[float]) -> float:
     return sum(x * y for x, y in zip(a, b)) if a and b and len(a) == len(b) else 0.0
 
 
-def remember(project: str, text: str, source: str = "conversation") -> dict:
+def remember(project: str, text: str, source: str = "conversation", verbose_embeddings: bool = False) -> dict:
     rec = append(project, "conversation", {"source": source, "text_sha256": hashlib.sha256(text.encode()).hexdigest()})
     th = themes(text)
     append(project, "theme", {"source_seq": rec["seq"], "themes": th})
-    return {"project": project, "conversation_seq": rec["seq"], "themes": th}
+    th_display = []
+    for t in th:
+        t_copy = {k: v for k, v in t.items() if verbose_embeddings or k != "embedding"}
+        th_display.append(t_copy)
+    return {"project": project, "chain_head": rec["hash"], "conversation_seq": rec["seq"], "themes": th_display}
 
 
 def init_project(project: str, site: str, goal: str) -> dict:
@@ -165,7 +169,8 @@ def memory_command(args: argparse.Namespace) -> int:
         payload = init_project(args.project, args.site, args.goal)
     elif args.memory_command == "remember":
         text = Path(args.file).read_text(encoding="utf-8") if args.file else args.text
-        payload = remember(args.project, text, source=args.source)
+        payload = remember(args.project, text, source=args.source,
+                           verbose_embeddings=getattr(args, "verbose_embeddings", False))
     else:
         payload = context(args.project, query=args.query, limit=args.limit)
     print(json.dumps(payload, indent=2, sort_keys=True))
@@ -185,6 +190,8 @@ def add_parser(sub) -> None:
     rem.add_argument("--text", default="")
     rem.add_argument("--file")
     rem.add_argument("--source", default="conversation")
+    rem.add_argument("--verbose-embeddings", action="store_true", dest="verbose_embeddings",
+                     help="include raw vector embeddings in theme output")
     rem.set_defaults(func=memory_command)
     ctx = mem.add_parser("context", help="emit deterministic chained context")
     ctx.add_argument("project")
