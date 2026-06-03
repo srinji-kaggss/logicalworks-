@@ -1275,6 +1275,11 @@ def build_parser() -> argparse.ArgumentParser:
     import lgwks_refactor
     lgwks_refactor.add_parser(sub)
 
+
+    # hooks — comprehensive audit-first hook system: lifecycle events, registry, audit log
+    import lgwks_hooks
+    lgwks_hooks.add_parser(sub)
+
     # doctor — self-test: verify environment, deps, models, and PATH
     doctor = sub.add_parser("doctor", help="self-test: verify install health")
     doctor.set_defaults(func=_doctor_dispatch)

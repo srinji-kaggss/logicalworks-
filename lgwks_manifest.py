@@ -403,7 +403,53 @@ _VERB_META: dict[str, dict] = {
         "output": "risk assessment + expanded plan without running",
         "tokens": "none",
     },
+    # ── hook system ──
+    "hooks list": {
+        "intent": "show all registered hooks (builtin + user) with event bindings",
+        "args": {"--repo": "repo root", "--json": "structured"},
+        "output": "[{name, event, source, enabled, description}]",
+        "tokens": "none",
+    },
+    "hooks run": {
+        "intent": "fire all hooks for a named event (audit + builtins + user scripts)",
+        "args": {"event": "dot-namespaced event (e.g. file.post_write)", "--payload": "JSON payload string", "--repo": "repo root"},
+        "output": "fires hooks; audit record written; stdout from builtins",
+        "tokens": "none",
+    },
+    "hooks add": {
+        "intent": "register a user hook script for a lifecycle event",
+        "args": {"--name": "unique name", "--event": "event to subscribe", "--command": "executable path", "--description": "human note", "--repo": "repo root"},
+        "output": "confirmation; updates .lgwks/hooks.json; fires config.hooks_modified",
+        "tokens": "none",
+    },
+    "hooks remove": {
+        "intent": "deregister a user hook from the registry",
+        "args": {"--name": "hook name", "--repo": "repo root"},
+        "output": "confirmation; updates .lgwks/hooks.json",
+        "tokens": "none",
+    },
+    "hooks enable": {
+        "intent": "enable a disabled user hook",
+        "args": {"--name": "hook name", "--repo": "repo root"},
+        "output": "confirmation",
+        "tokens": "none",
+    },
+    "hooks disable": {
+        "intent": "disable a user hook without removing it",
+        "args": {"--name": "hook name", "--repo": "repo root"},
+        "output": "confirmation",
+        "tokens": "none",
+    },
+    "hooks audit": {
+        "intent": "query the append-only .lgwks/audit.jsonl audit log with filters",
+        "args": {"--event": "filter by event name", "--last": "last N records (default 50)",
+                 "--since": "ISO timestamp lower bound", "--export": "write JSONL to path",
+                 "--repo": "repo root", "--json": "structured"},
+        "output": "{schema, records[{schema, event, ts, session_id, pid, cwd, payload}]}; fires audit.read",
+        "tokens": "none",
+    },
 }
+
 
 
 def _find_subparsers_action(parser: argparse.ArgumentParser):
