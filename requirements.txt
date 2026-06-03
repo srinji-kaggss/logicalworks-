@@ -1,0 +1,2 @@
+# lgwks runtime dependencies — lightweight, no ML training
+playwright>=1.40

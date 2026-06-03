@@ -1222,6 +1222,10 @@ def build_parser() -> argparse.ArgumentParser:
     # host-scoped Playwright storage file and are only reused for that same host.
     login = sub.add_parser("login", help="save a host-scoped browser session (human logs in)")
     login.add_argument("target", help="login URL or shorthand: linkedin")
+    login.add_argument("--selector", dest="success_selector", default=None,
+                       help="CSS selector for post-auth element (auto-detected for SPAs if omitted)")
+    login.add_argument("--engine", choices=["chromium", "webkit"], default="chromium",
+                       help="browser engine (webkit for Safari-cookie sites)")
     login.set_defaults(func=_login_dispatch)
 
     # solve — "I have this mess/thought: prove what happened." The first real-world experience.
@@ -1262,6 +1266,14 @@ def build_parser() -> argparse.ArgumentParser:
     # intent — schema-driven intent router: declare, probe, act
     import lgwks_intent
     lgwks_intent.add_parser(sub)
+
+    # entity-graph — offline document entity graph builder (T1 regex / T2 CoreML / T3 Foundation Models)
+    import lgwks_entity_graph
+    lgwks_entity_graph.add_parser(sub)
+
+    # doctor — self-test: verify environment, deps, models, and PATH
+    doctor = sub.add_parser("doctor", help="self-test: verify install health")
+    doctor.set_defaults(func=_doctor_dispatch)
 
     return parser
 
@@ -1327,8 +1339,111 @@ def _login_dispatch(args) -> int:
         target = "https://www.linkedin.com/login"
     elif "://" not in target:
         target = "https://" + target
-    print(_json.dumps(lgwks_browser.save_session(target), indent=2))
+    result = lgwks_browser.save_session(
+        target,
+        success_selector=args.success_selector,
+        browser_engine=args.engine,
+    )
+    print(_json.dumps(result, indent=2))
     return 0
+
+
+def _doctor_dispatch(args) -> int:
+    import json as _json
+    import sys
+    from pathlib import Path
+
+    checks: list[dict[str, Any]] = []
+    ok = True
+
+    # 1. Python version
+    py_major, py_minor = sys.version_info[:2]
+    py_ok = (py_major, py_minor) >= (3, 10)
+    checks.append({"name": "python_version", "want": ">=3.10", "got": f"{py_major}.{py_minor}", "ok": py_ok})
+    if not py_ok:
+        ok = False
+
+    # 2. Playwright import
+    try:
+        import importlib.metadata
+        pw_ver = importlib.metadata.version("playwright")
+        checks.append({"name": "playwright", "want": "installed", "got": pw_ver, "ok": True})
+    except Exception as exc:
+        checks.append({"name": "playwright", "want": "installed", "got": str(exc), "ok": False})
+        ok = False
+
+    # 3. Playwright browsers
+    try:
+        from playwright.sync_api import sync_playwright
+        with sync_playwright() as p:
+            chromium = p.chromium.executable_path or ""
+            webkit = p.webkit.executable_path or ""
+            browsers_ok = bool(chromium) or bool(webkit)
+            checks.append({"name": "playwright_browsers", "want": "chromium or webkit", "got": f"chromium={bool(chromium)}, webkit={bool(webkit)}", "ok": browsers_ok})
+            if not browsers_ok:
+                ok = False
+    except Exception as exc:
+        checks.append({"name": "playwright_browsers", "want": "installed", "got": str(exc), "ok": False})
+        ok = False
+
+    # 4. Model hub (repo-resident)
+    try:
+        import lgwks_model_hub as mh
+        model_dir = mh._models_dir()
+        available = [m["name"] for m in mh.list_models()]
+        present = [n for n in available if mh.find_model_dir(n)]
+        checks.append({"name": "models_dir", "want": str(model_dir), "got": f"{len(present)}/{len(available)} models present", "ok": len(present) > 0})
+        if not present:
+            ok = False
+    except Exception as exc:
+        checks.append({"name": "models_dir", "want": "readable", "got": str(exc), "ok": False})
+        ok = False
+
+    # 5. Session directory writable
+    session_dir = Path.home() / ".config" / "lgwks" / "sessions"
+    try:
+        session_dir.mkdir(parents=True, exist_ok=True)
+        test_file = session_dir / ".doctor_write_test"
+        test_file.write_text("ok")
+        test_file.unlink()
+        checks.append({"name": "session_dir", "want": str(session_dir), "got": "writable", "ok": True})
+    except Exception as exc:
+        checks.append({"name": "session_dir", "want": "writable", "got": str(exc), "ok": False})
+        ok = False
+
+    # 6. SQLite (stdlib, but verify)
+    try:
+        import sqlite3
+        conn = sqlite3.connect(":memory:")
+        conn.execute("SELECT 1")
+        conn.close()
+        checks.append({"name": "sqlite3", "want": "working", "got": sqlite3.sqlite_version, "ok": True})
+    except Exception as exc:
+        checks.append({"name": "sqlite3", "want": "working", "got": str(exc), "ok": False})
+        ok = False
+
+    # 7. CoreML (optional but reported)
+    _stderr = sys.stderr
+    try:
+        import io
+        # coremltools prints noisy binary-extension warnings on Python 3.13+
+        sys.stderr = io.StringIO()
+        import coremltools as ct
+        checks.append({"name": "coremltools", "want": "optional", "got": ct.__version__, "ok": True})
+    except Exception:
+        checks.append({"name": "coremltools", "want": "optional", "got": "not installed", "ok": True})
+    finally:
+        sys.stderr = _stderr
+
+    # 8. Transformers (optional but reported)
+    try:
+        import transformers
+        checks.append({"name": "transformers", "want": "optional", "got": transformers.__version__, "ok": True})
+    except Exception:
+        checks.append({"name": "transformers", "want": "optional", "got": "not installed", "ok": True})
+
+    print(_json.dumps({"ok": ok, "checks": checks}, indent=2))
+    return 0 if ok else 1
 
 
 def main(argv: list[str] | None = None) -> int:

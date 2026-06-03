@@ -189,6 +189,29 @@ class GraphDB:
     def commit(self) -> None:
         self._conn.commit()
 
+    def seed_directional_edges(self, matrix_path: Path | None = None) -> int:
+        """Load eligibility matrix and create directed edges between plan-type nodes.
+        Returns number of edges seeded."""
+        if matrix_path is None:
+            matrix_path = Path(__file__).parent.parent / "config" / "eligibility_matrix.json"
+        if not matrix_path.exists():
+            return 0
+        try:
+            data = json.loads(matrix_path.read_text())
+        except Exception:
+            return 0
+        count = 0
+        for rule in data.get("rules", []):
+            src = f"PLAN_TYPE:{rule['from'].lower()}"
+            dst = f"PLAN_TYPE:{rule['to'].lower()}"
+            self.upsert_node(src, "PLAN_TYPE", rule["from"])
+            self.upsert_node(dst, "PLAN_TYPE", rule["to"])
+            rel = "allows_transfer" if rule.get("legal") else "blocks_transfer"
+            self.upsert_edge(src, dst, rel, {"note": rule.get("note", "")})
+            count += 1
+        self.commit()
+        return count
+
     def query_nodes(self, node_type: str | None = None) -> list[dict]:
         if node_type:
             rows = self._conn.execute(
@@ -277,6 +300,18 @@ def ingest_chunk(
 
     mentions = extract_mentions(text)
     labels = list({m.entity_type for m in mentions})
+
+    # T3: Foundation Models fallback for genuinely ambiguous mentions
+    if not mentions or all(m.entity_type == "UNKNOWN" for m in mentions):
+        try:
+            import lgwks_foundation
+            fm_result = lgwks_foundation.extract_entities(text, entity_types=list(ENTITY_TYPES))
+            if fm_result.status == "ok" and fm_result.entities:
+                for e in fm_result.entities:
+                    mentions.append(ExtractedMention(e.text, e.type, e.start, e.end))
+                labels = list({m.entity_type for m in mentions})
+        except Exception:
+            pass  # T3 unavailable is silent
 
     db.upsert_chunk(chunk_id, doc_id, text, url=url, schema=schema, labels=labels)
 

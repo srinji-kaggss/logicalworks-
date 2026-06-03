@@ -154,32 +154,86 @@ def render(url: str, max_chars: int = 8000, *, use_session: bool = False,
         return {"ok": False, "text": "", "reason": f"render failed: {type(e).__name__}"}
 
 
-def save_session(login_url: str = "https://www.linkedin.com/login") -> dict:
+def save_session(
+    login_url: str = "https://www.linkedin.com/login",
+    *,
+    success_selector: str | None = None,
+    browser_engine: str = "chromium",
+) -> dict:
     """One-time: open a real browser so the USER logs in themselves, then persist their session.
     We never handle credentials — the human types them; we only save the resulting cookie/state.
+
+    For SPAs (Angular, React, Vue) the URL may not change after login — use success_selector
+    to wait for a post-auth DOM element. If omitted, auto-detects common patterns.
+
     Returns {ok, path, reason}. Requires a headed run (a visible window)."""
     ok, why = available()
     if not ok:
         return {"ok": False, "reason": why}
-    from playwright.sync_api import sync_playwright
+    if browser_engine not in ("chromium", "webkit"):
+        return {"ok": False, "reason": f"unknown browser_engine: {browser_engine!r}"}
+    from playwright.sync_api import sync_playwright, TimeoutError as PWTimeout
     parsed = urllib.parse.urlparse(login_url)
     host = parsed.hostname or "session"
     safe = re.sub(r"[^a-z0-9._-]+", "-", host.lower()).strip("-")
     session_path = _SESSION_DIR / f"{safe}.json"
     session_path.parent.mkdir(parents=True, exist_ok=True)
+
+    # Auto-detect selectors if none provided
+    _AUTO_SELECTORS = [
+        # Angular / React / Vue dashboards
+        "app-dashboard", "[data-testid='dashboard']", ".dashboard", "#dashboard",
+        "[role='main']", "main", "article",
+        # User menus / profiles (signals auth success)
+        ".user-menu", "[data-testid='user-menu']", "#userMenu",
+        "[aria-label*='account' i]", "[aria-label*='profile' i]",
+        # Generic app shells
+        "#app", ".app-shell", "[id='app']",
+    ]
+
     try:
         with sync_playwright() as p:
-            browser = p.chromium.launch(headless=False)      # visible — the human logs in
+            engine = p.webkit if browser_engine == "webkit" else p.chromium
+            launch_kwargs: dict = {"headless": False}  # visible — the human logs in
+            if browser_engine == "chromium":
+                launch_kwargs["args"] = ["--disable-blink-features=AutomationControlled"]
+            browser = engine.launch(**launch_kwargs)
             ctx = browser.new_context(user_agent=_UA, locale="en-CA")
             page = ctx.new_page()
-            page.goto(login_url)
-            # block until the human finishes login + navigates into the app
-            page.wait_for_url(lambda u: "login" not in u and "checkpoint" not in u, timeout=300000)
+            page.goto(login_url, wait_until="domcontentloaded", timeout=60000)
+
+            # SPA-aware auth detection: wait for a post-auth DOM signal
+            selector = success_selector
+            if not selector:
+                # Try each auto-selector with a short timeout; first match wins
+                for sel in _AUTO_SELECTORS:
+                    try:
+                        el = page.wait_for_selector(sel, timeout=5000, state="visible")
+                        if el:
+                            selector = sel
+                            break
+                    except PWTimeout:
+                        continue
+
+            if selector:
+                try:
+                    page.wait_for_selector(selector, timeout=300000, state="visible")
+                except PWTimeout:
+                    browser.close()
+                    return {"ok": False, "reason": f"timeout waiting for post-auth selector: {selector}"}
+            else:
+                # Fallback for traditional MPAs: URL no longer contains login
+                try:
+                    page.wait_for_url(lambda u: "login" not in u and "checkpoint" not in u, timeout=300000)
+                except PWTimeout:
+                    browser.close()
+                    return {"ok": False, "reason": "timeout waiting for URL to leave login page"}
+
             ctx.storage_state(path=str(session_path))
             browser.close()
         return {"ok": True, "path": str(session_path), "reason": "session saved"}
     except Exception as e:
-        return {"ok": False, "reason": f"login capture failed: {type(e).__name__}"}
+        return {"ok": False, "reason": f"login capture failed: {type(e).__name__}: {e}"}
 
 
 def linkedin(url: str, max_chars: int = 8000) -> dict:

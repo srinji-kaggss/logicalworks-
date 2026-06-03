@@ -1,0 +1,9 @@
+# lgwks developer dependencies — model download, conversion, training
+# Heavy; only needed to run scripts/setup_models.py or train classifiers
+torch>=2.0
+transformers>=4.30
+sentencepiece>=0.1.99
+tiktoken>=0.5
+huggingface-hub>=0.20
+coremltools>=7.0
+scikit-learn>=1.3
