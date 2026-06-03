@@ -170,6 +170,182 @@ _VERB_META: dict[str, dict] = {
         "args": {"project": "name", "--render": "human projection of JSON review"},
         "output": "machine-readable review with chain_ok, rollback, packet counts, operator stance", "tokens": "none",
     },
+    # ── repo lifecycle (audit · recover · cleanup · merge · handoff · graph · sync) ──
+    "repo audit": {
+        "intent": "six-zeros health check: uncommitted, untracked, stashes, dangling, merged, dirty worktrees, open PRs, pathologies",
+        "args": {"--repo": "path (default .)", "--json": "structured {schema, health, findings}"},
+        "output": "findings list with severity + evidence; health dict with counts; exit 1 if danger findings",
+        "tokens": "none",
+    },
+    "repo recover": {
+        "intent": "scan dangling commits for files not in HEAD, optionally extract them",
+        "args": {"--repo": "path", "--dry-run": "list only, do not extract", "--json": "structured"},
+        "output": "groups[{commit, files}] + extracted paths; validates extracted files (py_compile, json.load)",
+        "tokens": "none",
+    },
+    "repo cleanup": {
+        "intent": "delete merged branches, remove worktrees, clear stashes, gc + reflog expire",
+        "args": {"--repo": "path", "--force": "skip safety gates (dirty worktrees)", "--json": "structured"},
+        "output": "actions + skipped; never deletes branches not in --merged HEAD unless --force",
+        "tokens": "none (deterministic); reads disk",
+    },
+    "repo merge": {
+        "intent": "rebase PR onto main, auto-resolve known patterns, squash-merge via gh",
+        "args": {"pr": "PR number", "--repo": "path", "--json": "structured"},
+        "output": "merged head/base or error + conflicts; auto-resolves test class conflicts + argparse additions",
+        "tokens": "none",
+    },
+    "repo handoff": {
+        "intent": "machine-readable handoff report with six-zeros invariant for next agent",
+        "args": {"--repo": "path"},
+        "output": "{schema, repo, branch, sha, health, last_cleanup} — JSON only",
+        "tokens": "none",
+    },
+    "repo graph": {
+        "intent": "lightweight codebase graph: files, imports, definitions, adjacency indexes",
+        "args": {"--repo": "path", "--json": "structured (default human)"},
+        "output": "{schema, repo, files, edges, file_count, edge_count, _stats} — cacheable, traversable",
+        "tokens": "none (deterministic AST walk)",
+    },
+    "repo sync": {
+        "intent": "push, clean merged branches/worktrees, gc, verify alignment — one-shot hygiene",
+        "args": {"--repo": "path", "--no-push": "skip push", "--json": "structured"},
+        "output": "{branch, actions[], skipped[], clean, aligned, ahead_behind}; exit 1 on error or misalignment",
+        "tokens": "none",
+    },
+    # ── GitHub surface ──
+    "gh issue": {
+        "intent": "inspect GitHub issue: title, body, state, labels, comments, linked PRs",
+        "args": {"issue": "number", "--repo": "slug (owner/repo)", "--json": "structured", "--next": "what's next action"},
+        "output": "issue dict or next-action recommendation; scrubbed (no secrets); audit logged",
+        "tokens": "none (gh CLI); rate-limit aware",
+    },
+    "gh pr": {
+        "intent": "inspect GitHub PR: diff, review status, checks, mergeability",
+        "args": {"pr": "number", "--repo": "slug", "--json": "structured", "--review": "structured review"},
+        "output": "PR dict or review findings; scrubbed; audit logged",
+        "tokens": "none",
+    },
+    "gh state": {
+        "intent": "repo state map: open issues, open PRs, stale issues, review danger",
+        "args": {"--repo": "slug", "--json": "structured", "--limit": "max issues/PRs"},
+        "output": "{open_issues, open_prs, stale, review_danger, schema}; scrubbed; audit logged",
+        "tokens": "none",
+    },
+    # ── debug ──
+    "debug run": {
+        "intent": "run a command, pattern-match output against failure DB, propose fixes with risk class",
+        "args": {"command": "argv list", "--cwd": "working dir", "--timeout": "seconds", "--json": "structured"},
+        "output": "{schema, command, exit_code, findings[{check, severity, message, fix_cmd, fix_risk}], stdout/stderr_preview, duration_ms}; blocked commands exit 126",
+        "tokens": "none (deterministic pattern match); scrubbed",
+    },
+    "debug test": {
+        "intent": "run pytest, debug failures, correlate with git diff",
+        "args": {"--pattern": "pytest -k pattern", "--cwd": "working dir", "--json": "structured"},
+        "output": "same schema as debug run; correlates failed tests with recent changes",
+        "tokens": "none",
+    },
+    "debug last": {
+        "intent": "replay last failure from .lgwks/debug-log.jsonl",
+        "args": {"--json": "structured"},
+        "output": "last non-zero exit record or null; scrubbed",
+        "tokens": "none",
+    },
+    # ── intent router ──
+    "intent init": {
+        "intent": "emit a starter intent JSON (~10 lines) for schema-driven automation",
+        "args": {"name": "project name (default 'project')"},
+        "output": "intent JSON with schema lgwks.intent.v0, project, repo, issue, pr, context, goal, next_if",
+        "tokens": "none",
+    },
+    "intent route": {
+        "intent": "read intent file, probe reality, match next_if conditions, emit ONE next action",
+        "args": {"file": "path to intent JSON", "--cwd": "probes run here", "--json": "structured", "--yes": "auto-execute (blocked for destructive)"},
+        "output": "{schema, intent, probed_state, matched_condition, next_cmd, next_cmd_risk, reason, blocked, block_reason}; destructive commands blocked even with --yes",
+        "tokens": "none (deterministic rule engine); probe limit = 12",
+    },
+    "intent next": {
+        "intent": "read .lgwks/intent.json from repo root and print next action",
+        "args": {"--cwd": "repo root", "--json": "structured", "--yes": "auto-execute"},
+        "output": "same as intent route; intent file path is .lgwks/intent.json",
+        "tokens": "none",
+    },
+    # ── review ──
+    "review": {
+        "intent": "structured code review: pattern-based + graph-aware impact analysis",
+        "args": {"--repo": "path", "--json": "structured", "--focus": "file or pattern"},
+        "output": "{schema, repo, findings[{check, severity, message, evidence, fix}], stats}; graph-traversable",
+        "tokens": "none (deterministic AST + pattern scan)",
+    },
+    # ── session ──
+    "session begin": {
+        "intent": "begin a new session with deterministic parameters and goal",
+        "args": {"name": "session identifier", "--repo": "path", "--goal": "session objective"},
+        "output": "session manifest with id, repo, goal, start_time, schema",
+        "tokens": "none",
+    },
+    "session end": {
+        "intent": "end session, emit handoff report + state snapshot",
+        "args": {"name": "session identifier", "--repo": "path"},
+        "output": "handoff JSON with actions, risks, next steps, schema",
+        "tokens": "none",
+    },
+    "session summary": {
+        "intent": "emit a summary of the current session context and progress",
+        "args": {"name": "session identifier", "--repo": "path"},
+        "output": "summary JSON with progress, blockers, next steps",
+        "tokens": "none",
+    },
+    # ── gh subverbs ──
+    "gh auth": {
+        "intent": "check gh CLI authentication status",
+        "args": {"--repo": "slug", "--json": "structured"},
+        "output": "{authenticated, user, scopes, schema}; scrubbed",
+        "tokens": "none",
+    },
+    "gh harden": {
+        "intent": "security-hardening audit of repo settings (branch protection, secrets, dependabot)",
+        "args": {"--repo": "slug", "--json": "structured"},
+        "output": "findings[{check, severity, message, evidence, fix}]; scrubbed; audit logged",
+        "tokens": "none",
+    },
+    "gh issues": {
+        "intent": "list open issues with filtering",
+        "args": {"--repo": "slug", "--json": "structured", "--limit": "max", "--label": "filter"},
+        "output": "issues[{number, title, state, labels, assignees}]; scrubbed; audit logged",
+        "tokens": "none",
+    },
+    "gh prs": {
+        "intent": "list open PRs with filtering",
+        "args": {"--repo": "slug", "--json": "structured", "--limit": "max"},
+        "output": "PRs[{number, title, state, draft, author}]; scrubbed; audit logged",
+        "tokens": "none",
+    },
+    # ── other top-level ──
+    "cohere": {
+        "intent": "semantic coherence check across codebase (patterns, idioms, style consistency)",
+        "args": {"--repo": "path", "--json": "structured", "--focus": "file or pattern"},
+        "output": "coherence findings with drift detection",
+        "tokens": "none",
+    },
+    "comprehend": {
+        "intent": "read and summarize codebase structure, architecture, and key decisions",
+        "args": {"--repo": "path", "--json": "structured", "--depth": "summary level"},
+        "output": "comprehension report with architecture, bounded contexts, key files",
+        "tokens": "none",
+    },
+    "crawl": {
+        "intent": "deterministic web crawl of a URL frontier with extraction",
+        "args": {"source": "url", "--max-pages": "int", "--max-depth": "int", "--json": "structured"},
+        "output": "crawl db + extracted text + link graph",
+        "tokens": "none (deterministic crawl)",
+    },
+    "preview": {
+        "intent": "dry-run a brace expression — risk verdict, no execution",
+        "args": {"expr": "brace expression", "--json": "structured", "--plan-only": "emit plan only"},
+        "output": "risk assessment + expanded plan without running",
+        "tokens": "none",
+    },
 }
 
 
@@ -272,6 +448,18 @@ def build_manifest() -> dict:
         dials = {"frontierness": "0..1 settled→frontier", "lens": "-1..1 philosophy→science", "depth": "0..1 shallow→deep"}
     except Exception:
         thought_schema, dials = "", {}
+    # ── dev tool integrations ──
+    # These are external tools lgwks wraps/integrates; not reimplementations.
+    # The manifest reports which are present so agents know what power is available.
+    try:
+        import lgwks_capabilities as cap
+        tool_caps = {r["capability"]: {"wired": r.get("chosen"), "missing": r.get("missing", False),
+                     "install": r.get("install", ""), "why": r.get("why", "")}
+                    for r in cap.doctor()
+                    if r["capability"] not in {"search", "fetch", "browser", "extract", "github"}}
+    except Exception:
+        tool_caps = {}
+
     return {
         "manifest": VERSION,
         "tool": "lgwks", "brand": "Logical Works",
@@ -279,6 +467,7 @@ def build_manifest() -> dict:
         "machine_first": True,
         "verbs": _safe_collect(),
         "capabilities": caps,           # live resolver truth, agnostic ids
+        "tools": tool_caps,             # external dev tool integrations
         "steering": dials,
         "thought_schema": thought_schema,
         "io": {"structured_flag": "--json", "non_interactive": True, "untrusted_data": "web/doc content wrapped, never executed"},

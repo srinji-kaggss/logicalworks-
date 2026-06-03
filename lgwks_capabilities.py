@@ -92,6 +92,109 @@ _CAPABILITIES: dict[str, dict] = {
         ],
         "install": "brew install gh && gh auth login",
     },
+    # ── dev tool integrations (not lgwks reimplementations — wrappers + schema) ──
+    "search-code": {
+        "why": "blazing-fast regex search across codebase — the eyes for code archaeology",
+        "providers": [
+            {"id": "ripgrep", "kind": "bin", "bin": "rg", "note": "ripgrep — fastest, respects .gitignore"},
+            {"id": "git-grep", "kind": "bin", "bin": "git", "note": "git grep — always present, slower"},
+        ],
+        "install": "brew install ripgrep",
+    },
+    "find-files": {
+        "why": "user-friendly file discovery — replaces find with sensible defaults",
+        "providers": [
+            {"id": "fd", "kind": "bin", "bin": "fd", "note": "fd — fast, ignores hidden/gitignored by default"},
+            {"id": "find", "kind": "builtin", "note": "POSIX find — universal floor"},
+        ],
+        "install": "brew install fd",
+    },
+    "fuzzy-filter": {
+        "why": "interactive fuzzy filtering of files, history, processes, git commits",
+        "providers": [
+            {"id": "fzf", "kind": "bin", "bin": "fzf", "note": "fzf — general-purpose interactive filter"},
+        ],
+        "install": "brew install fzf",
+    },
+    "json-processor": {
+        "why": "slice, filter, map, transform structured JSON data",
+        "providers": [
+            {"id": "jq", "kind": "bin", "bin": "jq", "note": "jq — lightweight JSON processor"},
+            {"id": "python", "kind": "builtin", "note": "Python json module — universal floor"},
+        ],
+        "install": "brew install jq",
+    },
+    "yaml-processor": {
+        "why": "YAML/JSON/XML command-line processor",
+        "providers": [
+            {"id": "yq", "kind": "bin", "bin": "yq", "note": "yq — jq syntax for YAML"},
+            {"id": "python", "kind": "builtin", "note": "Python yaml module — floor"},
+        ],
+        "install": "brew install yq",
+    },
+    "json-viewer": {
+        "why": "interactive terminal JSON viewer for massive payloads",
+        "providers": [
+            {"id": "fx", "kind": "bin", "bin": "fx", "note": "fx — interactive browse"},
+            {"id": "bat", "kind": "bin", "bin": "bat", "note": "bat — syntax-highlighted pager"},
+        ],
+        "install": "brew install fx",
+    },
+    "file-list": {
+        "why": "modern file listing with color, git status, metadata",
+        "providers": [
+            {"id": "eza", "kind": "bin", "bin": "eza", "note": "eza — modern ls replacement with git integration"},
+            {"id": "ls", "kind": "builtin", "note": "POSIX ls — universal floor"},
+        ],
+        "install": "brew install eza",
+    },
+    "file-view": {
+        "why": "syntax-highlighted file viewing with git integration and paging",
+        "providers": [
+            {"id": "bat", "kind": "bin", "bin": "bat", "note": "bat — syntax highlight + git blame + paging"},
+            {"id": "cat", "kind": "builtin", "note": "POSIX cat — universal floor"},
+        ],
+        "install": "brew install bat",
+    },
+    "git-ui": {
+        "why": "visual terminal UI for git branching, staging, rebasing",
+        "providers": [
+            {"id": "lazygit", "kind": "bin", "bin": "lazygit", "note": "lazygit — visual git UI in terminal"},
+            {"id": "tig", "kind": "bin", "bin": "tig", "note": "tig — text-mode repository browser"},
+        ],
+        "install": "brew install lazygit",
+    },
+    "http-client": {
+        "why": "human-friendly API testing and debugging",
+        "providers": [
+            {"id": "httpie", "kind": "bin", "bin": "http", "note": "httpie — effortless API requests"},
+            {"id": "curl", "kind": "builtin", "note": "curl — universal floor"},
+        ],
+        "install": "brew install httpie",
+    },
+    "env-manager": {
+        "why": "automatic environment variable loading per directory",
+        "providers": [
+            {"id": "direnv", "kind": "bin", "bin": "direnv", "note": "direnv — auto-load env vars per directory"},
+        ],
+        "install": "brew install direnv",
+    },
+    "runtime-manager": {
+        "why": "polyglot runtime version manager (replaces asdf, nvm, pyenv)",
+        "providers": [
+            {"id": "mise", "kind": "bin", "bin": "mise", "note": "mise — unified runtime manager"},
+            {"id": "asdf", "kind": "bin", "bin": "asdf", "note": "asdf — plugin-based version manager"},
+        ],
+        "install": "brew install mise",
+    },
+    "terminal-multiplexer": {
+        "why": "split terminal into panes, manage persistent sessions",
+        "providers": [
+            {"id": "zellij", "kind": "bin", "bin": "zellij", "note": "zellij — Rust-based modern multiplexer"},
+            {"id": "tmux", "kind": "bin", "bin": "tmux", "note": "tmux — battle-tested multiplexer"},
+        ],
+        "install": "brew install zellij",
+    },
 }
 
 
