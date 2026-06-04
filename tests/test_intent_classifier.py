@@ -23,7 +23,7 @@ import lgwks_intent_classifier as ic
 VERBS = [
     {"verb": "manifest", "intent": "list the tool surface and verbs available"},
     {"verb": "geo compile", "intent": "compile a geographic expression"},
-    {"verb": "crawl", "intent": "deterministic web crawl with extraction"},
+    {"verb": "fetch", "intent": "single-page browser fetch and extraction"},
     {"verb": "refine", "intent": "machine intent refinement class gaps specificity"},
 ]
 
@@ -72,7 +72,7 @@ class TestEmbeddingDeterminism(_Hermetic):
         self.assertAlmostEqual(math.sqrt(sum(x * x for x in v)), 1.0, places=4)
 
     def test_distinct_text_distinct_vector(self):
-        self.assertNotEqual(ic._embed("crawl this website")[0], ic._embed("compile geography")[0])
+        self.assertNotEqual(ic._embed("fetch this website")[0], ic._embed("compile geography")[0])
 
     def test_centroids_align_with_classes(self):
         c, semantic = ic._build_centroids(VERBS)
@@ -105,7 +105,7 @@ class TestAuthorityLaw(_Hermetic):
         clf = _classifier()
         probes = [
             "manifest", "show me the tool manifest please",
-            "crawl https://example.com and extract", "geo compile expression",
+            "fetch https://example.com and extract", "geo compile expression",
             "refine my intent", "list verbs", "a" * 200, "manifest manifest manifest",
         ]
         for text in probes:

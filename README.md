@@ -75,10 +75,16 @@ Run the self-tests to verify your install health:
 ./lgwks doctor
 ```
 
-### Crawling
-To perform a local stealth crawl:
+### Research Crawl
+To run the research crawler:
 ```bash
-./lgwks crawl <url>
+./lgwks jarvis crawl <url>
+```
+
+### Single-Page Fetch
+To render and extract one page in a browser:
+```bash
+./lgwks fetch <url>
 ```
 
 ### Refactoring

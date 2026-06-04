@@ -210,7 +210,7 @@ def crawl_command(args: argparse.Namespace) -> int:
     on = ui.color_on()
     out: list[str] = [""]
     if result.ok:
-        out += ui.band("lgwks · crawl", f"{result.url} — {result.title}", on=on)
+        out += ui.band("lgwks · fetch", f"{result.url} — {result.title}", on=on)
         out.append(ui.spine(on=on))
         out.append(ui.spine(ui.fg(f"✓ {result.metadata['chars_extracted']} chars · {result.metadata['links_found']} links", ui.EMERALD, on=on), on=on))
         if result.links:
@@ -222,15 +222,19 @@ def crawl_command(args: argparse.Namespace) -> int:
         out.append("")
         out.append(result.text[:2000])
     else:
-        out += ui.band("lgwks · crawl", f"{result.url} — FAILED", on=on)
+        out += ui.band("lgwks · fetch", f"{result.url} — FAILED", on=on)
         out.append(ui.spine(ui.fg(f"✗ {result.reason}", ui.RUST, on=on), on=on))
-    out.append(""); out.append("  " + ui.footer("lgwks · crawl", on=on)); out.append("")
+    out.append(""); out.append("  " + ui.footer("lgwks · fetch", on=on)); out.append("")
     print("\n".join(out))
     return 0 if result.ok else 1
 
 
 def add_parser(sub) -> None:
-    p = sub.add_parser("crawl", help="stealth browser crawl — bot-resilient page extraction")
+    p = sub.add_parser(
+        "fetch",
+        aliases=["crawl"],
+        help="single-page browser fetch/extract (`crawl` is a compatibility alias; use `jarvis crawl` for crawling)",
+    )
     p.add_argument("url", help="target URL")
     p.add_argument("--max-chars", type=int, default=8000, help="max text chars to extract")
     p.add_argument("--wait", type=int, default=2000, help="ms to wait after load")

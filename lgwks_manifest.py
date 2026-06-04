@@ -439,11 +439,11 @@ _VERB_META: dict[str, dict] = {
         "output": "comprehension report with architecture, bounded contexts, key files",
         "tokens": "none",
     },
-    "crawl": {
-        "intent": "deterministic web crawl of a URL frontier with extraction",
-        "args": {"source": "url", "--max-pages": "int", "--max-depth": "int", "--json": "structured"},
-        "output": "crawl db + extracted text + link graph",
-        "tokens": "none (deterministic crawl)",
+    "fetch": {
+        "intent": "single-page browser fetch/extract for one URL (`jarvis crawl` is the crawler)",
+        "args": {"url": "target URL", "--max-chars": "int", "--wait": "ms", "--json": "structured"},
+        "output": "rendered page text + optional links/html",
+        "tokens": "none (browser fetch)",
     },
     "preview": {
         "intent": "dry-run a brace expression — risk verdict, no execution",
