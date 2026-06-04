@@ -57,6 +57,19 @@ Thin, local-only bridge to a containerized Ollama instance running in Docker Des
 
 ## 3. CLI Reference
 
+`lgwks` is the canonical entrypoint. Sidecar tools like the research driver, auth vault, agent-os
+bootstrap, context packer, execution spine, and model hub are available as subcommands under the
+same binary:
+
+```bash
+./lgwks agent-os doctor
+./lgwks auth ls
+./lgwks akinator --demo
+./lgwks run --demo
+./lgwks context path/to/run
+./lgwks model-hub list
+```
+
 Run the self-tests to verify your install health:
 ```bash
 ./lgwks doctor

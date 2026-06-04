@@ -14,6 +14,8 @@ import concurrent.futures
 import csv
 import hashlib
 import html
+import importlib.machinery
+import importlib.util
 import json
 import math
 import os
@@ -1280,6 +1282,38 @@ def build_parser() -> argparse.ArgumentParser:
     import lgwks_hooks
     lgwks_hooks.add_parser(sub)
 
+    # agent-os — fleet startup/bootstrap/doctor surface (Issue #1)
+    agent_os = sub.add_parser("agent-os", help="fleet startup/bootstrap helpers")
+    agent_os.set_defaults(func=_agent_os_dispatch, _passthrough=True)
+
+    # auth — auth-vault CLI (Issue #7)
+    auth = sub.add_parser("auth", help="capability vault (refs only; secrets stay in Keychain)")
+    auth.set_defaults(func=_auth_dispatch, _passthrough=True)
+
+    # akinator — curious research interface / autonomous deep-research driver
+    akinator = sub.add_parser("akinator", help="curious research interface and auto deep-research driver")
+    akinator.set_defaults(func=_akinator_dispatch, _passthrough=True)
+
+    # run — post-gate execution spine
+    run = sub.add_parser("run", help="post-gate crawl execution spine")
+    run.set_defaults(func=_run_dispatch, _passthrough=True)
+
+    # context — spawn context pack assembler for autonomous runs
+    context = sub.add_parser("context", help="build a graduated-resolution spawn context pack")
+    context.set_defaults(func=_context_dispatch, _passthrough=True)
+
+    # foundation — on-device Foundation/NaturalLanguage extraction surface
+    foundation = sub.add_parser("foundation", help="on-device structured extraction backends")
+    foundation.set_defaults(func=_foundation_dispatch, _passthrough=True)
+
+    # keyvault — runtime API-key resolution/store seam
+    keyvault = sub.add_parser("keyvault", help="Keychain-backed runtime secret resolver")
+    keyvault.set_defaults(func=_keyvault_dispatch, _passthrough=True)
+
+    # model-hub — repo-resident model catalog/convert/train entrypoint
+    model_hub = sub.add_parser("model-hub", help="repo-resident model loader")
+    model_hub.set_defaults(func=_model_hub_dispatch, _passthrough=True)
+
     # doctor — self-test: verify environment, deps, models, and PATH
     doctor = sub.add_parser("doctor", help="self-test: verify install health")
     doctor.set_defaults(func=_doctor_dispatch)
@@ -1460,9 +1494,71 @@ def _doctor_dispatch(args) -> int:
     return 0 if ok else 1
 
 
+def _forward_argv(args) -> list[str]:
+    argv = list(getattr(args, "_unknown_argv", []) or [])
+    return argv[1:] if argv[:1] == ["--"] else argv
+
+
+def _load_path_module(name: str, path: Path):
+    loader = importlib.machinery.SourceFileLoader(name, str(path))
+    spec = importlib.util.spec_from_loader(name, loader)
+    if spec is None:
+        raise RuntimeError(f"cannot create import spec for {path}")
+    mod = importlib.util.module_from_spec(spec)
+    sys.modules[name] = mod
+    loader.exec_module(mod)
+    return mod
+
+
+def _script_main_dispatch(script_path: Path, module_name: str, argv: list[str]) -> int:
+    mod = _load_path_module(module_name, script_path)
+    return mod.main(argv)
+
+
+def _module_main_dispatch(module_name: str, argv: list[str]) -> int:
+    mod = __import__(module_name)
+    return mod.main(argv)
+
+
+def _agent_os_dispatch(args) -> int:
+    return _module_main_dispatch("lgwks_agent_os", _forward_argv(args))
+
+
+def _auth_dispatch(args) -> int:
+    return _script_main_dispatch(ROOT / "tools" / "lgwks-auth", "lgwks_auth_tool", _forward_argv(args))
+
+
+def _akinator_dispatch(args) -> int:
+    return _script_main_dispatch(ROOT / "lgwks-akinator", "lgwks_akinator_tool", _forward_argv(args))
+
+
+def _run_dispatch(args) -> int:
+    return _module_main_dispatch("lgwks_run", _forward_argv(args))
+
+
+def _context_dispatch(args) -> int:
+    return _module_main_dispatch("lgwks_context", _forward_argv(args))
+
+
+def _foundation_dispatch(args) -> int:
+    return _module_main_dispatch("lgwks_foundation", _forward_argv(args))
+
+
+def _keyvault_dispatch(args) -> int:
+    return _module_main_dispatch("lgwks_keyvault", _forward_argv(args))
+
+
+def _model_hub_dispatch(args) -> int:
+    return _module_main_dispatch("lgwks_model_hub", _forward_argv(args))
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = build_parser()
-    args = parser.parse_args(argv)
+    args, unknown = parser.parse_known_args(argv)
+    if getattr(args, "_passthrough", False):
+        args._unknown_argv = unknown
+    elif unknown:
+        parser.error(f"unrecognized arguments: {' '.join(unknown)}")
     return args.func(args)
 
 

@@ -208,7 +208,9 @@ class TestManifest(unittest.TestCase):
         loader.exec_module(mod)
         live = man._collect_verbs()
         for expected in ("manifest", "extract", "convert", "solve", "x", "refine", "store",
-                         "jarvis crawl", "memory init", "project plan", "geo compile"):
+                         "jarvis crawl", "memory init", "project plan", "geo compile",
+                         "agent-os", "auth", "akinator", "run", "context", "foundation",
+                         "keyvault", "model-hub"):
             self.assertIn(expected, live, f"{expected!r} must appear in the live verb surface")
         m = man.build_manifest()
         manifest_names = {v["verb"] for v in m["verbs"]}
@@ -1007,9 +1009,8 @@ class TestHomeQuickHints(unittest.TestCase):
         shown = {name for name, _ in hints}
         # every shown verb must be a registered subparser
         self.assertTrue(shown.issubset(live), f"hints reference verbs not in parser: {shown - live}")
-        # //why: regression for the user-visible drift — `lgwks-akinator` is a separate binary
-        # and must NEVER appear in the quick block (it isn't in `lgwks --help`).
-        self.assertNotIn("akinator", shown)
+        # //why: quick hints must never reference a separate binary name; only live `lgwks` verbs.
+        self.assertTrue(all(not name.startswith("lgwks-") for name in shown))
 
     def test_hints_capped_at_six(self):
         import lgwks_home as home
@@ -1114,6 +1115,44 @@ class TestHomeQuickHints(unittest.TestCase):
             importlib.import_module("sys").stdout = real
         out = captured.getvalue()
         self.assertEqual(out, "", f"quick block should be empty when hints unavailable, got: {out!r}")
+
+
+class TestUnifiedCliPackaging(unittest.TestCase):
+    def _load_cli(self):
+        import importlib.util
+        from importlib.machinery import SourceFileLoader
+        root = Path(__file__).resolve().parent.parent
+        loader = SourceFileLoader("lgwks_cli_packaging", str(root / "lgwks"))
+        spec = importlib.util.spec_from_loader("lgwks_cli_packaging", loader)
+        mod = importlib.util.module_from_spec(spec)
+        import sys as _sys
+        _sys.modules["lgwks_cli_packaging"] = mod
+        loader.exec_module(mod)
+        return mod
+
+    def test_run_wrapper_forwards_flag_arguments(self):
+        mod = self._load_cli()
+        seen = {}
+
+        def fake_dispatch(args):
+            seen["argv"] = mod._forward_argv(args)
+            return 0
+
+        mod._run_dispatch = fake_dispatch
+        self.assertEqual(mod.main(["run", "--demo"]), 0)
+        self.assertEqual(seen["argv"], ["--demo"])
+
+    def test_akinator_wrapper_forwards_mixed_flag_arguments(self):
+        mod = self._load_cli()
+        seen = {}
+
+        def fake_dispatch(args):
+            seen["argv"] = mod._forward_argv(args)
+            return 0
+
+        mod._akinator_dispatch = fake_dispatch
+        self.assertEqual(mod.main(["akinator", "--demo", "--pick", "1"]), 0)
+        self.assertEqual(seen["argv"], ["--demo", "--pick", "1"])
 
 
 class TestExpressionParser(unittest.TestCase):
