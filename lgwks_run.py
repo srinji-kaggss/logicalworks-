@@ -142,11 +142,12 @@ class HostRate:
         self.gap = max(0.0, per_host_seconds)
         self._last: dict[str, float] = {}
 
-    def wait(self, host: str, clock=time.time, sleep=time.sleep) -> None:
-        if self.gap <= 0:
+    def wait(self, host: str, clock=time.time, sleep=time.sleep, gap: float | None = None) -> None:
+        effective_gap = max(0.0, self.gap if gap is None else gap)
+        if effective_gap <= 0:
             return
         now = clock()
-        due = self._last.get(host, 0.0) + self.gap
+        due = self._last.get(host, 0.0) + effective_gap
         if now < due:
             sleep(due - now)
         self._last[host] = clock()
@@ -193,22 +194,41 @@ def fetch(url: str, dry: bool, synthetic: dict[str, str] | None, frozen: tuple[s
         text = (synthetic or {}).get(url, "")
         return FetchResult(url, "ok" if text else "error", text=text,
                            error="" if text else "no synthetic page")
+    import lgwks_auth_runtime
+    import lgwks_search
     if not _allowed_hop(url, frozen):
         return FetchResult(url, "error", error="blocked: out-of-scope, non-http(s), or private/metadata host")
     # Manual redirect loop: redirects are NOT auto-followed; every hop is re-validated against the
     # frozen scope + IP denylist (C3 — defeats redirect SSRF / scope escape to 169.254.169.254 / localhost).
     current = url
     for _ in range(MAX_REDIRECTS + 1):
+        policy = lgwks_auth_runtime.auth_policy_for_url(current)
+        if policy["active"] and not policy["usable"]:
+            lgwks_auth_runtime.request_keyring(current, reason="active auth lock exists but keychain secret is missing")
+            return FetchResult(url, "error", error="auth lock active but no usable keychain secret")
         try:
             from curl_cffi import requests as cffi  # type: ignore
-            r = cffi.get(current, impersonate="chrome", timeout=20, allow_redirects=False)
+            r = cffi.get(
+                current,
+                impersonate="chrome",
+                timeout=20,
+                allow_redirects=False,
+                headers=policy["headers"] or None,
+            )
             if r.status_code in (301, 302, 303, 307, 308):
                 loc = urllib.parse.urljoin(current, r.headers.get("location", ""))
                 if not _allowed_hop(loc, frozen):
                     return FetchResult(url, "error", error="redirect off declared scope — refused")
                 current = loc
                 continue
+            if r.status_code in (401, 403):
+                lgwks_auth_runtime.note_auth_failure(current, r.status_code)
+                return FetchResult(url, "error", error=f"remote returned auth failure ({r.status_code})")
             body = r.text if len(r.content) <= MAX_BYTES else r.text[:MAX_BYTES]  # H4 byte cap
+            ok, diag = lgwks_search.source_validity(body, current)
+            if not ok:
+                lgwks_auth_runtime.request_keyring(current, reason=diag or "auth/access wall detected")
+                return FetchResult(url, "error", error=diag or "source validity rejected")
             return FetchResult(url, "ok", text=body)
         except ImportError:
             break
@@ -221,10 +241,20 @@ def fetch(url: str, dry: bool, synthetic: dict[str, str] | None, frozen: tuple[s
     opener = urllib.request.build_opener(_NoRedirect)
     current = url
     for _ in range(MAX_REDIRECTS + 1):
-        req = urllib.request.Request(current, headers={"User-Agent": "lgwks-jarvis-crawl/0.2 (+research)"})
+        policy = lgwks_auth_runtime.auth_policy_for_url(current)
+        if policy["active"] and not policy["usable"]:
+            lgwks_auth_runtime.request_keyring(current, reason="active auth lock exists but keychain secret is missing")
+            return FetchResult(url, "error", error="auth lock active but no usable keychain secret")
+        req_headers = {"User-Agent": "lgwks-jarvis-crawl/0.2 (+research)", **policy["headers"]}
+        req = urllib.request.Request(current, headers=req_headers)
         try:
             with opener.open(req, timeout=20) as resp:
-                return FetchResult(url, "ok", text=resp.read(MAX_BYTES).decode("utf-8", errors="replace"))
+                body = resp.read(MAX_BYTES).decode("utf-8", errors="replace")
+                ok, diag = lgwks_search.source_validity(body, current)
+                if not ok:
+                    lgwks_auth_runtime.request_keyring(current, reason=diag or "auth/access wall detected")
+                    return FetchResult(url, "error", error=diag or "source validity rejected")
+                return FetchResult(url, "ok", text=body)
         except urllib.error.HTTPError as exc:
             if exc.code in (301, 302, 303, 307, 308):
                 loc = urllib.parse.urljoin(current, exc.headers.get("Location", ""))
@@ -232,6 +262,8 @@ def fetch(url: str, dry: bool, synthetic: dict[str, str] | None, frozen: tuple[s
                     return FetchResult(url, "error", error="redirect off declared scope — refused")
                 current = loc
                 continue
+            if exc.code in (401, 403):
+                lgwks_auth_runtime.note_auth_failure(current, exc.code)
             return FetchResult(url, "error", error=_scrub(str(exc)))
         except Exception as exc:
             return FetchResult(url, "error", error=_scrub(str(exc)))
@@ -331,7 +363,9 @@ def execute_plan(plan: RunPlan, dry: bool = False, synthetic: dict[str, str] | N
             log.append("scope_drop", {"url": url}); continue
         if fetched >= plan.max_pages:
             log.append("budget_stop", {"max_pages": plan.max_pages}); break
-        rate.wait(_host(url))                                    # 3 — politeness
+        import lgwks_auth_runtime
+        auth_policy = lgwks_auth_runtime.auth_policy_for_url(url)
+        rate.wait(_host(url), gap=max(plan.per_host_seconds, auth_policy["min_interval_seconds"]))  # 3 — politeness
         res = fetch(url, dry, synthetic, plan.frozen_scope)      # 4 — provider seam (scope-bound)
         fetched += 1
         # L-1 (hacker F9): never log a full URL — a query string can carry a credential. Log host+path only.

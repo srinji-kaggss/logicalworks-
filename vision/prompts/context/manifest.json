@@ -1,0 +1,35 @@
+{
+  "schema": "logicalworks.prompt-context/1",
+  "entries": [
+    {
+      "name": "claims",
+      "kind": "relative",
+      "path": "../../claims",
+      "required": true
+    },
+    {
+      "name": "artifacts",
+      "kind": "relative",
+      "path": "../../artifacts",
+      "required": true
+    },
+    {
+      "name": "AGENTS.md",
+      "kind": "fleet-home",
+      "path": "AGENTS.md",
+      "required": false
+    },
+    {
+      "name": "governance",
+      "kind": "fleet-home",
+      "path": "governance",
+      "required": false
+    },
+    {
+      "name": "roles",
+      "kind": "fleet-home",
+      "path": ".agents/prompts",
+      "required": false
+    }
+  ]
+}

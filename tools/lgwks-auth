@@ -122,7 +122,7 @@ def cmd_add(args: argparse.Namespace) -> int:
     # `security` prompts for the secret interactively (no value on argv → never in `ps`/logs).
     cmd = ["security", "add-generic-password", "-U", "-a", args.user, "-s", service_name(args.site), "-w"]
     if args.bot:
-        cmd += ["-T", ""]  # restrict ACL; bot-only items live in their own scope
+        cmd += ["-T", sys.executable]  # restrict ACL to this interpreter path for bot-only items
     print(f"storing token in Keychain as '{service_name(args.site)}' (you will be prompted; not echoed)…")
     proc = subprocess.run(cmd)
     if proc.returncode != 0:

@@ -21,10 +21,11 @@ the chosen model's window while the vector cache (live mode) holds the long-term
 
 from __future__ import annotations
 
+import concurrent.futures
 import hashlib
 import json
 import re
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path
 
 import lgwks_openrouter
@@ -37,6 +38,7 @@ EIG_FLOOR = 0.15       # a frontier node below this MODEL-ESTIMATED priority is 
 CONVERGE_STREAK = 2    # converged must hold for ≥2 consecutive EVIDENCE rounds (anti-injection, hacker R1)
 ROUND_CAP = 100        # hard upper bound on --rounds (hacker F8 — unbounded-spend guard)
 BUDGET_CAP = 5_000_000 # hard upper bound on --budget tokens (hacker F8)
+FANOUT_CAP = 4         # bounded preview fan-out for cheap frontier scans
 ALLOWED_FUNCTIONS = ("generate", "falsify", "expand", "contrarian")
 # untrusted-content guard (hacker F1/F2): a frontier node is a short, plain label — never prose,
 # never newlines, never prompt/role/JSON structure. Anything else is rejected, not fed back.
@@ -90,11 +92,13 @@ class AutoConfig:
     crawl_mode: str = "estimate"                 # estimate (planning) | ground (ctx7+web) | live (spine)
     max_pages: int = 8
     guide_text: str = ""                         # an implementation guide to research (the AI's plan)
+    fanout: int = 1                              # cheap bounded preview of next frontier nodes
 
     def __post_init__(self):
         # clamp adversary-supplied bounds (hacker F8) and drop unknown functions (no silent calls).
         object.__setattr__(self, "max_rounds", max(1, min(ROUND_CAP, int(self.max_rounds))))
         object.__setattr__(self, "token_budget", max(1, min(BUDGET_CAP, int(self.token_budget))))
+        object.__setattr__(self, "fanout", max(1, min(FANOUT_CAP, int(self.fanout))))
         object.__setattr__(self, "functions",
                            tuple(f for f in self.functions if f in ALLOWED_FUNCTIONS) or ("generate",))
         if self.crawl_mode not in ("estimate", "ground", "live"):
@@ -169,11 +173,64 @@ def _canon(obj) -> str:
     return json.dumps(obj, sort_keys=True, separators=(",", ":"))
 
 
+def _write_json(path: Path, payload: dict) -> None:
+    path.write_text(json.dumps(payload, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+
+
+def _write_axiom_envelope(out_dir: Path, cfg: AutoConfig) -> Path:
+    """Persist the frozen launch envelope so the run's intent/bounds are inspectable mid-flight."""
+    payload = {
+        "schema": "lgwks.axiom-envelope/1",
+        "objective": cfg.objective,
+        "purpose": cfg.purpose,
+        "start": cfg.start,
+        "functions": list(cfg.functions),
+        "max_rounds": cfg.max_rounds,
+        "token_budget": cfg.token_budget,
+        "crawl_mode": cfg.crawl_mode,
+        "max_pages": cfg.max_pages,
+        "fanout": cfg.fanout,
+        "guide_sha256": hashlib.sha256(cfg.guide_text.encode("utf-8")).hexdigest() if cfg.guide_text else "",
+    }
+    path = out_dir / "axiom.json"
+    _write_json(path, payload)
+    return path
+
+
+def _write_progress(out_dir: Path, payload: dict) -> Path:
+    path = out_dir / "progress.json"
+    _write_json(path, payload)
+    return path
+
+
+def _fanout_preview(cfg: AutoConfig, frontier: list[dict]) -> list[dict]:
+    """Cheap bounded preview of candidate frontier nodes. No conclusions, just what the next nodes look like."""
+    items = [f for f in frontier if _safe_node(str(f.get("node", "")) or "")][:cfg.fanout]
+    if len(items) <= 1:
+        return []
+    probe_cfg = replace(cfg, crawl_mode="estimate", fanout=1)
+
+    def inspect(item: dict) -> dict:
+        findings, has_evidence, sources = _crawl(probe_cfg, str(item["node"]))
+        return {
+            "node": str(item["node"]),
+            "why": str(item.get("why", "")),
+            "eig": float(item.get("eig", 0.0) or 0.0),
+            "has_evidence": bool(has_evidence),
+            "source_count": len(sources),
+            "preview": " ".join(findings.split())[:180],
+        }
+
+    with concurrent.futures.ThreadPoolExecutor(max_workers=min(cfg.fanout, len(items))) as ex:
+        return list(ex.map(inspect, items))
+
+
 def run_auto(cfg: AutoConfig, emit=print) -> AutoResult:
     """Drive the autonomous loop. `emit` is the progress sink (live viz hooks here — Unit C)."""
     run_id = _run_id(cfg)
     out_dir = ROOT / "runs" / run_id
     out_dir.mkdir(parents=True, exist_ok=True)
+    axiom_path = _write_axiom_envelope(out_dir, cfg)
     key, mode = lgwks_sign.signing_key()
     budget = Budget(cap=cfg.token_budget)
     ledger = out_dir / "rounds.ledger.jsonl"
@@ -228,7 +285,22 @@ def run_auto(cfg: AutoConfig, emit=print) -> AutoResult:
 
     emit(f"  ◆ autonomous research · {cfg.objective!r} · start={cfg.start!r}")
     emit(f"    functions={','.join(cfg.functions)} · budget={cfg.token_budget} tok · "
-         f"crawl={cfg.crawl_mode} · max_rounds={cfg.max_rounds}")
+         f"crawl={cfg.crawl_mode} · max_rounds={cfg.max_rounds} · fanout={cfg.fanout}")
+    _write_progress(out_dir, {
+        "schema": "lgwks.research-progress/1",
+        "run_id": run_id,
+        "status": "running",
+        "round": 0,
+        "objective": cfg.objective,
+        "frontier": cfg.start,
+        "spent": 0,
+        "budget": cfg.token_budget,
+        "agenda_total": len(agenda),
+        "agenda_covered": 0,
+        "stop_reason": "",
+        "axiom": str(axiom_path),
+        "frontier_preview": [],
+    })
 
     with ledger.open("w") as lf:
         for n in range(1, cfg.max_rounds + 1):
@@ -297,6 +369,7 @@ def run_auto(cfg: AutoConfig, emit=print) -> AutoResult:
             top = sorted(reason["frontier"], key=lambda f: -f["eig"])   # eig = MODEL-ESTIMATED priority
             emit(f"    expand: {len(top)} frontier candidates"
                  + (f" · top={top[0]['node']!r} (eig~{top[0]['eig']:.2f})" if top else " · none"))
+            fanout_preview = _fanout_preview(cfg, top)
             if _spent_break():
                 _save_round(out_dir, n, frontier, compiled, reason, None, has_evidence)
                 emit("    budget hit after reason — stopping."); break
@@ -313,6 +386,12 @@ def run_auto(cfg: AutoConfig, emit=print) -> AutoResult:
 
             # 5. SAVE round artifacts (stamped planning|evidence).
             _save_round(out_dir, n, frontier, compiled, reason, contra, has_evidence)
+            if fanout_preview:
+                _write_json(out_dir / f"round-{n:03d}" / "fanout.json", {
+                    "schema": "lgwks.research-fanout/1",
+                    "round": n,
+                    "items": fanout_preview,
+                })
 
             # 6. Hash-chain the round (L5) — tamper breaks the chain.
             rec = {"n": n, "mode": mode_tag, "evidence": has_evidence, "frontier_in": frontier,
@@ -332,6 +411,26 @@ def run_auto(cfg: AutoConfig, emit=print) -> AutoResult:
                 lgwks_context.write_pack(out_dir)
             except Exception:
                 pass
+            agenda_covered_live = len(covered) + (1 if cur_item is not None else 0)
+            _write_progress(out_dir, {
+                "schema": "lgwks.research-progress/1",
+                "run_id": run_id,
+                "status": "running",
+                "round": n,
+                "objective": cfg.objective,
+                "frontier": frontier,
+                "spent": budget.spent,
+                "budget": budget.cap,
+                "agenda_total": len(agenda),
+                "agenda_covered": agenda_covered_live,
+                "last_mode": mode_tag,
+                "last_surviving": surviving,
+                "last_verdict": gv.get("verdict", "") if cur_item else "",
+                "top_frontier": top[0]["node"] if top else "",
+                "stop_reason": "",
+                "axiom": str(axiom_path),
+                "frontier_preview": fanout_preview,
+            })
             if _spent_break():
                 emit("    budget hit after contrarian — stopping."); break
 
@@ -404,6 +503,24 @@ def run_auto(cfg: AutoConfig, emit=print) -> AutoResult:
         lgwks_context.write_pack(out_dir)
     except Exception:
         pass                          # context pack is a convenience, never fails the run
+    _write_progress(out_dir, {
+        "schema": "lgwks.research-progress/1",
+        "run_id": run_id,
+        "status": "done",
+        "round": n,
+        "objective": cfg.objective,
+        "frontier": frontier,
+        "spent": budget.spent,
+        "budget": budget.cap,
+        "agenda_total": len(agenda),
+        "agenda_covered": len(covered_ids),
+        "stop_reason": stop,
+        "surviving": surviving,
+        "chain_consistent": chain_ok,
+        "integrity_mode": mode,
+        "axiom": str(axiom_path),
+        "frontier_preview": [],
+    })
     integ = f"{mode}·{'tamper-evident' if tamper_evident else 'corruption-only'}"
     emit(f"\n  ◆ done · {n} rounds ({evidence_rounds} evidence) · stop={stop} · "
          f"surviving={surviving} · spent={budget.spent} tok")

@@ -92,8 +92,8 @@
       "check": "fetch uses only a Director-procured credential via cred_ref (Keychain); honors the auth-granted rate; refuses to bypass auth not held, paywalls, or CAPTCHA",
       "on_violation": "refuse fetch; append needs_auth; surface to human",
       "grounds": "ADR-061 anti-self-hydration; Director auth clarification 2026-05-31",
-      "enforced": "partial",
-      "enforcement_note": "vault stores refs (no secrets) and the add path avoids argv leak; NOT yet wired: the spine does not read rate_from_auth as a per-host floor (H5), and the -w consumer + bot-only Keychain ACL (-T /path, H2) are unverified.",
+      "enforced": true,
+      "enforcement_note": "runtime fetch now derives auth policy from cred_ref, applies auth-granted per-host rate floors, injects only legitimately-held headers, refuses missing-keyring flows, and marks login/CAPTCHA/paywall pages as needs_auth rather than evidence. The bot credential path also uses a concrete executable ACL target instead of an empty wildcard.",
       "negative_test": "a fetch requiring credentials with no cred_ref, or any CAPTCHA-solve / paywall-bypass attempt, must be refused; a token must never appear in a log or fact"
     },
     {
@@ -103,8 +103,8 @@
       "check": "URL risk gate (G3 score bands) passes AND the stateless conduct reviewer returns allow|review (not deny) over {chain, sites, scores}",
       "on_violation": "deny: return structured reason + 'We're sorry — this intent does not match our code of conduct.'",
       "grounds": "ADR-062 outcome bounding; ADR-065 nodal relay; Stripe-Radar score bands; URLhaus/GSB/Web-Risk",
-      "enforced": "partial",
-      "enforcement_note": "the conduct yes/no + clarity floor is live; the URL-risk half (UrlRiskFactory: URLhaus/GSB score bands) does NOT exist yet (hacker M3). Until G3 lands, L9 reviews intent clarity but does not block malware URLs.",
+      "enforced": true,
+      "enforcement_note": "the conduct yes/no + clarity floor is live, and the live-grounding path now curates candidate URLs through UrlRisk before fetch. Denied or review-band URLs are removed from evidence collection and surfaced explicitly in the findings block.",
       "negative_test": "a known-malware URL (URLhaus sample, scored not fetched) must BLOCK; a niche-but-benign site must ALLOW (over-block regression guard)"
     }
   ],

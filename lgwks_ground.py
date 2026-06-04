@@ -20,8 +20,10 @@ EVIDENCE off this, never off a model claim.
 
 from __future__ import annotations
 
+import os
 import re
 import subprocess
+from pathlib import Path
 
 _CTX7_TIMEOUT = 60
 _MAX = 4000   # clip each source — grounding feeds a prompt; keep it window-cheap
@@ -72,6 +74,26 @@ def _quarantine(url: str, kind: str, body: str) -> str:
         return ""
 
 
+def _curate_results(results: list[dict]) -> tuple[list[dict], list[dict]]:
+    """Apply the G3 URL-risk gate before any source is fetched."""
+    try:
+        import lgwks_urlrisk
+    except Exception:
+        return results, []
+    feed_path = Path(os.environ["LGWKS_URLRISK_FEED"]) if os.environ.get("LGWKS_URLRISK_FEED") else None
+    history_path = Path(os.environ["LGWKS_URLRISK_HISTORY"]) if os.environ.get("LGWKS_URLRISK_HISTORY") else None
+    scored = lgwks_urlrisk.curate_scope(
+        [r.get("url", "") for r in results if r.get("url")],
+        feed_path=feed_path,
+        history_path=history_path,
+    )
+    by_url = {item.url: item for item in scored.scored}
+    kept = [r for r in results if by_url.get(r.get("url", "")).decision == "allow"]
+    denied = [{"url": item.url, "decision": item.decision, "reasons": item.reasons}
+              for item in scored.scored if item.decision != "allow"]
+    return kept, denied
+
+
 def _web(query: str, read_top: int = 3) -> tuple[str, list[str]]:
     """Web grounding via the multi-modal search sweep + source extraction (the eyes, finally wired).
     Best present search provider (googler→ddgr→DDG floor) → top results → read each source to text
@@ -83,9 +105,12 @@ def _web(query: str, read_top: int = 3) -> tuple[str, list[str]]:
     except Exception:
         return "", []
     sweep = lgwks_search.sweep(query)
-    results = sweep.get("results", [])
+    results, denied = _curate_results(sweep.get("results", []))
     if not results:
-        return "", []
+        note = ""
+        if denied:
+            note = "\n[url-risk blocked all candidate urls before fetch]"
+        return note, []
     blocks: list[str] = []
     cites: list[str] = []
     # read the top results in full (the source, not just the snippet — OpenAI-DR principle).
@@ -104,6 +129,11 @@ def _web(query: str, read_top: int = 3) -> tuple[str, list[str]]:
             blocks.append(f"[{','.join(r.get('arms', []))}] {r.get('title','')} — {r.get('snippet','')}\n{r['url']}")
             cites.append(r["url"])
     note = f"(arms_empty: {sweep.get('arms_empty')})" if sweep.get("arms_empty") else ""
+    if denied:
+        blocks.append("[url-risk gate]\n" + "\n".join(
+            f"{d['decision'].upper()} {d['url']} :: {', '.join(d['reasons'][:2]) or 'policy'}"
+            for d in denied[:10]
+        ))
     return ("\n\n".join(blocks) + (f"\n{note}" if note else ""), cites)
 
 

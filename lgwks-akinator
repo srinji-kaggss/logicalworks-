@@ -377,6 +377,8 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--crawl", default="estimate", choices=["estimate", "ground", "live"],
                    help="auto: estimate (planning) | ground (ctx7+web evidence) | live (gated spine)")
     p.add_argument("--guide", help="auto: path to an implementation guide to deep-research while you code")
+    p.add_argument("--fanout", type=int, default=1,
+                   help="auto: bounded cheap preview of top next-frontier nodes (1..4)")
     return p
 
 
@@ -406,7 +408,7 @@ def main(argv: list[str] | None = None) -> int:
             objective=args.objective, purpose=args.purpose, start=(args.start or args.objective),
             functions=tuple(f.strip() for f in args.functions.split(",") if f.strip()),
             max_rounds=args.rounds, token_budget=args.budget, crawl_mode=args.crawl,
-            max_pages=args.max_pages, guide_text=guide_text)
+            max_pages=args.max_pages, guide_text=guide_text, fanout=args.fanout)
         res = lgwks_research.run_auto(cfg)
         return 0 if res.ledger_intact else 1
     intent = {

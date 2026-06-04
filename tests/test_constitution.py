@@ -273,6 +273,38 @@ class TestUrlRiskCurator(unittest.TestCase):
         self.assertEqual(rec["runs"], 2)
 
 
+class TestAuthRuntime(unittest.TestCase):
+    def setUp(self):
+        import lgwks_auth_runtime as ar
+        self.ar = ar
+        self.tmp = Path(tempfile.mkdtemp())
+        self.ar.VAULT_DIR = self.tmp
+        self.ar.REGISTRY = self.tmp / "locks.jsonl"
+        self.ar.REGISTRY.write_text(json.dumps({
+            "event": "lock",
+            "site": "docs.example.com",
+            "cred_ref": "keychain://lgwks:docs.example.com",
+            "rate_from_auth": "10/min",
+        }) + "\n", encoding="utf-8")
+
+    def test_rate_floor_seconds(self):
+        self.assertEqual(self.ar.rate_floor_seconds("10/min"), 6.0)
+        self.assertEqual(self.ar.rate_floor_seconds("2/sec"), 0.5)
+        self.assertEqual(self.ar.rate_floor_seconds("bogus"), 0.0)
+
+    def test_auth_policy_for_url(self):
+        saved = self.ar._keychain_secret
+        self.ar._keychain_secret = lambda site: "Bearer token" if site == "docs.example.com" else None
+        try:
+            policy = self.ar.auth_policy_for_url("https://api.docs.example.com/v1")
+            self.assertTrue(policy["active"])
+            self.assertTrue(policy["usable"])
+            self.assertEqual(policy["min_interval_seconds"], 6.0)
+            self.assertIn("Authorization", policy["headers"])
+        finally:
+            self.ar._keychain_secret = saved
+
+
 class TestAutonomousLoop(unittest.TestCase):
     """#9 Unit A — the autonomous loop must fail closed when the Tongue is offline, and its per-round
     ledger must be hash-chained (tamper-evident under a key)."""
@@ -477,6 +509,42 @@ class TestGuideAgenda(unittest.TestCase):
              self.lt.reason_over_findings, self.lr._crawl, self.lr.ROOT) = saved
             os.environ.pop("LGWKS_NO_MODELS", None)
 
+    def test_progress_axiom_and_fanout_artifacts_written(self):
+        os.environ["LGWKS_NO_MODELS"] = "1"
+        saved = (self.lt.decompose_guide, self.lt.compile_hypotheses,
+                 self.lt.reason_over_findings, self.lt.contrarian, self.lr.ROOT)
+        self.lt.decompose_guide = lambda g, o="": {"summary": "react plan", "agenda": [
+            {"id": "Q1", "node": "alpha node", "question": "q1", "why": "w1"}]}
+        self.lt.compile_hypotheses = lambda obj, pur, context="": {
+            "meant": "m", "question": "q",
+            "hypotheses": [{"id": "H0", "role": "null", "claim": "c", "falsifier": "f", "builds_on": [], "keywords": []}]}
+        self.lt.reason_over_findings = lambda obj, h, f, context="": {
+            "think": "t", "falsifiers_hit": [], "surviving": ["H0"], "learnings": [],
+            "guide_verdict": {"claim": "alpha", "verdict": "unverified", "evidence": ""},
+            "frontier": [
+                {"node": "alpha child", "why": "w", "eig": 0.9},
+                {"node": "beta child", "why": "w", "eig": 0.8},
+            ],
+            "digest": "d", "converged": False}
+        self.lt.contrarian = lambda *a, **k: None
+        try:
+            with tempfile.TemporaryDirectory() as d:
+                self.lr.ROOT = Path(d)
+                cfg = self.lr.AutoConfig(objective="o", purpose="p", start="o", max_rounds=1,
+                                         guide_text="# plan\nx", fanout=2)
+                res = self.lr.run_auto(cfg, emit=lambda *_: None)
+                axiom = json.loads((Path(res.out_dir) / "axiom.json").read_text())
+                progress = json.loads((Path(res.out_dir) / "progress.json").read_text())
+                fanout = json.loads((Path(res.out_dir) / "round-001" / "fanout.json").read_text())
+                self.assertEqual(axiom["fanout"], 2)
+                self.assertEqual(progress["status"], "done")
+                self.assertEqual(progress["axiom"], str(Path(res.out_dir) / "axiom.json"))
+                self.assertEqual(len(fanout["items"]), 2)
+        finally:
+            (self.lt.decompose_guide, self.lt.compile_hypotheses,
+             self.lt.reason_over_findings, self.lt.contrarian, self.lr.ROOT) = saved
+            os.environ.pop("LGWKS_NO_MODELS", None)
+
     def _run_with_verdict(self, verdict, force_evidence):
         # helper: 1-question agenda, canned reason emits `verdict`; crawl gives evidence iff force_evidence.
         os.environ["LGWKS_NO_MODELS"] = "1"
@@ -572,6 +640,15 @@ class TestGroundingDepth(unittest.TestCase):
         self.assertEqual(self.gr._ctx7_docs("q"), ("", []))
         g = self.gr.ground("q", want_web=False)
         self.assertFalse(g["has_evidence"])                           # fail-soft → planning round
+
+    def test_urlrisk_filters_blocked_urls_before_fetch(self):
+        kept, denied = self.gr._curate_results([
+            {"url": "https://arxiv.org/abs/1", "title": "ok"},
+            {"url": "https://xn--paypl-secure.tk/wallet-unlock-verify", "title": "bad"},
+        ])
+        self.assertEqual([r["url"] for r in kept], ["https://arxiv.org/abs/1"])
+        self.assertEqual(len(denied), 1)
+        self.assertEqual(denied[0]["decision"], "block")
 
 
 if __name__ == "__main__":

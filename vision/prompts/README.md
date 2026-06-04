@@ -1,7 +1,8 @@
 # prompts/ — Logical Works agent startup layer
 
-Branch-independent, cross-repo context home for the fleet. Read by absolute path
-(`~/logicalworks-/vision/prompts/…`) so every agent worktree sees it regardless of its branch.
+Branch-independent, cross-repo context home for the fleet. The prompt bundle is still rooted at
+`vision/prompts/`, but context wiring is now manifest-driven rather than dependent on machine-local
+absolute symlinks.
 
 | Path | What |
 |------|------|
@@ -12,9 +13,14 @@ Branch-independent, cross-repo context home for the fleet. Read by absolute path
 
 ## context/ symlinks
 - `claims`, `artifacts` → **relative** in-repo (the `vision/claims/*.json` json layer + artifacts).
-- `governance`, `AGENTS.md`, `roles` → **absolute** into `~/sales-landing-page` (the role contract +
-  governance). Absolute symlinks are **machine-local** by design — they match the ecosystem's
-  `~/logicalworks-` / `~/sales-landing-page` single-dev path convention. On another machine, repoint
-  them (or switch to a manifest — see logicalworks-#1).
+- `governance`, `AGENTS.md`, `roles` → resolved from `vision/prompts/context/manifest.json` against
+  `LGWKS_FLEET_HOME` (default: `~/sales-landing-page`), then linked into `context/`.
+
+## bootstrap + verification
+- `python -m lgwks_agent_os bootstrap` refreshes `context/` from the manifest and writes
+  `agent_cards.json`.
+- `python -m lgwks_agent_os doctor` verifies startup prompt files, context links, role subagents,
+  and agent-card presence.
+- `.project/1/README.md` is the local workpad for Issue #1.
 
 Tracked by logicalworks-#1. Sticky enforcement (the `//why` and scope-creep hooks) is logicalworks-#2 / #3.
