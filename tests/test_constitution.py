@@ -342,6 +342,30 @@ class TestAutonomousLoop(unittest.TestCase):
             ledger.write_text("\n".join(lines) + "\n")
             self.assertFalse(self.lr._verify_ledger(ledger, key))
 
+    def test_research_focus_extracts_topic_from_lowercase_query(self):
+        self.assertEqual(
+            self.lr._research_focus("find me research on blue cross and current market positions"),
+            "Blue Cross",
+        )
+
+    def test_market_seed_agenda_is_generic_and_date_anchored(self):
+        agenda = self.lr._market_seed_agenda(
+            "find me research on OpenAI and current market positions",
+            "to understand whether I should invest in the company",
+        )
+        self.assertEqual(len(agenda), 6)
+        self.assertTrue(all("Canada Life" not in item["node"] for item in agenda))
+        self.assertTrue(all("OpenAI" in item["node"] for item in agenda))
+        self.assertTrue(any("2025" in item["node"] or "2026" in item["node"] for item in agenda))
+
+    def test_market_seed_agenda_triggers_for_plain_market_position_query(self):
+        agenda = self.lr._market_seed_agenda(
+            "find me research on Blue Cross and current market positions",
+            "to understand the competitive landscape",
+        )
+        self.assertEqual(len(agenda), 6)
+        self.assertTrue(all("Blue Cross" in item["node"] for item in agenda))
+
 
 class TestContextPack(unittest.TestCase):
     """#9 harness — LOD spawn-context: empty dir → empty; populated → tiers + state matrix + symlinks."""
@@ -535,10 +559,14 @@ class TestGuideAgenda(unittest.TestCase):
                 res = self.lr.run_auto(cfg, emit=lambda *_: None)
                 axiom = json.loads((Path(res.out_dir) / "axiom.json").read_text())
                 progress = json.loads((Path(res.out_dir) / "progress.json").read_text())
+                index = json.loads((Path(res.out_dir) / "INDEX.json").read_text())
                 fanout = json.loads((Path(res.out_dir) / "round-001" / "fanout.json").read_text())
                 self.assertEqual(axiom["fanout"], 2)
                 self.assertEqual(progress["status"], "done")
                 self.assertEqual(progress["axiom"], str(Path(res.out_dir) / "axiom.json"))
+                self.assertEqual(index["agenda_total"], 1)
+                self.assertEqual(index["agenda_covered"], 1)
+                self.assertEqual(index["rounds"][0]["frontier_in"], "alpha node")
                 self.assertEqual(len(fanout["items"]), 2)
         finally:
             (self.lt.decompose_guide, self.lt.compile_hypotheses,

@@ -26,6 +26,7 @@ import hashlib
 import json
 import re
 from dataclasses import dataclass, replace
+from datetime import date
 from pathlib import Path
 
 import lgwks_openrouter
@@ -42,7 +43,7 @@ FANOUT_CAP = 4         # bounded preview fan-out for cheap frontier scans
 ALLOWED_FUNCTIONS = ("generate", "falsify", "expand", "contrarian")
 # untrusted-content guard (hacker F1/F2): a frontier node is a short, plain label — never prose,
 # never newlines, never prompt/role/JSON structure. Anything else is rejected, not fed back.
-_NODE_OK = re.compile(r"^[A-Za-z0-9 ._:/\-]{1,80}$")
+_NODE_OK = re.compile(r"^[A-Za-z0-9 ._:/&(),'\-]{1,120}$")
 _INJECT_MARKERS = ("\n\n", "ignore ", "system:", "assistant:", "<", "{", "}", "instruction")
 
 
@@ -79,6 +80,91 @@ def _agenda_node(raw: str) -> str | None:
     s = re.sub(r"[^A-Za-z0-9 ._:/\-]", " ", raw or "")
     s = re.sub(r"\s+", " ", s).strip()[:70]
     return _safe_node(s)
+
+
+def _frontier_node(raw: str) -> str | None:
+    """Coerce a model frontier candidate into a searchable label instead of dropping it outright.
+    This is looser than the strict `_safe_node` check but still rejects instruction-shaped content."""
+    safe = _safe_node(raw)
+    if safe:
+        return safe
+    s = (raw or "").replace("&", " and ")
+    s = re.sub(r"[^A-Za-z0-9 ._:/&(),'\-]", " ", s)
+    s = re.sub(r"\s+", " ", s).strip()[:120]
+    return _safe_node(s)
+
+
+def _research_focus(objective: str) -> str:
+    # Prefer explicit title-cased spans when present.
+    parts = re.findall(r"[A-Z][A-Za-z0-9.+&-]*(?:\s+[A-Z][A-Za-z0-9.+&-]*){0,4}", objective)
+    for item in sorted(parts, key=len, reverse=True):
+        if item.lower() not in {"find", "research", "current market"}:
+            return item.strip()
+    # Fall back to the leading semantic phrase of a lowercase ask.
+    s = objective.strip()
+    s = re.sub(r"^\s*(find|show|give|bring|get|do|help)\s+(me\s+)?", "", s, flags=re.I)
+    s = re.sub(r"^\s*research\s+(on|about)\s+", "", s, flags=re.I)
+    s = re.sub(r"^\s*(find|show|give|get)\s+research\s+(on|about)\s+", "", s, flags=re.I)
+    s = re.split(r"\band\b\s+(current|latest|market|competitive|valuation|financial)\b", s, maxsplit=1, flags=re.I)[0]
+    s = re.sub(r"\s+", " ", s).strip(" ,.-")
+    words = s.split()[:5]
+    return " ".join(words).title() if words else objective[:80].strip()
+
+
+def _market_seed_agenda(objective: str, purpose: str) -> list[dict]:
+    """Heuristic agenda for market-position / investment-style research when no guide is provided.
+    This gives the loop real topic fronts instead of starting from the raw user sentence."""
+    text = f"{objective} {purpose}".lower()
+    if not any(tok in text for tok in (
+        "invest", "investment", "stock", "share price", "buy", "company",
+        "market position", "market positions", "competitor", "competitive", "valuation",
+        "industry position", "market share",
+    )):
+        return []
+    focus = _research_focus(objective)
+    year = date.today().year
+    annual_start = year - 2
+    annual_end = year - 1
+    quarter_start = year - 1
+    quarter_end = year
+    return [
+        {
+            "id": "Q1",
+            "node": f"{focus} annual report MD&A financial statements ({annual_start}-{annual_end})",
+            "question": f"What do the newest completed filings, annual reports, MD&A documents, or financing updates say about {focus}'s financial shape and strategic risks?",
+            "why": "Establish the freshest primary-source baseline before evaluating market position or investment merit.",
+        },
+        {
+            "id": "Q2",
+            "node": f"{focus} quarterly results earnings investor update ({quarter_start}-{quarter_end})",
+            "question": f"What has changed most recently for {focus} in earnings, investor updates, funding, or operating momentum?",
+            "why": "Annual views lag. Recent updates surface the current state.",
+        },
+        {
+            "id": "Q3",
+            "node": f"{focus} capital position debt liquidity dividends buybacks ({quarter_start}-{quarter_end})",
+            "question": f"What does the current capital structure for {focus} look like across leverage, liquidity, dividends, buybacks, or funding capacity?",
+            "why": "Investment posture depends on balance-sheet resilience, not just revenue momentum.",
+        },
+        {
+            "id": "Q4",
+            "node": f"{focus} market share competitors industry position ({quarter_start}-{quarter_end})",
+            "question": f"How is {focus} positioned versus peers on market share, analyst view, funding sentiment, or valuation?",
+            "why": "Investment posture depends on relative market position, not just internal filings.",
+        },
+        {
+            "id": "Q5",
+            "node": f"{focus} analyst coverage valuation price target sentiment ({quarter_start}-{quarter_end})",
+            "question": f"What do external analysts, valuation comparisons, or market sentiment suggest about expectations for {focus}?",
+            "why": "The market's current pricing logic often differs from management's own narrative.",
+        },
+        {
+            "id": "Q6",
+            "node": f"{focus} recent news strategy regulation partnerships ({quarter_start}-{quarter_end})",
+            "question": f"What recent news, partnerships, regulatory shifts, or strategy moves materially changed the story for {focus}?",
+            "why": "Market position can shift faster than formal filings update.",
+        },
+    ]
 
 
 @dataclass
@@ -203,6 +289,96 @@ def _write_progress(out_dir: Path, payload: dict) -> Path:
     return path
 
 
+def _write_index(out_dir: Path, cfg: AutoConfig, stop: str, surviving: list[str], spent: int,
+                 evidence_rounds: int, agenda: list[dict], covered: list[dict],
+                 contradicted: list[dict], report_path: Path) -> Path:
+    rounds = []
+    for rdir in sorted(out_dir.glob("round-*")):
+        reason_path = rdir / "reason.json"
+        sources_path = rdir / "sources.json"
+        if not reason_path.exists():
+            continue
+        reason = json.loads(reason_path.read_text())
+        sources = json.loads(sources_path.read_text()) if sources_path.exists() else []
+        rounds.append({
+            "round": rdir.name,
+            "frontier_in": reason.get("frontier_in", ""),
+            "mode": reason.get("mode", ""),
+            "surviving": reason.get("surviving", []),
+            "learnings": reason.get("learnings", []),
+            "top_frontier": reason.get("frontier", [{}])[0].get("node", "") if reason.get("frontier") else "",
+            "source_count": len(sources),
+            "sources": sources[:8],
+        })
+    payload = {
+        "schema": "lgwks.research-index/1",
+        "objective": cfg.objective,
+        "purpose": cfg.purpose,
+        "stop_reason": stop,
+        "spent": spent,
+        "evidence_rounds": evidence_rounds,
+        "surviving": surviving,
+        "report": str(report_path),
+        "agenda_total": len(agenda),
+        "agenda_covered": len({c["id"] for c in covered}),
+        "agenda": agenda,
+        "covered": covered,
+        "contradicted": contradicted,
+        "rounds": rounds,
+    }
+    path = out_dir / "INDEX.json"
+    _write_json(path, payload)
+    return path
+
+
+def _write_report(out_dir: Path, cfg: AutoConfig, stop: str, surviving: list[str], spent: int,
+                  evidence_rounds: int, contradicted: list[dict], plan_summary: str) -> Path:
+    parts = [
+        f"# Research Report — {cfg.objective}",
+        "",
+        "## Overview",
+        f"- Purpose: {cfg.purpose}",
+        f"- Stop reason: {stop}",
+        f"- Evidence rounds: {evidence_rounds}",
+        f"- Surviving hypotheses: {', '.join(surviving) or 'none'}",
+        f"- Tokens spent: {spent}",
+    ]
+    if plan_summary:
+        parts.append(f"- Guide verdicts: {plan_summary}")
+    if contradicted:
+        parts += ["", "## Contradicted Assumptions"]
+        for item in contradicted:
+            src = item.get("sources", [])
+            cite = src[0] if src else "UNRESOLVED"
+            parts.append(f"- [{item['id']}] {item['claim']} -> {item['evidence']} [{cite}]")
+    parts += ["", "## Rounds"]
+    for rdir in sorted(out_dir.glob("round-*")):
+        reason_path = rdir / "reason.json"
+        findings_path = rdir / "findings.md"
+        sources_path = rdir / "sources.json"
+        if not reason_path.exists():
+            continue
+        reason = json.loads(reason_path.read_text())
+        sources = json.loads(sources_path.read_text()) if sources_path.exists() else []
+        parts += [
+            "",
+            f"### {rdir.name}",
+            f"- Frontier: {reason.get('frontier_in', '') or (rdir / 'think.md').read_text().split('## frontier in\\n', 1)[-1].splitlines()[0] if (rdir / 'think.md').exists() else ''}",
+            f"- Mode: {reason.get('mode', '')}",
+            f"- Surviving: {', '.join(reason.get('surviving', [])) or 'none'}",
+            f"- Learnings: {'; '.join(reason.get('learnings', [])) or 'none'}",
+            f"- Next frontier: {reason.get('frontier', [{}])[0].get('node', '') if reason.get('frontier') else ''}",
+        ]
+        if sources:
+            parts.append(f"- Sources: {', '.join(sources[:4])}")
+        if findings_path.exists():
+            excerpt = " ".join(findings_path.read_text().split())[:500]
+            parts.append(f"- Findings excerpt: {excerpt}")
+    path = out_dir / "REPORT.md"
+    path.write_text("\n".join(parts) + "\n", encoding="utf-8")
+    return path
+
+
 def _fanout_preview(cfg: AutoConfig, frontier: list[dict]) -> list[dict]:
     """Cheap bounded preview of candidate frontier nodes. No conclusions, just what the next nodes look like."""
     items = [f for f in frontier if _safe_node(str(f.get("node", "")) or "")][:cfg.fanout]
@@ -263,6 +439,12 @@ def run_auto(cfg: AutoConfig, emit=print) -> AutoResult:
         else:
             emit("    guide decomposition unavailable (Tongue offline / malformed) — "
                  "falling back to seed-the-digest.")
+    else:
+        agenda = _market_seed_agenda(cfg.objective, cfg.purpose)
+        if agenda:
+            emit(f"    seeded market agenda: {len(agenda)} topic-specific questions")
+            (out_dir / "agenda.json").write_text(_canon({"summary": "investment-style seed agenda",
+                                                         "agenda": agenda}))
 
     agenda_i = 0
     if agenda:
@@ -371,7 +553,7 @@ def run_auto(cfg: AutoConfig, emit=print) -> AutoResult:
                  + (f" · top={top[0]['node']!r} (eig~{top[0]['eig']:.2f})" if top else " · none"))
             fanout_preview = _fanout_preview(cfg, top)
             if _spent_break():
-                _save_round(out_dir, n, frontier, compiled, reason, None, has_evidence)
+                _save_round(out_dir, n, frontier, compiled, reason, None, has_evidence, findings, sources)
                 emit("    budget hit after reason — stopping."); break
 
             # 4. CONTRARIAN (optional) — steelman the null / attack the leading H.
@@ -385,7 +567,7 @@ def run_auto(cfg: AutoConfig, emit=print) -> AutoResult:
                     emit(f"    contrarian: shifts_belief={contra['shifts_belief']} · {blurb}")
 
             # 5. SAVE round artifacts (stamped planning|evidence).
-            _save_round(out_dir, n, frontier, compiled, reason, contra, has_evidence)
+            _save_round(out_dir, n, frontier, compiled, reason, contra, has_evidence, findings, sources)
             if fanout_preview:
                 _write_json(out_dir / f"round-{n:03d}" / "fanout.json", {
                     "schema": "lgwks.research-fanout/1",
@@ -452,8 +634,14 @@ def run_auto(cfg: AutoConfig, emit=print) -> AutoResult:
                 frontier = cur_item["node"]; dry_streak = 0
             else:                                             # agenda drained → EIG-proposed expansion
                 cur_item = None
-                nxt = _safe_node(top[0]["node"]) if top else None   # reject injection-shaped frontier nodes
-                top_eig = top[0]["eig"] if top else 0.0
+                nxt = None
+                top_eig = 0.0
+                for cand in top:
+                    maybe = _frontier_node(str(cand.get("node", "")))
+                    if maybe and maybe != frontier:
+                        nxt = maybe
+                        top_eig = float(cand.get("eig", 0.0) or 0.0)
+                        break
                 if nxt is None or top_eig < EIG_FLOOR:
                     dry_streak += 1
                     if dry_streak >= DRY_LIMIT:
@@ -498,6 +686,10 @@ def run_auto(cfg: AutoConfig, emit=print) -> AutoResult:
         "tamper_evident": tamper_evident and chain_ok,
         "citations_verified": False, "eig_basis": "model-estimated-priority",
         "objective": cfg.objective, "start": cfg.start}))
+    report_path = _write_report(out_dir, cfg, stop, surviving, budget.spent, evidence_rounds,
+                                contradicted, plan_summary)
+    index_path = _write_index(out_dir, cfg, stop, surviving, budget.spent, evidence_rounds,
+                              agenda, covered, contradicted, report_path)
     try:
         import lgwks_context           # LOD spawn-context pack — next spawn reads decaying-resolution context
         lgwks_context.write_pack(out_dir)
@@ -525,11 +717,14 @@ def run_auto(cfg: AutoConfig, emit=print) -> AutoResult:
     emit(f"\n  ◆ done · {n} rounds ({evidence_rounds} evidence) · stop={stop} · "
          f"surviving={surviving} · spent={budget.spent} tok")
     emit(f"  ↳ artifacts: {out_dir}  (chain {'ok' if chain_ok else 'BROKEN'} · {integ})")
+    emit(f"  ↳ report: {report_path}")
+    emit(f"  ↳ index: {index_path}")
     return AutoResult(run_id, n, stop, surviving, budget.spent, str(out_dir), chain_ok, mode)
 
 
 def _save_round(out_dir: Path, n: int, frontier: str, compiled: dict, reason: dict,
-                contra: dict | None, has_evidence: bool) -> None:
+                contra: dict | None, has_evidence: bool, findings: str = "",
+                sources: list[str] | None = None) -> None:
     """Write one round's artifacts, stamped PLANNING|EVIDENCE so a reader can never mistake a
     no-evidence planning round for a research finding (epistemics CRITICAL)."""
     rdir = out_dir / f"round-{n:03d}"
@@ -537,13 +732,15 @@ def _save_round(out_dir: Path, n: int, frontier: str, compiled: dict, reason: di
     tag = "EVIDENCE" if has_evidence else "PLANNING (no document content — claims are plans, not findings)"
     (rdir / "hypotheses.json").write_text(_canon(compiled))
     (rdir / "reason.json").write_text(_canon({**reason, "mode": tag, "evidence": has_evidence,
-                                              "citations_verified": False}))
+                                              "citations_verified": False, "frontier_in": frontier}))
     body = (f"# Round {n} — {tag}\n\n## frontier in\n{frontier}\n\n## think\n{reason['think']}\n"
             + (f"\n## contrarian\n{contra['attack'] or contra['think']}\n" if contra else ""))
     (rdir / "think.md").write_text(body)
     if contra:
         (rdir / "contrarian.json").write_text(_canon(contra))
     (rdir / "digest.md").write_text(f"# Round {n} digest [{tag}]\n\n{reason['digest']}\n")
+    (rdir / "findings.md").write_text(findings or "", encoding="utf-8")
+    (rdir / "sources.json").write_text(_canon(sources or []), encoding="utf-8")
 
 
 def _verify_ledger(ledger: Path, key: bytes) -> bool:

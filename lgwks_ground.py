@@ -104,7 +104,7 @@ def _web(query: str, read_top: int = 3) -> tuple[str, list[str]]:
         import lgwks_extract
     except Exception:
         return "", []
-    sweep = lgwks_search.sweep(query)
+    sweep = lgwks_search.research_queue(query)
     results, denied = _curate_results(sweep.get("results", []))
     if not results:
         note = ""

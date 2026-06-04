@@ -53,6 +53,8 @@ _ANY_A = re.compile(r'<a\b[^>]*href="([^"]+)"[^>]*>(.*?)</a>', re.S)
 _MOJEEK_A = re.compile(r'<a[^>]*class="title"[^>]*href="([^"]+)"[^>]*>(.*?)</a>', re.S)  # mojeek result only
 _NAV_HOSTS = ("duckduckgo.com", "mojeek.com")       # self/nav links, never a result
 _TAG = re.compile(r"<[^>]+>")
+_YEAR = re.compile(r"\b(20\d{2})\b")
+_YEAR_SPAN = re.compile(r"\b(20\d{2})\s*[-–]\s*(20\d{2})\b")
 
 
 def _curl(url: str, data: str | None = None, timeout: int = 20, ua: str = "") -> str:
@@ -233,6 +235,46 @@ def _score(r: dict, terms: list[str]) -> int:
     return sum(1 for t in terms if t in hay)
 
 
+def temporal_queries(query: str) -> list[str]:
+    """Expand an explicit year-bounded query into newest→oldest subqueries.
+    Example: 'Canada Life annual reports and MD&A (2022-2024)' → 2024, 2023, 2022.
+    Empty list means no explicit temporal steering was requested."""
+    m = _YEAR_SPAN.search(query)
+    if not m:
+        return []
+    start, end = int(m.group(1)), int(m.group(2))
+    lo, hi = min(start, end), max(start, end)
+    if hi - lo > 25:
+        return []
+    stem = _YEAR_SPAN.sub("", query).replace("()", " ")
+    stem = re.sub(r"\s+", " ", stem).strip(" ,-")
+    return [f"{stem} {year}" for year in range(hi, lo - 1, -1)]
+
+
+def _result_year(result: dict) -> int:
+    bag = " ".join(str(result.get(k, "")) for k in ("title", "snippet", "url", "query"))
+    years = [int(y) for y in _YEAR.findall(bag)]
+    return max(years) if years else 0
+
+
+def order_results(query: str, results: list[dict]) -> list[dict]:
+    """Deterministic newest→oldest ordering when the query declares a time window.
+    Falls back to the existing relevance score when no explicit clock is present."""
+    terms = [t for t in re.findall(r"[a-z0-9]+", query.lower()) if len(t) > 2]
+    has_clock = bool(temporal_queries(query))
+    if has_clock:
+        return sorted(
+            results,
+            key=lambda r: (
+                int(r.get("query_year", 0) or 0),
+                _result_year(r),
+                _score(r, terms),
+            ),
+            reverse=True,
+        )
+    return sorted(results, key=lambda r: (_score(r, terms), _result_year(r)), reverse=True)
+
+
 # ── Google Scholar support ───────────────────────────────────────────────────
 
 def _parse_scholar(body: str, k: int, via: str) -> list[dict]:
@@ -336,6 +378,46 @@ def sweep(query: str, k_per_arm: int = 4) -> dict:
     return {"query": query, "results": list(found.values()),
             "arms_hit": arms_hit, "arms_empty": empty,
             "has_evidence": bool(found)}
+
+
+def research_queue(query: str, k_per_arm: int = 4) -> dict:
+    """A dogfood-oriented evidence queue: if the query declares a year window, search each year
+    newest→oldest and preserve that order in the merged queue. Otherwise fall back to one sweep."""
+    subqueries = temporal_queries(query)
+    if not subqueries:
+        pack = sweep(query, k_per_arm=k_per_arm)
+        pack["results"] = order_results(query, pack.get("results", []))
+        return pack
+
+    found: dict[str, dict] = {}
+    arms_hit: dict[str, int] = {}
+    arms_empty: set[str] = set()
+    for subq in subqueries:
+        year_match = _YEAR.search(subq)
+        qyear = int(year_match.group(1)) if year_match else 0
+        pack = sweep(subq, k_per_arm=k_per_arm)
+        for arm, count in (pack.get("arms_hit") or {}).items():
+            arms_hit[arm] = arms_hit.get(arm, 0) + int(count)
+        arms_empty.update(pack.get("arms_empty") or [])
+        for r in pack.get("results", []):
+            key = r["url"].split("?")[0].rstrip("/")
+            enriched = {**r, "query": subq, "query_year": qyear}
+            if key in found:
+                found[key]["arms"] = sorted(set(found[key].get("arms", []) + enriched.get("arms", [])))
+                if qyear > int(found[key].get("query_year", 0) or 0):
+                    found[key]["query"] = subq
+                    found[key]["query_year"] = qyear
+            else:
+                found[key] = enriched
+    ordered = order_results(query, list(found.values()))
+    return {
+        "query": query,
+        "results": ordered,
+        "arms_hit": arms_hit,
+        "arms_empty": sorted(arms_empty),
+        "has_evidence": bool(ordered),
+        "subqueries": subqueries,
+    }
 
 
 # ── source-validity verifier (gate-honesty #29) ──────────────────────────────────────────────

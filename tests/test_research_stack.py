@@ -49,6 +49,16 @@ class TestCapabilitiesAgnostic(unittest.TestCase):
 
 
 class TestSearchHygiene(unittest.TestCase):
+    def test_temporal_queries_expand_newest_to_oldest(self):
+        self.assertEqual(
+            search.temporal_queries("Canada Life annual reports and MD&A (2022-2024)"),
+            [
+                "Canada Life annual reports and MD&A 2024",
+                "Canada Life annual reports and MD&A 2023",
+                "Canada Life annual reports and MD&A 2022",
+            ],
+        )
+
     def test_dedup_and_relevance_rank(self):
         rows = [
             {"title": "unrelated postal api", "url": "https://x.com/api", "snippet": "post", "via": "open"},
@@ -128,6 +138,41 @@ class TestSearchHygiene(unittest.TestCase):
     def test_backoff_monotonic_and_capped(self):
         self.assertLess(search._backoff(0), search._backoff(2))
         self.assertLessEqual(search._backoff(10), 2.15, "backoff is capped (base 2.0 + max jitter 0.15), never unbounded")
+
+    def test_research_queue_honors_explicit_year_window_newest_first(self):
+        original = search.sweep
+        def fake_sweep(query, k_per_arm=4):
+            year = int(query.rsplit(" ", 1)[-1])
+            return {
+                "query": query,
+                "results": [{
+                    "title": f"Canada Life annual report {year}",
+                    "url": f"https://example.com/{year}",
+                    "snippet": f"MD&A for {year}",
+                    "via": "open",
+                    "arms": ["filings"],
+                }],
+                "arms_hit": {"filings": 1},
+                "arms_empty": [],
+                "has_evidence": True,
+            }
+        search.sweep = fake_sweep
+        try:
+            pack = search.research_queue("Canada Life annual reports and MD&A (2022-2024)")
+        finally:
+            search.sweep = original
+        self.assertEqual(
+            [r["query_year"] for r in pack["results"]],
+            [2024, 2023, 2022],
+        )
+        self.assertEqual(
+            pack["subqueries"],
+            [
+                "Canada Life annual reports and MD&A 2024",
+                "Canada Life annual reports and MD&A 2023",
+                "Canada Life annual reports and MD&A 2022",
+            ],
+        )
 
 
 class TestSteering(unittest.TestCase):
