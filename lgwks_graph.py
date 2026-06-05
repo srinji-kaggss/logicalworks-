@@ -688,3 +688,280 @@ def get_graph(repo: Path, force_refresh: bool = False) -> Graph:
     graph = extract_from_repo(repo, previous=previous)
     save_cached(repo, graph)
     return graph
+
+
+# ── query engine (lightweight Cypher-like) ─────────────────────────────────────
+# L0: graph usable from CLI without writing Python.
+# L1: syntax is a tiny subset — enough for 90% of graph questions, never a full parser.
+
+import re as _re
+
+_QUERY_TOKENS = _re.compile(
+    r"MATCH\s*\((\w+)\)"
+    r"(?:\s*-\[:?(\w+)?\]->\s*\((\w+)\))?"
+    r"(?:\s*WHERE\s+(.+?)(?=\s+RETURN|\s+LIMIT|$))?"
+    r"(?:\s*RETURN\s+(.+?)(?=\s+LIMIT|$))?"
+    r"(?:\s*LIMIT\s+(\d+))?",
+    _re.IGNORECASE,
+)
+
+
+class QueryResult:
+    """Structured result from a graph query."""
+    def __init__(self, columns: list[str], rows: list[dict[str, Any]]):
+        self.columns = columns
+        self.rows = rows
+
+    def to_dict(self) -> dict[str, Any]:
+        return {"columns": self.columns, "rows": self.rows}
+
+
+def _parse_where(clause: str) -> list[tuple[str, str, str]]:
+    """Parse simple WHERE conditions: a.op.b where op is =, !=, CONTAINS."""
+    # normalize
+    clause = clause.strip()
+    conditions: list[tuple[str, str, str]] = []
+    # split on AND (case-insensitive)
+    parts = _re.split(r"\s+AND\s+", clause, flags=_re.IGNORECASE)
+    for part in parts:
+        part = part.strip()
+        if not part:
+            continue
+        # op matching
+        m = _re.match(r"(\w+(?:\.\w+)?)\s*(=|!=|CONTAINS)\s*(.+)", part, _re.IGNORECASE)
+        if m:
+            field, op, val = m.group(1), m.group(2).upper(), m.group(3).strip()
+            # strip quotes from value
+            if (val.startswith("'") and val.endswith("'")) or (val.startswith('"') and val.endswith('"')):
+                val = val[1:-1]
+            conditions.append((field, op, val))
+    return conditions
+
+
+def _get_field(node: Node, field: str) -> Any:
+    """Resolve n.id, n.kind, n.defines, n.variables, n.pagerank, etc."""
+    if field in ("id", "kind", "sha256"):
+        return getattr(node, field)
+    if field == "imports":
+        return node.imports
+    if field == "defines":
+        return node.defines
+    if field == "variables":
+        return node.variables
+    if field == "calls":
+        return node.calls
+    if field == "config_keys":
+        return node.config_keys
+    return None
+
+
+def _eval_condition(node: Node, field: str, op: str, val: str) -> bool:
+    """Evaluate one WHERE condition against a node."""
+    actual = _get_field(node, field)
+    if op == "=":
+        return str(actual) == val
+    if op == "!=":
+        return str(actual) != val
+    if op == "CONTAINS":
+        if isinstance(actual, tuple):
+            return any(val in str(item) for item in actual)
+        if isinstance(actual, str):
+            return val in actual
+        if isinstance(actual, list):
+            return any(val in str(item) for item in actual)
+        return False
+    return False
+
+
+def execute_query(graph: Graph, query: str) -> QueryResult:
+    """Run a Cypher-like query against the graph.
+
+    Supported syntax:
+      MATCH (n)
+      MATCH (n)-[:import]->(m)
+      WHERE n.kind = 'file' AND n.defines CONTAINS 'foo'
+      RETURN n.id, n.pagerank
+      LIMIT 10
+    """
+    m = _QUERY_TOKENS.search(query)
+    if not m:
+        raise ValueError(f"query syntax not recognized: {query!r}")
+    node_var = m.group(1)
+    edge_kind = m.group(2)
+    node_b = m.group(3)
+    where_clause = m.group(4)
+    return_clause = m.group(5)
+    limit_str = m.group(6)
+
+    limit = int(limit_str) if limit_str else 1000
+
+    # Build result set
+    results: list[dict[str, Any]] = []
+    conditions = _parse_where(where_clause) if where_clause else []
+
+    if edge_kind:
+        # Edge query: iterate edges of the given kind
+        graph._ensure_index()
+        for e in graph.edges:
+            if edge_kind and e.kind.lower() != edge_kind.lower():
+                continue
+            src = graph.nodes.get(e.source)
+            dst = graph.nodes.get(e.target)
+            if not src or not dst:
+                continue
+            row: dict[str, Any] = {node_var: src.to_dict() if hasattr(src, "to_dict") else {"id": src.id}}
+            if node_b:
+                row[node_b] = dst.to_dict() if hasattr(dst, "to_dict") else {"id": dst.id}
+            # WHERE applies to source node by default
+            ok = all(_eval_condition(src, f.replace(node_var + ".", ""), op, val) for f, op, val in conditions)
+            if ok:
+                results.append(row)
+    else:
+        # Node query
+        for nid, node in graph.nodes.items():
+            ok = all(_eval_condition(node, f.replace(node_var + ".", ""), op, val) for f, op, val in conditions)
+            if ok:
+                results.append({node_var: {"id": node.id, "kind": node.kind, "defines": list(node.defines),
+                                            "variables": list(node.variables), "calls": list(node.calls),
+                                            "config_keys": list(node.config_keys)}})
+
+    # Truncate
+    results = results[:limit]
+
+    # RETURN projection
+    if return_clause:
+        cols = [c.strip() for c in return_clause.split(",")]
+        projected: list[dict[str, Any]] = []
+        for row in results:
+            proj: dict[str, Any] = {}
+            for col in cols:
+                col = col.strip()
+                if "." in col:
+                    var, field = col.split(".", 1)
+                    obj = row.get(var, {})
+                    if isinstance(obj, dict):
+                        proj[col] = obj.get(field)
+                    elif hasattr(obj, field):
+                        proj[col] = getattr(obj, field)
+                    else:
+                        proj[col] = None
+                else:
+                    proj[col] = row.get(col)
+            projected.append(proj)
+        return QueryResult(cols, projected)
+
+    return QueryResult([node_var], results)
+
+
+def graph_command(args) -> int:
+    """CLI entry point for `lgwks graph …` queries."""
+    import argparse
+    repo = Path(getattr(args, "repo", ".")).resolve()
+    if not (repo / ".git").exists():
+        print(f"[graph] not a git repo: {repo}", file=sys.stderr)
+        return 1
+
+    graph = get_graph(repo, force_refresh=getattr(args, "refresh", False))
+
+    # ── impact ─────────────────────────────────────────────────────────────────
+    if getattr(args, "impact", None):
+        files = [f.strip() for f in getattr(args, "files", "").split(",") if f.strip()]
+        radius = getattr(args, "radius", 3)
+        scores = graph.change_propagation_score(files, radius=radius)
+        payload = {
+            "schema": "lgwks.graph.impact.v0",
+            "repo": str(repo),
+            "changed": files,
+            "radius": radius,
+            "scores": {k: v for k, v in sorted(scores.items(), key=lambda x: -x[1])},
+        }
+        print(json.dumps(payload, indent=2))
+        return 0
+
+    # ── complexity ─────────────────────────────────────────────────────────────
+    if getattr(args, "complexity", False):
+        ci = graph.complexity_index()
+        pr = graph.pagerank()
+        bc = graph.betweenness_centrality()
+        payload = {
+            "schema": "lgwks.graph.complexity.v0",
+            "repo": str(repo),
+            "kgci": ci,
+            "top_pagerank": dict(sorted(pr.items(), key=lambda x: -x[1])[:10]),
+            "top_betweenness": dict(sorted(bc.items(), key=lambda x: -x[1])[:10]),
+        }
+        print(json.dumps(payload, indent=2))
+        return 0
+
+    # ── path ───────────────────────────────────────────────────────────────────
+    if getattr(args, "path", None):
+        src = getattr(args, "from_node", "")
+        dst = getattr(args, "to_node", "")
+        p = graph.shortest_path(src, dst)
+        payload = {
+            "schema": "lgwks.graph.path.v0",
+            "repo": str(repo),
+            "from": src,
+            "to": dst,
+            "path": p if p else [],
+            "reachable": p is not None,
+        }
+        print(json.dumps(payload, indent=2))
+        return 0
+
+    # ── neighbors ──────────────────────────────────────────────────────────────
+    if getattr(args, "neighbors", None):
+        nid = getattr(args, "of", "")
+        out_n = graph.neighbors(nid)
+        in_n = graph.predecessors(nid)
+        payload = {
+            "schema": "lgwks.graph.neighbors.v0",
+            "repo": str(repo),
+            "node": nid,
+            "outgoing": out_n,
+            "incoming": in_n,
+        }
+        print(json.dumps(payload, indent=2))
+        return 0
+
+    # ── query ────────────────────────────────────────────────────────────────────
+    q = getattr(args, "query", "")
+    if q:
+        try:
+            result = execute_query(graph, q)
+            payload = {
+                "schema": "lgwks.graph.query.v0",
+                "repo": str(repo),
+                "query": q,
+                "columns": result.columns,
+                "rows": result.rows,
+            }
+            print(json.dumps(payload, indent=2))
+        except ValueError as e:
+            print(f"[graph] query error: {e}", file=sys.stderr)
+            return 1
+        return 0
+
+    print("[graph] nothing to do — specify --impact, --complexity, --path, --neighbors, or --query", file=sys.stderr)
+    return 1
+
+
+def add_graph_parser(subparsers) -> None:
+    """Register `lgwks graph` subparser."""
+    p = subparsers.add_parser(
+        "graph",
+        help="query the codebase graph: impact, complexity, path, neighbors, Cypher-like queries",
+    )
+    p.add_argument("--repo", default=".", help="path to git repo (default: cwd)")
+    p.add_argument("--refresh", action="store_true", help="force re-extraction, ignore cache")
+    p.add_argument("--impact", action="store_true", help="run change-propagation impact analysis")
+    p.add_argument("--files", default="", help="comma-separated changed files for --impact")
+    p.add_argument("--radius", type=int, default=3, help="impact radius (default: 3)")
+    p.add_argument("--complexity", action="store_true", help="print KGCI complexity index")
+    p.add_argument("--path", action="store_true", help="shortest path between two files")
+    p.add_argument("--from", dest="from_node", default="", help="source node for --path")
+    p.add_argument("--to", dest="to_node", default="", help="target node for --path")
+    p.add_argument("--neighbors", action="store_true", help="list neighbors of a node")
+    p.add_argument("--of", default="", help="node id for --neighbors")
+    p.add_argument("--query", default="", help='Cypher-like query, e.g. \'MATCH (n) WHERE n.kind = "file" RETURN n.id\'')
+    p.set_defaults(func=graph_command)

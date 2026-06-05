@@ -1279,6 +1279,10 @@ def build_parser() -> argparse.ArgumentParser:
     import lgwks_entity_graph
     lgwks_entity_graph.add_parser(sub)
 
+    # graph — deterministic code-graph queries (impact, complexity, path, Cypher-like)
+    import lgwks_graph
+    lgwks_graph.add_graph_parser(sub)
+
     # substrate — deterministic crawl+vector substrate for local/web content
     import lgwks_substrate
     lgwks_substrate.add_parser(sub)

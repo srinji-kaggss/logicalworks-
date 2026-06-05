@@ -364,3 +364,100 @@ def test_v1_backward_compat():
     assert g.nodes["a.py"].variables == ()
     assert g.nodes["a.py"].calls == ()
     assert g.nodes["a.py"].config_keys == ()
+
+
+# ── Phase 3: query engine ──────────────────────────────────────────────────────
+
+def test_query_match_all_nodes():
+    """L0: MATCH (n) returns all nodes."""
+    graph = gmod.Graph()
+    graph.nodes["a.py"] = gmod.Node(id="a.py", kind="file")
+    graph.nodes["b.py"] = gmod.Node(id="b.py", kind="file")
+    result = gmod.execute_query(graph, "MATCH (n)")
+    assert len(result.rows) == 2
+
+
+def test_query_where_kind():
+    """L0: WHERE n.kind = 'file' filters correctly."""
+    graph = gmod.Graph()
+    graph.nodes["a.py"] = gmod.Node(id="a.py", kind="file")
+    graph.nodes["cfg.json"] = gmod.Node(id="cfg.json", kind="config")
+    result = gmod.execute_query(graph, "MATCH (n) WHERE n.kind = 'file' RETURN n.id")
+    assert len(result.rows) == 1
+    assert result.rows[0]["n.id"] == "a.py"
+
+
+def test_query_where_contains():
+    """L0: WHERE n.defines CONTAINS 'foo' finds nodes with the symbol."""
+    graph = gmod.Graph()
+    graph.nodes["a.py"] = gmod.Node(id="a.py", kind="file", defines=("def:foo", "def:bar"))
+    graph.nodes["b.py"] = gmod.Node(id="b.py", kind="file", defines=("def:baz",))
+    result = gmod.execute_query(graph, "MATCH (n) WHERE n.defines CONTAINS 'foo' RETURN n.id")
+    ids = [r["n.id"] for r in result.rows]
+    assert "a.py" in ids
+    assert "b.py" not in ids
+
+
+def test_query_limit():
+    """L0: LIMIT caps result count."""
+    graph = gmod.Graph()
+    for i in range(10):
+        graph.nodes[f"f{i}.py"] = gmod.Node(id=f"f{i}.py", kind="file")
+    result = gmod.execute_query(graph, "MATCH (n) LIMIT 3")
+    assert len(result.rows) == 3
+
+
+def test_query_edge_import():
+    """L0: MATCH (n)-[:import]->(m) returns import edges."""
+    graph = gmod.Graph()
+    graph.nodes["a.py"] = gmod.Node(id="a.py", kind="file")
+    graph.nodes["b.py"] = gmod.Node(id="b.py", kind="file")
+    graph.edges.append(gmod.Edge("a.py", "b.py", "import"))
+    result = gmod.execute_query(graph, "MATCH (n)-[:import]->(m)")
+    assert len(result.rows) == 1
+    assert result.rows[0]["n"]["id"] == "a.py"
+    assert result.rows[0]["m"]["id"] == "b.py"
+
+
+def test_query_invalid_syntax():
+    """L1: Unrecognized query raises ValueError."""
+    graph = gmod.Graph()
+    with pytest.raises(ValueError):
+        gmod.execute_query(graph, "SELECT * FROM nodes")
+
+
+def test_graph_command_complexity(tmp_path, capsys):
+    """L0: `graph --complexity` outputs KGCI payload."""
+    import argparse
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    (repo / "a.py").write_text("def foo(): pass\n", encoding="utf-8")
+    subprocess.run(["git", "init", "-q"], cwd=repo, check=True)
+    subprocess.run(["git", "add", "-A"], cwd=repo, check=True)
+    subprocess.run(["git", "commit", "-m", "init", "-q"], cwd=repo, check=True)
+    args = argparse.Namespace(repo=str(repo), refresh=True, impact=False, files="", radius=3,
+                               complexity=True, path=False, from_node="", to_node="",
+                               neighbors=False, of="", query="")
+    rc = gmod.graph_command(args)
+    assert rc == 0
+    captured = capsys.readouterr()
+    assert "kgci" in captured.out
+
+
+def test_graph_command_neighbors(tmp_path, capsys):
+    """L0: `graph --neighbors --of FILE` outputs neighbor lists."""
+    import argparse
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    (repo / "a.py").write_text("def foo(): pass\n", encoding="utf-8")
+    (repo / "b.py").write_text("import a\n", encoding="utf-8")
+    subprocess.run(["git", "init", "-q"], cwd=repo, check=True)
+    subprocess.run(["git", "add", "-A"], cwd=repo, check=True)
+    subprocess.run(["git", "commit", "-m", "init", "-q"], cwd=repo, check=True)
+    args = argparse.Namespace(repo=str(repo), refresh=True, impact=False, files="", radius=3,
+                               complexity=False, path=False, from_node="", to_node="",
+                               neighbors=True, of="b.py", query="")
+    rc = gmod.graph_command(args)
+    assert rc == 0
+    captured = capsys.readouterr()
+    assert "a.py" in captured.out
