@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import sqlite3
 import tempfile
 import unittest
 from pathlib import Path
@@ -151,6 +152,87 @@ class TestSubstrateBuild(unittest.TestCase):
         self.assertTrue(any(row["status"] == "auth_saved_but_failed" for row in frontier))
         # render should be called: initial + verification (2 times), NOT a second save_session
         self.assertEqual(call_count["render"], 2)
+
+
+class TestCrawlMap(unittest.TestCase):
+    def test_uses_last_status_per_url(self):
+        """frontier is append-only: _crawl_map must surface the final status per URL."""
+        frontier = [
+            {"url": "https://example.com/a", "depth": 0, "status": "retrying_gate", "discovered_by": "seed"},
+            {"url": "https://example.com/a", "depth": 0, "status": "auth_verified", "discovered_by": "seed", "links_found": 12},
+            {"url": "https://example.com/b", "depth": 1, "status": "ok", "links_found": 5, "discovered_by": "https://example.com/a"},
+        ]
+        cmap = substrate._crawl_map(frontier)
+        self.assertEqual(len(cmap["nodes"]), 2)
+        node_a = next(n for n in cmap["nodes"] if n["url"] == "https://example.com/a")
+        self.assertEqual(node_a["status"], "auth_verified")
+        self.assertEqual(node_a["links_found"], 12)
+        # seed is excluded from edges; only a→b
+        self.assertEqual(len(cmap["edges"]), 1)
+        self.assertEqual(cmap["edges"][0], {"from": "https://example.com/a", "to": "https://example.com/b"})
+
+
+class TestBuildIndexDb(unittest.TestCase):
+    def test_allows_duplicate_frontier_urls(self):
+        """frontier table is append-only; duplicate URLs must not crash with UNIQUE constraint."""
+        with tempfile.TemporaryDirectory() as td:
+            db_path = Path(td) / "test.db"
+            substrate._build_index_db(
+                db_path,
+                source_rows=[],
+                doc_rows=[],
+                chunk_rows=[],
+                fact_rows=[],
+                vector_rows=[],
+                frontier=[
+                    {"url": "https://example.com", "depth": 0, "status": "retrying_gate", "discovered_by": "seed"},
+                    {"url": "https://example.com", "depth": 0, "status": "auth_verified", "discovered_by": "seed"},
+                ],
+            )
+            conn = sqlite3.connect(db_path)
+            cur = conn.cursor()
+            cur.execute("SELECT status FROM frontier WHERE url = ? ORDER BY rowid", ("https://example.com",))
+            rows = cur.fetchall()
+            self.assertEqual(len(rows), 2)
+            self.assertEqual(rows[0][0], "retrying_gate")
+            self.assertEqual(rows[1][0], "auth_verified")
+            conn.close()
+
+
+class TestAuthHandoff(unittest.TestCase):
+    def test_uses_chromium_for_manual_auth(self):
+        """When auth handoff triggers, save_session must use chromium regardless of the
+        headless browser_engine, because headed WebKit on macOS often fails to surface
+        a visible window."""
+        captured = {}
+
+        def fake_render(url, **_kwargs):
+            return {"ok": True, "html": "<html>Sign in</html>", "text": "Sign in"}
+
+        def fake_html_to_markdown(html, url):
+            return "Sign in", "Sign in", []
+
+        def fake_save_session(url, **kwargs):
+            captured["kwargs"] = kwargs
+            return {"ok": True, "path": "/tmp/session.json", "reason": "session saved (manual)"}
+
+        with mock.patch.object(substrate.lgwks_browser, "_remote_allowed", return_value=True):
+            with mock.patch.object(substrate.lgwks_browser, "render", side_effect=fake_render):
+                with mock.patch.object(substrate.lgwks_browser, "save_session", side_effect=fake_save_session):
+                    with mock.patch.object(substrate, "html_to_markdown", side_effect=fake_html_to_markdown):
+                        substrate._crawl_site(
+                            "https://portal.example.com",
+                            max_pages=1,
+                            max_depth=0,
+                            browser_engine="webkit",
+                            login_if_needed=True,
+                            login_url="",
+                            success_selector=None,
+                            max_auto_bypass_attempts=0,
+                            max_auth_handoffs=2,
+                        )
+        self.assertEqual(captured["kwargs"]["browser_engine"], "chromium")
+        self.assertTrue(captured["kwargs"]["manual"])
 
 
 if __name__ == "__main__":

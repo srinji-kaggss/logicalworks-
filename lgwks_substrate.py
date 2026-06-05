@@ -194,10 +194,13 @@ def _crawl_site(
                 })
                 continue
             auth_target = login_url or clean
+            # //why: headed WebKit on macOS often fails to surface a visible window,
+            # making human auth completion impossible. Chromium headed is reliable.
+            manual_engine = "chromium"
             login_result = lgwks_browser.save_session(
                 auth_target,
                 success_selector=success_selector,
-                browser_engine=browser_engine,
+                browser_engine=manual_engine,
                 manual=True,
             )
             auth_handoffs += 1
@@ -337,23 +340,27 @@ def _emit_json(path: Path, payload: dict[str, Any]) -> None:
 
 
 def _crawl_map(frontier: list[dict[str, Any]]) -> dict[str, Any]:
-    nodes: list[dict[str, Any]] = []
+    # frontier is append-only: same URL may appear multiple times (retry → auth → ok).
+    # Take the LAST entry per URL as the canonical state; the graph/embed layer reconciles.
+    url_state: dict[str, dict[str, Any]] = {}
     edges: list[dict[str, Any]] = []
-    seen: set[str] = set()
+    seen_edges: set[tuple[str, str]] = set()
     for row in frontier:
         url = row.get("url", "")
-        if url and url not in seen:
-            seen.add(url)
-            nodes.append({
+        if url:
+            url_state[url] = {
                 "url": url,
                 "depth": row.get("depth", 0),
                 "status": row.get("status", ""),
                 "links_found": row.get("links_found", 0),
-            })
+            }
         parent = row.get("discovered_by", "")
         if parent and parent not in {"seed", "filesystem"} and url:
-            edges.append({"from": parent, "to": url})
-    return {"schema": "lgwks.substrate.crawl_map.v0", "nodes": nodes, "edges": edges}
+            key = (parent, url)
+            if key not in seen_edges:
+                seen_edges.add(key)
+                edges.append({"from": parent, "to": url})
+    return {"schema": "lgwks.substrate.crawl_map.v0", "nodes": list(url_state.values()), "edges": edges}
 
 
 def _json_cell(value: Any) -> str:
@@ -443,7 +450,7 @@ def _build_index_db(
             chunk_kind TEXT
         );
         CREATE TABLE frontier (
-            url TEXT PRIMARY KEY,
+            url TEXT,
             depth INTEGER,
             status TEXT,
             reason TEXT,

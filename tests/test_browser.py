@@ -6,6 +6,7 @@ import json
 import tempfile
 import unittest
 from pathlib import Path
+from unittest import mock
 
 import lgwks_browser as browser
 
@@ -162,6 +163,17 @@ class TestSessionForUrl(unittest.TestCase):
                 assert browser._session_for_url("https://example.com/") is None
             finally:
                 browser._SESSION_DIR = old
+
+    def test_returns_path_for_existing_session(self):
+        with tempfile.TemporaryDirectory() as td:
+            session_dir = Path(td)
+            # _session_for_url preserves dots in the host, so the file name includes them.
+            session_file = session_dir / "portal.fundserv.com.json"
+            session_file.write_text('{"cookies": []}', encoding="utf-8")
+            with mock.patch.object(browser, "_SESSION_DIR", session_dir):
+                result = browser._session_for_url("https://portal.fundserv.com/login")
+                self.assertIsNotNone(result)
+                self.assertEqual(result, session_dir / "portal.fundserv.com.json")
 
 
 if __name__ == "__main__":

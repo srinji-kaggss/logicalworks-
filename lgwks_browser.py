@@ -215,6 +215,11 @@ def save_session(
     session_path = _SESSION_DIR / f"{safe}.json"
     session_path.parent.mkdir(parents=True, exist_ok=True)
 
+    # //why: if a session was previously saved for this host, preload it so the user
+    # only needs to complete any remaining step (OTP/passkey), not re-authenticate from zero.
+    existing_session = _session_for_url(login_url)
+    preload_storage = str(existing_session) if existing_session else None
+
     # Auto-detect selectors if none provided
     # //why: these selectors must be UNLIKELY on a pre-auth page.
     # Generic tags like "main" or "article" or "#app" appear on login pages too,
@@ -236,11 +241,16 @@ def save_session(
             print(f"\n  Opening {browser_engine} browser for {login_url}", flush=True)
             print("  Complete login in that window, then return here and press Enter to continue...\n", flush=True)
             browser = engine.launch(**launch_kwargs)
-            ctx = browser.new_context(user_agent=_UA, locale="en-CA")
+            ctx = browser.new_context(
+                user_agent=_UA, locale="en-CA",
+                storage_state=preload_storage,
+            )
             page = ctx.new_page()
             page.goto(login_url, wait_until="domcontentloaded", timeout=60000)
 
             if manual:
+                if not preload_storage:
+                    print(f"  No saved session for {host} — log in to create one.", flush=True)
                 print("  Complete auth in the browser window, then press Enter here to continue...", flush=True)
                 print("  (auto-close in 5 minutes if no input)", flush=True)
                 ready, _, _ = select.select([sys.stdin], [], [], 300)
