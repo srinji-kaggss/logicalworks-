@@ -163,6 +163,190 @@ class Graph:
             "orphan_nodes": [n.id for n in self.nodes.values() if not self.neighbors(n.id) and not self.predecessors(n.id)],
         }
 
+    # ── complex graph math (deterministic, no AI/LLM) ─────────────────────
+
+    def pagerank(self, damping: float = 0.85, iterations: int = 30) -> dict[str, float]:
+        """PageRank over the import/call graph. High rank = central / depended-on module.
+        Pure iterative matrix-power method; no LLM involved."""
+        self._ensure_index()
+        n = len(self.nodes)
+        if n == 0:
+            return {}
+        node_ids = list(self.nodes.keys())
+        idx = {nid: i for i, nid in enumerate(node_ids)}
+        # Build adjacency matrix (outgoing normalized)
+        rank = [1.0 / n] * n
+        for _ in range(iterations):
+            new_rank = [0.0] * n
+            for i, nid in enumerate(node_ids):
+                out_edges = self._adj_out.get(nid, [])
+                share = rank[i] / max(1, len(out_edges)) if out_edges else 0.0
+                for e in out_edges:
+                    j = idx.get(e.target)
+                    if j is not None:
+                        new_rank[j] += share
+            # Damping + teleport
+            for j in range(n):
+                new_rank[j] = damping * new_rank[j] + (1.0 - damping) / n
+            rank = new_rank
+        return {node_ids[i]: round(rank[i], 6) for i in range(n)}
+
+    def betweenness_centrality(self, sample: int | None = None) -> dict[str, float]:
+        """Brandes-style betweenness centrality on directed graph.
+        Gatekeeper score: high = module lies on many shortest paths."""
+        self._ensure_index()
+        nids = list(self.nodes.keys())
+        n = len(nids)
+        if n == 0:
+            return {}
+        # Sample for large graphs to keep O(V*E) bounded
+        sources = nids if sample is None or sample >= n else nids[:sample]
+        cb: dict[str, float] = {nid: 0.0 for nid in nids}
+        for s in sources:
+            # BFS from s
+            stack: list[str] = []
+            preds: dict[str, list[str]] = {v: [] for v in nids}
+            sigma: dict[str, float] = {v: 0.0 for v in nids}
+            dist: dict[str, int] = {v: -1 for v in nids}
+            queue: list[str] = [s]
+            sigma[s] = 1.0
+            dist[s] = 0
+            while queue:
+                v = queue.pop(0)
+                stack.append(v)
+                for e in self._adj_out.get(v, []):
+                    w = e.target
+                    if w not in dist:
+                        continue
+                    if dist[w] < 0:
+                        queue.append(w)
+                        dist[w] = dist[v] + 1
+                    if dist[w] == dist[v] + 1:
+                        sigma[w] += sigma[v]
+                        preds[w].append(v)
+            # Accumulation
+            delta: dict[str, float] = {v: 0.0 for v in nids}
+            while stack:
+                w = stack.pop()
+                for v in preds[w]:
+                    delta[v] += (sigma[v] / sigma[w]) * (1.0 + delta[w])
+                if w != s:
+                    cb[w] += delta[w]
+        # Normalize
+        norm = max(1.0, (n - 1) * (n - 2)) if n > 2 else 1.0
+        return {k: round(v / norm, 6) for k, v in cb.items()}
+
+    def clustering_coefficient(self) -> dict[str, float]:
+        """Local directed clustering (cycle density around each node).
+        High = tightly coupled local cluster."""
+        self._ensure_index()
+        result: dict[str, float] = {}
+        for nid in self.nodes:
+            out_neighbors = {e.target for e in self._adj_out.get(nid, [])}
+            in_neighbors = {e.source for e in self._adj_in.get(nid, [])}
+            neighbors = out_neighbors | in_neighbors
+            if len(neighbors) < 2:
+                result[nid] = 0.0
+                continue
+            count = 0
+            possible = len(neighbors) * (len(neighbors) - 1)
+            for a in neighbors:
+                a_out = {e.target for e in self._adj_out.get(a, [])}
+                for b in neighbors:
+                    if a != b and b in a_out:
+                        count += 1
+            result[nid] = round(count / possible, 6) if possible else 0.0
+        return result
+
+    def graph_density(self) -> float:
+        """Ratio of actual edges to possible edges. High = tightly coupled monolith."""
+        n = len(self.nodes)
+        if n < 2:
+            return 0.0
+        possible = n * (n - 1)
+        return round(len(self.edges) / possible, 6)
+
+    def module_instability(self) -> dict[str, float]:
+        """Robert C. Martin Instability: I = Ce / (Ca + Ce).
+        Ce = afferent (incoming) edges; Ca = efferent (outgoing) edges.
+        I=0 = maximally stable (abstract); I=1 = maximally unstable (concrete/leaf)."""
+        self._ensure_index()
+        result: dict[str, float] = {}
+        for nid in self.nodes:
+            ca = len(self._adj_out.get(nid, []))
+            ce = len(self._adj_in.get(nid, []))
+            total = ca + ce
+            result[nid] = round(ce / total, 6) if total else 0.0
+        return result
+
+    def change_propagation_score(self, changed_files: list[str], radius: int = 3) -> dict[str, float]:
+        """Probability-weighted impact score for a set of changed files.
+        Combines distance decay + betweenness gatekeeping + PageRank of impacted nodes.
+        Pure math; no LLM."""
+        self._ensure_index()
+        pr = self.pagerank()
+        bc = self.betweenness_centrality()
+        scores: dict[str, float] = {}
+        for cf in changed_files:
+            if cf not in self.nodes:
+                continue
+            impacted = self.reverse_deps(cf, max_depth=radius)
+            for node in impacted:
+                # Distance matters: closer = higher score
+                path = self.shortest_path(node, cf, max_depth=radius)
+                distance = len(path) if path else radius
+                decay = 1.0 / (distance ** 1.5)
+                # Gatekeeper boost: if node is a bottleneck, changes propagate harder
+                gatekeeper = 1.0 + (bc.get(node, 0.0) * 5.0)
+                # Target importance: high-PageRank nodes are costlier to break
+                importance = 1.0 + (pr.get(node, 0.0) * 10.0)
+                score = decay * gatekeeper * importance
+                scores[node] = round(max(scores.get(node, 0.0), score), 6)
+        return scores
+
+    def complexity_index(self) -> dict[str, Any]:
+        """Composite Knowledge Graph Complexity Index (KGCI) — single number summarizing
+        graph health. Deterministic; no AI. Components:
+          - Density (coupling)
+          - Mean PageRank variance (inequality of importance)
+          - Mean clustering (local tightness)
+          - Orphan ratio (disconnected code)
+          - Mean instability (architectural balance)
+        """
+        n = len(self.nodes)
+        if n == 0:
+            return {"index": 0.0, "components": {}}
+        pr = self.pagerank()
+        cc = self.clustering_coefficient()
+        mi = self.module_instability()
+        density = self.graph_density()
+        orphans = [nid for nid in self.nodes if not self.neighbors(nid) and not self.predecessors(nid)]
+        pr_values = list(pr.values())
+        pr_variance = sum((v - (sum(pr_values) / n)) ** 2 for v in pr_values) / n if n else 0.0
+        cc_mean = sum(cc.values()) / n
+        mi_mean = sum(mi.values()) / n
+        orphan_ratio = len(orphans) / n
+        # Composite: higher = more complex / more attention needed
+        # Each component normalized to ~0..1 range
+        index = round(
+            (density * 0.25) +
+            (pr_variance * 100.0 * 0.25) +
+            (cc_mean * 0.20) +
+            (orphan_ratio * 0.15) +
+            (mi_mean * 0.15),
+            6,
+        )
+        return {
+            "index": index,
+            "components": {
+                "density": density,
+                "pr_variance": round(pr_variance, 6),
+                "clustering_mean": round(cc_mean, 6),
+                "orphan_ratio": round(orphan_ratio, 6),
+                "instability_mean": round(mi_mean, 6),
+            },
+        }
+
     # ── serialization ─────────────────────────────────────────────────────
 
     def to_dict(self) -> dict[str, Any]:

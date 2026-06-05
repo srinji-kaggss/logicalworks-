@@ -166,6 +166,74 @@ def test_cache_roundtrip(tmp_path):
     assert loaded.nodes["a.py"].id == "a.py"
 
 
+# ── complex graph math (deterministic) ─────────────────────────────────────────
+
+def _chain_graph() -> gmod.Graph:
+    """a -> b -> c, d -> b"""
+    g = gmod.Graph()
+    for n in ["a.py", "b.py", "c.py", "d.py"]:
+        g.nodes[n] = gmod.Node(id=n, kind="file")
+    g.edges = [
+        gmod.Edge("a.py", "b.py", "import"),
+        gmod.Edge("b.py", "c.py", "import"),
+        gmod.Edge("d.py", "b.py", "import"),
+    ]
+    return g
+
+
+def test_pagerank():
+    graph = _chain_graph()
+    pr = graph.pagerank()
+    # b.py is most central (2 incoming, 1 outgoing)
+    assert pr["b.py"] > pr["a.py"]
+    assert pr["b.py"] > pr["d.py"]
+
+
+def test_betweenness_centrality():
+    graph = _chain_graph()
+    bc = graph.betweenness_centrality()
+    # b.py lies on a->c and d->c paths
+    assert bc["b.py"] > bc["a.py"]
+    assert bc["b.py"] > bc["c.py"]
+
+
+def test_clustering_coefficient():
+    graph = _chain_graph()
+    cc = graph.clustering_coefficient()
+    # b.py neighbors = {a,c,d}; possible = 3*2=6; actual edges among them = 0
+    assert cc["b.py"] == 0.0
+
+
+def test_graph_density():
+    graph = _chain_graph()
+    # 4 nodes, possible = 4*3 = 12, actual = 3
+    assert graph.graph_density() == round(3 / 12, 6)
+
+
+def test_module_instability():
+    graph = _chain_graph()
+    mi = graph.module_instability()
+    # c.py: Ca=0, Ce=1 -> I=1.0 (maximally unstable, no outgoing)
+    assert mi["c.py"] == 1.0
+    # a.py: Ca=1, Ce=0 -> I=0.0 (maximally stable, no incoming)
+    assert mi["a.py"] == 0.0
+
+
+def test_change_propagation_score():
+    graph = _chain_graph()
+    scores = graph.change_propagation_score(["b.py"], radius=2)
+    # a.py and d.py depend on b.py; c.py is downstream
+    assert "a.py" in scores or "c.py" in scores
+
+
+def test_complexity_index():
+    graph = _chain_graph()
+    ci = graph.complexity_index()
+    assert "index" in ci
+    assert "components" in ci
+    assert 0.0 <= ci["index"] <= 1.0
+
+
 def test_cache_stale(tmp_path):
     repo = tmp_path / "repo"
     repo.mkdir()
