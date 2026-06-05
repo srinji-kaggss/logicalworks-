@@ -119,6 +119,7 @@ def _crawl_site(
     login_if_needed: bool,
     login_url: str,
     success_selector: str | None,
+    max_auto_bypass_attempts: int,
     max_auth_handoffs: int,
 ) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
     parsed = urllib.parse.urlparse(base_url)
@@ -127,6 +128,8 @@ def _crawl_site(
     queue: deque[tuple[str, int, str]] = deque([(base_url, 0, "seed")])
     docs: list[dict[str, Any]] = []
     frontier: list[dict[str, Any]] = []
+    blocker_retries_used = 0
+    url_attempts: Counter[str] = Counter()
     auth_handoffs = 0
     while queue and len(docs) < max_pages:
         url, depth, discovered_by = queue.popleft()
@@ -134,6 +137,8 @@ def _crawl_site(
         if not clean or clean in seen:
             continue
         seen.add(clean)
+        url_attempts[clean] += 1
+        attempt = url_attempts[clean]
         if not lgwks_browser._remote_allowed(clean):
             frontier.append({"url": clean, "depth": depth, "status": "blocked", "discovered_by": discovered_by})
             continue
@@ -141,11 +146,24 @@ def _crawl_site(
             clean,
             max_chars=120_000,
             use_session=True,
-            wait_ms=2500,
+            wait_ms=min(9000, 2500 + ((attempt - 1) * 2500)),
             with_html=True,
             browser_engine=browser_engine,
         )
         if not rendered.get("ok") or not rendered.get("html"):
+            if blocker_retries_used < max_auto_bypass_attempts:
+                blocker_retries_used += 1
+                seen.discard(clean)
+                frontier.append({
+                    "url": clean,
+                    "depth": depth,
+                    "status": "retrying_blocker",
+                    "reason": rendered.get("reason", ""),
+                    "attempt": attempt,
+                    "discovered_by": discovered_by,
+                })
+                queue.appendleft((clean, depth, discovered_by))
+                continue
             frontier.append({
                 "url": clean, "depth": depth, "status": "error", "reason": rendered.get("reason", ""),
                 "discovered_by": discovered_by,
@@ -153,6 +171,19 @@ def _crawl_site(
             continue
         markdown, title, links = html_to_markdown(rendered["html"], clean)
         if login_if_needed and _looks_like_login_gate(title or "", markdown or rendered.get("text", ""), clean):
+            if blocker_retries_used < max_auto_bypass_attempts:
+                blocker_retries_used += 1
+                seen.discard(clean)
+                frontier.append({
+                    "url": clean,
+                    "depth": depth,
+                    "status": "retrying_gate",
+                    "reason": "advanced bypass retry before human handoff",
+                    "attempt": attempt,
+                    "discovered_by": discovered_by,
+                })
+                queue.appendleft((clean, depth, discovered_by))
+                continue
             if auth_handoffs >= max_auth_handoffs:
                 frontier.append({
                     "url": clean,
@@ -605,6 +636,7 @@ def build_run(args: argparse.Namespace) -> dict[str, Any]:
             login_if_needed=args.login_if_needed,
             login_url=args.login_url,
             success_selector=args.success_selector,
+            max_auto_bypass_attempts=args.max_auto_bypass_attempts,
             max_auth_handoffs=args.max_auth_handoffs,
         )
     else:
@@ -764,6 +796,7 @@ def build_run(args: argparse.Namespace) -> dict[str, Any]:
             "login_if_needed": bool(args.login_if_needed),
             "login_url": args.login_url,
             "success_selector": args.success_selector or "",
+            "max_auto_bypass_attempts": args.max_auto_bypass_attempts,
             "max_auth_handoffs": args.max_auth_handoffs,
             "browser_engine": args.browser_engine,
         },
@@ -888,6 +921,8 @@ def add_parser(sub) -> None:
                          help="optional explicit login URL; defaults to the target URL when auth is detected")
         cmd.add_argument("--auth-selector", dest="success_selector", default=None,
                          help="optional CSS selector for auto-detected post-auth success on SPAs")
+        cmd.add_argument("--max-auto-bypass-attempts", type=int, default=3,
+                         help="global retry budget before escalating a blocker to the human browser handoff")
         cmd.add_argument("--max-auth-handoffs", type=int, default=3,
                          help="how many times the crawler may pause for human auth before giving up")
         cmd.add_argument("--webkit", dest="browser_engine", action="store_const", const="webkit",

@@ -58,6 +58,7 @@ class TestSubstrateBuild(unittest.TestCase):
                 "login_if_needed": True,
                 "login_url": "",
                 "success_selector": None,
+                "max_auto_bypass_attempts": 3,
                 "max_auth_handoffs": 3,
                 "browser_engine": "chromium",
             })()
@@ -105,10 +106,12 @@ class TestSubstrateBuild(unittest.TestCase):
                             login_if_needed=True,
                             login_url="",
                             success_selector=None,
+                            max_auto_bypass_attempts=1,
                             max_auth_handoffs=2,
                         )
         self.assertEqual(len(docs), 1)
         self.assertIn("$500", docs[0]["text"])
+        self.assertTrue(any(row["status"] == "retrying_gate" for row in frontier))
         self.assertTrue(any(row["status"] == "auth_prompted" for row in frontier))
 
 
