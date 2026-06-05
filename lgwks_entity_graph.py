@@ -22,6 +22,7 @@ import re
 import sqlite3
 import subprocess
 import sys
+from collections import deque
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
@@ -212,33 +213,117 @@ class GraphDB:
         self.commit()
         return count
 
-    def query_nodes(self, node_type: str | None = None) -> list[dict]:
+    def query_nodes(self, node_type: str | None = None, match: str | None = None, limit: int = 200) -> list[dict]:
+        sql = "SELECT node_id, type, label, attrs FROM nodes"
+        clauses: list[str] = []
+        params: list[Any] = []
         if node_type:
-            rows = self._conn.execute(
-                "SELECT node_id, type, label, attrs FROM nodes WHERE type = ?", (node_type,)
-            ).fetchall()
-        else:
-            rows = self._conn.execute(
-                "SELECT node_id, type, label, attrs FROM nodes"
-            ).fetchall()
+            clauses.append("type = ?")
+            params.append(node_type)
+        if match:
+            clauses.append("(lower(node_id) LIKE ? OR lower(label) LIKE ?)")
+            needle = f"%{match.lower()}%"
+            params.extend([needle, needle])
+        if clauses:
+            sql += " WHERE " + " AND ".join(clauses)
+        sql += " ORDER BY type, label LIMIT ?"
+        params.append(limit)
+        rows = self._conn.execute(sql, tuple(params)).fetchall()
         return [
             {"node_id": r[0], "type": r[1], "label": r[2], "attrs": json.loads(r[3])}
             for r in rows
         ]
 
-    def query_edges(self, rel: str | None = None) -> list[dict]:
+    def query_edges(self, rel: str | None = None, match: str | None = None, limit: int = 200) -> list[dict]:
+        sql = "SELECT edge_id, src, dst, rel, attrs FROM edges"
+        clauses: list[str] = []
+        params: list[Any] = []
         if rel:
-            rows = self._conn.execute(
-                "SELECT edge_id, src, dst, rel, attrs FROM edges WHERE rel = ?", (rel,)
-            ).fetchall()
-        else:
-            rows = self._conn.execute(
-                "SELECT edge_id, src, dst, rel, attrs FROM edges"
-            ).fetchall()
+            clauses.append("rel = ?")
+            params.append(rel)
+        if match:
+            clauses.append("(lower(src) LIKE ? OR lower(dst) LIKE ? OR lower(rel) LIKE ?)")
+            needle = f"%{match.lower()}%"
+            params.extend([needle, needle, needle])
+        if clauses:
+            sql += " WHERE " + " AND ".join(clauses)
+        sql += " ORDER BY rel, src, dst LIMIT ?"
+        params.append(limit)
+        rows = self._conn.execute(sql, tuple(params)).fetchall()
         return [
             {"edge_id": r[0], "src": r[1], "dst": r[2], "rel": r[3], "attrs": json.loads(r[4])}
             for r in rows
         ]
+
+    def resolve_nodes(self, query: str, limit: int = 20) -> list[dict]:
+        exact = self._conn.execute(
+            "SELECT node_id, type, label, attrs FROM nodes WHERE node_id = ? OR lower(label) = ? ORDER BY label LIMIT ?",
+            (query, query.lower(), limit),
+        ).fetchall()
+        rows = exact if exact else self._conn.execute(
+            "SELECT node_id, type, label, attrs FROM nodes WHERE lower(node_id) LIKE ? OR lower(label) LIKE ? ORDER BY label LIMIT ?",
+            (f"%{query.lower()}%", f"%{query.lower()}%", limit),
+        ).fetchall()
+        return [
+            {"node_id": r[0], "type": r[1], "label": r[2], "attrs": json.loads(r[3])}
+            for r in rows
+        ]
+
+    def neighbors(self, node_id: str, direction: str = "both", rel: str | None = None, limit: int = 100) -> list[dict]:
+        clauses: list[str] = []
+        params: list[Any] = []
+        if direction == "out":
+            clauses.append("src = ?")
+            params.append(node_id)
+        elif direction == "in":
+            clauses.append("dst = ?")
+            params.append(node_id)
+        else:
+            clauses.append("(src = ? OR dst = ?)")
+            params.extend([node_id, node_id])
+        if rel:
+            clauses.append("rel = ?")
+            params.append(rel)
+        sql = (
+            "SELECT edge_id, src, dst, rel, attrs FROM edges WHERE "
+            + " AND ".join(clauses)
+            + " ORDER BY rel, src, dst LIMIT ?"
+        )
+        params.append(limit)
+        rows = self._conn.execute(sql, tuple(params)).fetchall()
+        out: list[dict] = []
+        for r in rows:
+            src, dst = r[1], r[2]
+            out.append({
+                "edge_id": r[0],
+                "src": src,
+                "dst": dst,
+                "rel": r[3],
+                "attrs": json.loads(r[4]),
+                "neighbor": dst if src == node_id else src,
+                "direction": "out" if src == node_id else "in",
+            })
+        return out
+
+    def shortest_path(self, src: str, dst: str, max_depth: int = 6) -> list[dict]:
+        if src == dst:
+            return []
+        queue: deque[tuple[str, list[dict]]] = deque([(src, [])])
+        seen = {src}
+        while queue:
+            current, path = queue.popleft()
+            if len(path) >= max_depth:
+                continue
+            for edge in self.neighbors(current, direction="out", limit=500):
+                nxt = edge["neighbor"]
+                step = {"src": current, "dst": nxt, "rel": edge["rel"], "edge_id": edge["edge_id"]}
+                next_path = path + [step]
+                if nxt == dst:
+                    return next_path
+                if nxt not in seen:
+                    seen.add(nxt)
+                    queue.append((nxt, next_path))
+        return []
 
     def stats(self) -> dict[str, Any]:
         n = self._conn.execute("SELECT COUNT(*) FROM nodes").fetchone()[0]
@@ -391,9 +476,39 @@ def add_parser(subparsers: Any) -> None:
     p.add_argument("--export", metavar="PATH", help="export graph to JSON file")
     p.add_argument("--mermaid", metavar="PATH", help="export Mermaid diagram")
     p.add_argument("--stats", action="store_true", help="print graph statistics and exit")
+    p.add_argument("--nodes", action="store_true", help="list nodes")
+    p.add_argument("--edges", action="store_true", help="list edges")
+    p.add_argument("--node-type", metavar="TYPE", help="filter nodes by type")
+    p.add_argument("--rel", metavar="REL", help="filter edges or neighbors by relation")
+    p.add_argument("--match", metavar="TEXT", help="case-insensitive node/edge label match")
+    p.add_argument("--neighbors", metavar="NODE", help="show neighbors for a node id or label")
+    p.add_argument("--direction", choices=["out", "in", "both"], default="both",
+                   help="neighbor direction (default: both)")
+    p.add_argument("--path", nargs=2, metavar=("SRC", "DST"),
+                   help="shortest directed path between two node ids or labels")
+    p.add_argument("--max-depth", type=int, default=6, help="path search depth limit")
+    p.add_argument("--limit", type=int, default=200, help="row limit for query output")
+    p.add_argument("--json", action="store_true", help="emit structured query output")
     p.add_argument("--sync", action="store_true", help="git add + commit + push after ingest")
     p.add_argument("--sync-repo", metavar="PATH", default=".", help="repo root for git sync")
     p.set_defaults(func=_entity_graph_command)
+
+
+def _resolve_single_node(db: GraphDB, query: str) -> tuple[dict[str, Any] | None, str | None]:
+    matches = db.resolve_nodes(query)
+    if not matches:
+        return None, f"no node matches {query!r}"
+    if len(matches) > 1:
+        preview = ", ".join(m["node_id"] for m in matches[:5])
+        return None, f"ambiguous node {query!r}; candidates: {preview}"
+    return matches[0], None
+
+
+def _emit_query(args: Any, payload: dict[str, Any]) -> None:
+    if getattr(args, "json", False):
+        print(json.dumps(payload, indent=2))
+        return
+    print(json.dumps(payload, indent=2))
 
 
 def _entity_graph_command(args: Any) -> None:
@@ -431,6 +546,52 @@ def _entity_graph_command(args: Any) -> None:
         ingest_chunks(db, chunks, classifier_fn=classifier_fn)
         print(f"[entity-graph] ingested {len(chunks)} chunks → {db_path}", file=sys.stderr)
         print(json.dumps(db.stats(), indent=2))
+
+    if args.nodes:
+        _emit_query(args, {
+            "schema": "lgwks.entity-graph.nodes.v0",
+            "db": str(db_path),
+            "nodes": db.query_nodes(node_type=args.node_type, match=args.match, limit=args.limit),
+        })
+
+    if args.edges:
+        _emit_query(args, {
+            "schema": "lgwks.entity-graph.edges.v0",
+            "db": str(db_path),
+            "edges": db.query_edges(rel=args.rel, match=args.match, limit=args.limit),
+        })
+
+    if args.neighbors:
+        node, err = _resolve_single_node(db, args.neighbors)
+        if err:
+            print(f"[entity-graph] {err}", file=sys.stderr)
+            db.close()
+            sys.exit(1)
+        _emit_query(args, {
+            "schema": "lgwks.entity-graph.neighbors.v0",
+            "db": str(db_path),
+            "node": node,
+            "neighbors": db.neighbors(node["node_id"], direction=args.direction, rel=args.rel, limit=args.limit),
+        })
+
+    if args.path:
+        src, err = _resolve_single_node(db, args.path[0])
+        if err:
+            print(f"[entity-graph] {err}", file=sys.stderr)
+            db.close()
+            sys.exit(1)
+        dst, err = _resolve_single_node(db, args.path[1])
+        if err:
+            print(f"[entity-graph] {err}", file=sys.stderr)
+            db.close()
+            sys.exit(1)
+        _emit_query(args, {
+            "schema": "lgwks.entity-graph.path.v0",
+            "db": str(db_path),
+            "src": src,
+            "dst": dst,
+            "path": db.shortest_path(src["node_id"], dst["node_id"], max_depth=args.max_depth),
+        })
 
     if args.export:
         out = Path(args.export)

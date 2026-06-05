@@ -1277,6 +1277,10 @@ def build_parser() -> argparse.ArgumentParser:
     import lgwks_entity_graph
     lgwks_entity_graph.add_parser(sub)
 
+    # substrate — deterministic crawl+vector substrate for local/web content
+    import lgwks_substrate
+    lgwks_substrate.add_parser(sub)
+
     # refactor — deterministic AST-based code refactoring
     import lgwks_refactor
     lgwks_refactor.add_parser(sub)

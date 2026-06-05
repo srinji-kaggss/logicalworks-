@@ -197,6 +197,21 @@ _VERB_META: dict[str, dict] = {
         "args": {"path": "folder", "--project": "memory project", "--keywords": "repeatable focus terms", "--cycles": "0 = until stable"},
         "output": "project root vault + per-folder sub-vault manifests and embeddings", "tokens": "none",
     },
+    "substrate build": {
+        "intent": "build deterministic crawl+vector substrate from a url, file, folder, or repo",
+        "args": {"target": "url|file|folder|repo", "--project": "run label", "--source-type": "auto|url|file|folder|repo",
+                 "--max-pages": "web crawl bound", "--max-depth": "same-host bfs depth", "--max-files": "filesystem bound",
+                 "--embed-provider": "auto|ollama|deterministic", "--webkit": "use Safari-session WebKit fetch"},
+        "output": "run directory with chunks, STEM facts, vectors, frontier, graph db/json/mermaid, and manifest",
+        "tokens": "none (generation-free; local embedding only)",
+    },
+    "substrate query": {
+        "intent": "query substrate facts/chunks and optionally graph neighbors without AI",
+        "args": {"run": "substrate run dir", "--kind": "facts|chunks", "--match": "substring filter",
+                 "--neighbors": "node label/id", "--limit": "row cap"},
+        "output": "structured matching rows + optional graph neighbor expansion",
+        "tokens": "none",
+    },
     "batch": {
         "intent": "validate and run a typed command batch with one approval boundary",
         "args": {"--file": "path to lgwks-batch/1 JSON; omit to read stdin",
