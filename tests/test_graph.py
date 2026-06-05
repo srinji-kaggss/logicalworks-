@@ -5,6 +5,9 @@ Strategy: build graphs in memory, assert query correctness. No subprocess, no fi
 
 from __future__ import annotations
 
+import ast
+import subprocess
+
 import pytest
 
 import lgwks_graph as gmod
@@ -246,3 +249,118 @@ def test_cache_stale(tmp_path):
 def test_cache_missing(tmp_path):
     loaded = gmod.load_cached(tmp_path)
     assert loaded is None
+
+
+# ── Phase 2: entity expansion (variables, calls, config, incremental) ──────────
+
+def test_node_has_variables_and_calls():
+    """L0: Node dataclass carries variables and calls for cross-file analysis."""
+    n = gmod.Node(id="a.py", kind="file", variables=("MAX_RETRIES",), calls=("fetch", "parse"))
+    assert n.variables == ("MAX_RETRIES",)
+    assert n.calls == ("fetch", "parse")
+
+
+def test_walk_variables():
+    """L0: _walk_variables extracts module-level names from ast.Assign."""
+    source = "MAX_RETRIES = 5\nREPO_ROOT = '/tmp'\n\ndef foo():\n    local = 1\n"
+    tree = ast.parse(source)
+    vars_found = gmod._walk_variables(tree)
+    assert "MAX_RETRIES" in vars_found
+    assert "REPO_ROOT" in vars_found
+    assert "local" not in vars_found  # function-scoped, ignored
+
+
+def test_walk_calls():
+    """L0: _walk_calls collects function names from ast.Call nodes."""
+    source = "fetch(url)\nparse(data)\nobj.save()\n"
+    tree = ast.parse(source)
+    calls = gmod._walk_calls(tree)
+    assert "fetch" in calls
+    assert "parse" in calls
+    assert "save" in calls
+
+
+def test_config_keys_json(tmp_path):
+    """L0: _config_keys extracts top-level keys from JSON files."""
+    f = tmp_path / "config.json"
+    f.write_text('{"api_url": "https://x", "timeout": 30}', encoding="utf-8")
+    keys = gmod._config_keys(f)
+    assert sorted(keys) == ["api_url", "timeout"]
+
+
+def test_config_keys_env(tmp_path):
+    """L0: _config_keys extracts keys from .env files."""
+    f = tmp_path / ".env"
+    f.write_text("API_KEY=secret\n# comment\nDEBUG=1\n", encoding="utf-8")
+    keys = gmod._config_keys(f)
+    assert sorted(keys) == ["API_KEY", "DEBUG"]
+
+
+def test_extract_creates_call_edges(tmp_path):
+    """L0: extract_from_repo builds call edges when one file calls a function defined in another."""
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    (repo / "a.py").write_text("def helper(): pass\n", encoding="utf-8")
+    (repo / "b.py").write_text("import a\nhelper()\n", encoding="utf-8")
+    # git init so ls-files works
+    subprocess.run(["git", "init", "-q"], cwd=repo, check=True)
+    subprocess.run(["git", "add", "-A"], cwd=repo, check=True)
+    subprocess.run(["git", "commit", "-m", "init", "-q"], cwd=repo, check=True)
+    graph = gmod.extract_from_repo(repo)
+    call_edges = [e for e in graph.edges if e.kind == "call"]
+    assert any(e.source == "b.py" and e.target == "a.py" for e in call_edges)
+
+
+def test_extract_creates_config_node(tmp_path):
+    """L0: JSON config files become nodes with config_keys."""
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    (repo / "settings.json").write_text('{"host": "localhost", "port": 8080}', encoding="utf-8")
+    subprocess.run(["git", "init", "-q"], cwd=repo, check=True)
+    subprocess.run(["git", "add", "-A"], cwd=repo, check=True)
+    subprocess.run(["git", "commit", "-m", "init", "-q"], cwd=repo, check=True)
+    graph = gmod.extract_from_repo(repo)
+    assert "settings.json" in graph.nodes
+    assert graph.nodes["settings.json"].kind == "config"
+    assert set(graph.nodes["settings.json"].config_keys) == {"host", "port"}
+
+
+def test_incremental_skips_unchanged_files(tmp_path):
+    """L1: extract_from_repo with previous graph reuses nodes whose sha256 matches."""
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    (repo / "a.py").write_text("def foo(): pass\n", encoding="utf-8")
+    (repo / "b.py").write_text("def bar(): pass\n", encoding="utf-8")
+    subprocess.run(["git", "init", "-q"], cwd=repo, check=True)
+    subprocess.run(["git", "add", "-A"], cwd=repo, check=True)
+    subprocess.run(["git", "commit", "-m", "init", "-q"], cwd=repo, check=True)
+
+    first = gmod.extract_from_repo(repo)
+    # modify only b.py
+    (repo / "b.py").write_text("def bar(): pass\ndef baz(): pass\n", encoding="utf-8")
+    subprocess.run(["git", "add", "-A"], cwd=repo, check=True)
+    subprocess.run(["git", "commit", "-m", "change", "-q"], cwd=repo, check=True)
+
+    second = gmod.extract_from_repo(repo, previous=first)
+    # a.py should be the exact same node object (reused)
+    assert second.nodes["a.py"] is first.nodes["a.py"]
+    # b.py should be a new node (re-parsed)
+    assert second.nodes["b.py"] is not first.nodes["b.py"]
+    # b.py now has 2 defines
+    assert len(second.nodes["b.py"].defines) == 2
+
+
+def test_v1_backward_compat():
+    """L1: graphs saved with v1 schema still load (missing fields default to empty tuples)."""
+    v1_data = {
+        "schema": "lgwks.graph.v1",
+        "repo": "/tmp",
+        "nodes": {
+            "a.py": {"id": "a.py", "kind": "file", "imports": ["b"], "defines": ["def:main"], "sha256": "abc"}
+        },
+        "edges": [],
+    }
+    g = gmod.Graph.from_dict(v1_data)
+    assert g.nodes["a.py"].variables == ()
+    assert g.nodes["a.py"].calls == ()
+    assert g.nodes["a.py"].config_keys == ()

@@ -22,18 +22,21 @@ from pathlib import Path
 from typing import Any
 
 
-_SCHEMA = "lgwks.graph.v1"
+_SCHEMA = "lgwks.graph.v2"
 _CACHE_SCHEMA = "lgwks.graph.cache.v1"
 
 
 @dataclass(frozen=True)
 class Node:
-    """Immutable graph node representing a source file."""
-    id: str          # relative path, e.g. "src/main.py"
-    kind: str        # "file"
+    """Immutable graph node representing a source file or config artifact."""
+    id: str              # relative path, e.g. "src/main.py"
+    kind: str            # "file" | "config" | "data"
     imports: tuple[str, ...] = ()
     defines: tuple[str, ...] = ()
-    sha256: str = "" # content hash for cache invalidation
+    variables: tuple[str, ...] = ()   # module-level variable names
+    calls: tuple[str, ...] = ()       # function names called in this file
+    config_keys: tuple[str, ...] = () # keys for config/data nodes
+    sha256: str = ""     # content hash for cache invalidation
 
 
 @dataclass(frozen=True)
@@ -359,6 +362,9 @@ class Graph:
                     "kind": n.kind,
                     "imports": list(n.imports),
                     "defines": list(n.defines),
+                    "variables": list(n.variables),
+                    "calls": list(n.calls),
+                    "config_keys": list(n.config_keys),
                     "sha256": n.sha256,
                 }
                 for k, n in self.nodes.items()
@@ -371,8 +377,9 @@ class Graph:
 
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> "Graph":
-        if data.get("schema") not in (_SCHEMA, "lgwks.repo.graph.v0"):
-            raise ValueError(f"graph schema mismatch: expected {_SCHEMA}, got {data.get('schema')!r}")
+        schema = data.get("schema", "")
+        if schema not in (_SCHEMA, "lgwks.graph.v1", "lgwks.repo.graph.v0"):
+            raise ValueError(f"graph schema mismatch: expected {_SCHEMA}, got {schema!r}")
         g = cls(schema=_SCHEMA, repo=data.get("repo", ""))
         for k, n in data.get("nodes", {}).items():
             g.nodes[k] = Node(
@@ -380,6 +387,9 @@ class Graph:
                 kind=n.get("kind", "file"),
                 imports=tuple(n.get("imports", [])),
                 defines=tuple(n.get("defines", [])),
+                variables=tuple(n.get("variables", [])),
+                calls=tuple(n.get("calls", [])),
+                config_keys=tuple(n.get("config_keys", [])),
                 sha256=n.get("sha256", ""),
             )
         for e in data.get("edges", []):
@@ -409,8 +419,70 @@ def _file_hash(content: str) -> str:
     return hashlib.sha256(content.encode("utf-8")).hexdigest()[:16]
 
 
-def extract_from_repo(repo: Path) -> Graph:
-    """Build a Graph from a git repository using AST parsing."""
+def _walk_calls(node: ast.AST) -> set[str]:
+    """Recursively walk AST and collect simple function/method names called."""
+    calls: set[str] = set()
+    for child in ast.walk(node):
+        if isinstance(child, ast.Call):
+            if isinstance(child.func, ast.Name):
+                calls.add(child.func.id)
+            elif isinstance(child.func, ast.Attribute):
+                calls.add(child.func.attr)
+    return calls
+
+
+def _walk_variables(node: ast.AST) -> set[str]:
+    """Collect module-level variable names from ast.Assign targets."""
+    variables: set[str] = set()
+    for child in ast.iter_child_nodes(node):
+        if isinstance(child, ast.Assign):
+            for target in child.targets:
+                if isinstance(target, ast.Name):
+                    variables.add(target.id)
+        elif isinstance(child, ast.AnnAssign):
+            if isinstance(child.target, ast.Name):
+                variables.add(child.target.id)
+    return variables
+
+
+def _config_keys(path: Path) -> list[str]:
+    """Extract top-level keys from JSON or .env files."""
+    ext = path.suffix.lower()
+    try:
+        text = path.read_text(encoding="utf-8")
+    except Exception:
+        return []
+    if ext == ".json":
+        try:
+            data = json.loads(text)
+            if isinstance(data, dict):
+                return list(data.keys())
+        except Exception:
+            pass
+    elif ext in (".yaml", ".yml"):
+        try:
+            import yaml
+            data = yaml.safe_load(text)
+            if isinstance(data, dict):
+                return list(data.keys())
+        except Exception:
+            pass
+    elif path.name == ".env" or ext == ".env":
+        keys: list[str] = []
+        for line in text.splitlines():
+            line = line.strip()
+            if line and not line.startswith("#") and "=" in line:
+                keys.append(line.split("=", 1)[0].strip())
+        return keys
+    return []
+
+
+def extract_from_repo(repo: Path, previous: Graph | None = None) -> Graph:
+    """Build a Graph from a git repository using AST parsing.
+
+    If *previous* is provided, only re-parse files whose sha256 changed (incremental).
+    Deleted files are removed. Untracked files are ignored (git ls-files boundary).
+    """
     import subprocess
     g = Graph(repo=str(repo.resolve()))
 
@@ -423,16 +495,63 @@ def extract_from_repo(repo: Path) -> Graph:
         return g
 
     paths = [ln for ln in p.stdout.splitlines() if ln.strip()]
+
+    # ── incremental setup ──────────────────────────────────────────────────────
+    prev_nodes: dict[str, Node] = {}
+    prev_by_def: dict[str, str] = {}  # def:name -> file path
+    if previous:
+        prev_nodes = dict(previous.nodes)
+        for nid, n in prev_nodes.items():
+            for d in n.defines:
+                if d.startswith("def:"):
+                    prev_by_def[d[4:]] = nid
+
+    # First pass: gather all definitions for cross-file call-graph mapping
+    all_defs: dict[str, str] = {}  # def:name -> file path
+    file_data: list[tuple[str, Path, str, ast.AST | None, list[str], list[str], set[str], set[str], list[str]]] = []
+    # (rel_path, fpath, source, tree, imports, defines, variables, calls, config_keys)
+
     for rel_path in paths:
-        if not rel_path.endswith(".py"):
-            continue
         fpath = repo / rel_path
         if not fpath.exists():
             continue
+
+        # Config files: JSON, YAML, .env
+        if rel_path.endswith((".json", ".yaml", ".yml", ".env")) or fpath.name == ".env":
+            keys = _config_keys(fpath)
+            try:
+                source = fpath.read_text(encoding="utf-8")
+            except Exception:
+                continue
+            sha = _file_hash(source)
+            # incremental: reuse previous node if sha matches
+            if previous and rel_path in prev_nodes and prev_nodes[rel_path].sha256 == sha:
+                g.nodes[rel_path] = prev_nodes[rel_path]
+                continue
+            kind = "config" if rel_path.endswith((".json", ".yaml", ".yml")) else "data"
+            g.nodes[rel_path] = Node(
+                id=rel_path, kind=kind, config_keys=tuple(keys), sha256=sha,
+            )
+            continue
+
+        if not rel_path.endswith(".py"):
+            continue
+
         try:
             source = fpath.read_text(encoding="utf-8")
         except Exception:
             continue
+        sha = _file_hash(source)
+
+        # incremental: reuse previous node if sha matches
+        if previous and rel_path in prev_nodes and prev_nodes[rel_path].sha256 == sha:
+            g.nodes[rel_path] = prev_nodes[rel_path]
+            # still need its defs for call-graph mapping
+            for d in prev_nodes[rel_path].defines:
+                if d.startswith("def:"):
+                    all_defs[d[4:]] = rel_path
+            continue
+
         try:
             tree = ast.parse(source)
         except SyntaxError:
@@ -452,17 +571,23 @@ def extract_from_repo(repo: Path) -> Graph:
                 defines.append(f"class:{node.name}")
             elif isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
                 defines.append(f"def:{node.name}")
+                all_defs[node.name] = rel_path
 
+        variables = _walk_variables(tree)
+        calls = _walk_calls(tree)
+
+        file_data.append((rel_path, fpath, source, tree, imports, defines, variables, calls, []))
+
+    # Second pass: build nodes + import edges
+    for rel_path, fpath, source, tree, imports, defines, variables, calls, _ in file_data:
         # map imports to likely internal modules
         internal_imports: list[str] = []
         for imp in imports:
-            # if import looks like a local module, try to map to file
             parts = imp.split(".")
             candidate = "/".join(parts) + ".py"
             if (repo / candidate).exists():
                 internal_imports.append(candidate)
             else:
-                # try __init__.py
                 candidate_init = "/".join(parts) + "/__init__.py"
                 if (repo / candidate_init).exists():
                     internal_imports.append(candidate_init)
@@ -473,20 +598,47 @@ def extract_from_repo(repo: Path) -> Graph:
             kind="file",
             imports=tuple(imports),
             defines=tuple(defines),
+            variables=tuple(sorted(variables)),
+            calls=tuple(sorted(calls)),
             sha256=sha,
         )
 
         for imp in internal_imports:
             g.edges.append(Edge(source=rel_path, target=imp, kind="import", weight=1.0))
 
-        # call-graph edges: simple grep for function calls within same repo
-        # lightweight: scan for `func_name(` where func_name is defined elsewhere
-        for d in defines:
+    # Third pass: call-graph edges (cross-file)
+    # Build full def map from both fresh and cached nodes
+    full_def_map = dict(all_defs)
+    for nid, n in g.nodes.items():
+        if n.kind != "file":
+            continue
+        for d in n.defines:
             if d.startswith("def:"):
-                func = d[4:]
-                # naive: check if this file calls functions defined elsewhere
-                # real call-graph needs inter-procedural analysis; this is the seed
-                pass
+                full_def_map[d[4:]] = nid
+    for nid, n in (previous.nodes if previous else {}).items():
+        if nid not in g.nodes or g.nodes[nid].kind != "file":
+            continue
+        for d in n.defines:
+            if d.startswith("def:") and d[4:] not in full_def_map:
+                full_def_map[d[4:]] = nid
+
+    for rel_path, _, _, _, _, _, _, calls, _ in file_data:
+        for call_name in calls:
+            target_file = full_def_map.get(call_name)
+            if target_file and target_file != rel_path:
+                g.edges.append(Edge(source=rel_path, target=target_file, kind="call", weight=1.0))
+
+    # Copy cached call edges from unchanged files (they still hold)
+    if previous:
+        for e in previous.edges:
+            if e.kind == "call":
+                # If both source and target are unchanged, preserve the edge
+                src_unchanged = e.source in prev_nodes and e.source in g.nodes and g.nodes[e.source].sha256 == prev_nodes[e.source].sha256
+                dst_unchanged = e.target in prev_nodes and e.target in g.nodes and g.nodes[e.target].sha256 == prev_nodes[e.target].sha256
+                if src_unchanged and dst_unchanged:
+                    # avoid duplicates
+                    if not any(x.source == e.source and x.target == e.target and x.kind == "call" for x in g.edges):
+                        g.edges.append(e)
 
     return g
 
@@ -529,11 +681,10 @@ def save_cached(repo: Path, graph: Graph) -> None:
 
 
 def get_graph(repo: Path, force_refresh: bool = False) -> Graph:
-    """High-level: cached load or fresh extraction."""
+    """High-level: incremental load — only re-parse files whose sha256 changed."""
+    previous: Graph | None = None
     if not force_refresh:
-        cached = load_cached(repo)
-        if cached is not None:
-            return cached
-    graph = extract_from_repo(repo)
+        previous = load_cached(repo)
+    graph = extract_from_repo(repo, previous=previous)
     save_cached(repo, graph)
     return graph
