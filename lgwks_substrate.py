@@ -5,7 +5,8 @@ It produces replayable artifacts: clean chunks, STEM-lean facts, semantic vector
 
 Runtime principles:
   - generation-free execution path
-  - local embeddings only (Qwen Eye via Ollama or deterministic fallback if explicitly requested)
+  - local embeddings by default (Qwen Eye via Ollama or deterministic fallback if explicitly requested)
+  - optional remote multimodal embeddings as an explicit second provider
   - host-scoped browser sessions for authenticated sites
   - stable IDs + jsonl/sqlite artifacts for downstream AI or human query layers
 """
@@ -48,6 +49,7 @@ NARRATIVE_TERMS = {
     "think", "feel", "believe", "love", "maybe", "probably", "helpful", "great",
     "excellent", "frustrated", "opinion", "story", "journey", "marketing", "vision",
 }
+AUTH_GATE_RE = re.compile(r"\b(sign in|log in|login|password|multi-factor|two-factor|passkey|touch id|face id|verify identity|one-time code|magic link|otp)\b", re.I)
 
 
 def _sha(text: str) -> str:
@@ -90,13 +92,32 @@ def _read_text(path: Path, max_chars: int) -> str:
         return ""
 
 
-def _crawl_site(base_url: str, *, max_pages: int, max_depth: int, browser_engine: str) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
+def _looks_like_login_gate(title: str, text: str, url: str) -> bool:
+    low_url = url.lower()
+    if any(term in low_url for term in ("/login", "/signin", "signin", "authenticate", "sso")):
+        return True
+    sample = " ".join(part for part in (title, text[:2500]) if part).strip()
+    return bool(AUTH_GATE_RE.search(sample))
+
+
+def _crawl_site(
+    base_url: str,
+    *,
+    max_pages: int,
+    max_depth: int,
+    browser_engine: str,
+    login_if_needed: bool,
+    login_url: str,
+    success_selector: str | None,
+    max_auth_handoffs: int,
+) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
     parsed = urllib.parse.urlparse(base_url)
     base_host = parsed.hostname or ""
     seen: set[str] = set()
     queue: deque[tuple[str, int, str]] = deque([(base_url, 0, "seed")])
     docs: list[dict[str, Any]] = []
     frontier: list[dict[str, Any]] = []
+    auth_handoffs = 0
     while queue and len(docs) < max_pages:
         url, depth, discovered_by = queue.popleft()
         clean = urllib.parse.urldefrag(url)[0]
@@ -121,6 +142,35 @@ def _crawl_site(base_url: str, *, max_pages: int, max_depth: int, browser_engine
             })
             continue
         markdown, title, links = html_to_markdown(rendered["html"], clean)
+        if login_if_needed and _looks_like_login_gate(title or "", markdown or rendered.get("text", ""), clean):
+            if auth_handoffs >= max_auth_handoffs:
+                frontier.append({
+                    "url": clean,
+                    "depth": depth,
+                    "status": "auth_exhausted",
+                    "reason": "auth handoff limit reached",
+                    "discovered_by": discovered_by,
+                })
+                continue
+            auth_target = login_url or clean
+            login_result = lgwks_browser.save_session(
+                auth_target,
+                success_selector=success_selector,
+                browser_engine=browser_engine,
+                manual=True,
+            )
+            auth_handoffs += 1
+            frontier.append({
+                "url": clean,
+                "depth": depth,
+                "status": "auth_prompted" if login_result.get("ok") else "auth_failed",
+                "reason": login_result.get("reason", ""),
+                "discovered_by": discovered_by,
+            })
+            if login_result.get("ok"):
+                seen.discard(clean)
+                queue.appendleft((clean, depth, discovered_by))
+            continue
         docs.append({
             "source": clean,
             "title": title or clean,
@@ -245,6 +295,10 @@ def build_run(args: argparse.Namespace) -> dict[str, Any]:
             max_pages=args.max_pages,
             max_depth=args.max_depth,
             browser_engine=args.browser_engine,
+            login_if_needed=args.login_if_needed,
+            login_url=args.login_url,
+            success_selector=args.success_selector,
+            max_auth_handoffs=args.max_auth_handoffs,
         )
     else:
         docs = _build_from_local(Path(args.target).resolve(), source_kind, args.max_files, args.max_chars)
@@ -312,7 +366,12 @@ def build_run(args: argparse.Namespace) -> dict[str, Any]:
                     "chunk_kind": chunk_kind,
                 })
             vector_text = stem or piece
-            vector, provider, is_semantic = lgwks_run.embed(vector_text, embed_on=True, provider=args.embed_provider)
+            vector, provider, is_semantic = lgwks_run.embed(
+                vector_text,
+                embed_on=True,
+                provider=args.embed_provider,
+                model=(args.embed_model or None),
+            )
             provider_counts[provider] += 1
             if is_semantic:
                 semantic_vectors += 1
@@ -356,9 +415,17 @@ def build_run(args: argparse.Namespace) -> dict[str, Any]:
         "created_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
         "embedding": {
             "provider_requested": args.embed_provider,
+            "model_requested": args.embed_model,
             "providers_used": dict(provider_counts),
             "semantic_vectors": semantic_vectors,
             "total_vectors": len(vector_rows),
+        },
+        "auth": {
+            "login_if_needed": bool(args.login_if_needed),
+            "login_url": args.login_url,
+            "success_selector": args.success_selector or "",
+            "max_auth_handoffs": args.max_auth_handoffs,
+            "browser_engine": args.browser_engine,
         },
         "counts": {
             "sources": len(source_rows),
@@ -445,7 +512,17 @@ def add_parser(sub) -> None:
     build.add_argument("--chunk-words", type=int, default=320)
     build.add_argument("--chunk-overlap", type=int, default=48)
     build.add_argument("--fact-threshold", type=float, default=0.6)
-    build.add_argument("--embed-provider", choices=["auto", "ollama", "deterministic"], default="auto")
+    build.add_argument("--embed-provider", choices=["auto", "ollama", "openrouter-vl", "deterministic"], default="auto")
+    build.add_argument("--embed-model", default="",
+                       help="optional explicit embedding model id; openrouter-vl defaults to NVIDIA Nemotron Embed VL")
+    build.add_argument("--login-if-needed", action=argparse.BooleanOptionalAction, default=True,
+                       help="for URL targets, detect auth walls, open a browser, save session, then resume")
+    build.add_argument("--login-url", default="",
+                       help="optional explicit login URL; defaults to the target URL when auth is detected")
+    build.add_argument("--auth-selector", dest="success_selector", default=None,
+                       help="optional CSS selector for auto-detected post-auth success on SPAs")
+    build.add_argument("--max-auth-handoffs", type=int, default=3,
+                       help="how many times the crawler may pause for human auth before giving up")
     build.add_argument("--webkit", dest="browser_engine", action="store_const", const="webkit",
                        default="chromium", help="use WebKit for authenticated Safari-session sites")
     build.set_defaults(func=build_command)

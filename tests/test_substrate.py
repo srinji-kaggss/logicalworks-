@@ -22,6 +22,10 @@ class TestSubstrateScoring(unittest.TestCase):
         self.assertIn("Use form T2033.", out)
         self.assertNotIn("I think this is great.", out)
 
+    def test_looks_like_login_gate(self):
+        self.assertTrue(substrate._looks_like_login_gate("Sign in", "Use Touch ID to continue", "https://portal.example.com/login"))
+        self.assertFalse(substrate._looks_like_login_gate("Overview", "Transfer threshold is 500 dollars.", "https://portal.example.com/docs"))
+
 
 class TestSubstrateBuild(unittest.TestCase):
     def test_build_from_local_folder(self):
@@ -49,6 +53,11 @@ class TestSubstrateBuild(unittest.TestCase):
                 "chunk_overlap": 10,
                 "fact_threshold": 0.6,
                 "embed_provider": "auto",
+                "embed_model": "",
+                "login_if_needed": True,
+                "login_url": "",
+                "success_selector": None,
+                "max_auth_handoffs": 3,
                 "browser_engine": "chromium",
             })()
 
@@ -62,6 +71,41 @@ class TestSubstrateBuild(unittest.TestCase):
             vectors = [json.loads(line) for line in (run_dir / "vectors.jsonl").read_text(encoding="utf-8").splitlines()]
             self.assertTrue(all(row["provider"] == "ollama:qwen3-embedding:8b" for row in vectors))
             self.assertEqual(manifest["embedding"]["semantic_vectors"], len(vectors))
+
+    def test_crawl_site_prompts_auth_then_retries(self):
+        state = {"saved": False}
+
+        def fake_render(url, **_kwargs):
+            if not state["saved"]:
+                return {"ok": True, "html": "<html>Sign in with passkey</html>", "text": "Sign in with passkey"}
+            return {"ok": True, "html": "<html>Transfer threshold is $500.</html>", "text": "Transfer threshold is $500."}
+
+        def fake_html_to_markdown(html, url):
+            if "Sign in" in html:
+                return "Sign in with passkey", "Sign in", []
+            return "Transfer threshold is $500.", "Overview", []
+
+        def fake_save_session(_url, **_kwargs):
+            state["saved"] = True
+            return {"ok": True, "path": "/tmp/session.json", "reason": "session saved (manual)"}
+
+        with mock.patch.object(substrate.lgwks_browser, "_remote_allowed", return_value=True):
+            with mock.patch.object(substrate.lgwks_browser, "render", side_effect=fake_render):
+                with mock.patch.object(substrate.lgwks_browser, "save_session", side_effect=fake_save_session):
+                    with mock.patch.object(substrate, "html_to_markdown", side_effect=fake_html_to_markdown):
+                        docs, frontier = substrate._crawl_site(
+                            "https://portal.example.com",
+                            max_pages=1,
+                            max_depth=0,
+                            browser_engine="webkit",
+                            login_if_needed=True,
+                            login_url="",
+                            success_selector=None,
+                            max_auth_handoffs=2,
+                        )
+        self.assertEqual(len(docs), 1)
+        self.assertIn("$500", docs[0]["text"])
+        self.assertTrue(any(row["status"] == "auth_prompted" for row in frontier))
 
 
 if __name__ == "__main__":

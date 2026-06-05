@@ -280,10 +280,17 @@ def _deterministic_embed(text: str, dims: int = DIMS) -> list[float]:
     return [round(v / norm, 6) for v in vec]
 
 
-def embed(text: str, embed_on: bool, provider: str = "auto") -> tuple[list[float] | None, str, bool]:
+def embed(
+    text: str,
+    embed_on: bool,
+    provider: str = "auto",
+    *,
+    model: str | None = None,
+) -> tuple[list[float] | None, str, bool]:
     """Returns (vector, provider, is_semantic). is_semantic gates L2 edge labelling.
-    provider 'auto'|'ollama' tries the real Eye (qwen3-embedding via Ollama) → SEMANTIC vector,
-    MRL-sliced to DIMS for the hot graph. Falls back to deterministic feature-hash (NOT semantic)."""
+    provider 'auto'|'ollama' tries the real local Eye (qwen3-embedding via Ollama) → semantic vector.
+    provider 'openrouter-vl' tries the remote multimodal Eye through OpenRouter.
+    Falls back to deterministic feature-hash (NOT semantic)."""
     if not embed_on:
         return None, "none", False
     if provider in ("auto", "ollama"):
@@ -292,6 +299,12 @@ def embed(text: str, embed_on: bool, provider: str = "auto") -> tuple[list[float
         vec = lgwks_ollama.embed_one(text)
         if vec is not None:
             return lgwks_ollama.slice_mrl(vec, DIMS), f"ollama:{lgwks_ollama.EYE_MODEL}", True
+    if provider == "openrouter-vl":
+        import lgwks_openrouter_embed
+        chosen = model or lgwks_openrouter_embed.DEFAULT_MODEL
+        vec = lgwks_openrouter_embed.embed_one(text, model=chosen)
+        if vec is not None:
+            return vec, f"openrouter:{chosen}", True
     # MLX path lands here in the migration (also semantic). Until a real provider answers:
     return _deterministic_embed(text), "deterministic-feature-hash", False
 

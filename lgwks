@@ -1232,6 +1232,8 @@ def build_parser() -> argparse.ArgumentParser:
                        help="CSS selector for post-auth element (auto-detected for SPAs if omitted)")
     login.add_argument("--engine", choices=["chromium", "webkit"], default="chromium",
                        help="browser engine (webkit for Safari-cookie sites)")
+    login.add_argument("--manual", action="store_true",
+                       help="save session after you press Enter in the terminal; useful for OTP, passkeys, and magic links")
     login.set_defaults(func=_login_dispatch)
 
     # solve — "I have this mess/thought: prove what happened." The first real-world experience.
@@ -1394,6 +1396,7 @@ def _login_dispatch(args) -> int:
         target,
         success_selector=args.success_selector,
         browser_engine=args.engine,
+        manual=bool(getattr(args, "manual", False)),
     )
     print(_json.dumps(result, indent=2))
     return 0

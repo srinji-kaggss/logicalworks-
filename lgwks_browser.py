@@ -162,6 +162,7 @@ def save_session(
     *,
     success_selector: str | None = None,
     browser_engine: str = "chromium",
+    manual: bool = False,
 ) -> dict:
     """One-time: open a real browser so the USER logs in themselves, then persist their session.
     We never handle credentials — the human types them; we only save the resulting cookie/state.
@@ -169,7 +170,10 @@ def save_session(
     For SPAs (Angular, React, Vue) the URL may not change after login — use success_selector
     to wait for a post-auth DOM element. If omitted, auto-detects common patterns.
 
-    Returns {ok, path, reason}. Requires a headed run (a visible window)."""
+    Returns {ok, path, reason}. Requires a headed run (a visible window).
+
+    manual=True skips DOM/URL success detection and lets the user complete OTP/passkey/magic-link
+    flows in the visible browser, then press Enter in the terminal to persist the session."""
     ok, why = available()
     if not ok:
         return {"ok": False, "reason": why}
@@ -204,6 +208,13 @@ def save_session(
             ctx = browser.new_context(user_agent=_UA, locale="en-CA")
             page = ctx.new_page()
             page.goto(login_url, wait_until="domcontentloaded", timeout=60000)
+
+            if manual:
+                print("  Complete auth in the browser window, then press Enter here to continue...", flush=True)
+                input()
+                ctx.storage_state(path=str(session_path))
+                browser.close()
+                return {"ok": True, "path": str(session_path), "reason": "session saved (manual)"}
 
             # SPA-aware auth detection: wait for a post-auth DOM signal
             selector = success_selector
