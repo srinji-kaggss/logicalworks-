@@ -17,7 +17,9 @@ from __future__ import annotations
 
 import re
 import ipaddress
+import select
 import socket
+import sys
 import urllib.parse
 from pathlib import Path
 
@@ -28,15 +30,32 @@ _UA = ("Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 "
        "(KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36")
 _SESSION_DIR = Path.home() / ".config" / "lgwks" / "sessions"
 _SESSION = Path.home() / ".config" / "lgwks" / "linkedin-session.json"  # legacy location
-_INSTALL = "pipx install playwright && playwright install chromium"
+_INSTALL = "pipx install playwright && playwright install chromium webkit"
 
 
-def available() -> tuple[bool, str]:
-    """Is a real browser usable? (pymod + installed Chromium). Returns (ok, reason-or-install-hint)."""
+def _browser_path(engine: str) -> Path | None:
+    """Return the expected browser executable path, or None if not found."""
+    try:
+        from playwright.sync_api import sync_playwright
+        with sync_playwright() as p:
+            browser_type = p.webkit if engine == "webkit" else p.chromium
+            executable = browser_type.executable_path
+            if executable and Path(executable).exists():
+                return Path(executable)
+    except Exception:
+        pass
+    return None
+
+
+def available(engine: str = "webkit") -> tuple[bool, str]:
+    """Is a real browser usable? (pymod + installed browser binary).
+    Returns (ok, reason-or-install-hint)."""
     try:
         from playwright.sync_api import sync_playwright  # noqa: F401
     except Exception:
         return False, f"playwright not installed — {_INSTALL}"
+    if _browser_path(engine) is None:
+        return False, f"{engine} browser not installed — run: playwright install {engine}"
     return True, "ready"
 
 
@@ -109,17 +128,18 @@ def _session_for_url(url: str) -> Path | None:
 
 def render(url: str, max_chars: int = 8000, *, use_session: bool = False,
            wait_ms: int = 1500, with_html: bool = False,
-           browser_engine: str = "chromium") -> dict:
+           browser_engine: str = "webkit") -> dict:
     """Fetch a JS-rendered page with a real browser.
 
-    browser_engine: "chromium" (default) or "webkit" (Safari engine — use for sites that
-    require Safari cookies, e.g. after a Safari extension session capture via lgwks login).
+    browser_engine: "webkit" (default, Safari engine — best for macOS Safari sessions)
+    or "chromium" (use for Chrome-cookie compatibility or --disable-blink-features
+    anti-detection on heavily bot-walled sites).
     use_session loads the saved session for this host from ~/.config/lgwks/sessions/.
     with_html also returns the rendered DOM. Returns {ok, text, reason[, html]}.
     """
     if not _remote_allowed(url):
         return {"ok": False, "text": "", "reason": "blocked URL"}
-    ok, why = available()
+    ok, why = available(browser_engine)
     if not ok:
         return {"ok": False, "text": "", "reason": why}
     if browser_engine not in ("chromium", "webkit"):
@@ -161,7 +181,7 @@ def save_session(
     login_url: str = "https://www.linkedin.com/login",
     *,
     success_selector: str | None = None,
-    browser_engine: str = "chromium",
+    browser_engine: str = "webkit",
     manual: bool = False,
 ) -> dict:
     """One-time: open a real browser so the USER logs in themselves, then persist their session.
@@ -174,7 +194,7 @@ def save_session(
 
     manual=True skips DOM/URL success detection and lets the user complete OTP/passkey/magic-link
     flows in the visible browser, then press Enter in the terminal to persist the session."""
-    ok, why = available()
+    ok, why = available(browser_engine)
     if not ok:
         return {"ok": False, "reason": why}
     if browser_engine not in ("chromium", "webkit"):
@@ -204,6 +224,8 @@ def save_session(
             launch_kwargs: dict = {"headless": False}  # visible — the human logs in
             if browser_engine == "chromium":
                 launch_kwargs["args"] = ["--disable-blink-features=AutomationControlled"]
+            print(f"\n  Opening {browser_engine} browser for {login_url}", flush=True)
+            print("  Complete login in that window, then return here and press Enter to continue...\n", flush=True)
             browser = engine.launch(**launch_kwargs)
             ctx = browser.new_context(user_agent=_UA, locale="en-CA")
             page = ctx.new_page()
@@ -211,7 +233,12 @@ def save_session(
 
             if manual:
                 print("  Complete auth in the browser window, then press Enter here to continue...", flush=True)
-                input()
+                print("  (auto-close in 5 minutes if no input)", flush=True)
+                ready, _, _ = select.select([sys.stdin], [], [], 300)
+                if not ready:
+                    browser.close()
+                    return {"ok": False, "reason": "timeout: no input within 5 minutes — session not saved"}
+                sys.stdin.readline()
                 ctx.storage_state(path=str(session_path))
                 browser.close()
                 return {"ok": True, "path": str(session_path), "reason": "session saved (manual)"}

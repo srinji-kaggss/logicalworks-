@@ -201,16 +201,50 @@ def _crawl_site(
                 manual=True,
             )
             auth_handoffs += 1
+            if not login_result.get("ok"):
+                frontier.append({
+                    "url": clean,
+                    "depth": depth,
+                    "status": "auth_failed",
+                    "reason": login_result.get("reason", ""),
+                    "discovered_by": discovered_by,
+                })
+                continue
+            # Verify the saved session actually resolves the login gate in headless mode.
+            # Some sites (financial portals, Cloudflare) reject headless even with valid cookies,
+            # so we verify once rather than looping infinitely.
+            verify = lgwks_browser.render(
+                clean,
+                max_chars=120_000,
+                use_session=True,
+                wait_ms=5000,
+                with_html=True,
+                browser_engine=browser_engine,
+            )
+            if verify.get("ok") and verify.get("html"):
+                v_md, v_title, _ = html_to_markdown(verify["html"], clean)
+                if not _looks_like_login_gate(v_title or "", v_md or verify.get("text", ""), clean):
+                    seen.discard(clean)
+                    queue.appendleft((clean, depth, discovered_by))
+                    frontier.append({
+                        "url": clean,
+                        "depth": depth,
+                        "status": "auth_verified",
+                        "reason": login_result.get("reason", ""),
+                        "discovered_by": discovered_by,
+                    })
+                    continue
             frontier.append({
                 "url": clean,
                 "depth": depth,
-                "status": "auth_prompted" if login_result.get("ok") else "auth_failed",
-                "reason": login_result.get("reason", ""),
+                "status": "auth_saved_but_failed",
+                "reason": (
+                    "session saved but headless render still shows a login gate; "
+                    "site may block headless browsers or auth was incomplete — "
+                    "try omitting --webkit, or capture the session in a normal browser and copy cookies"
+                ),
                 "discovered_by": discovered_by,
             })
-            if login_result.get("ok"):
-                seen.discard(clean)
-                queue.appendleft((clean, depth, discovered_by))
             continue
         docs.append({
             "source": clean,
@@ -925,8 +959,8 @@ def add_parser(sub) -> None:
                          help="global retry budget before escalating a blocker to the human browser handoff")
         cmd.add_argument("--max-auth-handoffs", type=int, default=3,
                          help="how many times the crawler may pause for human auth before giving up")
-        cmd.add_argument("--webkit", dest="browser_engine", action="store_const", const="webkit",
-                         default="chromium", help="use WebKit for authenticated Safari-session sites")
+        cmd.add_argument("--chromium", dest="browser_engine", action="store_const", const="chromium",
+                         default="webkit", help="use Chromium instead of WebKit (for Chrome-cookie compatibility or anti-detection flag)")
 
     build = ps.add_parser("build", help="build a substrate run from a url, file, folder, or repo")
     _add_build_args(build)
