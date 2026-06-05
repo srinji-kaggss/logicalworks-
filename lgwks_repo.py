@@ -67,6 +67,11 @@ def _head_sha(repo: Path) -> str:
     return out if rc == 0 else "unknown"
 
 
+def _current_branch(repo: Path) -> str:
+    rc, out = _git(repo, "branch", "--show-current")
+    return out.strip() if rc == 0 else ""
+
+
 def _merged_branches(repo: Path, head: str = "HEAD") -> list[str]:
     """Return merged local branch names without TTY markers from `git branch` output."""
     rc, out = _git(repo, "branch", "--merged", head, "--format=%(refname:short)")
@@ -118,7 +123,8 @@ def repo_audit(repo: Path) -> tuple[list[AuditFinding], dict[str, Any]]:
         findings.append(AuditFinding("dangling", "danger", f"{len(dangling)} dangling commit(s)", ["git fsck --no-reflogs --dangling"]))
 
     # 5) merged branches
-    merged = [b for b in _merged_branches(repo, "HEAD") if b != "HEAD"]
+    current_branch = _current_branch(repo)
+    merged = [b for b in _merged_branches(repo, "HEAD") if b not in {"HEAD", current_branch}]
     if merged:
         findings.append(AuditFinding("merged_branches", "warn", f"{len(merged)} merged branch(es) not deleted: {', '.join(merged[:5])}" + ("…" if len(merged) > 5 else ""), ["git branch --merged HEAD"]))
 
@@ -166,7 +172,7 @@ def repo_audit(repo: Path) -> tuple[list[AuditFinding], dict[str, Any]]:
         "dirty_worktrees": dirty,
         "open_prs": len(prs) if isinstance(prs, list) else 0,
         "repo": str(repo),
-        "branch": _git(repo, "branch", "--show-current")[1] or "(detached)",
+        "branch": current_branch or "(detached)",
         "sha": _head_sha(repo),
     }
     return findings, health
@@ -215,7 +221,8 @@ def repo_cleanup(repo: Path, force: bool = False) -> dict[str, Any]:
     skipped: list[str] = []
 
     # branches
-    merged = [b for b in _merged_branches(repo, "HEAD") if b != "HEAD"]
+    current_branch = _current_branch(repo)
+    merged = [b for b in _merged_branches(repo, "HEAD") if b not in {"HEAD", current_branch}]
     for b in merged:
         _git(repo, "branch", "-d", b)
         actions.append(f"deleted branch {b}")
@@ -597,8 +604,8 @@ def repo_sync(repo: Path, push: bool = True) -> dict[str, Any]:
     rc, out = _git(repo, "rev-parse", "--is-inside-work-tree")
     if rc != 0 or out != "true":
         return {"error": f"{repo} is not a git repo"}
-    rc, branch = _git(repo, "branch", "--show-current")
-    if rc != 0 or not branch:
+    branch = _current_branch(repo)
+    if not branch:
         return {"error": "detached HEAD — cannot sync"}
 
     # 2) working tree must be clean
