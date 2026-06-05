@@ -17,6 +17,7 @@ import argparse
 import hashlib
 import json
 import re
+import sqlite3
 import time
 import urllib.parse
 from collections import Counter, deque
@@ -30,6 +31,8 @@ from lgwks_html import html_to_markdown
 
 ROOT = Path(__file__).resolve().parent
 RUN_ROOT = ROOT / "store" / "substrate"
+GLOBAL_ROOT = ROOT / "store" / "substrate-global"
+GLOBAL_FACT_DB = GLOBAL_ROOT / "fact_vectors.db"
 TEXT_EXT = {
     ".txt", ".md", ".json", ".jsonl", ".yaml", ".yml", ".toml", ".ini", ".cfg", ".xml", ".csv",
     ".py", ".js", ".ts", ".tsx", ".jsx", ".rs", ".go", ".java", ".kt", ".swift", ".rb", ".php",
@@ -256,6 +259,303 @@ def _emit_jsonl(path: Path, rows: list[dict[str, Any]]) -> None:
             fh.write(json.dumps(row, sort_keys=True, ensure_ascii=False) + "\n")
 
 
+def _emit_json(path: Path, payload: dict[str, Any]) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps(payload, indent=2, sort_keys=True), encoding="utf-8")
+
+
+def _crawl_map(frontier: list[dict[str, Any]]) -> dict[str, Any]:
+    nodes: list[dict[str, Any]] = []
+    edges: list[dict[str, Any]] = []
+    seen: set[str] = set()
+    for row in frontier:
+        url = row.get("url", "")
+        if url and url not in seen:
+            seen.add(url)
+            nodes.append({
+                "url": url,
+                "depth": row.get("depth", 0),
+                "status": row.get("status", ""),
+                "links_found": row.get("links_found", 0),
+            })
+        parent = row.get("discovered_by", "")
+        if parent and parent not in {"seed", "filesystem"} and url:
+            edges.append({"from": parent, "to": url})
+    return {"schema": "lgwks.substrate.crawl_map.v0", "nodes": nodes, "edges": edges}
+
+
+def _json_cell(value: Any) -> str:
+    return json.dumps(value, ensure_ascii=False, sort_keys=True)
+
+
+def _fact_sentences(text: str, threshold: float) -> list[str]:
+    out: list[str] = []
+    seen: set[str] = set()
+    for sentence in _split_sentences(text):
+        s = _fact_score(sentence)
+        if s >= threshold or NUMERIC_RE.search(sentence) or REF_RE.search(sentence) or CODE_RE.search(sentence):
+            clean = sentence.strip()
+            if clean and clean not in seen:
+                seen.add(clean)
+                out.append(clean)
+    return out
+
+
+def _build_index_db(
+    path: Path,
+    *,
+    source_rows: list[dict[str, Any]],
+    doc_rows: list[dict[str, Any]],
+    chunk_rows: list[dict[str, Any]],
+    fact_rows: list[dict[str, Any]],
+    vector_rows: list[dict[str, Any]],
+    frontier: list[dict[str, Any]],
+) -> None:
+    conn = sqlite3.connect(path)
+    cur = conn.cursor()
+    cur.executescript(
+        """
+        DROP TABLE IF EXISTS sources;
+        DROP TABLE IF EXISTS documents;
+        DROP TABLE IF EXISTS chunks;
+        DROP TABLE IF EXISTS facts;
+        DROP TABLE IF EXISTS vectors;
+        DROP TABLE IF EXISTS frontier;
+        DROP TABLE IF EXISTS chunk_fts;
+        DROP TABLE IF EXISTS fact_fts;
+
+        CREATE TABLE sources (
+            source_id TEXT PRIMARY KEY,
+            source TEXT,
+            title TEXT,
+            discovered_by TEXT,
+            depth INTEGER
+        );
+        CREATE TABLE documents (
+            document_id TEXT PRIMARY KEY,
+            source_id TEXT,
+            title TEXT,
+            source TEXT,
+            word_count INTEGER
+        );
+        CREATE TABLE chunks (
+            chunk_id TEXT PRIMARY KEY,
+            document_id TEXT,
+            source TEXT,
+            url TEXT,
+            text TEXT,
+            stem_text TEXT,
+            hash TEXT,
+            fact_score REAL,
+            chunk_kind TEXT,
+            position INTEGER
+        );
+        CREATE TABLE facts (
+            fact_id TEXT PRIMARY KEY,
+            chunk_id TEXT,
+            document_id TEXT,
+            fact_text TEXT,
+            fact_score REAL,
+            chunk_kind TEXT
+        );
+        CREATE TABLE vectors (
+            vector_id TEXT PRIMARY KEY,
+            chunk_id TEXT,
+            document_id TEXT,
+            provider TEXT,
+            is_semantic INTEGER,
+            dims INTEGER,
+            vector_text TEXT,
+            vector_json TEXT,
+            fact_score REAL,
+            chunk_kind TEXT
+        );
+        CREATE TABLE frontier (
+            url TEXT PRIMARY KEY,
+            depth INTEGER,
+            status TEXT,
+            reason TEXT,
+            discovered_by TEXT,
+            links_found INTEGER
+        );
+        CREATE VIRTUAL TABLE chunk_fts USING fts5(chunk_id, text, stem_text, source, tokenize='porter unicode61');
+        CREATE VIRTUAL TABLE fact_fts USING fts5(fact_id, fact_text, chunk_kind, tokenize='porter unicode61');
+        """
+    )
+    cur.executemany(
+        "INSERT INTO sources(source_id, source, title, discovered_by, depth) VALUES(?,?,?,?,?)",
+        [(r["source_id"], r["source"], r["title"], r["discovered_by"], r["depth"]) for r in source_rows],
+    )
+    cur.executemany(
+        "INSERT INTO documents(document_id, source_id, title, source, word_count) VALUES(?,?,?,?,?)",
+        [(r["document_id"], r["source_id"], r["title"], r["source"], r["word_count"]) for r in doc_rows],
+    )
+    cur.executemany(
+        "INSERT INTO chunks(chunk_id, document_id, source, url, text, stem_text, hash, fact_score, chunk_kind, position) VALUES(?,?,?,?,?,?,?,?,?,?)",
+        [(r["chunk_id"], r["document_id"], r["source"], r["url"], r["text"], r["stem_text"], r["hash"], r["fact_score"], r["chunk_kind"], r["position"]) for r in chunk_rows],
+    )
+    cur.executemany(
+        "INSERT INTO facts(fact_id, chunk_id, document_id, fact_text, fact_score, chunk_kind) VALUES(?,?,?,?,?,?)",
+        [(r["fact_id"], r["chunk_id"], r["document_id"], r["fact_text"], r["fact_score"], r["chunk_kind"]) for r in fact_rows],
+    )
+    cur.executemany(
+        "INSERT INTO vectors(vector_id, chunk_id, document_id, provider, is_semantic, dims, vector_text, vector_json, fact_score, chunk_kind) VALUES(?,?,?,?,?,?,?,?,?,?)",
+        [(r["vector_id"], r["chunk_id"], r["document_id"], r["provider"], int(bool(r["is_semantic"])), r["dims"], r["vector_text"], _json_cell(r["vector"]), r["fact_score"], r["chunk_kind"]) for r in vector_rows],
+    )
+    cur.executemany(
+        "INSERT INTO frontier(url, depth, status, reason, discovered_by, links_found) VALUES(?,?,?,?,?,?)",
+        [(r.get("url", ""), r.get("depth", 0), r.get("status", ""), r.get("reason", ""), r.get("discovered_by", ""), r.get("links_found", 0)) for r in frontier if r.get("url")],
+    )
+    cur.executemany(
+        "INSERT INTO chunk_fts(chunk_id, text, stem_text, source) VALUES(?,?,?,?)",
+        [(r["chunk_id"], r["text"], r["stem_text"], r["source"]) for r in chunk_rows],
+    )
+    cur.executemany(
+        "INSERT INTO fact_fts(fact_id, fact_text, chunk_kind) VALUES(?,?,?)",
+        [(r["fact_id"], r["fact_text"], r["chunk_kind"]) for r in fact_rows],
+    )
+    conn.commit()
+    conn.close()
+
+
+def _dot(a: list[float], b: list[float]) -> float:
+    return sum(x * y for x, y in zip(a, b))
+
+
+def _upsert_global_fact_vectors(
+    path: Path,
+    *,
+    run_id: str,
+    fact_vectors: list[dict[str, Any]],
+) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    conn = sqlite3.connect(path)
+    cur = conn.cursor()
+    cur.executescript(
+        """
+        CREATE TABLE IF NOT EXISTS fact_vectors (
+            fact_hash TEXT PRIMARY KEY,
+            fact_text TEXT NOT NULL,
+            provider TEXT NOT NULL,
+            dims INTEGER NOT NULL,
+            vector_json TEXT NOT NULL,
+            first_seen_run TEXT NOT NULL,
+            last_seen_run TEXT NOT NULL,
+            seen_count INTEGER NOT NULL,
+            max_fact_score REAL NOT NULL,
+            chunk_kind TEXT NOT NULL
+        );
+        CREATE VIRTUAL TABLE IF NOT EXISTS fact_vectors_fts USING fts5(
+            fact_hash, fact_text, chunk_kind, tokenize='porter unicode61'
+        );
+        """
+    )
+    for row in fact_vectors:
+        fact_hash = row["fact_hash"]
+        current = cur.execute(
+            "SELECT seen_count, max_fact_score FROM fact_vectors WHERE fact_hash = ?",
+            (fact_hash,),
+        ).fetchone()
+        if current:
+            seen_count, max_fact_score = current
+            cur.execute(
+                """
+                UPDATE fact_vectors
+                SET last_seen_run = ?, seen_count = ?, max_fact_score = ?, provider = ?, dims = ?, vector_json = ?, chunk_kind = ?
+                WHERE fact_hash = ?
+                """,
+                (
+                    run_id,
+                    int(seen_count) + 1,
+                    max(float(max_fact_score), float(row["fact_score"])),
+                    row["provider"],
+                    row["dims"],
+                    _json_cell(row["vector"]),
+                    row["chunk_kind"],
+                    fact_hash,
+                ),
+            )
+        else:
+            cur.execute(
+                """
+                INSERT INTO fact_vectors(
+                    fact_hash, fact_text, provider, dims, vector_json, first_seen_run, last_seen_run,
+                    seen_count, max_fact_score, chunk_kind
+                ) VALUES(?,?,?,?,?,?,?,?,?,?)
+                """,
+                (
+                    fact_hash,
+                    row["fact_text"],
+                    row["provider"],
+                    row["dims"],
+                    _json_cell(row["vector"]),
+                    run_id,
+                    run_id,
+                    1,
+                    row["fact_score"],
+                    row["chunk_kind"],
+                ),
+            )
+            cur.execute(
+                "INSERT INTO fact_vectors_fts(fact_hash, fact_text, chunk_kind) VALUES(?,?,?)",
+                (fact_hash, row["fact_text"], row["chunk_kind"]),
+            )
+    conn.commit()
+    conn.close()
+
+
+def _vector_search(run_dir: Path, text: str, limit: int, provider: str, model: str) -> dict[str, Any]:
+    vector_file = run_dir / "vectors.jsonl"
+    if not vector_file.exists():
+        return {
+            "schema": "lgwks.substrate.vector_query.v0",
+            "run": str(run_dir),
+            "query": text,
+            "provider": "none",
+            "semantic": False,
+            "rows": [],
+            "error": f"missing vector artifact: {vector_file}",
+        }
+    query_vec, query_provider, semantic = lgwks_run.embed(text, embed_on=True, provider=provider, model=(model or None))
+    if not query_vec:
+        return {
+            "schema": "lgwks.substrate.vector_query.v0",
+            "run": str(run_dir),
+            "query": text,
+            "provider": query_provider,
+            "semantic": semantic,
+            "rows": [],
+            "error": "query vector unavailable",
+        }
+    rows: list[dict[str, Any]] = []
+    for line in vector_file.read_text(encoding="utf-8").splitlines():
+        if not line.strip():
+            continue
+        row = json.loads(line)
+        vec = row.get("vector") or []
+        if not vec:
+            continue
+        score = _dot(query_vec, vec[:len(query_vec)])
+        rows.append({
+            "chunk_id": row["chunk_id"],
+            "document_id": row["document_id"],
+            "provider": row["provider"],
+            "chunk_kind": row["chunk_kind"],
+            "fact_score": row["fact_score"],
+            "score": round(float(score), 6),
+            "text": row["vector_text"],
+        })
+    rows.sort(key=lambda item: item["score"], reverse=True)
+    return {
+        "schema": "lgwks.substrate.vector_query.v0",
+        "run": str(run_dir),
+        "query": text,
+        "provider": query_provider,
+        "semantic": semantic,
+        "rows": rows[:limit],
+    }
+
+
 def _build_from_local(root: Path, source_type: str, max_files: int, max_chars: int) -> list[dict[str, Any]]:
     if source_type == "file":
         text = _read_text(root, max_chars)
@@ -308,6 +608,7 @@ def build_run(args: argparse.Namespace) -> dict[str, Any]:
     doc_rows: list[dict[str, Any]] = []
     chunk_rows: list[dict[str, Any]] = []
     fact_rows: list[dict[str, Any]] = []
+    fact_vector_rows: list[dict[str, Any]] = []
     vector_rows: list[dict[str, Any]] = []
     graph_input_rows: list[dict[str, Any]] = []
     provider_counts: Counter[str] = Counter()
@@ -365,6 +666,25 @@ def build_run(args: argparse.Namespace) -> dict[str, Any]:
                     "fact_score": fact_score,
                     "chunk_kind": chunk_kind,
                 })
+                for sentence in _fact_sentences(stem, args.fact_threshold):
+                    fact_vec, fact_provider, fact_semantic = lgwks_run.embed(
+                        sentence,
+                        embed_on=True,
+                        provider=args.embed_provider,
+                        model=(args.embed_model or None),
+                    )
+                    provider_counts[fact_provider] += 1
+                    if fact_semantic:
+                        semantic_vectors += 1
+                    fact_vector_rows.append({
+                        "fact_hash": _sha(sentence),
+                        "fact_text": sentence,
+                        "provider": fact_provider,
+                        "dims": len(fact_vec or []),
+                        "vector": fact_vec,
+                        "fact_score": _fact_score(sentence),
+                        "chunk_kind": chunk_kind,
+                    })
             vector_text = stem or piece
             vector, provider, is_semantic = lgwks_run.embed(
                 vector_text,
@@ -395,6 +715,7 @@ def build_run(args: argparse.Namespace) -> dict[str, Any]:
     _emit_jsonl(run_dir / "vectors.jsonl", vector_rows)
     if frontier:
         _emit_jsonl(run_dir / "frontier.jsonl", frontier)
+        _emit_json(run_dir / "crawl_map.json", _crawl_map(frontier))
 
     db_path = run_dir / "graph.db"
     db = entity_graph.GraphDB(db_path)
@@ -405,6 +726,17 @@ def build_run(args: argparse.Namespace) -> dict[str, Any]:
     db.export_mermaid(graph_mmd)
     stats = db.stats()
     db.close()
+    index_db = run_dir / "substrate.db"
+    _build_index_db(
+        index_db,
+        source_rows=source_rows,
+        doc_rows=doc_rows,
+        chunk_rows=chunk_rows,
+        fact_rows=fact_rows,
+        vector_rows=vector_rows,
+        frontier=frontier,
+    )
+    _upsert_global_fact_vectors(GLOBAL_FACT_DB, run_id=run_id, fact_vectors=fact_vector_rows)
 
     manifest = {
         "schema": "lgwks.substrate.run.v0",
@@ -419,6 +751,7 @@ def build_run(args: argparse.Namespace) -> dict[str, Any]:
             "providers_used": dict(provider_counts),
             "semantic_vectors": semantic_vectors,
             "total_vectors": len(vector_rows),
+            "global_fact_vectors_written": len(fact_vector_rows),
         },
         "auth": {
             "login_if_needed": bool(args.login_if_needed),
@@ -444,9 +777,14 @@ def build_run(args: argparse.Namespace) -> dict[str, Any]:
             "facts": "facts.jsonl",
             "vectors": "vectors.jsonl",
             "frontier": "frontier.jsonl" if frontier else "",
+            "crawl_map": "crawl_map.json" if frontier else "",
             "graph_db": "graph.db",
             "graph_json": "graph.json",
             "graph_mermaid": "graph.mmd",
+            "substrate_db": "substrate.db",
+        },
+        "global_artifacts": {
+            "fact_vector_db": str(GLOBAL_FACT_DB),
         },
     }
     (run_dir / "manifest.json").write_text(json.dumps(manifest, indent=2, sort_keys=True), encoding="utf-8")
@@ -455,6 +793,8 @@ def build_run(args: argparse.Namespace) -> dict[str, Any]:
 
 def query_run(args: argparse.Namespace) -> dict[str, Any]:
     run_dir = Path(args.run).resolve()
+    if getattr(args, "vector", ""):
+        return _vector_search(run_dir, args.vector, args.limit, args.embed_provider, args.embed_model)
     rows: list[dict[str, Any]] = []
     path = run_dir / ("facts.jsonl" if args.kind == "facts" else "chunks.jsonl")
     if path.exists():
@@ -492,6 +832,26 @@ def build_command(args: argparse.Namespace) -> int:
     return 0
 
 
+def map_command(args: argparse.Namespace) -> int:
+    payload = build_run(args)
+    artifacts = payload["artifacts"]
+    root = Path(artifacts["root"])
+    summary = {
+        "schema": "lgwks.substrate.map.v0",
+        "run_id": payload["run_id"],
+        "target": payload["target"],
+        "crawl_map": str(root / artifacts["crawl_map"]) if artifacts.get("crawl_map") else "",
+        "substrate_db": str(root / artifacts["substrate_db"]),
+        "graph_json": str(root / artifacts["graph_json"]),
+        "counts": payload["counts"],
+        "embedding": payload["embedding"],
+        "auth": payload["auth"],
+        "global_artifacts": payload.get("global_artifacts", {}),
+    }
+    print(json.dumps(summary, indent=2))
+    return 0
+
+
 def query_command(args: argparse.Namespace) -> int:
     print(json.dumps(query_run(args), indent=2))
     return 0
@@ -501,36 +861,46 @@ def add_parser(sub) -> None:
     p = sub.add_parser("substrate", help="deterministic crawl+vector substrate for local or web content")
     ps = p.add_subparsers(dest="substrate_command", required=True)
 
+    def _add_build_args(cmd) -> None:
+        cmd.add_argument("target")
+        cmd.add_argument("--project", default="")
+        cmd.add_argument("--source-type", choices=["auto", "url", "file", "folder", "repo"], default="auto")
+        cmd.add_argument("--max-pages", type=int, default=25)
+        cmd.add_argument("--max-depth", type=int, default=2)
+        cmd.add_argument("--max-files", type=int, default=250)
+        cmd.add_argument("--max-chars", type=int, default=120_000)
+        cmd.add_argument("--chunk-words", type=int, default=320)
+        cmd.add_argument("--chunk-overlap", type=int, default=48)
+        cmd.add_argument("--fact-threshold", type=float, default=0.6)
+        cmd.add_argument("--embed-provider", choices=["auto", "ollama", "openrouter-vl", "deterministic"], default="auto")
+        cmd.add_argument("--embed-model", default="",
+                         help="optional explicit embedding model id; openrouter-vl defaults to NVIDIA Nemotron Embed VL")
+        cmd.add_argument("--login-if-needed", action=argparse.BooleanOptionalAction, default=True,
+                         help="for URL targets, detect auth walls, open a browser, save session, then resume")
+        cmd.add_argument("--login-url", default="",
+                         help="optional explicit login URL; defaults to the target URL when auth is detected")
+        cmd.add_argument("--auth-selector", dest="success_selector", default=None,
+                         help="optional CSS selector for auto-detected post-auth success on SPAs")
+        cmd.add_argument("--max-auth-handoffs", type=int, default=3,
+                         help="how many times the crawler may pause for human auth before giving up")
+        cmd.add_argument("--webkit", dest="browser_engine", action="store_const", const="webkit",
+                         default="chromium", help="use WebKit for authenticated Safari-session sites")
+
     build = ps.add_parser("build", help="build a substrate run from a url, file, folder, or repo")
-    build.add_argument("target")
-    build.add_argument("--project", default="")
-    build.add_argument("--source-type", choices=["auto", "url", "file", "folder", "repo"], default="auto")
-    build.add_argument("--max-pages", type=int, default=25)
-    build.add_argument("--max-depth", type=int, default=2)
-    build.add_argument("--max-files", type=int, default=250)
-    build.add_argument("--max-chars", type=int, default=120_000)
-    build.add_argument("--chunk-words", type=int, default=320)
-    build.add_argument("--chunk-overlap", type=int, default=48)
-    build.add_argument("--fact-threshold", type=float, default=0.6)
-    build.add_argument("--embed-provider", choices=["auto", "ollama", "openrouter-vl", "deterministic"], default="auto")
-    build.add_argument("--embed-model", default="",
-                       help="optional explicit embedding model id; openrouter-vl defaults to NVIDIA Nemotron Embed VL")
-    build.add_argument("--login-if-needed", action=argparse.BooleanOptionalAction, default=True,
-                       help="for URL targets, detect auth walls, open a browser, save session, then resume")
-    build.add_argument("--login-url", default="",
-                       help="optional explicit login URL; defaults to the target URL when auth is detected")
-    build.add_argument("--auth-selector", dest="success_selector", default=None,
-                       help="optional CSS selector for auto-detected post-auth success on SPAs")
-    build.add_argument("--max-auth-handoffs", type=int, default=3,
-                       help="how many times the crawler may pause for human auth before giving up")
-    build.add_argument("--webkit", dest="browser_engine", action="store_const", const="webkit",
-                       default="chromium", help="use WebKit for authenticated Safari-session sites")
+    _add_build_args(build)
     build.set_defaults(func=build_command)
+
+    map_run = ps.add_parser("map", help="one deep pass: crawl map + chunks + vectors + graph + substrate db")
+    _add_build_args(map_run)
+    map_run.set_defaults(func=map_command)
 
     query = ps.add_parser("query", help="query a substrate run")
     query.add_argument("run")
     query.add_argument("--kind", choices=["facts", "chunks"], default="facts")
-    query.add_argument("--match", required=True)
+    query.add_argument("--match", default="")
     query.add_argument("--neighbors", help="also resolve graph neighbors for a node label/id")
+    query.add_argument("--vector", default="", help="semantic/vector query text over stored chunk vectors")
+    query.add_argument("--embed-provider", choices=["auto", "ollama", "openrouter-vl", "deterministic"], default="auto")
+    query.add_argument("--embed-model", default="", help="optional explicit embedding model id for vector query")
     query.add_argument("--limit", type=int, default=20)
     query.set_defaults(func=query_command)

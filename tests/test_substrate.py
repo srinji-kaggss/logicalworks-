@@ -62,7 +62,8 @@ class TestSubstrateBuild(unittest.TestCase):
             })()
 
             with mock.patch.object(substrate.lgwks_run, "embed", return_value=([0.1, 0.2, 0.3], "ollama:qwen3-embedding:8b", True)):
-                manifest = substrate.build_run(args)
+                with mock.patch.object(substrate, "GLOBAL_FACT_DB", Path(td) / "global-facts.db"):
+                    manifest = substrate.build_run(args)
 
             run_dir = Path(manifest["artifacts"]["root"])
             self.assertTrue((run_dir / "facts.jsonl").exists())
@@ -70,7 +71,9 @@ class TestSubstrateBuild(unittest.TestCase):
             self.assertTrue(any("T2033" in row["fact_text"] for row in facts))
             vectors = [json.loads(line) for line in (run_dir / "vectors.jsonl").read_text(encoding="utf-8").splitlines()]
             self.assertTrue(all(row["provider"] == "ollama:qwen3-embedding:8b" for row in vectors))
-            self.assertEqual(manifest["embedding"]["semantic_vectors"], len(vectors))
+            self.assertGreaterEqual(manifest["embedding"]["semantic_vectors"], len(vectors))
+            self.assertGreater(manifest["embedding"]["global_fact_vectors_written"], 0)
+            self.assertTrue(Path(manifest["global_artifacts"]["fact_vector_db"]).exists())
 
     def test_crawl_site_prompts_auth_then_retries(self):
         state = {"saved": False}
