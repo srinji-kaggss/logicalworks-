@@ -73,8 +73,8 @@ def test_scrub_token():
 # ── rate limit detection ─────────────────────────────────────────────────────
 
 def test_rate_limit_detected():
-    stdout = "API rate limit exceeded. Please retry after 3600 seconds."
-    with patch("subprocess.run", side_effect=_make_run(0, stdout)):
+    stderr = "API rate limit exceeded. Please retry after 3600 seconds."
+    with patch("subprocess.run", side_effect=_make_run(0, "", stderr)):
         rc, out = gh._gh("issue", "list")
     assert rc == 1
     assert "rate limit" in out.lower()
@@ -334,3 +334,201 @@ def test_issue_command_bad_slug():
     args = argparse.Namespace(number="42", repo="../../etc/passwd", json=False)
     rc = gh.issue_command(args)
     assert rc == 1
+
+
+# ── H0 simulations: falsification attempts for each function ─────────────────
+
+# H0_1: _gh never modifies a successful return code due to content in stdout.
+def test_gh_rate_limit_false_positive_from_stdout():
+    """If the issue body itself mentions 'rate limit', _gh must NOT rewrite rc."""
+    stdout = "User reports: API rate limit exceeded on their end. Not our bug."
+    with patch("subprocess.run", side_effect=_make_run(0, stdout, "")):
+        rc, out = gh._gh("issue", "view", "42")
+    assert rc == 0, "stdout content must never trigger rate-limit rewrite"
+    assert "rate limit" in out.lower()
+
+
+# H0_2: _issue_view never falsely reports "not found" for a valid PR number.
+def test_issue_view_pr_fallback():
+    """When gh issue view fails but gh pr view succeeds, return PR hint."""
+    pr_data = {
+        "number": 42,
+        "title": "Add dark mode",
+        "state": "MERGED",
+        "url": "https://github.com/acme/widget/pull/42",
+    }
+
+    def _mock_run(cmd, **kwargs):
+        class _Result:
+            returncode = 0
+            stdout = ""
+            stderr = ""
+        res = _Result()
+        if "issue" in cmd and "view" in cmd:
+            res.returncode = 1
+            res.stdout = "not found"
+        elif "pr" in cmd and "view" in cmd and "--json" in cmd:
+            res.stdout = json.dumps(pr_data)
+        return res
+
+    with patch("subprocess.run", side_effect=_mock_run):
+        issue = gh._issue_view(42, None)
+
+    assert issue.state == "pr"
+    assert issue.title == "Add dark mode"
+    assert any(a.verb == "switch" for a in issue.next_actions)
+    assert any("lgwks gh pr 42" in a.cmd for a in issue.next_actions if a.cmd)
+
+
+def test_issue_view_pr_fallback_not_found():
+    """When both issue and PR view fail, state remains unknown."""
+    def _mock_run(cmd, **kwargs):
+        class _Result:
+            returncode = 1
+            stdout = "not found"
+            stderr = ""
+        return _Result()
+
+    with patch("subprocess.run", side_effect=_mock_run):
+        issue = gh._issue_view(99, None)
+
+    assert issue.state == "unknown"
+    assert issue.title == "not found"
+
+
+# H0_3: _compute_issue_next never recommends "create branch" for landed issues.
+def test_compute_issue_next_landed_on_main():
+    """If git log references the issue, next action must be 'verify', not 'start'."""
+    def _mock_run(cmd, **kwargs):
+        class _Result:
+            returncode = 0
+            stdout = "a1b2c3d fix(parser): resolve null dereference (#7)\n"
+            stderr = ""
+        return _Result()
+
+    with patch("subprocess.run", side_effect=_mock_run):
+        issue = gh.IssueView(number=7, title="crash", state="open", labels=["bug"], assignees=["alice"])
+        actions = gh._compute_issue_next(issue)
+
+    verbs = [a.verb for a in actions]
+    assert "start" not in verbs, "landed issue must not get 'create branch'"
+    assert "verify" in verbs
+
+
+def test_compute_issue_next_not_landed():
+    """If git log does NOT reference the issue, 'start' is the correct action."""
+    def _mock_run(cmd, **kwargs):
+        class _Result:
+            returncode = 0
+            stdout = ""
+            stderr = ""
+        return _Result()
+
+    with patch("subprocess.run", side_effect=_mock_run):
+        issue = gh.IssueView(number=999, title="new feature", state="open", labels=["enhancement"], assignees=["bob"])
+        actions = gh._compute_issue_next(issue)
+
+    verbs = [a.verb for a in actions]
+    assert "start" in verbs
+    assert "verify" not in verbs
+
+
+# H0_4: --json returns complete structured data; --raw returns zero-transform passthrough.
+def test_issue_command_json_full_comments():
+    """--json must include the full comments array, not just a count."""
+    issue_data = {
+        "number": 42,
+        "title": "Bug in parser",
+        "state": "open",
+        "labels": [{"name": "bug"}],
+        "assignees": [],
+        "body": "Detailed description here.",
+        "url": "https://github.com/acme/widget/issues/42",
+        "comments": [{"body": "first comment"}, {"body": "second comment"}],
+    }
+
+    def _mock_run(cmd, **kwargs):
+        class _Result:
+            returncode = 0
+            stdout = ""
+            stderr = ""
+        res = _Result()
+        if "--json" in cmd:
+            res.stdout = json.dumps(issue_data)
+        return res
+
+    import argparse, io
+    with patch("subprocess.run", side_effect=_mock_run):
+        args = argparse.Namespace(number="42", repo=None, json=True, raw=False)
+        # Capture stdout
+        fake_stdout = io.StringIO()
+        with patch("sys.stdout", fake_stdout):
+            rc = gh.issue_command(args)
+
+    assert rc == 0
+    output = json.loads(fake_stdout.getvalue())
+    assert "comments" in output["issue"]
+    assert len(output["issue"]["comments"]) == 2
+    assert output["issue"]["comments"][0]["body"] == "first comment"
+
+
+def test_issue_command_raw_passthrough():
+    """--raw must print the untouched gh JSON output without lgwks schema wrapper."""
+    raw_data = {
+        "number": 42,
+        "title": "Bug in parser",
+        "state": "open",
+        "labels": [{"name": "bug"}],
+        "body": "Detailed description here.",
+        "url": "https://github.com/acme/widget/issues/42",
+        "comments": [{"body": "first comment"}],
+        "createdAt": "2026-01-01T00:00:00Z",
+    }
+
+    def _mock_run(cmd, **kwargs):
+        class _Result:
+            returncode = 0
+            stdout = json.dumps(raw_data)
+            stderr = ""
+        return _Result()
+
+    import argparse, io
+    with patch("subprocess.run", side_effect=_mock_run):
+        args = argparse.Namespace(number="42", repo=None, json=False, raw=True)
+        fake_stdout = io.StringIO()
+        with patch("sys.stdout", fake_stdout):
+            rc = gh.issue_command(args)
+
+    assert rc == 0
+    output = json.loads(fake_stdout.getvalue())
+    assert "schema" not in output  # no lgwks wrapper
+    assert output["createdAt"] == "2026-01-01T00:00:00Z"
+
+
+def test_issue_command_raw_no_scrub():
+    """--raw must NOT redact secrets (passthrough contract)."""
+    raw_data = {
+        "number": 42,
+        "title": "Bug in parser",
+        "state": "open",
+        "body": "api_key='sk-1234567890abcdef'",
+    }
+
+    def _mock_run(cmd, **kwargs):
+        class _Result:
+            returncode = 0
+            stdout = json.dumps(raw_data)
+            stderr = ""
+        return _Result()
+
+    import argparse, io
+    with patch("subprocess.run", side_effect=_mock_run):
+        args = argparse.Namespace(number="42", repo=None, json=False, raw=True)
+        fake_stdout = io.StringIO()
+        with patch("sys.stdout", fake_stdout):
+            rc = gh.issue_command(args)
+
+    assert rc == 0
+    output = fake_stdout.getvalue()
+    assert "sk-1234567890abcdef" in output, "raw mode must not scrub secrets"
+    assert "[REDACTED]" not in output

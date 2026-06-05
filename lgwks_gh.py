@@ -103,7 +103,8 @@ def _gh(*args: str, cwd: str | Path | None = None, timeout: int = 30) -> tuple[i
             cwd=str(cwd) if cwd else None,
         )
         out = (p.stdout or "").strip()
-        if _RATE_LIMIT_RE.search(out + p.stderr):
+        stderr = (p.stderr or "").strip()
+        if _RATE_LIMIT_RE.search(stderr):
             return 1, "gh: API rate limit exceeded — retry after cooldown"
         return p.returncode, out
     except FileNotFoundError:
@@ -157,6 +158,7 @@ class IssueView:
     url: str = ""
     linked_prs: list[dict[str, Any]] = field(default_factory=list)
     comments_count: int = 0
+    comments: list[dict[str, Any]] = field(default_factory=list)
     next_actions: list[NextAction] = field(default_factory=list)
 
 
@@ -198,6 +200,8 @@ def _compute_issue_next(issue: IssueView) -> list[NextAction]:
         actions.append(NextAction("comment", "no discussion yet — clarify scope", "mutate"))
     if issue.linked_prs:
         actions.append(NextAction("review_pr", f"{len(issue.linked_prs)} linked PR(s) — review first", "read"))
+    elif _git_log_has_issue_ref(issue.number):
+        actions.append(NextAction("verify", "commit(s) reference this issue on main — verify landed", "read"))
     else:
         actions.append(NextAction("start", "no linked PR — create branch + draft PR", "mutate",
                                    cmd=f"gh issue develop {issue.number}"))
@@ -250,6 +254,20 @@ def _issues_list(repo: str | None, state_filter: str, label: str | None) -> list
 def _issue_view(number: int, repo: str | None) -> IssueView:
     rc, out = _gh("issue", "view", str(number), *_repo_slug_args(repo))
     if rc != 0:
+        # Fallback: the number may be a PR
+        pr_data = _gh_json("pr", "view", str(number), "number,title,state,url", *_repo_slug_args(repo))
+        if "_error" not in pr_data:
+            iv = IssueView(
+                number=number,
+                title=pr_data.get("title", ""),
+                state="pr",
+                url=pr_data.get("url", ""),
+            )
+            iv.next_actions = [
+                NextAction("switch", f"this number is a PR — try lgwks gh pr {number}", "read",
+                           cmd=f"lgwks gh pr {number}"),
+            ]
+            return iv
         return IssueView(number=number, title="not found", state="unknown")
 
     data = _gh_json("issue", "view", str(number), "number,title,state,labels,assignees,body,url,comments", *_repo_slug_args(repo))
@@ -277,6 +295,7 @@ def _issue_view(number: int, repo: str | None) -> IssueView:
         body=body,
         url=data.get("url", ""),
         comments_count=len(comments) if isinstance(comments, list) else comments,
+        comments=comments if isinstance(comments, list) else [],
     )
     iv.next_actions = _compute_issue_next(iv)
     return iv
@@ -476,6 +495,24 @@ def _current_repo_slug() -> str:
         pass
     return ""
 
+def _git_log_has_issue_ref(number: int) -> bool:
+    """Check if the default branch history references this exact issue number."""
+    try:
+        p = subprocess.run(
+            ["git", "log", "--grep", f"#{number}", "--oneline", "-n", "20"],
+            capture_output=True,
+            text=True,
+            timeout=10,
+        )
+        if p.returncode == 0 and p.stdout.strip():
+            pattern = re.compile(rf"#{number}(?:\D|$)")
+            for line in p.stdout.splitlines():
+                if pattern.search(line):
+                    return True
+    except Exception:
+        pass
+    return False
+
 
 # ── CLI renderers ────────────────────────────────────────────────────────────
 
@@ -552,6 +589,17 @@ def issue_command(args: argparse.Namespace) -> int:
         print(f"error: {e}", file=sys.stderr)
         return 1
     issue = _issue_view(number, repo)
+    if getattr(args, "raw", False):
+        raw = _gh_json("issue", "view", str(number),
+                       "number,title,state,labels,assignees,body,url,comments,createdAt,updatedAt",
+                       *_repo_slug_args(repo))
+        if "_error" in raw:
+            # If issue view failed, maybe it's a PR — try raw PR output
+            raw = _gh_json("pr", "view", str(number),
+                           "number,title,state,url,headRefName,baseRefName,mergeStateStatus,createdAt,updatedAt",
+                           *_repo_slug_args(repo))
+        print(json.dumps(raw, indent=2, ensure_ascii=False))
+        return 0 if "_error" not in raw else 1
     if getattr(args, "json", False):
         print(json.dumps({
             "schema": "lgwks.gh.v0",
@@ -565,6 +613,7 @@ def issue_command(args: argparse.Namespace) -> int:
                 "body": issue.body,
                 "url": issue.url,
                 "comments_count": issue.comments_count,
+                "comments": issue.comments,
                 "next_actions": [{"verb": a.verb, "reason": a.reason, "risk": a.risk, "cmd": a.cmd} for a in issue.next_actions],
             },
         }, indent=2, ensure_ascii=False))
@@ -723,6 +772,7 @@ def add_parser(sub) -> None:
     issue.add_argument("number", help="issue number")
     issue.add_argument("--repo", default=None)
     issue.add_argument("--json", action="store_true")
+    issue.add_argument("--raw", action="store_true", help="passthrough raw gh --json output (no scrubbing)")
     issue.set_defaults(func=issue_command)
 
     prs = gs.add_parser("prs", help="list PRs")

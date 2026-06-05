@@ -301,30 +301,102 @@ def render_home(no_anim: bool = False) -> int:
           + fg("  forged by Logical Claude with Codex", SLATE_DIM, on=on)
           + fg(f"   {lore}", SLATE_DIM, on=on))
     print()
-    return _entryway(on)
+    return _browser_entryway(on)
 
 
-# ── the entryway ─────────────────────────────────────────────────────────────────────────────────
-# After the dashboard, drop into the first question set (like `claude` on launch) — an interactive prompt
-# that opens the rest of the options. TTY-only: piped/non-interactive callers get the dashboard and exit
-# clean (the machine surface is never blocked on input).
+# ── command browser: hierarchical navigation over the full parser surface ──────────────────────
+# Invariant: every registered subcommand must be reachable through the browser. No command may be
+# hidden behind "type an intent" as the only path. The browser is the human discovery layer.
+#
+# Architecture:
+#   _build_command_tree()  → introspects the live parser (same source-of-truth as _live_hints)
+#   _domain_for()          → static verb→domain map; unknown verbs land in "Other" (never hidden)
+#   _render_home_browser() → domain grid + quick actions + intent input
+#   _render_domain()       → commands in a domain with 1-line help
+#   _render_command()      → command detail: help, flags, subcommands, run/help/back options
+#   _browser_entryway()    → stack-based navigation loop (home → domain → command → subcommand)
 
-def _menu(on: bool) -> None:
-    print(ui.spine(fg("where to?", EMERALD_DIM, on=on)
-                   + fg("   — type an intent, or pick", CREAM_DIM, on=on), on=on))
-    rows = [
-        ("›", "your intent", "research it — I'll ask the question behind it, then ground it"),
-        ("1", "solve git", "prove what happened in a repo (read-only, no tokens)"),
-        ("2", "repl", "interactive harness — history, completion, inline queries"),
-        ("3", "doctor", "what's wired on this machine"),
-        ("q", "quit", ""),
-    ]
-    for key, name, why in rows:
-        line = ("  " + fg(f"{key} ", EMERALD, on=on, bold=True)
-                + fg(f"{name:<13}", CREAM, on=on)
-                + (fg(why, CREAM_DIM, on=on) if why else ""))
-        print(ui.spine(line, on=on))
-    print(ui.spine(on=on))
+_DOMAINS: dict[str, list[str]] = {
+    "Research":  ["jarvis", "fetch", "refine", "preview", "extract", "convert",
+                  "x", "manifest", "login", "cohere", "comprehend", "geo", "public",
+                  "akinator", "run", "context", "model-hub"],
+    "GitHub":    ["gh"],
+    "DevOps":    ["repo", "review", "session", "project", "batch", "refactor", "hooks", "agent-os"],
+    "System":    ["solve", "debug", "doctor", "intent", "entity-graph", "graph",
+                  "substrate", "repl", "initialize", "auth", "keyvault", "foundation"],
+    "Data":      ["store", "memory", "embed"],
+}
+
+_QUICK_ACTIONS: list[tuple[str, str, str, list[str]]] = [
+    # (key, label, one-liner, argv)
+    ("s", "solve git",  "prove what happened (read-only)",           ["lgwks", "solve", "git"]),
+    ("r", "repl",       "interactive harness",                      []),
+    ("d", "doctor",     "what's wired on this machine",             []),
+]
+
+
+def _build_command_tree() -> dict[str, dict[str, Any]]:
+    """Introspect the live parser and return {verb: {"help": ..., "subcommands": {...}}}.
+    Subcommands are only captured one level deep — that's the lgwks CLI structure."""
+    try:
+        import importlib.util
+        from importlib.machinery import SourceFileLoader
+        from pathlib import Path as _P
+        loader = SourceFileLoader("lgwks_cli", str(_P(__file__).resolve().parent / "lgwks"))
+        spec = importlib.util.spec_from_loader("lgwks_cli", loader)
+        mod = importlib.util.module_from_spec(spec)
+        sys.modules.setdefault("lgwks_cli", mod)
+        loader.exec_module(mod)
+        parser = mod.build_parser()
+    except Exception:
+        return {}
+
+    # Find top-level subparsers
+    sub_action = None
+    for action in parser._actions:
+        if action.dest == "command":
+            sub_action = action
+            break
+    if sub_action is None or not getattr(sub_action, "choices", None):
+        return {}
+
+    help_by_name: dict[str, str] = {ca.dest: (ca.help or "").strip() for ca in sub_action._choices_actions}
+    tree: dict[str, dict[str, Any]] = {}
+
+    for name, subparser in sub_action.choices.items():
+        help_text = help_by_name.get(name, "")
+        # Skip aliases (e.g. crawl is an alias for fetch). Aliases have empty help text.
+        if not help_text:
+            continue
+        node: dict[str, Any] = {"help": help_text}
+        # Detect sub-subparsers (e.g. jarvis → crawl, gh → issue).
+        # //why: argparse uses `choices` for both subparsers AND --choices flags. The only
+        # reliable discriminator is `_choices_actions`, which exists exclusively on _SubParsersAction.
+        sub_sub = None
+        for a in subparser._actions:
+            if getattr(a, "dest", None) and hasattr(a, "_choices_actions") and hasattr(a, "choices") and a.choices:
+                sub_sub = a
+                break
+        if sub_sub:
+            sub_help = {ca.dest: (ca.help or "").strip() for ca in getattr(sub_sub, "_choices_actions", [])}
+            choices = sub_sub.choices
+            if isinstance(choices, dict):
+                choice_keys = choices.keys()
+            else:
+                choice_keys = choices
+            node["subcommands"] = {
+                sc_name: {"help": sub_help.get(sc_name, "")}
+                for sc_name in choice_keys
+            }
+        tree[name] = node
+    return tree
+
+
+def _domain_for(verb: str) -> str:
+    for domain, verbs in _DOMAINS.items():
+        if verb in verbs:
+            return domain
+    return "Other"
 
 
 def _ask(prompt: str, on: bool) -> str:
@@ -335,11 +407,7 @@ def _ask(prompt: str, on: bool) -> str:
 
 
 def _run(argv: list[str]) -> None:
-    """Route into a sibling verb in its own process (clean stdout, isolated failure).
-
-    //why: subprocess.run without check=True silently swallows non-zero exits. The menu then
-    immediately re-renders, covering any output — the user sees nothing and thinks it broke.
-    We check the returncode ourselves, print stderr on failure, and let the caller pause."""
+    """Route into a sibling verb in its own process (clean stdout, isolated failure)."""
     cmd = [sys.executable, str(ROOT / argv[0]), *argv[1:]]
     try:
         result = subprocess.run(cmd, capture_output=True, text=True)
@@ -399,33 +467,271 @@ def _intent_flow(intent: str, on: bool) -> None:
     _run(["lgwks-akinator", intent, "--purpose", purpose, "--auto", "--crawl", "ground"])
 
 
-def _entryway(on: bool) -> int:
+def _print_doctor(on: bool) -> None:
+    try:
+        import lgwks_capabilities as cap
+        for r in cap.doctor():
+            mark = fg(r["chosen"], EMERALD, on=on) if r.get("chosen") else fg("MISSING", AMBER, on=on)
+            tail = "" if r.get("chosen") else fg(f"  → {r.get('install','')}", CREAM_DIM, on=on)
+            print(ui.spine(fg(f"{r['capability']:<9}", CREAM, on=on) + mark + tail, on=on))
+    except Exception as e:
+        print(ui.spine(fg(f"doctor unavailable: {type(e).__name__}", AMBER, on=on), on=on))
+
+
+# ── browser renderers ─────────────────────────────────────────────────────────
+
+def _render_home_browser(tree: dict[str, dict[str, Any]], on: bool) -> None:
+    """Domain grid + quick actions + intent input."""
+    print(ui.spine(fg("where to?", EMERALD_DIM, on=on)
+                   + fg("   — navigate by domain, or type an intent", CREAM_DIM, on=on), on=on))
+    print(ui.spine(on=on))
+
+    # Group commands by domain
+    by_domain: dict[str, list[str]] = {}
+    for verb in sorted(tree.keys()):
+        domain = _domain_for(verb)
+        by_domain.setdefault(domain, []).append(verb)
+
+    # Render domain grid
+    domains = [d for d in list(_DOMAINS.keys()) + ["Other"] if d in by_domain]
+    for i, domain in enumerate(domains, 1):
+        verbs = by_domain[domain]
+        line = ("  " + fg(f"{i} ", EMERALD, on=on, bold=True)
+                + fg(f"{domain:<13}", CREAM, on=on)
+                + fg(f"{len(verbs)} command{'s' if len(verbs) != 1 else ''} ", CREAM_DIM, on=on)
+                + fg(", ".join(verbs[:4]), CREAM_DIM, on=on)
+                + (fg("…", CREAM_DIM, on=on) if len(verbs) > 4 else ""))
+        print(ui.spine(line, on=on))
+
+    print(ui.spine(on=on))
+
+    # Quick actions (non-command shortcuts)
+    for key, label, why, _argv in _QUICK_ACTIONS:
+        line = ("  " + fg(f"{key} ", EMERALD, on=on, bold=True)
+                + fg(f"{label:<13}", CREAM, on=on)
+                + (fg(why, CREAM_DIM, on=on) if why else ""))
+        print(ui.spine(line, on=on))
+
+    # Intent input
+    print(ui.spine("  " + fg("› ", EMERALD, on=on, bold=True)
+                   + fg("your intent", CREAM, on=on)
+                   + fg("   research it — I'll ask the question behind it", CREAM_DIM, on=on), on=on))
+    print(ui.spine(on=on))
+    print(ui.spine(fg("q quit  ·  b back  ·  [number/letter] pick", CREAM_DIM, on=on), on=on))
+    print(ui.spine(on=on))
+
+
+def _render_domain_browser(domain: str, verbs: list[str], tree: dict[str, dict[str, Any]], on: bool) -> None:
+    """List commands in a domain."""
+    print(ui.spine(fg(f"▸ {domain}", EMERALD_DIM, on=on)
+                   + fg(f"   — {len(verbs)} command{'s' if len(verbs) != 1 else ''}", CREAM_DIM, on=on), on=on))
+    print(ui.spine(on=on))
+    for i, verb in enumerate(verbs, 1):
+        node = tree.get(verb, {})
+        help_text = node.get("help", "")
+        if "." in help_text:
+            help_text = help_text.split(".", 1)[0]
+        if len(help_text) > 56:
+            help_text = help_text[:53].rstrip() + "..."
+        has_sub = "subcommands" in node
+        badge = fg("▸", EMERALD_DIM, on=on) if has_sub else fg("·", MUTED, on=on)
+        line = ("  " + fg(f"{i} ", EMERALD, on=on, bold=True)
+                + fg(f"{verb:<15}", CREAM, on=on)
+                + badge + " "
+                + fg(help_text, CREAM_DIM, on=on))
+        print(ui.spine(line, on=on))
+    print(ui.spine(on=on))
+    print(ui.spine(fg("q quit  ·  b back  ·  [number] pick", CREAM_DIM, on=on), on=on))
+    print(ui.spine(on=on))
+
+
+def _render_command_detail(verb: str, node: dict[str, Any], on: bool) -> None:
+    """Show command details: help text, subcommands if any, and action options."""
+    help_text = node.get("help", "")
+    print(ui.spine(fg(f"▸ {verb}", EMERALD_DIM, on=on)
+                   + (fg(f"   {help_text}", CREAM_DIM, on=on) if help_text else ""), on=on))
+    print(ui.spine(on=on))
+
+    subcommands = node.get("subcommands", {})
+    if subcommands:
+        print(ui.spine(fg("subcommands", EMERALD_DIM, on=on), on=on))
+        for i, (sc_name, sc_node) in enumerate(sorted(subcommands.items()), 1):
+            sc_help = sc_node.get("help", "")
+            if "." in sc_help:
+                sc_help = sc_help.split(".", 1)[0]
+            if len(sc_help) > 50:
+                sc_help = sc_help[:47].rstrip() + "..."
+            line = ("  " + fg(f"{i} ", EMERALD, on=on, bold=True)
+                    + fg(f"{sc_name:<15}", CREAM, on=on)
+                    + fg(sc_help, CREAM_DIM, on=on))
+            print(ui.spine(line, on=on))
+        print(ui.spine(on=on))
+        print(ui.spine(fg("r run  ·  h help  ·  b back  ·  q quit  ·  [number] pick subcommand", CREAM_DIM, on=on), on=on))
+    else:
+        print(ui.spine(fg("r run", EMERALD, on=on) + fg("   run with no args (Phase-3: prompt for args)", CREAM_DIM, on=on), on=on))
+        print(ui.spine(fg("h help", EMERALD, on=on) + fg("   show full help", CREAM_DIM, on=on), on=on))
+        print(ui.spine(on=on))
+        print(ui.spine(fg("b back  ·  q quit", CREAM_DIM, on=on), on=on))
+    print(ui.spine(on=on))
+
+
+def _run_with_help(argv: list[str]) -> None:
+    """Run a command with --help to show usage."""
+    _run(argv + ["--help"])
+
+
+# ── browser navigation loop ───────────────────────────────────────────────────
+
+def _browser_entryway(on: bool) -> int:
     if not sys.stdin.isatty():
         return 0   # piped / non-interactive — dashboard only, never block on input
-    _menu(on)
+
+    tree = _build_command_tree()
+    if not tree:
+        # Fallback: if parser introspection fails, show the old-style minimal menu
+        print(ui.spine(fg("browser unavailable — parser introspection failed", AMBER, on=on), on=on))
+        print(ui.spine(fg("fallback: type an intent directly, or q to quit", CREAM_DIM, on=on), on=on))
+        while True:
+            choice = _ask("", on)
+            low = choice.lower()
+            if low in ("q", "quit", "exit", ""):
+                print(ui.spine(fg("← stay curious.", EMERALD_DIM, on=on), on=on))
+                return 0
+            _intent_flow(choice, on)
+            print(ui.spine(on=on))
+
+    # Group by domain
+    by_domain: dict[str, list[str]] = {}
+    for verb in sorted(tree.keys()):
+        domain = _domain_for(verb)
+        by_domain.setdefault(domain, []).append(verb)
+    domains = [d for d in list(_DOMAINS.keys()) + ["Other"] if d in by_domain]
+
+    # Navigation stack: list of frames
+    # Each frame is a tuple: ("home",) or ("domain", domain_name) or ("command", verb)
+    stack: list[tuple[str, ...]] = [("home",)]
+
+    def _render_current() -> None:
+        frame = stack[-1]
+        if frame[0] == "home":
+            _render_home_browser(tree, on)
+        elif frame[0] == "domain":
+            domain = frame[1]
+            verbs = by_domain.get(domain, [])
+            _render_domain_browser(domain, verbs, tree, on)
+        elif frame[0] == "command":
+            verb = frame[1]
+            node = tree.get(verb, {})
+            _render_command_detail(verb, node, on)
+
+    _render_current()
+
     while True:
         choice = _ask("", on)
         low = choice.lower()
-        if low in ("q", "quit", "exit", ""):
+
+        if low in ("q", "quit", "exit"):
             print(ui.spine(fg("← stay curious.", EMERALD_DIM, on=on), on=on))
             return 0
-        if low in ("1", "solve", "solve git"):
-            _run(["lgwks", "solve", "git"])
-            _pause(on)
-        elif low in ("2", "repl"):
-            try:
-                import lgwks_repl
-                lgwks_repl.run_repl()
-            except Exception as e:
-                print(fg(f"  · repl error: {type(e).__name__}: {e}", AMBER, on=on), file=sys.stderr)
-        elif low in ("3", "doctor"):
-            _print_doctor(on)
-            _pause(on)
-        else:
-            _intent_flow(choice, on)   # anything else = an intent
-            # _intent_flow already has its own prompt chain; no extra pause needed
+
+        if low == "b" or low == "back":
+            if len(stack) > 1:
+                stack.pop()
+                print(ui.spine(on=on))
+                _render_current()
+            else:
+                print(ui.spine(fg("already at home", CREAM_DIM, on=on), on=on))
+            continue
+
+        frame = stack[-1]
+        frame_type = frame[0]
+
+        if frame_type == "home":
+            # Domain number?
+            if low.isdigit():
+                idx = int(low) - 1
+                if 0 <= idx < len(domains):
+                    stack.append(("domain", domains[idx]))
+                    print(ui.spine(on=on))
+                    _render_current()
+                    continue
+            # Quick action key?
+            quick_map = {qa[0]: qa for qa in _QUICK_ACTIONS}
+            if low in quick_map:
+                _, label, _why, argv = quick_map[low]
+                if label == "repl":
+                    try:
+                        import lgwks_repl
+                        lgwks_repl.run_repl()
+                    except Exception as e:
+                        print(fg(f"  · repl error: {type(e).__name__}: {e}", AMBER, on=on), file=sys.stderr)
+                elif label == "doctor":
+                    _print_doctor(on)
+                    _pause(on)
+                elif argv:
+                    _run(argv)
+                    _pause(on)
+                print(ui.spine(on=on))
+                _render_current()
+                continue
+            # Anything else = intent
+            if low:
+                _intent_flow(low, on)
+                print(ui.spine(on=on))
+                _render_current()
+                continue
+
+        elif frame_type == "domain":
+            domain = frame[1]
+            verbs = by_domain.get(domain, [])
+            if low.isdigit():
+                idx = int(low) - 1
+                if 0 <= idx < len(verbs):
+                    verb = verbs[idx]
+                    node = tree.get(verb, {})
+                    if "subcommands" in node:
+                        # For commands with subcommands, go to command detail
+                        stack.append(("command", verb))
+                    else:
+                        # Leaf command: run directly
+                        _run(["lgwks", verb])
+                        _pause(on)
+                    print(ui.spine(on=on))
+                    _render_current()
+                    continue
+
+        elif frame_type == "command":
+            verb = frame[1]
+            node = tree.get(verb, {})
+            subcommands = node.get("subcommands", {})
+            sc_list = sorted(subcommands.keys())
+
+            if low == "r":
+                _run(["lgwks", verb])
+                _pause(on)
+                print(ui.spine(on=on))
+                _render_current()
+                continue
+            elif low == "h":
+                _run_with_help(["lgwks", verb])
+                _pause(on)
+                print(ui.spine(on=on))
+                _render_current()
+                continue
+            elif low.isdigit() and subcommands:
+                idx = int(low) - 1
+                if 0 <= idx < len(sc_list):
+                    sc_name = sc_list[idx]
+                    _run(["lgwks", verb, sc_name])
+                    _pause(on)
+                    print(ui.spine(on=on))
+                    _render_current()
+                    continue
+
+        # Unknown input
+        print(ui.spine(fg(f"unknown choice: {choice!r}", AMBER, on=on), on=on))
         print(ui.spine(on=on))
-        _menu(on)
+        _render_current()
 
 
 def _print_doctor(on: bool) -> None:

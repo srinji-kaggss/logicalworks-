@@ -75,34 +75,103 @@ def test_pause_graceful_on_eof():
         home._pause(on=False)  # should not raise
 
 
-def test_entryway_quits_on_q():
-    """L0: typing 'q' exits the entryway cleanly."""
+def test_browser_entryway_quits_on_q():
+    """L0: typing 'q' exits the browser cleanly."""
     with patch("lgwks_home.sys.stdin.isatty", return_value=True):
         with patch("lgwks_home._ask", return_value="q"):
             with patch("lgwks_home.print"):
-                rc = home._entryway(on=False)
+                rc = home._browser_entryway(on=False)
     assert rc == 0
 
 
-def test_entryway_dispatches_solve_git():
-    """L0: picking '1' runs lgwks solve git and pauses before re-rendering."""
+def test_browser_entryway_dispatches_solve_git():
+    """L0: picking 's' (quick action) runs lgwks solve git and pauses before re-rendering."""
     with patch("lgwks_home.sys.stdin.isatty", return_value=True):
-        with patch("lgwks_home._ask", side_effect=["1", "q"]) as mock_ask:
+        with patch("lgwks_home._ask", side_effect=["s", "q"]):
             with patch("lgwks_home._run") as mock_run:
                 with patch("lgwks_home._pause") as mock_pause:
                     with patch("lgwks_home.print"):
-                        home._entryway(on=False)
+                        home._browser_entryway(on=False)
     mock_run.assert_called_once_with(["lgwks", "solve", "git"])
     mock_pause.assert_called_once()
 
 
-def test_entryway_dispatches_doctor():
-    """L0: picking '3' prints doctor output and pauses."""
+def test_browser_entryway_dispatches_doctor():
+    """L0: picking 'd' (quick action) prints doctor output and pauses."""
     with patch("lgwks_home.sys.stdin.isatty", return_value=True):
-        with patch("lgwks_home._ask", side_effect=["3", "q"]):
+        with patch("lgwks_home._ask", side_effect=["d", "q"]):
             with patch("lgwks_home._print_doctor") as mock_doc:
                 with patch("lgwks_home._pause") as mock_pause:
                     with patch("lgwks_home.print"):
-                        home._entryway(on=False)
+                        home._browser_entryway(on=False)
     mock_doc.assert_called_once()
     mock_pause.assert_called_once()
+
+
+def test_build_command_tree_non_empty():
+    """L0: parser introspection must discover at least the commands we know exist."""
+    tree = home._build_command_tree()
+    assert "gh" in tree
+    assert "jarvis" in tree
+    assert "solve" in tree
+    # crawl alias should be filtered out (empty help)
+    assert "crawl" not in tree
+
+
+def test_domain_for_coverage():
+    """L0: every discovered command must map to a known domain (no 'Other' catch-all)."""
+    tree = home._build_command_tree()
+    for verb in tree:
+        domain = home._domain_for(verb)
+        assert domain != "Other", f"{verb} is unmapped — add it to _DOMAINS"
+
+
+def test_render_command_detail_with_subcommands():
+    """L0: gh (orchestrator) must show its subcommands in the detail view."""
+    tree = home._build_command_tree()
+    node = tree.get("gh", {})
+    assert "subcommands" in node
+    with patch("lgwks_home.print") as mock_print:
+        home._render_command_detail("gh", node, on=False)
+    texts = [str(c) for c in mock_print.call_args_list]
+    assert any("issue" in t for t in texts)
+    assert any("pr" in t for t in texts)
+
+
+def test_render_command_detail_leaf():
+    """L0: leaf commands (no subcommands) must show run/help options, not a subcommand list."""
+    tree = home._build_command_tree()
+    node = tree.get("solve", {})
+    assert "subcommands" not in node
+    with patch("lgwks_home.print") as mock_print:
+        home._render_command_detail("solve", node, on=False)
+    texts = [str(c) for c in mock_print.call_args_list]
+    assert any("run" in t for t in texts)
+    assert any("help" in t for t in texts)
+
+
+def test_browser_navigates_domain_to_command():
+    """L0: user picks domain '1' (Research), then command '1' (first Research verb), then 'q'."""
+    tree = home._build_command_tree()
+    research_verbs = sorted([v for v in tree if home._domain_for(v) == "Research"])
+    first_verb = research_verbs[0]
+    with patch("lgwks_home.sys.stdin.isatty", return_value=True):
+        with patch("lgwks_home._ask", side_effect=["1", "1", "q"]):
+            with patch("lgwks_home._run") as mock_run:
+                with patch("lgwks_home._pause"):
+                    with patch("lgwks_home.print"):
+                        home._browser_entryway(on=False)
+    # The first Research verb should have been run
+    mock_run.assert_called_once_with(["lgwks", first_verb])
+
+
+def test_browser_back_navigation():
+    """L0: 'b' at domain level pops back to home; 'b' at home stays at home."""
+    with patch("lgwks_home.sys.stdin.isatty", return_value=True):
+        with patch("lgwks_home._ask", side_effect=["1", "b", "q"]):
+            with patch("lgwks_home._run") as mock_run:
+                with patch("lgwks_home._pause"):
+                    with patch("lgwks_home.print"):
+                        home._browser_entryway(on=False)
+    # Should never have run a command (b at domain = back to home, then q = quit)
+    mock_run.assert_not_called()
