@@ -15,6 +15,7 @@ install command — never a silent empty (the googler lesson).
 
 from __future__ import annotations
 
+import json
 import re
 import ipaddress
 import select
@@ -123,6 +124,17 @@ def _session_for_url(url: str) -> Path | None:
         return scoped
     if host.lower().endswith("linkedin.com") and _SESSION.exists():
         return _SESSION
+    # Cross-domain adaptive: if auth happened on a different subdomain (e.g. auth.example.com)
+    # but cookies are scoped to .example.com, find the session that covers this host.
+    try:
+        for path in _SESSION_DIR.glob("*.json"):
+            data = json.loads(path.read_text(encoding="utf-8"))
+            for cookie in data.get("cookies", []):
+                domain = (cookie.get("domain") or "").lstrip(".").lower()
+                if domain and (host.lower() == domain or host.lower().endswith("." + domain)):
+                    return path
+    except Exception:
+        pass
     return None
 
 

@@ -2,7 +2,10 @@
 
 from __future__ import annotations
 
+import json
+import tempfile
 import unittest
+from pathlib import Path
 
 import lgwks_browser as browser
 
@@ -89,6 +92,76 @@ class TestSessionForUrl(unittest.TestCase):
 
     def test_returns_none_for_invalid_url(self):
         assert browser._session_for_url("not-a-url") is None
+
+    def test_cross_domain_cookie_match(self):
+        """If session was saved on auth.example.com but cookies are scoped to .example.com,
+        portal.example.com should find the session."""
+        with tempfile.TemporaryDirectory() as td:
+            session_dir = Path(td)
+            auth_session = session_dir / "auth-example-com.json"
+            auth_session.write_text(
+                json.dumps({
+                    "cookies": [
+                        {
+                            "name": "session",
+                            "value": "abc123",
+                            "domain": ".example.com",
+                            "path": "/",
+                        }
+                    ]
+                }),
+                encoding="utf-8",
+            )
+            old = browser._SESSION_DIR
+            try:
+                browser._SESSION_DIR = session_dir
+                result = browser._session_for_url("https://portal.example.com/dashboard")
+                assert result == auth_session, f"expected {auth_session}, got {result}"
+            finally:
+                browser._SESSION_DIR = old
+
+    def test_cross_domain_exact_subdomain_match(self):
+        """Cookie domain without leading dot also works."""
+        with tempfile.TemporaryDirectory() as td:
+            session_dir = Path(td)
+            auth_session = session_dir / "login-example-com.json"
+            auth_session.write_text(
+                json.dumps({
+                    "cookies": [
+                        {
+                            "name": "token",
+                            "value": "xyz",
+                            "domain": "example.com",
+                            "path": "/",
+                        }
+                    ]
+                }),
+                encoding="utf-8",
+            )
+            old = browser._SESSION_DIR
+            try:
+                browser._SESSION_DIR = session_dir
+                result = browser._session_for_url("https://app.example.com/")
+                assert result == auth_session
+            finally:
+                browser._SESSION_DIR = old
+
+    def test_cross_domain_no_match_for_wrong_domain(self):
+        """A session for evil.com must NOT match example.com."""
+        with tempfile.TemporaryDirectory() as td:
+            session_dir = Path(td)
+            (session_dir / "evil-com.json").write_text(
+                json.dumps({
+                    "cookies": [{"name": "s", "value": "v", "domain": "evil.com", "path": "/"}]
+                }),
+                encoding="utf-8",
+            )
+            old = browser._SESSION_DIR
+            try:
+                browser._SESSION_DIR = session_dir
+                assert browser._session_for_url("https://example.com/") is None
+            finally:
+                browser._SESSION_DIR = old
 
 
 if __name__ == "__main__":
