@@ -17,7 +17,9 @@ from __future__ import annotations
 
 import re
 import ipaddress
+import select
 import socket
+import sys
 import urllib.parse
 from pathlib import Path
 
@@ -31,12 +33,29 @@ _SESSION = Path.home() / ".config" / "lgwks" / "linkedin-session.json"  # legacy
 _INSTALL = "pipx install playwright && playwright install chromium webkit"
 
 
-def available() -> tuple[bool, str]:
-    """Is a real browser usable? (pymod + installed Chromium). Returns (ok, reason-or-install-hint)."""
+def _browser_path(engine: str) -> Path | None:
+    """Return the expected browser executable path, or None if not found."""
+    try:
+        from playwright.sync_api import sync_playwright
+        with sync_playwright() as p:
+            browser_type = p.webkit if engine == "webkit" else p.chromium
+            executable = browser_type.executable_path
+            if executable and Path(executable).exists():
+                return Path(executable)
+    except Exception:
+        pass
+    return None
+
+
+def available(engine: str = "webkit") -> tuple[bool, str]:
+    """Is a real browser usable? (pymod + installed browser binary).
+    Returns (ok, reason-or-install-hint)."""
     try:
         from playwright.sync_api import sync_playwright  # noqa: F401
     except Exception:
         return False, f"playwright not installed — {_INSTALL}"
+    if _browser_path(engine) is None:
+        return False, f"{engine} browser not installed — run: playwright install {engine}"
     return True, "ready"
 
 
@@ -120,7 +139,7 @@ def render(url: str, max_chars: int = 8000, *, use_session: bool = False,
     """
     if not _remote_allowed(url):
         return {"ok": False, "text": "", "reason": "blocked URL"}
-    ok, why = available()
+    ok, why = available(browser_engine)
     if not ok:
         return {"ok": False, "text": "", "reason": why}
     if browser_engine not in ("chromium", "webkit"):
@@ -175,7 +194,7 @@ def save_session(
 
     manual=True skips DOM/URL success detection and lets the user complete OTP/passkey/magic-link
     flows in the visible browser, then press Enter in the terminal to persist the session."""
-    ok, why = available()
+    ok, why = available(browser_engine)
     if not ok:
         return {"ok": False, "reason": why}
     if browser_engine not in ("chromium", "webkit"):
@@ -214,7 +233,12 @@ def save_session(
 
             if manual:
                 print("  Complete auth in the browser window, then press Enter here to continue...", flush=True)
-                input()
+                print("  (auto-close in 5 minutes if no input)", flush=True)
+                ready, _, _ = select.select([sys.stdin], [], [], 300)
+                if not ready:
+                    browser.close()
+                    return {"ok": False, "reason": "timeout: no input within 5 minutes — session not saved"}
+                sys.stdin.readline()
                 ctx.storage_state(path=str(session_path))
                 browser.close()
                 return {"ok": True, "path": str(session_path), "reason": "session saved (manual)"}
