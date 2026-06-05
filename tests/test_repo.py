@@ -125,6 +125,22 @@ class TestCleanup(unittest.TestCase):
         import shutil
         shutil.rmtree(wt, ignore_errors=True)
 
+    def test_cleanup_removes_clean_merged_worktree_branch(self):
+        r = _init_repo()
+        _git(r, "checkout", "-b", "feat")
+        (r / "b.py").write_text("y = 1\n")
+        _git(r, "add", "b.py")
+        _git(r, "commit", "-m", "feat")
+        wt = Path(tempfile.mkdtemp(prefix="lgwks_repo_clean_wt_"))
+        wt.rmdir()
+        _git(r, "worktree", "add", str(wt), "feat")
+        _git(r, "checkout", "main")
+        _git(r, "merge", "--no-ff", "feat", "-m", "merge feat")
+        result = repo.repo_cleanup(r)
+        self.assertTrue(any("removed worktree" in a for a in result["actions"]))
+        self.assertTrue(any("deleted branch feat" in a for a in result["actions"]))
+        self.assertFalse(wt.exists())
+
 
 class TestHandoff(unittest.TestCase):
     def test_handoff_schema_and_health(self):

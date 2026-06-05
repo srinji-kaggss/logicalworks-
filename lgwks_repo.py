@@ -67,6 +67,14 @@ def _head_sha(repo: Path) -> str:
     return out if rc == 0 else "unknown"
 
 
+def _merged_branches(repo: Path, head: str = "HEAD") -> list[str]:
+    """Return merged local branch names without TTY markers from `git branch` output."""
+    rc, out = _git(repo, "branch", "--merged", head, "--format=%(refname:short)")
+    if rc != 0 or not out:
+        return []
+    return [ln.strip() for ln in out.splitlines() if ln.strip()]
+
+
 @dataclass
 class AuditFinding:
     check: str
@@ -110,10 +118,7 @@ def repo_audit(repo: Path) -> tuple[list[AuditFinding], dict[str, Any]]:
         findings.append(AuditFinding("dangling", "danger", f"{len(dangling)} dangling commit(s)", ["git fsck --no-reflogs --dangling"]))
 
     # 5) merged branches
-    rc, out = _git(repo, "branch", "--merged", "HEAD")
-    merged = [ln.strip().lstrip("* ") for ln in out.splitlines() if ln.strip() and not ln.strip().startswith("*")]
-    # Exclude HEAD itself if listed
-    merged = [b for b in merged if b != "HEAD"]
+    merged = [b for b in _merged_branches(repo, "HEAD") if b != "HEAD"]
     if merged:
         findings.append(AuditFinding("merged_branches", "warn", f"{len(merged)} merged branch(es) not deleted: {', '.join(merged[:5])}" + ("…" if len(merged) > 5 else ""), ["git branch --merged HEAD"]))
 
@@ -210,8 +215,7 @@ def repo_cleanup(repo: Path, force: bool = False) -> dict[str, Any]:
     skipped: list[str] = []
 
     # branches
-    rc, out = _git(repo, "branch", "--merged", "HEAD")
-    merged = [ln.strip().lstrip("* ") for ln in out.splitlines() if ln.strip() and not ln.strip().startswith("*") and ln.strip() != "HEAD"]
+    merged = [b for b in _merged_branches(repo, "HEAD") if b != "HEAD"]
     for b in merged:
         _git(repo, "branch", "-d", b)
         actions.append(f"deleted branch {b}")
@@ -610,8 +614,7 @@ def repo_sync(repo: Path, push: bool = True) -> dict[str, Any]:
         actions.append(f"pushed {branch} to origin")
 
     # 4) find merged branches
-    rc, out = _git(repo, "branch", "--merged", "HEAD")
-    merged = [ln.strip().lstrip("* ") for ln in out.splitlines() if ln.strip() and not ln.strip().startswith("*") and ln.strip() != "HEAD" and ln.strip() != branch]
+    merged = [b for b in _merged_branches(repo, "HEAD") if b not in {"HEAD", branch}]
 
     # 5) find worktrees + remove merged ones
     rc, out = _git(repo, "worktree", "list", "--porcelain")
