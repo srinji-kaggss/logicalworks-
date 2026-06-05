@@ -197,6 +197,18 @@ _VERB_META: dict[str, dict] = {
         "args": {"path": "folder", "--project": "memory project", "--keywords": "repeatable focus terms", "--cycles": "0 = until stable"},
         "output": "project root vault + per-folder sub-vault manifests and embeddings", "tokens": "none",
     },
+    "batch": {
+        "intent": "validate and run a typed command batch with one approval boundary",
+        "args": {"--file": "path to lgwks-batch/1 JSON; omit to read stdin",
+                 "--yes": "approve known-risk batches non-interactively",
+                 "--force": "required for destructive batches",
+                 "--dry-run": "validate + preview only",
+                 "--keep-going": "continue after a command fails",
+                 "--json": "structured validation/transcript",
+                 "--render": "human preview"},
+        "output": "validation report or transcript persisted under store/batch-runs/",
+        "tokens": "none",
+    },
     "project plan": {
         "intent": "turn one prompt into bounded branch-worker crawl/embed/reason plan",
         "args": {"project": "name", "--prompt": "goal", "--reasoning-cycles": "default 5", "--embedding-rounds": "default 400"},

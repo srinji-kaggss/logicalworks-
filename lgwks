@@ -1204,6 +1204,10 @@ def build_parser() -> argparse.ArgumentParser:
     import lgwks_embed
     lgwks_embed.add_parser(sub)
 
+    # batch — schema-validated batch execution for real shell commands.
+    import lgwks_batch
+    lgwks_batch.add_parser(sub)
+
     # project — one-prompt orchestrator: identify/spec now, deploy executor next.
     import lgwks_project
     lgwks_project.add_parser(sub)
