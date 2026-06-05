@@ -52,7 +52,14 @@ NARRATIVE_TERMS = {
     "think", "feel", "believe", "love", "maybe", "probably", "helpful", "great",
     "excellent", "frustrated", "opinion", "story", "journey", "marketing", "vision",
 }
-AUTH_GATE_RE = re.compile(r"\b(sign in|log in|login|password|multi-factor|two-factor|passkey|touch id|face id|verify identity|one-time code|magic link|otp)\b", re.I)
+AUTH_GATE_RE = re.compile(
+    r"\b("
+    r"sign in|log in|login|password|multi-factor|two-factor|passkey|touch id|face id|verify identity|"
+    r"one-time code|magic link|otp|captcha|cloudflare|checking your browser|verify you are human|"
+    r"access denied|enable javascript|challenge|bot detection|unusual traffic"
+    r")\b",
+    re.I,
+)
 
 
 def _sha(text: str) -> str:

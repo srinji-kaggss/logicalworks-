@@ -24,6 +24,7 @@ class TestSubstrateScoring(unittest.TestCase):
 
     def test_looks_like_login_gate(self):
         self.assertTrue(substrate._looks_like_login_gate("Sign in", "Use Touch ID to continue", "https://portal.example.com/login"))
+        self.assertTrue(substrate._looks_like_login_gate("Just a moment...", "Checking your browser before accessing the portal", "https://portal.example.com/"))
         self.assertFalse(substrate._looks_like_login_gate("Overview", "Transfer threshold is 500 dollars.", "https://portal.example.com/docs"))
 
 
