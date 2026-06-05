@@ -335,11 +335,32 @@ def _ask(prompt: str, on: bool) -> str:
 
 
 def _run(argv: list[str]) -> None:
-    """Route into a sibling verb in its own process (clean stdout, isolated failure)."""
+    """Route into a sibling verb in its own process (clean stdout, isolated failure).
+
+    //why: subprocess.run without check=True silently swallows non-zero exits. The menu then
+    immediately re-renders, covering any output — the user sees nothing and thinks it broke.
+    We check the returncode ourselves, print stderr on failure, and let the caller pause."""
+    cmd = [sys.executable, str(ROOT / argv[0]), *argv[1:]]
     try:
-        subprocess.run([sys.executable, str(ROOT / argv[0]), *argv[1:]])
+        result = subprocess.run(cmd, capture_output=True, text=True)
+        if result.stdout:
+            print(result.stdout, end="")
+        if result.returncode != 0:
+            err = (result.stderr or "<no stderr>").strip()
+            print(fg(f"  · {argv[0]} exited {result.returncode}", AMBER, on=ui.color_on()))
+            if err:
+                for line in err.splitlines():
+                    print(fg(f"    {line}", AMBER, on=ui.color_on()))
     except Exception as e:
         print(fg(f"  · couldn't launch {argv[0]}: {type(e).__name__}", AMBER, on=ui.color_on()))
+
+
+def _pause(on: bool) -> None:
+    """Hold so the user can read subprocess output before the menu re-renders over it."""
+    try:
+        input("  " + fg("— press Enter to continue —", CREAM_DIM, on=on))
+    except (EOFError, KeyboardInterrupt):
+        pass
 
 
 def _intent_flow(intent: str, on: bool) -> None:
@@ -390,12 +411,16 @@ def _entryway(on: bool) -> int:
             return 0
         if low in ("1", "solve", "solve git"):
             _run(["lgwks", "solve", "git"])
+            _pause(on)
         elif low in ("2", "demo"):
             _run(["lgwks-akinator", "--demo"])
+            _pause(on)
         elif low in ("3", "doctor"):
             _print_doctor(on)
+            _pause(on)
         else:
             _intent_flow(choice, on)   # anything else = an intent
+            # _intent_flow already has its own prompt chain; no extra pause needed
         print(ui.spine(on=on))
         _menu(on)
 
