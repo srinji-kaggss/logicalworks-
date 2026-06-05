@@ -1328,6 +1328,11 @@ def build_parser() -> argparse.ArgumentParser:
     doctor = sub.add_parser("doctor", help="self-test: verify install health")
     doctor.set_defaults(func=_doctor_dispatch)
 
+    # initialize — first-time human setup: verify deps, create dirs, install browsers, print next steps
+    init = sub.add_parser("initialize", help="first-time setup: verify deps, install browsers, create dirs")
+    init.add_argument("--skip-browser-install", action="store_true", help="skip playwright browser install (assume already done)")
+    init.set_defaults(func=_initialize_dispatch)
+
     return parser
 
 
@@ -1503,6 +1508,110 @@ def _doctor_dispatch(args) -> int:
 
     print(_json.dumps({"ok": ok, "checks": checks}, indent=2))
     return 0 if ok else 1
+
+
+def _initialize_dispatch(args) -> int:
+    import subprocess
+    import sys
+    from pathlib import Path
+
+    print("\n  ╔══════════════════════════════════════════════════════════════╗")
+    print("  ║  lgwks initialize — first-time human setup                 ║")
+    print("  ╚══════════════════════════════════════════════════════════════╝\n")
+
+    ok = True
+
+    # 1. Python version
+    py_major, py_minor = sys.version_info[:2]
+    if (py_major, py_minor) >= (3, 10):
+        print(f"  ✅ Python {py_major}.{py_minor} (need ≥3.10)")
+    else:
+        print(f"  ❌ Python {py_major}.{py_minor} — need ≥3.10. Install via pyenv or Homebrew.")
+        ok = False
+
+    # 2. Playwright module
+    try:
+        import importlib.metadata
+        pw_ver = importlib.metadata.version("playwright")
+        print(f"  ✅ playwright {pw_ver}")
+    except Exception:
+        print("  ⚠️  playwright not installed")
+        print("     → installing now: pip install playwright")
+        try:
+            subprocess.run([sys.executable, "-m", "pip", "install", "playwright"], check=True)
+            print("  ✅ playwright installed")
+        except Exception as exc:
+            print(f"  ❌ install failed: {exc}")
+            ok = False
+
+    # 3. Browser binaries
+    if not args.skip_browser_install:
+        print("  → installing browser binaries (webkit + chromium)")
+        try:
+            subprocess.run([sys.executable, "-m", "playwright", "install", "webkit", "chromium"], check=True)
+            print("  ✅ browsers installed")
+        except Exception as exc:
+            print(f"  ❌ browser install failed: {exc}")
+            print("     → try manually: python3 -m playwright install webkit chromium")
+            ok = False
+    else:
+        print("  ⏭️  skipping browser install (--skip-browser-install)")
+
+    # 4. Session directory
+    session_dir = Path.home() / ".config" / "lgwks" / "sessions"
+    try:
+        session_dir.mkdir(parents=True, exist_ok=True)
+        print(f"  ✅ session dir: {session_dir}")
+    except Exception as exc:
+        print(f"  ❌ session dir failed: {exc}")
+        ok = False
+
+    # 5. Auth vault
+    vault_dir = Path.home() / ".lgwks" / "auth-vault"
+    try:
+        vault_dir.mkdir(parents=True, exist_ok=True)
+        print(f"  ✅ auth vault: {vault_dir}")
+    except Exception as exc:
+        print(f"  ❌ auth vault failed: {exc}")
+        ok = False
+
+    # 6. Store/substrate
+    store_dir = Path(__file__).resolve().parent / "store" / "substrate"
+    try:
+        store_dir.mkdir(parents=True, exist_ok=True)
+        print(f"  ✅ store dir: {store_dir}")
+    except Exception as exc:
+        print(f"  ❌ store dir failed: {exc}")
+        ok = False
+
+    # 7. Ollama (optional but recommended)
+    ollama_ok = False
+    try:
+        proc = subprocess.run(["ollama", "--version"], capture_output=True, text=True, timeout=5)
+        ollama_ok = proc.returncode == 0
+    except Exception:
+        pass
+    if ollama_ok:
+        print("  ✅ ollama found (local embeddings)")
+    else:
+        print("  ⏭️  ollama not found — optional; install for local embeddings:")
+        print("     → https://ollama.com/download")
+
+    # 8. Summary
+    print("\n  ╔══════════════════════════════════════════════════════════════╗")
+    if ok:
+        print("  ║  ✅ Ready for first crawl                                  ║")
+        print("  ╚══════════════════════════════════════════════════════════════╝\n")
+        print("  Next steps:")
+        print("    lgwks doctor                 # full health check")
+        print("    lgwks login https://example.com  # save a browser session")
+        print("    lgwks substrate map URL    # crawl + vector + graph")
+        print("")
+        return 0
+    else:
+        print("  ║  ❌ Some checks failed — fix above, then re-run            ║")
+        print("  ╚══════════════════════════════════════════════════════════════╝\n")
+        return 1
 
 
 def _forward_argv(args) -> list[str]:
