@@ -112,7 +112,45 @@ class TestSubstrateBuild(unittest.TestCase):
         self.assertEqual(len(docs), 1)
         self.assertIn("$500", docs[0]["text"])
         self.assertTrue(any(row["status"] == "retrying_gate" for row in frontier))
-        self.assertTrue(any(row["status"] == "auth_prompted" for row in frontier))
+        self.assertTrue(any(row["status"] == "auth_verified" for row in frontier))
+
+    def test_crawl_site_stops_after_failed_auth_verification(self):
+        """If save_session returns ok but headless verification still shows a login gate,
+        the crawler must NOT re-queue the URL and must NOT prompt again immediately."""
+        call_count = {"render": 0}
+
+        def fake_render(url, **_kwargs):
+            call_count["render"] += 1
+            # Always returns login-gate HTML — session never works in headless mode
+            return {"ok": True, "html": "<html>Sign in with passkey</html>", "text": "Sign in with passkey"}
+
+        def fake_html_to_markdown(html, url):
+            if "Sign in" in html:
+                return "Sign in with passkey", "Sign in", []
+            return "Transfer threshold is $500.", "Overview", []
+
+        def fake_save_session(_url, **_kwargs):
+            return {"ok": True, "path": "/tmp/session.json", "reason": "session saved (manual)"}
+
+        with mock.patch.object(substrate.lgwks_browser, "_remote_allowed", return_value=True):
+            with mock.patch.object(substrate.lgwks_browser, "render", side_effect=fake_render):
+                with mock.patch.object(substrate.lgwks_browser, "save_session", side_effect=fake_save_session):
+                    with mock.patch.object(substrate, "html_to_markdown", side_effect=fake_html_to_markdown):
+                        docs, frontier = substrate._crawl_site(
+                            "https://portal.example.com",
+                            max_pages=1,
+                            max_depth=0,
+                            browser_engine="chromium",
+                            login_if_needed=True,
+                            login_url="",
+                            success_selector=None,
+                            max_auto_bypass_attempts=0,
+                            max_auth_handoffs=2,
+                        )
+        self.assertEqual(len(docs), 0)
+        self.assertTrue(any(row["status"] == "auth_saved_but_failed" for row in frontier))
+        # render should be called: initial + verification (2 times), NOT a second save_session
+        self.assertEqual(call_count["render"], 2)
 
 
 if __name__ == "__main__":

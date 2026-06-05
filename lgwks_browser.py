@@ -28,7 +28,7 @@ _UA = ("Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 "
        "(KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36")
 _SESSION_DIR = Path.home() / ".config" / "lgwks" / "sessions"
 _SESSION = Path.home() / ".config" / "lgwks" / "linkedin-session.json"  # legacy location
-_INSTALL = "pipx install playwright && playwright install chromium"
+_INSTALL = "pipx install playwright && playwright install chromium webkit"
 
 
 def available() -> tuple[bool, str]:
@@ -109,11 +109,12 @@ def _session_for_url(url: str) -> Path | None:
 
 def render(url: str, max_chars: int = 8000, *, use_session: bool = False,
            wait_ms: int = 1500, with_html: bool = False,
-           browser_engine: str = "chromium") -> dict:
+           browser_engine: str = "webkit") -> dict:
     """Fetch a JS-rendered page with a real browser.
 
-    browser_engine: "chromium" (default) or "webkit" (Safari engine — use for sites that
-    require Safari cookies, e.g. after a Safari extension session capture via lgwks login).
+    browser_engine: "webkit" (default, Safari engine — best for macOS Safari sessions)
+    or "chromium" (use for Chrome-cookie compatibility or --disable-blink-features
+    anti-detection on heavily bot-walled sites).
     use_session loads the saved session for this host from ~/.config/lgwks/sessions/.
     with_html also returns the rendered DOM. Returns {ok, text, reason[, html]}.
     """
@@ -161,7 +162,7 @@ def save_session(
     login_url: str = "https://www.linkedin.com/login",
     *,
     success_selector: str | None = None,
-    browser_engine: str = "chromium",
+    browser_engine: str = "webkit",
     manual: bool = False,
 ) -> dict:
     """One-time: open a real browser so the USER logs in themselves, then persist their session.
@@ -204,6 +205,8 @@ def save_session(
             launch_kwargs: dict = {"headless": False}  # visible — the human logs in
             if browser_engine == "chromium":
                 launch_kwargs["args"] = ["--disable-blink-features=AutomationControlled"]
+            print(f"\n  Opening {browser_engine} browser for {login_url}", flush=True)
+            print("  Complete login in that window, then return here and press Enter to continue...\n", flush=True)
             browser = engine.launch(**launch_kwargs)
             ctx = browser.new_context(user_agent=_UA, locale="en-CA")
             page = ctx.new_page()
