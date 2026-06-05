@@ -30,7 +30,6 @@ _WS = re.compile(r"\n{3,}")
 _UA = ("Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 "
        "(KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36")
 _SESSION_DIR = Path.home() / ".config" / "lgwks" / "sessions"
-_SESSION = Path.home() / ".config" / "lgwks" / "linkedin-session.json"  # legacy location
 _INSTALL = "pipx install playwright && playwright install chromium webkit"
 
 
@@ -122,8 +121,6 @@ def _session_for_url(url: str) -> Path | None:
     scoped = _SESSION_DIR / f"{safe}.json"
     if scoped.exists():
         return scoped
-    if host.lower().endswith("linkedin.com") and _SESSION.exists():
-        return _SESSION
     # Cross-domain adaptive: if auth happened on a different subdomain (e.g. auth.example.com)
     # but cookies are scoped to .example.com, find the session that covers this host.
     try:
@@ -289,9 +286,3 @@ def save_session(
         return {"ok": False, "reason": f"login capture failed: {type(e).__name__}: {e}"}
 
 
-def linkedin(url: str, max_chars: int = 8000) -> dict:
-    """Fetch a LinkedIn page through the user's consented session. Honest if no session saved yet."""
-    if not _session_for_url(url):
-        return {"ok": False, "text": "",
-                "reason": "no LinkedIn session — run: lgwks login linkedin (opens a window; you log in)"}
-    return render(url, max_chars, use_session=True, wait_ms=2500)

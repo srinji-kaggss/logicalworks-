@@ -366,9 +366,8 @@ class TestAuthRuntime(unittest.TestCase):
         import lgwks_browser as browser
 
         tmp = Path(tempfile.mkdtemp())
-        old_dir, old_legacy = browser._SESSION_DIR, browser._SESSION
+        old_dir = browser._SESSION_DIR
         browser._SESSION_DIR = tmp / "sessions"
-        browser._SESSION = tmp / "linkedin-session.json"
         try:
             browser._SESSION_DIR.mkdir()
             scoped = browser._SESSION_DIR / "scholar.google.com.json"
@@ -376,7 +375,7 @@ class TestAuthRuntime(unittest.TestCase):
             self.assertEqual(browser._session_for_url("https://scholar.google.com/scholar"), scoped)
             self.assertIsNone(browser._session_for_url("https://example.com/"))
         finally:
-            browser._SESSION_DIR, browser._SESSION = old_dir, old_legacy
+            browser._SESSION_DIR = old_dir
 
     def test_needs_auth_json_sanitizes_url(self):
         import lgwks_auth_runtime as auth
