@@ -1332,6 +1332,11 @@ def build_parser() -> argparse.ArgumentParser:
     doctor = sub.add_parser("doctor", help="self-test: verify install health")
     doctor.set_defaults(func=_doctor_dispatch)
 
+    # repl — interactive readline harness (history, completion, inline queries)
+    repl = sub.add_parser("repl", help="interactive readline harness (history, tab completion, inline queries)")
+    repl.add_argument("--repo", default=".", help="repo path to load graph context from")
+    repl.set_defaults(func=_repl_dispatch)
+
     # initialize — first-time human setup: verify deps, create dirs, install browsers, print next steps
     init = sub.add_parser("initialize", help="first-time setup: verify deps, install browsers, create dirs")
     init.add_argument("--skip-browser-install", action="store_true", help="skip playwright browser install (assume already done)")
@@ -1348,6 +1353,11 @@ def _solve_dispatch(args) -> int:
 def _home_dispatch(args) -> int:
     import lgwks_home  # lazy: the launcher pulls ui/capabilities/steering only when you land on it
     return lgwks_home.home_command(args)
+
+
+def _repl_dispatch(args) -> int:
+    import lgwks_repl
+    return lgwks_repl.run_repl(repo_path=getattr(args, "repo", "."))
 
 
 def _manifest_dispatch(args) -> int:

@@ -456,8 +456,165 @@ def test_graph_command_neighbors(tmp_path, capsys):
     subprocess.run(["git", "commit", "-m", "init", "-q"], cwd=repo, check=True)
     args = argparse.Namespace(repo=str(repo), refresh=True, impact=False, files="", radius=3,
                                complexity=False, path=False, from_node="", to_node="",
-                               neighbors=True, of="b.py", query="")
+                               neighbors=True, of="b.py", query="",
+                               patterns=False, schema_infer=False)
     rc = gmod.graph_command(args)
     assert rc == 0
     captured = capsys.readouterr()
     assert "a.py" in captured.out
+
+
+# ── Phase 5: deterministic pattern/schema extraction ───────────────────────────
+
+def test_detect_patterns_circular_deps():
+    """L0: detect_patterns finds a circular import chain a→b→c→a."""
+    graph = gmod.Graph()
+    for n in ["a.py", "b.py", "c.py"]:
+        graph.nodes[n] = gmod.Node(id=n, kind="file")
+    graph.edges = [
+        gmod.Edge("a.py", "b.py", "import"),
+        gmod.Edge("b.py", "c.py", "import"),
+        gmod.Edge("c.py", "a.py", "import"),
+    ]
+    pats = graph.detect_patterns()
+    assert pats["circular_dependencies"]["count"] == 1
+    group = pats["circular_dependencies"]["groups"][0]
+    assert set(group) == {"a.py", "b.py", "c.py"}
+
+
+def test_detect_patterns_god_modules():
+    """L0: a node with extreme in-degree is flagged as a god module."""
+    graph = gmod.Graph()
+    for i in range(10):
+        graph.nodes[f"dep{i}.py"] = gmod.Node(id=f"dep{i}.py", kind="file")
+    graph.nodes["core.py"] = gmod.Node(id="core.py", kind="file")
+    for i in range(9):
+        graph.edges.append(gmod.Edge(f"dep{i}.py", "core.py", "import"))
+    pats = graph.detect_patterns()
+    assert "core.py" in pats["god_modules"]["modules"]
+
+
+def test_detect_patterns_orphans():
+    """L0: nodes with no edges are listed as orphans."""
+    graph = gmod.Graph()
+    graph.nodes["a.py"] = gmod.Node(id="a.py", kind="file")
+    graph.nodes["b.py"] = gmod.Node(id="b.py", kind="file")
+    graph.edges = [gmod.Edge("a.py", "b.py", "import")]
+    pats = graph.detect_patterns()
+    assert pats["orphans"] == []
+    graph.nodes["c.py"] = gmod.Node(id="c.py", kind="file")
+    pats = graph.detect_patterns()
+    assert "c.py" in pats["orphans"]
+
+
+def test_detect_patterns_unstable():
+    """L0: leaf modules with only incoming edges have instability > 0.8."""
+    graph = gmod.Graph()
+    graph.nodes["util.py"] = gmod.Node(id="util.py", kind="file")
+    graph.nodes["main.py"] = gmod.Node(id="main.py", kind="file")
+    graph.edges = [
+        gmod.Edge("main.py", "util.py", "import"),
+    ]
+    pats = graph.detect_patterns()
+    assert "util.py" in pats["unstable_modules"]["modules"]
+
+
+def test_tarjan_scc_no_cycle():
+    """L0: Tarjan on acyclic graph returns all singleton SCCs."""
+    graph = gmod.Graph()
+    for n in ["a.py", "b.py", "c.py"]:
+        graph.nodes[n] = gmod.Node(id=n, kind="file")
+    graph.edges = [
+        gmod.Edge("a.py", "b.py", "import"),
+        gmod.Edge("b.py", "c.py", "import"),
+    ]
+    sccs = graph._tarjan_scc()
+    assert all(len(scc) == 1 for scc in sccs)
+
+
+def test_infer_schema_entity_types():
+    """L0: infer_schema extracts entity type frequencies from node kinds."""
+    graph = gmod.Graph()
+    graph.nodes["a.py"] = gmod.Node(id="a.py", kind="file")
+    graph.nodes["cfg.json"] = gmod.Node(id="cfg.json", kind="config", config_keys=("host", "port"))
+    graph.nodes["data.csv"] = gmod.Node(id="data.csv", kind="data")
+    schema = gmod.infer_schema(graph)
+    assert "file" in schema.entity_types
+    assert "config" in schema.entity_types
+    assert schema.entity_types["config"]["count"] == 1
+
+
+def test_infer_schema_cardinality():
+    """L0: relationship cardinality inferred from edge distribution."""
+    graph = gmod.Graph()
+    for n in ["a.py", "b.py", "c.py", "d.py"]:
+        graph.nodes[n] = gmod.Node(id=n, kind="file")
+    # a imports b, c, d → 1:N from a's perspective
+    graph.edges = [
+        gmod.Edge("a.py", "b.py", "import"),
+        gmod.Edge("a.py", "c.py", "import"),
+        gmod.Edge("a.py", "d.py", "import"),
+    ]
+    schema = gmod.infer_schema(graph)
+    rel = next(r for r in schema.relationships if r["rel"] == "import")
+    assert rel["cardinality"] == "1:N"  # one source (a.py) → many targets (b,c,d)
+
+
+def test_infer_schema_coverage():
+    """L0: field coverage computed as fraction of nodes having the field."""
+    graph = gmod.Graph()
+    graph.nodes["a.py"] = gmod.Node(id="a.py", kind="file", config_keys=("host",))
+    graph.nodes["b.py"] = gmod.Node(id="b.py", kind="file")
+    schema = gmod.infer_schema(graph)
+    # host appears on 1 of 2 file nodes, but coverage is across ALL nodes
+    # Actually coverage is computed across all nodes, so host = 1/2 = 0.5
+    assert schema.coverage.get("host", 0.0) == 0.5
+
+
+def test_infer_schema_anomalies():
+    """L0: anomalies list includes orphan count and edge statistics."""
+    graph = gmod.Graph()
+    graph.nodes["a.py"] = gmod.Node(id="a.py", kind="file")
+    graph.nodes["b.py"] = gmod.Node(id="b.py", kind="file")
+    schema = gmod.infer_schema(graph)
+    assert any("no edges" in a for a in schema.anomalies)
+
+
+def test_graph_command_patterns(tmp_path, capsys):
+    """L0: `graph --patterns` outputs pattern report."""
+    import argparse
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    (repo / "a.py").write_text("def foo(): pass\n", encoding="utf-8")
+    (repo / "b.py").write_text("import a\n", encoding="utf-8")
+    subprocess.run(["git", "init", "-q"], cwd=repo, check=True)
+    subprocess.run(["git", "add", "-A"], cwd=repo, check=True)
+    subprocess.run(["git", "commit", "-m", "init", "-q"], cwd=repo, check=True)
+    args = argparse.Namespace(repo=str(repo), refresh=True, impact=False, files="", radius=3,
+                               complexity=False, path=False, from_node="", to_node="",
+                               neighbors=False, of="", query="",
+                               patterns=True, schema_infer=False)
+    rc = gmod.graph_command(args)
+    assert rc == 0
+    captured = capsys.readouterr()
+    assert "circular_dependencies" in captured.out
+
+
+def test_graph_command_schema_infer(tmp_path, capsys):
+    """L0: `graph --schema-infer` outputs inferred schema."""
+    import argparse
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    (repo / "settings.json").write_text('{"host": "localhost", "port": 8080}', encoding="utf-8")
+    (repo / "a.py").write_text("def foo(): pass\n", encoding="utf-8")
+    subprocess.run(["git", "init", "-q"], cwd=repo, check=True)
+    subprocess.run(["git", "add", "-A"], cwd=repo, check=True)
+    subprocess.run(["git", "commit", "-m", "init", "-q"], cwd=repo, check=True)
+    args = argparse.Namespace(repo=str(repo), refresh=True, impact=False, files="", radius=3,
+                               complexity=False, path=False, from_node="", to_node="",
+                               neighbors=False, of="", query="",
+                               patterns=False, schema_infer=True)
+    rc = gmod.graph_command(args)
+    assert rc == 0
+    captured = capsys.readouterr()
+    assert "entity_types" in captured.out

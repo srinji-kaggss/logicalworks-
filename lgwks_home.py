@@ -315,7 +315,7 @@ def _menu(on: bool) -> None:
     rows = [
         ("›", "your intent", "research it — I'll ask the question behind it, then ground it"),
         ("1", "solve git", "prove what happened in a repo (read-only, no tokens)"),
-        ("2", "demo", "watch the full loop, offline, no tokens"),
+        ("2", "repl", "interactive harness — history, completion, inline queries"),
         ("3", "doctor", "what's wired on this machine"),
         ("q", "quit", ""),
     ]
@@ -412,9 +412,12 @@ def _entryway(on: bool) -> int:
         if low in ("1", "solve", "solve git"):
             _run(["lgwks", "solve", "git"])
             _pause(on)
-        elif low in ("2", "demo"):
-            _run(["lgwks-akinator", "--demo"])
-            _pause(on)
+        elif low in ("2", "repl"):
+            try:
+                import lgwks_repl
+                lgwks_repl.run_repl()
+            except Exception as e:
+                print(fg(f"  · repl error: {type(e).__name__}: {e}", AMBER, on=on), file=sys.stderr)
         elif low in ("3", "doctor"):
             _print_doctor(on)
             _pause(on)

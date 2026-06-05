@@ -351,6 +351,125 @@ class Graph:
             },
         }
 
+    # ── deterministic pattern detection (no AI) ─────────────────────────────
+
+    def detect_patterns(self) -> dict[str, Any]:
+        """Detect architectural anti-patterns and structural anomalies.
+        Pure graph topology — no LLM involved."""
+        self._ensure_index()
+        n = len(self.nodes)
+        if n == 0:
+            return {}
+
+        pr = self.pagerank()
+        bc = self.betweenness_centrality()
+        mi = self.module_instability()
+        cc = self.clustering_coefficient()
+        in_degrees = {nid: len(self._adj_in.get(nid, [])) for nid in self.nodes}
+        out_degrees = {nid: len(self._adj_out.get(nid, [])) for nid in self.nodes}
+        avg_in = sum(in_degrees.values()) / n
+        avg_out = sum(out_degrees.values()) / n
+
+        patterns: dict[str, Any] = {}
+
+        # 1. Circular dependencies (SCC > 1 via Tarjan)
+        sccs = self._tarjan_scc()
+        cycles = [scc for scc in sccs if len(scc) > 1]
+        patterns["circular_dependencies"] = {
+            "count": len(cycles),
+            "groups": [sorted(c) for c in cycles],
+        }
+
+        # 2. God modules (in-degree > 3× avg or out-degree > 3× avg)
+        gods = [nid for nid in self.nodes if in_degrees[nid] > avg_in * 3 or out_degrees[nid] > avg_out * 3]
+        patterns["god_modules"] = {
+            "threshold_in": round(avg_in * 3, 2),
+            "threshold_out": round(avg_out * 3, 2),
+            "modules": gods,
+        }
+
+        # 3. Orphan clusters (nodes with zero edges)
+        orphans = [nid for nid in self.nodes if in_degrees[nid] == 0 and out_degrees[nid] == 0]
+        patterns["orphans"] = orphans
+
+        # 4. Unstable islands (instability > 0.8)
+        unstable = [nid for nid, i in mi.items() if i > 0.8]
+        patterns["unstable_modules"] = {
+            "threshold": 0.8,
+            "modules": unstable,
+        }
+
+        # 5. Gatekeeper bottlenecks (betweenness > 0.1)
+        gatekeepers = [nid for nid, v in bc.items() if v > 0.1]
+        patterns["gatekeepers"] = {
+            "threshold": 0.1,
+            "modules": gatekeepers,
+        }
+
+        # 6. Tight coupling clusters (clustering > 0.5)
+        tight = [nid for nid, v in cc.items() if v > 0.5]
+        patterns["tight_coupling"] = {
+            "threshold": 0.5,
+            "modules": tight,
+        }
+
+        # 7. Long dependency chains (max shortest path > 6)
+        long_chains: list[dict[str, Any]] = []
+        checked: set[tuple[str, str]] = set()
+        for src in list(self.nodes.keys())[:min(n, 50)]:  # sample for speed
+            for dst in list(self.nodes.keys())[:min(n, 50)]:
+                if src >= dst:
+                    continue
+                pair = (src, dst)
+                if pair in checked:
+                    continue
+                checked.add(pair)
+                p = self.shortest_path(src, dst, max_depth=10)
+                if p and len(p) > 6:
+                    long_chains.append({"from": src, "to": dst, "length": len(p), "path": p})
+        patterns["long_chains"] = long_chains[:5]
+
+        return patterns
+
+    def _tarjan_scc(self) -> list[list[str]]:
+        """Tarjan's strongly connected components algorithm."""
+        index_counter = [0]
+        stack: list[str] = []
+        lowlinks: dict[str, int] = {}
+        index: dict[str, int] = {}
+        on_stack: set[str] = set()
+        sccs: list[list[str]] = []
+
+        def strongconnect(v: str) -> None:
+            index[v] = index_counter[0]
+            lowlinks[v] = index_counter[0]
+            index_counter[0] += 1
+            stack.append(v)
+            on_stack.add(v)
+            for e in self._adj_out.get(v, []):
+                w = e.target
+                if w not in self.nodes:
+                    continue
+                if w not in lowlinks:
+                    strongconnect(w)
+                    lowlinks[v] = min(lowlinks[v], lowlinks[w])
+                elif w in on_stack:
+                    lowlinks[v] = min(lowlinks[v], index[w])
+            if lowlinks[v] == index[v]:
+                scc: list[str] = []
+                while True:
+                    w = stack.pop()
+                    on_stack.remove(w)
+                    scc.append(w)
+                    if w == v:
+                        break
+                sccs.append(scc)
+
+        for v in self.nodes:
+            if v not in lowlinks:
+                strongconnect(v)
+        return sccs
+
     # ── serialization ─────────────────────────────────────────────────────
 
     def to_dict(self) -> dict[str, Any]:
@@ -691,6 +810,150 @@ def get_graph(repo: Path, force_refresh: bool = False) -> Graph:
     return graph
 
 
+# ── deterministic schema inference (no AI) ───────────────────────────────────
+# L0: given a graph dump, infer entity types, relationships, cardinality, domain.
+# L1: no LLM — pure frequency, co-occurrence, and edge-direction analysis.
+
+@dataclass
+class SchemaReport:
+    """Inferred schema from a graph dump."""
+    entity_types: dict[str, dict[str, Any]]  # type -> {count, domain_values, required}
+    relationships: list[dict[str, Any]]      # inferred rel types with cardinality
+    coverage: dict[str, float]               # field -> fraction of nodes that have it
+    anomalies: list[str]                     # human-readable pattern findings
+
+
+def infer_schema(graph: Graph) -> SchemaReport:
+    """Infer schema from a code/config graph (Node.kind + Node.config_keys + edges).
+    For entity graphs (SQLite), use lgwks_entity_graph.infer_entity_schema."""
+    n = len(graph.nodes)
+    if n == 0:
+        return SchemaReport({}, [], {}, ["empty graph"])
+
+    graph._ensure_index()
+
+    # Entity type frequencies
+    type_counts: dict[str, int] = {}
+    type_fields: dict[str, dict[str, int]] = {}  # type -> field -> count
+    for node in graph.nodes.values():
+        k = node.kind
+        type_counts[k] = type_counts.get(k, 0) + 1
+        if k not in type_fields:
+            type_fields[k] = {}
+        if node.config_keys:
+            for key in node.config_keys:
+                type_fields[k][key] = type_fields[k].get(key, 0) + 1
+        if node.defines:
+            for d in node.defines:
+                type_fields[k][d] = type_fields[k].get(d, 0) + 1
+        if node.variables:
+            for v in node.variables:
+                type_fields[k][v] = type_fields[k].get(v, 0) + 1
+
+    entity_types: dict[str, dict[str, Any]] = {}
+    for t, c in type_counts.items():
+        fields = type_fields.get(t, {})
+        coverage = {f: round(count / c, 3) for f, count in fields.items()}
+        # required = coverage > 0.9
+        required = [f for f, r in coverage.items() if r > 0.9]
+        # domain = values that appear for fields with coverage > 0.5 and low cardinality
+        domain: dict[str, list[str]] = {}
+        for f, r in coverage.items():
+            if r > 0.5 and len(fields) <= 20:
+                # collect actual values for this field across nodes of this type
+                values: set[str] = set()
+                for node in graph.nodes.values():
+                    if node.kind != t:
+                        continue
+                    if f in node.config_keys:
+                        values.add(f)
+                    elif f in node.defines:
+                        values.add(f)
+                    elif f in node.variables:
+                        values.add(f)
+                if values:
+                    domain[f] = sorted(values)[:20]
+        entity_types[t] = {
+            "count": c,
+            "fraction": round(c / n, 3),
+            "required_fields": required,
+            "optional_fields": [f for f in fields if f not in required],
+            "domain": domain,
+            "field_coverage": coverage,
+        }
+
+    # Relationship inference from edges
+    rel_counts: dict[str, int] = {}
+    rel_pairs: dict[str, dict[tuple[str, str], int]] = {}  # rel -> (src_kind, dst_kind) -> count
+    for e in graph.edges:
+        rel_counts[e.kind] = rel_counts.get(e.kind, 0) + 1
+        src_node = graph.nodes.get(e.source)
+        dst_node = graph.nodes.get(e.target)
+        if src_node and dst_node:
+            pair = (src_node.kind, dst_node.kind)
+            if e.kind not in rel_pairs:
+                rel_pairs[e.kind] = {}
+            rel_pairs[e.kind][pair] = rel_pairs[e.kind].get(pair, 0) + 1
+
+    relationships: list[dict[str, Any]] = []
+    for rel, total in sorted(rel_counts.items(), key=lambda x: -x[1]):
+        pairs = rel_pairs.get(rel, {})
+        # Cardinality inference:
+        # If every src has exactly 1 dst for this rel -> 1:1 or 1:N
+        src_counts: dict[str, int] = {}
+        dst_counts: dict[str, int] = {}
+        for e in graph.edges:
+            if e.kind != rel:
+                continue
+            src_counts[e.source] = src_counts.get(e.source, 0) + 1
+            dst_counts[e.target] = dst_counts.get(e.target, 0) + 1
+        avg_src = sum(src_counts.values()) / max(1, len(src_counts))
+        avg_dst = sum(dst_counts.values()) / max(1, len(dst_counts))
+        if avg_src <= 1.1 and avg_dst <= 1.1:
+            cardinality = "1:1"
+        elif avg_src <= 1.1 and avg_dst > 1.1:
+            cardinality = "N:1"  # many sources → one target (many-to-one)
+        elif avg_src > 1.1 and avg_dst <= 1.1:
+            cardinality = "1:N"  # one source → many targets (one-to-many)
+        else:
+            cardinality = "N:M"
+
+        top_pairs = sorted(pairs.items(), key=lambda x: -x[1])[:3]
+        relationships.append({
+            "rel": rel,
+            "count": total,
+            "cardinality": cardinality,
+            "avg_per_src": round(avg_src, 2),
+            "avg_per_dst": round(avg_dst, 2),
+            "top_pairs": [{"from": p[0], "to": p[1], "count": c} for p, c in top_pairs],
+        })
+
+    # Coverage of fields across ALL nodes
+    all_fields: dict[str, int] = {}
+    for node in graph.nodes.values():
+        for f in list(node.config_keys) + list(node.defines) + list(node.variables):
+            all_fields[f] = all_fields.get(f, 0) + 1
+    coverage = {f: round(c / n, 3) for f, c in all_fields.items()}
+
+    # Anomalies (human-readable)
+    anomalies: list[str] = []
+    orphan_count = len([nid for nid in graph.nodes if not graph.neighbors(nid) and not graph.predecessors(nid)])
+    if orphan_count > 0:
+        anomalies.append(f"{orphan_count} orphaned nodes (no edges)")
+    if len(rel_counts) == 0:
+        anomalies.append("no edges — graph is fully disconnected")
+    else:
+        most_common_rel = max(rel_counts.items(), key=lambda x: x[1])
+        anomalies.append(f"most common relationship: {most_common_rel[0]} ({most_common_rel[1]} edges)")
+    # high instability
+    mi = graph.module_instability()
+    unstable = [nid for nid, v in mi.items() if v > 0.8]
+    if unstable:
+        anomalies.append(f"{len(unstable)} modules with instability > 0.8 (leaf/concrete)")
+
+    return SchemaReport(entity_types, relationships, coverage, anomalies)
+
+
 # ── query engine (lightweight Cypher-like) ─────────────────────────────────────
 # L0: graph usable from CLI without writing Python.
 # L1: syntax is a tiny subset — enough for 90% of graph questions, never a full parser.
@@ -943,7 +1206,32 @@ def graph_command(args) -> int:
             return 1
         return 0
 
-    print("[graph] nothing to do — specify --impact, --complexity, --path, --neighbors, or --query", file=sys.stderr)
+    # ── patterns ─────────────────────────────────────────────────────────────────
+    if getattr(args, "patterns", False):
+        pats = graph.detect_patterns()
+        payload = {
+            "schema": "lgwks.graph.patterns.v0",
+            "repo": str(repo),
+            "patterns": pats,
+        }
+        print(json.dumps(payload, indent=2))
+        return 0
+
+    # ── schema-infer ───────────────────────────────────────────────────────────────
+    if getattr(args, "schema_infer", False):
+        schema = infer_schema(graph)
+        payload = {
+            "schema": "lgwks.graph.schema-infer.v0",
+            "repo": str(repo),
+            "entity_types": schema.entity_types,
+            "relationships": schema.relationships,
+            "coverage": schema.coverage,
+            "anomalies": schema.anomalies,
+        }
+        print(json.dumps(payload, indent=2))
+        return 0
+
+    print("[graph] nothing to do — specify --impact, --complexity, --path, --neighbors, --query, --patterns, or --schema-infer", file=sys.stderr)
     return 1
 
 
@@ -965,4 +1253,6 @@ def add_graph_parser(subparsers) -> None:
     p.add_argument("--neighbors", action="store_true", help="list neighbors of a node")
     p.add_argument("--of", default="", help="node id for --neighbors")
     p.add_argument("--query", default="", help='Cypher-like query, e.g. \'MATCH (n) WHERE n.kind = "file" RETURN n.id\'')
+    p.add_argument("--patterns", action="store_true", help="detect architectural patterns (circular deps, god modules, orphans, etc.)")
+    p.add_argument("--schema-infer", action="store_true", help="infer schema from graph topology (entity types, cardinality, coverage)")
     p.set_defaults(func=graph_command)
