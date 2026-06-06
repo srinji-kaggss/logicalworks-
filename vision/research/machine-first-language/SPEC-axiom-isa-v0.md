@@ -68,11 +68,29 @@ the hot path** → the verifier is a dumb machine that fits in WASM on a phone. 
 democratization + the 0-AI guarantee:* validity = the click, never the oracle (INV: oracle-agnostic).
 
 ## §5 · Capability + WASI (two walls, one capability)
-`by …:cap` + `proves cap:` = the **declared** capability (author layer); the gate refuses a capsule whose
-needed caps aren't carried up its `on[]` lineage — **least-privilege as a graph property.** At L0, effects
-hit the system **only through WASI handles** (grounded: WASI = capability-based, no ambient authority); the
-clicked capsule's `cap:` lower to WASI imports. Can't *claim* a cap the base lacked; can't *exercise* one
-WASI didn't grant.
+`proves cap:` = the **declared** capability (author layer); the gate refuses a capsule whose needed caps
+aren't carried up its `on[]` lineage — **least-privilege as a graph property.** At L0, effects hit the system
+**only through WASI handles** (grounded: WASI = capability-based, no ambient authority); the clicked capsule's
+`cap:` lower to WASI imports. Can't *claim* a cap the base lacked; can't *exercise* one WASI didn't grant.
+
+**§5.1 · The grant root (resolves AUDIT F-03 — Director 2026-06-06: signed genesis).** Capabilities are NOT
+free attacker-writable fields. A capability exists only if it descends from a **cryptographically-signed
+genesis capsule**:
+- **Genesis** — a signed capsule whose signature verifies against a trusted key; it is the ONLY origin of
+  authority. `grants` on a non-genesis capsule are valid only if `grants ⊆ needs` (you may re-grant only what
+  you legitimately hold and the lineage carried to you).
+- The `by:"ai+human:<cap>"` **string self-grant path is REMOVED** — a string prefix is not authority.
+  Authority is a verified signature, never a substring (T0: trust is cryptographic, not stringly).
+- v0 stdlib stand-in: keyed **HMAC** attestation (matches constitution L5 `tag=HMAC_key(...)`); production
+  upgrade = ed25519 asymmetric signatures. The CONTRACT (grants trace to a verified genesis) is unchanged.
+- Holes carry `grants = ∅` and contribute nothing to the lineage union (resolves AUDIT F-02).
+
+## §5.2 · CID integrity (resolves AUDIT F-01/F-05/F-09)
+The CID is verified, not trusted: every store and every base read MUST assert `capsule.cid() == key` and
+reject mismatch (no decorative content-addressing). Encoding is a **strict canonical codec** (canonical
+CBOR/JCS): one number type, ±0 normalized, NaN/±Inf rejected, fixed float serialization — hash over canonical
+*bytes*, never a language-native JSON round-trip. Digest = **BLAKE3-256** (no 128-bit). These are build
+mandates for the `axiom/` package, not options.
 
 ## §6 · Lowering = MLIR multi-dialect (the authority plane never changes, only the target)
 One authored capsule lowers via an **MLIR-style multi-dialect Core IR**: → WASM (binary, today; **UNBUILT —
@@ -138,12 +156,24 @@ up `on[]`) · erasure (proof dropped at L0 lowering).
 5. Self-doc fold (§9) — emissions → tickets/docs.
 6. **WASM lowering target (UNBUILT, first real cost)** → then frontend "NodeUI" on the custom OS backend.
 
-## §14 · Pending→committed transaction (the time-machine, refined 2026-06-06)
-AI changes land **PENDING** (rejectable). A **commit window** elapses → **COMMITTED**: the human "cannot
-just reject" anymore. Post-commit change is **additive** — draw new relations / `sup`, never a bare reject
-(append-only). So three states: PENDING (revert freely) → COMMITTED (restructure via new relations) →
-superseded (`sup`). //why a window: autonomy needs the change to *stick* without per-node human touch, while
-the window preserves cheap correction; after it, the comms-diagnostic (not a reject button) is the feedback.
+## §14 · The git/Google-Drive model — immutable DAG + checkout refs (resolves AUDIT F-04/F-06; Director 2026-06-06)
+Nodes are **immutable + content-addressed, NEVER deleted.** This is git semantics on the Merkle-DAG
+(translation-chain §4.5: "git IS the Merkle-DAG core"), and it dissolves the cascade-vs-quarantine fork:
+- **Immutable objects:** a capsule, once stored under its CID, is permanent. There is no `del` (kills AUDIT
+  F-06 structurally). "Change" = append a new version (new CID via `sup`); the old CID still exists forever.
+- **Checkout refs (the working set):** each actor (human or AI) has a **checkout** = the files/nodes they
+  are working on (the bounded live set). A "revert" is **moving your checkout ref to an earlier snapshot** —
+  it never destroys anything; divergent work persists by CID, just off your current ref.
+- **Dependents pin to a specific base CID** (immutable) → **nothing is ever stranded** (the old base always
+  resolves by hash). A child built on `K` stays valid even after `K` is superseded, because `K` is permanent.
+- **Clean traceback + snapshot diff:** the hash-chained log + the DAG let you bisect to *exactly where it
+  diverged* and **diff any two snapshots** — e.g., between two Director prompts. The history IS the diagnostic.
+- **Monotonic time (kills AUDIT F-04):** commit/order uses a **monotonic logical clock** (log length / a
+  high-water mark the core refuses to go below), never a caller-supplied wall-clock; reject `window ≤ 0`.
+  COMMITTED is monotone — you cannot rewind to un-commit.
+PENDING (on your checkout, freely abandonable) → COMMITTED (in shared history, change only by `sup`) →
+superseded (new version appended; old persists). //why git-model: an immutable content-addressed DAG makes
+"never strand, never lose, always trace" a property of the data structure, not a policy bolted on revert.
 
 ## §15 · The weight/gauge math (Director: "nodes become mathematical weights of health")
 A node is a **capsule that carries a weight** — two complementary layers: **validity** (discrete, the click,
@@ -170,12 +200,16 @@ theater over a guess. OPEN: `αc` **declared** (designer sets weights; pure 0-AI
 from time-machine reverts via frozen Tier-E evaluator; adaptive but reintroduces a model). Instinct: declared
 first; learned as opt-in that only *proposes* a criterion the human ratifies, so the 0-AI floor never depends on it.
 
-## OPEN forks (for the Director / Codex hardening pass)
+## Hardening status (see AUDIT-axiom-byte-framework-adversarial.md — pen-test FAIL at first-pass)
+RESOLVED this session: **F-01/F-05/F-09** → §5.2 (verify CID on read, strict canonical codec, BLAKE3-256);
+**F-02** → §5.1 (hole `grants=∅`, no lineage contribution); **F-03** → §5.1 (signed genesis grant root, kill
+self-grant); **F-04/F-06** → §14 (immutable git-model DAG, monotonic clock, reject `window≤0`, never delete);
+**`cap:node-at-runtime` granter** → §5.1 (it is just another cap that must descend from genesis). F-07 (reorder
+supersede) + F-08 (gauge rank by weight) are build mandates. F-10: stop asserting unimplemented invariants.
+These are MANDATES for the `axiom/` build, enforced by negative tests mirroring the audit's exploits.
+
+## OPEN forks (still for the Director)
 - **The primitive itself** (Director: "idk if node is correct"): node-first vs relation-first vs cell/triple;
   how to stay granular and avoid binning. The verifier is agnostic, but the authoring model depends on this.
-- **Time-machine revert of committed nodes**: cascade (orphan superstructure → noise) vs quarantine (freeze
-  dependents as stranded). Cascade depth = comms-failure severity. (Pre-commit revert is free, §14.)
-- **`cap:node-at-runtime`** (§10): what GRANTS it, what AUDITS each runtime-noding. The soundness frontier.
 - **Gauge budget**: confirm ≤5 *live gauges* (not nodes) as the cognitive limit; the 50-node figure is dead.
-- **Commit-window length** (§14): fixed time, or activity-based (N dependent nodes attached on top = committed)?
 - **Syntax flavor**: text projection defaulted to S-expr/WAT-like (homogeneous, no whitespace-significance).
