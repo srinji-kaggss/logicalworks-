@@ -234,6 +234,32 @@ This is the working issue list for the JEPA/product-seed path.
   - warnings
   - final side effects
 
+### JEPA-030 — Conversational setup compiler
+
+- Add a setup flow that asks what kind of work the user wants to do
+- Compile answers into:
+  - compaction tier
+  - safety policy
+  - recommended features
+  - default continuation mode
+
+### JEPA-031 — Project-scoped continuation state
+
+- Keep active continuation state repo-local when appropriate
+- Store:
+  - package lineage
+  - continuation history
+  - local policy overrides
+  - cached bindings
+
+### JEPA-032 — Compaction tier contract
+
+- Define stable compaction levels for:
+  - seed continuation packets
+  - machine projections
+  - human projections
+- Make the tradeoff inspectable instead of implicit
+
 ## Research issues
 
 ### JEPA-R01 — Thesis validation for `H1`

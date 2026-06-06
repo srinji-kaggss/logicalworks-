@@ -21,6 +21,13 @@ Decide what external open-source work can be ported into `lgwks`, under what lic
     - https://github.com/JosefAlbers/pvm
     - https://raw.githubusercontent.com/JosefAlbers/pvm/main/LICENSE
 
+### alexzhaosheng
+
+- `huko`: MIT
+  - Source: repo page shows MIT license.
+  - URLs:
+    - https://github.com/alexzhaosheng/huko
+
 ### ginwind
 
 - `VLA-JEPA`: no verified license captured from the repo surface during this pass
@@ -80,6 +87,32 @@ This should influence:
 
 It should not yet influence direct code import.
 
+### From `huko`
+
+The strongest reusable patterns are agent-shell and setup patterns:
+
+1. Project-scoped state
+- state lives under a repo-local directory
+- useful analogue for `seed`/`jepa` session state and continuation history
+
+2. Chat-based setup that selects defaults
+- user describes intended usage
+- system chooses compaction, safety, and feature defaults
+- useful for `lgwks seed setup` or `lgwks start`
+
+3. Configurable compaction as a first-class product knob
+- not just model context size, but explicit compaction tiers
+- useful for package projection and continuation stream sizing
+
+4. Lean tool surface
+- fewer tools exposed to the model by default
+- useful reinforcement for `lgwks` machine-contract discipline
+
+5. Per-tool safety and sandbox wrapper
+- allow/deny/confirm per tool
+- sandboxed wrapper mode for risky continuation
+- useful for future `seed continue --sandbox` and readiness tiers
+
 ## Porting map into lgwks
 
 ### Port now
@@ -99,6 +132,18 @@ It should not yet influence direct code import.
 4. Apple Silicon local runtime posture
 - inspired by `pvm`
 - maps to future MLX router / local package predictor
+
+5. Project-scoped continuation memory
+- inspired by `huko`
+- maps to repo-local `seed` state and continuation history
+
+6. Conversational setup that compiles to machine config
+- inspired by `huko setup`
+- maps to `seed setup` / `lgwks start`
+
+7. Compaction tiers
+- inspired by `huko`
+- maps to machine/human projection budgets and continuation packet sizing
 
 ### Translate first, port later
 

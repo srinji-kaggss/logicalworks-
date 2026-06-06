@@ -42,6 +42,15 @@ Purpose: record useful product/runtime patterns from external references without
   - typed errors with next actions
   - evidence packs as review artifacts
 
+5. huko
+- https://github.com/alexzhaosheng/huko
+- useful for:
+  - project-scoped agent state
+  - conversational setup that chooses defaults from intended use
+  - explicit compaction tiers
+  - lean tool surface
+  - per-tool safety and sandboxable execution
+
 ## Direct implications for lgwks
 
 1. `seed` should be the default product noun
@@ -88,6 +97,11 @@ Purpose: record useful product/runtime patterns from external references without
   - planned operations
   - validations
   - final side effects
+
+8. setup should compile human intent into config
+- a good setup flow does not ask for low-level knobs first
+- it asks what kind of work the user wants to do, then selects defaults
+- this fits the `seed` thesis better than manual config-first onboarding
 
 ## Translation rule
 

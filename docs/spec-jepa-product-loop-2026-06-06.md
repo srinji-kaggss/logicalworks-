@@ -381,3 +381,38 @@ Implication for `lgwks`:
 reviewability is not a nice-to-have
 it is part of the machine contract
 ```
+
+## 14. Setup and state constraints
+
+The product should not assume users know which machine defaults matter.
+
+Relevant product lessons:
+
+1. setup should start from intended usage
+- ask:
+  - what kind of work is this?
+  - what repo or project is this for?
+  - how risky is the expected continuation?
+- then compile that into config
+
+2. state should be project-scoped when possible
+- continuation memory, local policies, and package history should bind to the project context
+- global state should exist, but local state should dominate during active work
+
+3. compaction should be explicit and controllable
+- different tasks need different packet budgets
+- `lgwks` should eventually expose compaction tiers for:
+  - continuation streams
+  - machine projections
+  - human projections
+
+4. the tool surface should stay lean
+- every additional exposed capability increases ambiguity and token overhead
+- disable or hide irrelevant tools from the active continuation surface
+
+Implication for `lgwks`:
+
+```text
+good setup is a compiler from human work-shape
+to machine defaults and policy
+```

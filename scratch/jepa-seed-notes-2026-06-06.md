@@ -64,3 +64,9 @@ Messy notes, keep until cleaned.
   - dry-run + diff preview
   - typed errors
   - evidence packs
+- huko useful:
+  - project-scoped state dir
+  - setup flow based on intended work shape
+  - explicit compaction tiers
+  - lean tool surface
+  - per-tool safety / sandbox wrapper
