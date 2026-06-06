@@ -903,7 +903,18 @@ def _browser_entryway(on: bool) -> int:
                 if label == "repl":
                     try:
                         import lgwks_repl
-                        lgwks_repl.run_repl(repo_path=str(selected_repo) if selected_repo else ".")
+                        # Build a welcome hint that bridges browser → REPL mental model:
+                        # show the same quick actions the user just saw, translated to REPL syntax.
+                        hint_cmds: list[str] = []
+                        for k, lbl, _why, _argv in quick_actions:
+                            if lbl in ("repl",):
+                                continue
+                            hint_cmds.append(f"{lbl}")
+                        hint = f"commands: {', '.join(hint_cmds[:4])} … type .help for all" if hint_cmds else "type .help for commands"
+                        lgwks_repl.run_repl(
+                            repo_path=str(selected_repo) if selected_repo else ".",
+                            welcome_hint=hint,
+                        )
                     except Exception as e:
                         print(fg(f"  · repl error: {type(e).__name__}: {e}", AMBER, on=on), file=sys.stderr)
                 elif label == "doctor":

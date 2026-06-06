@@ -93,8 +93,78 @@ def test_dispatch_inline_graph_complexity(tmp_path, capsys):
 # ── special commands ───────────────────────────────────────────────────────────
 
 def test_cmd_help_prints():
-    """L0: .help prints something."""
+    """L0: .help prints domain-grouped commands (same mental model as browser)."""
     with patch("builtins.print") as mock_print:
         repl._cmd_help()
     texts = [str(c) for c in mock_print.call_args_list]
-    assert any("special commands" in t for t in texts)
+    assert any("commands by domain" in t for t in texts)
+    assert any("Special commands" in t for t in texts)
+
+
+def test_suggest_commands_for_number():
+    """L0: typing a number in the REPL gets a helpful 'use browser menu' message."""
+    msg = repl._suggest_commands("1")
+    assert "browser navigation" in msg
+
+
+def test_suggest_commands_prefix_match():
+    """L0: typing an unknown prefix suggests closest matching commands."""
+    msg = repl._suggest_commands("sol")
+    assert "solve" in msg
+
+
+def test_suggest_commands_no_match():
+    """L0: completely unknown command shows generic help message."""
+    msg = repl._suggest_commands("xyz")
+    assert "unknown command" in msg
+    assert ".help" in msg
+
+
+def test_live_commands_non_empty():
+    """L0: dynamic command discovery must find at least the commands we know exist."""
+    cmds = repl._live_commands()
+    assert "gh" in cmds
+    assert "solve" in cmds
+    assert "jarvis" in cmds
+
+
+def test_repl_welcome_hint_shown():
+    """L0: welcome_hint is printed on REPL entry."""
+    with patch("builtins.input", side_effect=[".quit"]):
+        with patch("builtins.print") as mock_print:
+            repl.run_repl(welcome_hint="commands: solve git, gh issues")
+    texts = [str(c) for c in mock_print.call_args_list]
+    assert any("commands: solve git, gh issues" in t for t in texts)
+
+
+def test_repl_unknown_command_number_gives_browser_hint():
+    """L1: end-to-end: user types '1' in REPL → gets browser navigation hint."""
+    with patch("builtins.input", side_effect=["1", ".quit"]):
+        with patch("builtins.print") as mock_print:
+            repl.run_repl()
+    texts = [str(c) for c in mock_print.call_args_list]
+    assert any("browser navigation" in t for t in texts)
+
+
+def test_repl_commands_match_cli_no_drift():
+    """L1: REPL command list must match the live CLI parser.
+    Regression: _COMMANDS was a hardcoded list that drifted from the CLI,
+    missing 18 commands. Now it's derived from the parser — this test catches
+    any future drift."""
+    import lgwks_home as home
+    cli_cmds = set(home._build_command_tree().keys())
+    repl_cmds = set(repl._COMMANDS)
+    missing = cli_cmds - repl_cmds
+    assert not missing, f"REPL is missing CLI commands: {sorted(missing)}"
+
+
+def test_repl_help_shows_all_domains():
+    """L1: .help must show every domain that has at least one command."""
+    with patch("builtins.print") as mock_print:
+        repl._cmd_help()
+    texts = " ".join(str(c) for c in mock_print.call_args_list)
+    # Every domain in _DOMAINS should appear if it has commands
+    for domain in repl._DOMAINS:
+        cmds_in_domain = [c for c in repl._COMMANDS if repl._domain_for(c) == domain]
+        if cmds_in_domain:
+            assert domain in texts, f"domain '{domain}' missing from .help output"

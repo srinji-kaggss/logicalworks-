@@ -26,14 +26,62 @@ ROOT = Path(__file__).resolve().parent
 HISTORY_PATH = Path.home() / ".lgwks" / "repl_history"
 HISTORY_PATH.parent.mkdir(parents=True, exist_ok=True)
 
-# ── completion sources ─────────────────────────────────────────────────────────
+# ── dynamic command discovery (single source of truth: the live parser) ─────────
+# //why: hardcoding _COMMANDS drifts from the CLI. The browser already introspects
+# the parser; the REPL must use the same source of truth or commands disappear
+# from tab completion and the help text.
 
-_COMMANDS = [
-    "solve", "graph", "substrate", "entity-graph", "doctor", "jarvis",
-    "manifest", "extract", "convert", "refine", "store", "login",
-    "memory", "public", "embed", "x", "geo", "project", "review",
-    "debug", "gh", "intent", "refactor", "hooks", "agent-os",
-]
+_DOMAINS: dict[str, list[str]] = {
+    "Research":  ["jarvis", "fetch", "refine", "preview", "extract", "convert",
+                  "x", "manifest", "login", "cohere", "comprehend", "geo", "public",
+                  "akinator", "run", "context", "model-hub"],
+    "GitHub":    ["gh"],
+    "DevOps":    ["repo", "review", "session", "project", "batch", "refactor", "hooks", "agent-os"],
+    "System":    ["solve", "debug", "doctor", "intent", "entity-graph", "graph",
+                  "substrate", "repl", "initialize", "auth", "keyvault", "foundation"],
+    "Data":      ["store", "memory", "embed"],
+}
+
+
+def _domain_for(verb: str) -> str:
+    for domain, verbs in _DOMAINS.items():
+        if verb in verbs:
+            return domain
+    return "Other"
+
+
+def _live_commands() -> list[str]:
+    """Introspect the live lgwks parser and return all registered subcommands.
+    Falls back to a static list if introspection fails (e.g. lgwks is broken)."""
+    try:
+        import importlib.util
+        from importlib.machinery import SourceFileLoader
+        loader = SourceFileLoader("lgwks_cli", str(ROOT / "lgwks"))
+        spec = importlib.util.spec_from_loader("lgwks_cli", loader)
+        mod = importlib.util.module_from_spec(spec)
+        sys.modules.setdefault("lgwks_cli", mod)
+        loader.exec_module(mod)
+        parser = mod.build_parser()
+    except Exception:
+        return []
+
+    sub_action = None
+    for action in parser._actions:
+        if action.dest == "command":
+            sub_action = action
+            break
+    if sub_action is None or not getattr(sub_action, "choices", None):
+        return []
+
+    help_by_name = {ca.dest: (ca.help or "").strip() for ca in sub_action._choices_actions}
+    # Filter out aliases (empty help text) but keep everything else
+    return sorted([name for name in sub_action.choices.keys() if help_by_name.get(name)])
+
+
+_COMMANDS = _live_commands()
+# //why: if introspection fails, _COMMANDS is empty — the REPL still works for
+# shell escapes and special commands, but every typed command falls through to
+# subprocess (which may also fail). An empty list is honest: we don't know.
 
 _GRAPH_OPTIONS = [
     "--repo", "--refresh", "--impact", "--files", "--radius",
@@ -126,23 +174,56 @@ _SPECIALS = [".help", ".quit", ".history", ".repo", ".refresh", ".graph"]
 
 
 def _cmd_help() -> None:
-    print("""
-  lgwks REPL — special commands
-  ─────────────────────────────
-  .help      this message
-  .quit      exit the REPL
-  .history   show last 20 commands
-  .repo      show current repo path
-  .refresh   reload the graph from disk
-  .graph     print graph stats
+    """Show commands grouped by domain — same mental model as the browser."""
+    # Build domain → commands map from live _COMMANDS
+    by_domain: dict[str, list[str]] = {}
+    for cmd in _COMMANDS:
+        by_domain.setdefault(_domain_for(cmd), []).append(cmd)
 
-  Any other command is passed to lgwks inline:
-    >>> graph --complexity
-    >>> substrate map https://example.com
-    >>> solve git --repo ~/my-project
+    lines = ["\n  lgwks REPL — commands by domain"]
+    lines.append("  " + "─" * 35)
+    for domain in list(_DOMAINS.keys()) + ["Other"]:
+        cmds = by_domain.get(domain, [])
+        if not cmds:
+            continue
+        lines.append(f"  {domain:<12}  {', '.join(cmds)}")
+    lines.append("")
+    lines.append("  Special commands")
+    lines.append("  " + "─" * 35)
+    for s in _SPECIALS:
+        lines.append(f"  {s:<12}  {_SPECIAL_HELP.get(s, '')}")
+    lines.append("")
+    lines.append("  Examples:")
+    lines.append("    >>> graph --complexity")
+    lines.append("    >>> solve git")
+    lines.append("    >>> !git status       (shell escape)")
+    lines.append("")
+    print("\n".join(lines))
 
-  Tab completion works on commands, flags, file paths, and graph node IDs.
-""")
+
+_SPECIAL_HELP: dict[str, str] = {
+    ".help": "this message",
+    ".quit": "exit the REPL",
+    ".history": "show last 20 commands",
+    ".repo": "show current repo path",
+    ".refresh": "reload the graph from disk",
+    ".graph": "print graph stats",
+}
+
+
+def _suggest_commands(bad: str) -> str:
+    """Return a helpful message when the user types an unknown command."""
+    # Numbers are browser navigation, not REPL commands
+    if bad.isdigit():
+        return (
+            f"  · '{bad}' is browser navigation (use numbers in the browser menu,\n"
+            f"    not the REPL). Type a command name or .help for the list."
+        )
+    # Suggest closest match by prefix
+    matches = [c for c in _COMMANDS if c.startswith(bad[:2].lower())]
+    if matches:
+        return f"  · unknown command: {bad!r} — did you mean: {', '.join(matches[:3])}?"
+    return f"  · unknown command: {bad!r} — type .help for available commands"
 
 
 def _cmd_history() -> None:
@@ -290,8 +371,12 @@ def _prompt(ctx: GraphContext) -> str:
 
 # ── main loop ──────────────────────────────────────────────────────────────────
 
-def run_repl(repo_path: str = ".", no_color: bool = False) -> int:
-    """Enter the REPL. Returns exit code."""
+def run_repl(repo_path: str = ".", no_color: bool = False, *, welcome_hint: str = "") -> int:
+    """Enter the REPL. Returns exit code.
+
+    welcome_hint: shown once on entry so the user knows what context they dropped
+    into (e.g. "s solve git    prove what happened (read-only)").
+    """
     # Setup readline
     if HISTORY_PATH.exists():
         try:
@@ -313,6 +398,12 @@ def run_repl(repo_path: str = ".", no_color: bool = False) -> int:
             completer.set_graph_nodes(list(ctx.graph.nodes.keys()))
             s = ctx.graph.stats()
             print(f"[repl] graph loaded: {s['nodes']} nodes, {s['edges']} edges")
+
+    # Context-aware welcome: bridge browser → REPL mental model
+    if welcome_hint:
+        print(f"[repl] {welcome_hint}")
+    print("[repl] type a command (e.g. solve git, graph --impact) or .help")
+    print()
 
     while True:
         try:
@@ -378,7 +469,7 @@ def run_repl(repo_path: str = ".", no_color: bool = False) -> int:
             if rc != 0:
                 print(f"  · exit {rc}", file=sys.stderr)
         else:
-            print(f"  · unknown command: {argv[0]} — type .help for available commands", file=sys.stderr)
+            print(_suggest_commands(argv[0]), file=sys.stderr)
 
     return 0
 

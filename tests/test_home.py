@@ -347,7 +347,11 @@ def test_browser_repl_uses_selected_repo():
                 with patch("lgwks_home._detect_repo_context", return_value=(fake_repo, [])):
                     with patch("lgwks_repl.run_repl") as mock_repl:
                         home._browser_entryway(on=False)
-    mock_repl.assert_called_once_with(repo_path=str(fake_repo))
+    mock_repl.assert_called_once()
+    call = mock_repl.call_args
+    assert call.kwargs["repo_path"] == str(fake_repo)
+    assert "welcome_hint" in call.kwargs
+    assert "type .help" in call.kwargs["welcome_hint"]
 
 
 def test_browser_repl_without_repo_uses_cwd():
@@ -359,5 +363,8 @@ def test_browser_repl_without_repo_uses_cwd():
                 with patch("lgwks_home._detect_repo_context", return_value=(None, [])):
                     with patch("lgwks_repl.run_repl") as mock_repl:
                         home._browser_entryway(on=False)
-    mock_repl.assert_called_once_with(repo_path=".")
+    mock_repl.assert_called_once()
+    call = mock_repl.call_args
+    assert call.kwargs["repo_path"] == "."
+    assert "welcome_hint" in call.kwargs
 
