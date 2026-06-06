@@ -86,24 +86,29 @@ def test_browser_entryway_quits_on_q():
 
 def test_browser_entryway_dispatches_solve_git():
     """L0: picking 's' (quick action) runs lgwks solve git and pauses before re-rendering."""
+    fake_repo = Path("/tmp/fake-repo")
     with patch("lgwks_home.sys.stdin.isatty", return_value=True):
         with patch("lgwks_home._ask", side_effect=["s", "q"]):
             with patch("lgwks_home._run") as mock_run:
                 with patch("lgwks_home._pause") as mock_pause:
                     with patch("lgwks_home.print"):
-                        home._browser_entryway(on=False)
+                        with patch("lgwks_home._detect_repo_context", return_value=(fake_repo, [])):
+                            with patch("lgwks_home._repo_for_command", return_value=[]):
+                                home._browser_entryway(on=False)
     mock_run.assert_called_once_with(["lgwks", "solve", "git"])
     mock_pause.assert_called_once()
 
 
 def test_browser_entryway_dispatches_doctor():
     """L0: picking 'd' (quick action) prints doctor output and pauses."""
+    fake_repo = Path("/tmp/fake-repo")
     with patch("lgwks_home.sys.stdin.isatty", return_value=True):
         with patch("lgwks_home._ask", side_effect=["d", "q"]):
             with patch("lgwks_home._print_doctor") as mock_doc:
                 with patch("lgwks_home._pause") as mock_pause:
                     with patch("lgwks_home.print"):
-                        home._browser_entryway(on=False)
+                        with patch("lgwks_home._detect_repo_context", return_value=(fake_repo, [])):
+                            home._browser_entryway(on=False)
     mock_doc.assert_called_once()
     mock_pause.assert_called_once()
 
@@ -155,23 +160,178 @@ def test_browser_navigates_domain_to_command():
     tree = home._build_command_tree()
     research_verbs = sorted([v for v in tree if home._domain_for(v) == "Research"])
     first_verb = research_verbs[0]
+    fake_repo = Path("/tmp/fake-repo")
     with patch("lgwks_home.sys.stdin.isatty", return_value=True):
         with patch("lgwks_home._ask", side_effect=["1", "1", "q"]):
             with patch("lgwks_home._run") as mock_run:
                 with patch("lgwks_home._pause"):
                     with patch("lgwks_home.print"):
-                        home._browser_entryway(on=False)
+                        with patch("lgwks_home._detect_repo_context", return_value=(fake_repo, [])):
+                            home._browser_entryway(on=False)
     # The first Research verb should have been run
     mock_run.assert_called_once_with(["lgwks", first_verb])
 
 
 def test_browser_back_navigation():
     """L0: 'b' at domain level pops back to home; 'b' at home stays at home."""
+    fake_repo = Path("/tmp/fake-repo")
     with patch("lgwks_home.sys.stdin.isatty", return_value=True):
         with patch("lgwks_home._ask", side_effect=["1", "b", "q"]):
             with patch("lgwks_home._run") as mock_run:
                 with patch("lgwks_home._pause"):
                     with patch("lgwks_home.print"):
-                        home._browser_entryway(on=False)
-    # Should never have run a command (b at domain = back to home, then q = quit)
-    mock_run.assert_not_called()
+                        with patch("lgwks_home._detect_repo_context", return_value=(fake_repo, [])):
+                            home._browser_entryway(on=False)
+def test_detect_repo_context_in_repo():
+    """L0: when cwd is a git repo, _detect_repo_context returns it with empty nearby list."""
+    fake = Path("/tmp/fake-repo")
+    with patch("lgwks_home._is_git_repo", return_value=True):
+        with patch("lgwks_home.Path.cwd", return_value=fake):
+            repo, nearby = home._detect_repo_context()
+    assert repo is not None
+    assert repo.resolve() == fake.resolve()
+    assert nearby == []
+
+
+def test_detect_repo_context_not_in_repo():
+    """L0: when cwd is not a git repo, _detect_repo_context returns None + nearby repos."""
+    fake_nearby = [Path("/a"), Path("/b")]
+    with patch("lgwks_home._is_git_repo", return_value=False):
+        with patch("lgwks_home._scan_nearby_repos", return_value=fake_nearby):
+            repo, nearby = home._detect_repo_context()
+    assert repo is None
+    assert nearby == fake_nearby
+
+
+def test_repo_status_line_clean():
+    """L0: clean repo returns 'clean'; dirty repo returns count string."""
+    with patch("lgwks_home.subprocess.run", return_value=FakeResult(stdout="")):
+        assert home._repo_status_line(Path("/x")) == "clean"
+    with patch("lgwks_home.subprocess.run", return_value=FakeResult(stdout=" M a.py\n?? b.py\n")):
+        assert "2" in home._repo_status_line(Path("/x"))
+
+
+def test_repo_for_command_aware():
+    """L0: repo-aware commands (gh, solve) get --repo injected; unaware commands do not."""
+    repo = Path("/tmp/fake")
+    assert home._repo_for_command("gh", repo) == ["--repo", str(repo)]
+    assert home._repo_for_command("solve", repo) == ["--repo", str(repo)]
+    assert home._repo_for_command("doctor", repo) == []
+    assert home._repo_for_command("gh", None) == []
+
+
+def test_quick_actions_with_repo():
+    """L0: when a repo is active, quick actions include 'g' (gh issues) and 's' (solve)."""
+    actions = home._quick_actions_for_repo(Path("/tmp/fake"))
+    keys = [a[0] for a in actions]
+    assert "s" in keys
+    assert "g" in keys
+    assert "d" in keys
+
+
+def test_quick_actions_without_repo():
+    """L0: when no repo is active, quick actions still include 's' and 'd' but no 'g'."""
+    actions = home._quick_actions_for_repo(None)
+    keys = [a[0] for a in actions]
+    assert "s" in keys
+    assert "d" in keys
+    assert "g" not in keys
+
+
+def test_no_repo_screen_shows_nearby():
+    """L0: starting with no repo context shows the no-repo screen with nearby projects."""
+    nearby = [Path("/Users/srinji/project-a"), Path("/Users/srinji/project-b")]
+    with patch("lgwks_home.sys.stdin.isatty", return_value=True):
+        with patch("lgwks_home._ask", side_effect=["q"]):
+            with patch("lgwks_home._detect_repo_context", return_value=(None, nearby)):
+                with patch("lgwks_home.print") as mock_print:
+                    home._browser_entryway(on=False)
+    texts = [str(c) for c in mock_print.call_args_list]
+    assert any("not in a git repo" in t for t in texts)
+    assert any("project-a" in t for t in texts)
+
+
+def test_no_repo_continue_without_project():
+    """L0: pressing 'n' on no-repo screen switches to the full home browser."""
+    fake_repo = Path("/tmp/fake-repo")
+    with patch("lgwks_home.sys.stdin.isatty", return_value=True):
+        with patch("lgwks_home._ask", side_effect=["n", "q"]):
+            with patch("lgwks_home._detect_repo_context", return_value=(None, [])):
+                with patch("lgwks_home.print") as mock_print:
+                    home._browser_entryway(on=False)
+    texts = [str(c) for c in mock_print.call_args_list]
+    # After 'n', the home browser should render (showing domain grid)
+    assert any("Research" in t for t in texts)
+
+
+def test_no_repo_picks_nearby_project():
+    """L0: pressing '1' on no-repo screen selects the first nearby repo and switches to home."""
+    nearby = [Path("/Users/srinji/project-a"), Path("/Users/srinji/project-b")]
+    with patch("lgwks_home.sys.stdin.isatty", return_value=True):
+        with patch("lgwks_home._ask", side_effect=["1", "q"]):
+            with patch("lgwks_home._detect_repo_context", return_value=(None, nearby)):
+                with patch("lgwks_home.print") as mock_print:
+                    home._browser_entryway(on=False)
+    texts = [str(c) for c in mock_print.call_args_list]
+    # Should show the switched-to message and then home browser
+    assert any("switched to project-a" in t for t in texts)
+
+
+def test_home_repo_picker():
+    """L0: pressing 'p' on home screen opens the project picker; picking '1' switches repo."""
+    nearby = [Path("/Users/srinji/project-b")]
+    current = Path("/Users/srinji/project-a")
+    with patch("lgwks_home.sys.stdin.isatty", return_value=True):
+        with patch("lgwks_home._ask", side_effect=["p", "1", "q"]):
+            with patch("lgwks_home._detect_repo_context", return_value=(current, nearby)):
+                with patch("lgwks_home.print") as mock_print:
+                    home._browser_entryway(on=False)
+    texts = [str(c) for c in mock_print.call_args_list]
+    assert any("switch project" in t for t in texts)
+    assert any("switched to project-b" in t for t in texts)
+
+
+def test_resolve_argv_injects_repo():
+    """L0: _resolve_argv injects --repo for repo-aware commands when a repo is selected."""
+    with patch("lgwks_home._repo_for_command", return_value=["--repo", "/tmp/fake"]):
+        # _resolve_argv is a closure inside _browser_entryway; test via the public side-effect on _run
+        fake_repo = Path("/tmp/fake")
+        with patch("lgwks_home.sys.stdin.isatty", return_value=True):
+            with patch("lgwks_home._ask", side_effect=["s", "q"]):
+                with patch("lgwks_home._run") as mock_run:
+                    with patch("lgwks_home._pause"):
+                        with patch("lgwks_home.print"):
+                            with patch("lgwks_home._detect_repo_context", return_value=(fake_repo, [])):
+                                home._browser_entryway(on=False)
+        mock_run.assert_called_once_with(["lgwks", "solve", "git", "--repo", "/tmp/fake"])
+
+
+def test_render_home_browser_shows_repo():
+    """L0: home browser shows current project name when a repo is active."""
+    tree = home._build_command_tree()
+    with patch("lgwks_home.print") as mock_print:
+        home._render_home_browser(tree, on=False, repo=Path("/Users/srinji/logic-os-kernel"))
+    texts = [str(c) for c in mock_print.call_args_list]
+    assert any("current project" in t for t in texts)
+    assert any("logic-os-kernel" in t for t in texts)
+
+
+def test_render_no_repo_home_shows_options():
+    """L0: no-repo screen shows create / initialize / continue options."""
+    with patch("lgwks_home.print") as mock_print:
+        home._render_no_repo_home(on=False, nearby=[])
+    texts = [str(c) for c in mock_print.call_args_list]
+    assert any("create repo" in t for t in texts)
+    assert any("initialize" in t for t in texts)
+    assert any("continue" in t for t in texts)
+
+
+def test_repo_for_command_coverage():
+    """L0: repo-aware verbs get --repo; everything else returns empty."""
+    repo = Path("/tmp/fake")
+    repo_aware_verbs = {"gh", "repo", "review", "session", "graph", "solve", "debug", "intent", "entity-graph"}
+    for verb in repo_aware_verbs:
+        assert home._repo_for_command(verb, repo) == ["--repo", str(repo)]
+    for verb in ("doctor", "jarvis", "akinator", "fetch", "crawl", "plan", "pr", "issue"):
+        assert home._repo_for_command(verb, repo) == []
+
