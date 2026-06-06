@@ -1180,21 +1180,22 @@ class QueryResult:
 
 
 def _parse_where(clause: str) -> list[tuple[str, str, str]]:
-    """Parse simple WHERE conditions: a.op.b where op is =, !=, CONTAINS."""
-    # normalize
+    """Parse WHERE conditions: a.op.b where op is =, !=, CONTAINS, ENDS WITH, STARTS WITH."""
     clause = clause.strip()
     conditions: list[tuple[str, str, str]] = []
-    # split on AND (case-insensitive)
     parts = _re.split(r"\s+AND\s+", clause, flags=_re.IGNORECASE)
     for part in parts:
         part = part.strip()
         if not part:
             continue
-        # op matching
-        m = _re.match(r"(\w+(?:\.\w+)?)\s*(=|!=|CONTAINS)\s*(.+)", part, _re.IGNORECASE)
+        # multi-word operators first (ENDS WITH, STARTS WITH) then single-word (=, !=, CONTAINS)
+        m = _re.match(
+            r"(\w+(?:\.\w+)?)\s*(ENDS WITH|STARTS WITH|CONTAINS|=|!=)\s*(.+)",
+            part,
+            _re.IGNORECASE,
+        )
         if m:
             field, op, val = m.group(1), m.group(2).upper(), m.group(3).strip()
-            # strip quotes from value
             if (val.startswith("'") and val.endswith("'")) or (val.startswith('"') and val.endswith('"')):
                 val = val[1:-1]
             conditions.append((field, op, val))
@@ -1233,6 +1234,12 @@ def _eval_condition(node: Node, field: str, op: str, val: str) -> bool:
         if isinstance(actual, list):
             return any(val in str(item) for item in actual)
         return False
+    if op == "ENDS WITH":
+        s = str(actual)
+        return s.endswith(val)
+    if op == "STARTS WITH":
+        s = str(actual)
+        return s.startswith(val)
     return False
 
 
@@ -1291,10 +1298,16 @@ def execute_query(graph: Graph, query: str) -> QueryResult:
     # Truncate
     results = results[:limit]
 
-    # RETURN projection
+    # RETURN projection (with DISTINCT support)
     if return_clause:
-        cols = [c.strip() for c in return_clause.split(",")]
+        rc = return_clause.strip()
+        distinct = False
+        if rc.upper().startswith("DISTINCT "):
+            distinct = True
+            rc = rc[9:]
+        cols = [c.strip() for c in rc.split(",")]
         projected: list[dict[str, Any]] = []
+        seen: set[str] = set()
         for row in results:
             proj: dict[str, Any] = {}
             for col in cols:
@@ -1310,10 +1323,25 @@ def execute_query(graph: Graph, query: str) -> QueryResult:
                         proj[col] = None
                 else:
                     proj[col] = row.get(col)
+            if distinct:
+                key = json.dumps(proj, sort_keys=True, ensure_ascii=False)
+                if key in seen:
+                    continue
+                seen.add(key)
             projected.append(proj)
         return QueryResult(cols, projected)
 
     return QueryResult([node_var], results)
+
+
+def _build_meta(rows: list[Any], query_validated: bool = True, warnings: list[str] | None = None) -> dict[str, Any]:
+    """Meta block for every JSON payload: explains emptiness, validation state, and warnings."""
+    meta: dict[str, Any] = {"query_validated": query_validated, "row_count": len(rows)}
+    if not rows:
+        meta["why_empty"] = "query_constraint_returned_zero_matches"
+    if warnings:
+        meta["warnings"] = warnings
+    return meta
 
 
 def graph_command(args) -> int:
@@ -1327,7 +1355,7 @@ def graph_command(args) -> int:
     graph = get_graph(repo, force_refresh=getattr(args, "refresh", False))
 
     # ── language coverage warning (hollow-green trap guard) ──────────────────────
-    # Detect dominant unindexed languages and warn before returning any results.
+    pre_warnings: list[str] = []
     try:
         p = subprocess.run(
             ["git", "-C", str(repo), "ls-files"],
@@ -1336,8 +1364,8 @@ def graph_command(args) -> int:
         if p.returncode == 0:
             all_paths = [ln for ln in p.stdout.splitlines() if ln.strip()]
             indexed_paths = set(graph.nodes.keys())
-            warnings = _detect_unindexed_languages(all_paths, indexed_paths)
-            for w in warnings:
+            pre_warnings = _detect_unindexed_languages(all_paths, indexed_paths)
+            for w in pre_warnings:
                 print(w, file=sys.stderr)
     except Exception:
         pass
@@ -1347,12 +1375,14 @@ def graph_command(args) -> int:
         files = [f.strip() for f in getattr(args, "files", "").split(",") if f.strip()]
         radius = getattr(args, "radius", 3)
         scores = graph.change_propagation_score(files, radius=radius)
+        rows = [{"id": k, "score": v} for k, v in sorted(scores.items(), key=lambda x: -x[1])]
         payload = {
             "schema": "lgwks.graph.impact.v0",
             "repo": str(repo),
             "changed": files,
             "radius": radius,
             "scores": {k: v for k, v in sorted(scores.items(), key=lambda x: -x[1])},
+            "meta": _build_meta(rows, warnings=pre_warnings or None),
         }
         print(json.dumps(payload, indent=2))
         return 0
@@ -1362,12 +1392,14 @@ def graph_command(args) -> int:
         ci = graph.complexity_index()
         pr = graph.pagerank()
         bc = graph.betweenness_centrality()
+        rows = [{"id": k, "pagerank": v} for k, v in sorted(pr.items(), key=lambda x: -x[1])[:10]]
         payload = {
             "schema": "lgwks.graph.complexity.v0",
             "repo": str(repo),
             "kgci": ci,
             "top_pagerank": dict(sorted(pr.items(), key=lambda x: -x[1])[:10]),
             "top_betweenness": dict(sorted(bc.items(), key=lambda x: -x[1])[:10]),
+            "meta": _build_meta(rows, warnings=pre_warnings or None),
         }
         print(json.dumps(payload, indent=2))
         return 0
@@ -1377,6 +1409,7 @@ def graph_command(args) -> int:
         src = getattr(args, "from_node", "")
         dst = getattr(args, "to_node", "")
         p = graph.shortest_path(src, dst)
+        rows = [{"id": node} for node in (p if p else [])]
         payload = {
             "schema": "lgwks.graph.path.v0",
             "repo": str(repo),
@@ -1384,6 +1417,7 @@ def graph_command(args) -> int:
             "to": dst,
             "path": p if p else [],
             "reachable": p is not None,
+            "meta": _build_meta(rows, warnings=pre_warnings or None),
         }
         print(json.dumps(payload, indent=2))
         return 0
@@ -1393,12 +1427,14 @@ def graph_command(args) -> int:
         nid = getattr(args, "of", "")
         out_n = graph.neighbors(nid)
         in_n = graph.predecessors(nid)
+        rows = [{"id": nid, "direction": "out", "neighbor": n} for n in out_n] + [{"id": nid, "direction": "in", "neighbor": n} for n in in_n]
         payload = {
             "schema": "lgwks.graph.neighbors.v0",
             "repo": str(repo),
             "node": nid,
             "outgoing": out_n,
             "incoming": in_n,
+            "meta": _build_meta(rows, warnings=pre_warnings or None),
         }
         print(json.dumps(payload, indent=2))
         return 0
@@ -1408,26 +1444,39 @@ def graph_command(args) -> int:
     if q:
         try:
             result = execute_query(graph, q)
+            query_warnings: list[str] = []
+            if not result.rows:
+                query_warnings.append("query_returned_zero_rows — verify predicates (CONTAINS, ENDS WITH, STARTS WITH are supported; keys() is not)")
             payload = {
                 "schema": "lgwks.graph.query.v0",
                 "repo": str(repo),
                 "query": q,
                 "columns": result.columns,
                 "rows": result.rows,
+                "meta": _build_meta(result.rows, query_validated=True, warnings=query_warnings + pre_warnings),
             }
             print(json.dumps(payload, indent=2))
         except ValueError as e:
-            print(f"[graph] query error: {e}", file=sys.stderr)
+            err_payload = {
+                "schema": "lgwks.graph.query.v0",
+                "repo": str(repo),
+                "query": q,
+                "error": str(e),
+                "meta": {"query_validated": False, "why_empty": "query_syntax_error", "row_count": 0},
+            }
+            print(json.dumps(err_payload, indent=2), file=sys.stderr)
             return 1
         return 0
 
     # ── patterns ─────────────────────────────────────────────────────────────────
     if getattr(args, "patterns", False):
         pats = graph.detect_patterns()
+        rows = [{"pattern": k, "count": len(v)} for k, v in pats.items()]
         payload = {
             "schema": "lgwks.graph.patterns.v0",
             "repo": str(repo),
             "patterns": pats,
+            "meta": _build_meta(rows, warnings=pre_warnings or None),
         }
         print(json.dumps(payload, indent=2))
         return 0
@@ -1435,6 +1484,7 @@ def graph_command(args) -> int:
     # ── schema-infer ───────────────────────────────────────────────────────────────
     if getattr(args, "schema_infer", False):
         schema = infer_schema(graph)
+        rows = [{"type": k, "count": v.get("count", 0)} for k, v in schema.entity_types.items()]
         payload = {
             "schema": "lgwks.graph.schema-infer.v0",
             "repo": str(repo),
@@ -1442,6 +1492,7 @@ def graph_command(args) -> int:
             "relationships": schema.relationships,
             "coverage": schema.coverage,
             "anomalies": schema.anomalies,
+            "meta": _build_meta(rows, warnings=pre_warnings or None),
         }
         print(json.dumps(payload, indent=2))
         return 0
@@ -1485,4 +1536,5 @@ def add_graph_parser(subparsers) -> None:
     p.add_argument("--serve", action="store_true", help="alias for --viz: start HTTP server")
     p.add_argument("--port", type=int, default=3000, help="server port for --viz (default: 3000)")
     p.add_argument("--export-html", default="", help="export static HTML file (no server)")
+    p.add_argument("--json", action="store_true", help="structured output (default when piped or LGWRS_MACHINE set)")
     p.set_defaults(func=graph_command)

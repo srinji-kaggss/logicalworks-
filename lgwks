@@ -1112,6 +1112,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="lgwks")
     # bare `lgwks` → the home launcher (the "pop up" experience), so no subcommand is required.
     parser.add_argument("--no-anim", action="store_true", help="skip the reveal animation")
+    parser.add_argument("--machine", action="store_true", help="machine-first output: pure JSON/ND-JSON, no decoration, no escape codes, no prompts")
     parser.set_defaults(func=_home_dispatch)
     sub = parser.add_subparsers(dest="command", required=False)
     jarvis = sub.add_parser("jarvis", help="deterministic research graph crawler")
@@ -1143,6 +1144,7 @@ def build_parser() -> argparse.ArgumentParser:
     manifest = sub.add_parser("manifest", help="machine-readable contract (verbs, capabilities, schema)")
     manifest.add_argument("--json", action="store_true", help="structured (default; flag exists for caller intent)")
     manifest.add_argument("--render", action="store_true", help="human view instead of JSON")
+    manifest.add_argument("--for-agent", action="store_true", help="compact capability matrix for AI consumption")
     manifest.set_defaults(func=_manifest_dispatch)
 
     # preview — dry-run brace/expression strings: show plan + risk verdict, no execution (T0 safe).
@@ -1693,6 +1695,10 @@ def main(argv: list[str] | None = None) -> int:
         args._unknown_argv = unknown
     elif unknown:
         parser.error(f"unrecognized arguments: {' '.join(unknown)}")
+    # global --machine flag propagates to all subcommands via environment
+    if getattr(args, "machine", False):
+        os.environ["LGWRS_MACHINE"] = "1"
+        os.environ["NO_COLOR"] = "1"
     return args.func(args)
 
 

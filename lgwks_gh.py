@@ -29,6 +29,18 @@ from typing import Any
 import lgwks_ui as ui
 
 
+# ── machine-first helpers ───────────────────────────────────────────────────
+
+def _gh_meta(items: list[Any] | None = None, warnings: list[str] | None = None, query_validated: bool = True) -> dict[str, Any]:
+    """Meta block for every gh JSON payload: explains emptiness and validation state."""
+    meta: dict[str, Any] = {"query_validated": query_validated, "row_count": len(items) if items is not None else None}
+    if items is not None and not items:
+        meta["why_empty"] = "github_api_returned_zero_matches_or_not_authenticated"
+    if warnings:
+        meta["warnings"] = warnings
+    return meta
+
+
 # ── constants ───────────────────────────────────────────────────────────────
 
 _SLUG_RE = re.compile(r"^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$")
@@ -602,8 +614,13 @@ def issues_command(args: argparse.Namespace) -> int:
         print(f"error: {e}", file=sys.stderr)
         return 1
     issues = _issues_list(repo, getattr(args, "state", "open"), getattr(args, "label", None))
-    if getattr(args, "json", False):
-        print(json.dumps({"schema": "lgwks.gh.v0", "check": "issues", "issues": issues}, indent=2))
+    if getattr(args, "json", False) or ui.machine_mode():
+        print(json.dumps({
+            "schema": "lgwks.gh.v0",
+            "check": "issues",
+            "issues": issues,
+            "meta": _gh_meta(issues),
+        }, indent=2))
         return 0
     on = ui.color_on()
     out: list[str] = [""]
@@ -639,7 +656,7 @@ def issue_command(args: argparse.Namespace) -> int:
                            *_repo_slug_args(repo))
         print(json.dumps(raw, indent=2, ensure_ascii=False))
         return 0 if "_error" not in raw else 1
-    if getattr(args, "json", False):
+    if getattr(args, "json", False) or ui.machine_mode():
         print(json.dumps({
             "schema": "lgwks.gh.v0",
             "check": "issue",
@@ -655,6 +672,7 @@ def issue_command(args: argparse.Namespace) -> int:
                 "comments": issue.comments,
                 "next_actions": [{"verb": a.verb, "reason": a.reason, "risk": a.risk, "cmd": a.cmd} for a in issue.next_actions],
             },
+            "meta": _gh_meta([issue.number] if issue.state != "unknown" else None),
         }, indent=2, ensure_ascii=False))
         return 0 if issue.state != "unknown" else 1
     on = ui.color_on()
@@ -670,8 +688,13 @@ def prs_command(args: argparse.Namespace) -> int:
         print(f"error: {e}", file=sys.stderr)
         return 1
     prs = _prs_list(repo, getattr(args, "state", "open"))
-    if getattr(args, "json", False):
-        print(json.dumps({"schema": "lgwks.gh.v0", "check": "prs", "prs": prs}, indent=2))
+    if getattr(args, "json", False) or ui.machine_mode():
+        print(json.dumps({
+            "schema": "lgwks.gh.v0",
+            "check": "prs",
+            "prs": prs,
+            "meta": _gh_meta(prs),
+        }, indent=2))
         return 0
     on = ui.color_on()
     out: list[str] = [""]
@@ -700,8 +723,13 @@ def pr_command(args: argparse.Namespace) -> int:
     if "_error" in result:
         print(f"error: {result['_error']}", file=sys.stderr)
         return 1
-    if getattr(args, "json", False):
-        print(json.dumps({"schema": "lgwks.gh.v0", "check": "pr", "pr": result}, indent=2))
+    if getattr(args, "json", False) or ui.machine_mode():
+        print(json.dumps({
+            "schema": "lgwks.gh.v0",
+            "check": "pr",
+            "pr": result,
+            "meta": _gh_meta([result] if "_error" not in result else None),
+        }, indent=2))
         return 0
     on = ui.color_on()
     out: list[str] = [""]
@@ -726,7 +754,7 @@ def state_command(args: argparse.Namespace) -> int:
         print(f"error: {e}", file=sys.stderr)
         return 1
     state = _repo_state(repo)
-    if getattr(args, "json", False):
+    if getattr(args, "json", False) or ui.machine_mode():
         print(json.dumps({
             "schema": "lgwks.gh.v0",
             "check": "state",
@@ -738,6 +766,7 @@ def state_command(args: argparse.Namespace) -> int:
             "last_commit_age_hours": state.last_commit_age_hours,
             "health_score": state.health_score,
             "next_actions": [{"verb": a.verb, "reason": a.reason, "risk": a.risk, "cmd": a.cmd} for a in state.next_actions],
+            "meta": _gh_meta([state.slug]),
         }, indent=2))
         return 0
     on = ui.color_on()
@@ -754,7 +783,8 @@ def harden_command(args: argparse.Namespace) -> int:
         return 1
     result = _harden(repo)
     _audit("harden", {"repo": repo}, "completed" if "_error" not in result else "error")
-    if getattr(args, "json", False):
+    if getattr(args, "json", False) or ui.machine_mode():
+        result["meta"] = _gh_meta(result.get("findings"), warnings=result.get("findings", []))
         print(json.dumps(result, indent=2))
         return 0
     on = ui.color_on()
@@ -776,8 +806,17 @@ def harden_command(args: argparse.Namespace) -> int:
     return 0
 
 
-def auth_command(_args: argparse.Namespace) -> int:
+def auth_command(args: argparse.Namespace) -> int:
     rc, out = _gh("auth", "status")
+    if getattr(args, "json", False) or ui.machine_mode():
+        print(json.dumps({
+            "schema": "lgwks.gh.v0",
+            "check": "auth",
+            "authenticated": rc == 0,
+            "raw": out.strip() if rc == 0 else None,
+            "meta": _gh_meta(["authenticated"] if rc == 0 else None, query_validated=True),
+        }, indent=2))
+        return rc
     on = ui.color_on()
     out_ui: list[str] = [""]
     out_ui += ui.band("lgwks · gh auth", "status", on=on)
@@ -798,6 +837,7 @@ def add_parser(sub) -> None:
     gs = gh.add_subparsers(dest="gh_command", required=True)
 
     auth = gs.add_parser("auth", help="check gh authentication status")
+    auth.add_argument("--json", action="store_true", help="structured output")
     auth.set_defaults(func=auth_command)
 
     issues = gs.add_parser("issues", help="list issues")

@@ -672,8 +672,32 @@ def build_manifest() -> dict:
     }
 
 
+def _for_agent_manifest(full: dict) -> dict:
+    """Compact capability matrix optimized for AI consumption: verbs only, no prose."""
+    verbs: list[dict] = []
+    for v in full.get("verbs", []):
+        verbs.append({
+            "verb": v["verb"],
+            "intent": v["intent"],
+            "tokens": v.get("tokens", "unknown"),
+            "args": list(v.get("args", {}).keys()),
+            "output_mode": "json" if "--json" in str(v.get("args", {})) else "ascii",
+        })
+    return {
+        "schema": "lgwks.manifest.for_agent.v0",
+        "tool": full.get("tool"),
+        "verbs": verbs,
+        "capabilities": full.get("capabilities", []),
+        "steering": full.get("steering", {}),
+        "io": full.get("io", {}),
+    }
+
+
 def manifest_command(args) -> int:
     m = build_manifest()
+    if getattr(args, "for_agent", False):
+        print(json.dumps(_for_agent_manifest(m), indent=2, sort_keys=False))
+        return 0
     # --render wins over --json: the human view is an explicit opt-in, JSON is the default.
     if getattr(args, "render", False):
         return _render(m)

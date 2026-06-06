@@ -26,7 +26,14 @@ AMBER, RUST, MUTED = 179, 167, 245
 _SPINE = "┃"
 
 
+def machine_mode() -> bool:
+    """Global --machine flag: suppress ALL decoration, emit pure data."""
+    return bool(os.environ.get("LGWRS_MACHINE"))
+
+
 def color_on(stream=sys.stdout) -> bool:
+    if machine_mode():
+        return False
     if os.environ.get("NO_COLOR"):
         return False
     if os.environ.get("TERM", "") == "dumb":
