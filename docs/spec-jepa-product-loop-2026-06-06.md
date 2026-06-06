@@ -416,3 +416,88 @@ Implication for `lgwks`:
 good setup is a compiler from human work-shape
 to machine defaults and policy
 ```
+
+## 15. Multi-surface and visual constraints
+
+The same underlying package should support multiple surfaces without duplicating logic.
+
+Relevant product lessons:
+
+1. one core layer, many surfaces
+- the package/runtime layer should feed:
+  - CLI
+  - human visual workbench
+  - agent stream
+  - future API surfaces
+
+2. human context compression is visual, not just textual
+- when the human needs “more context”, that often means:
+  - more distinct signals on screen
+  - better separation of concerns
+  - faster drill-down
+- not a longer summary
+
+3. dense visual surfaces should remain object-backed
+- panes should map to:
+  - package objects
+  - resources
+  - repo bindings
+  - contradictions
+  - actions
+
+4. command-jump should unify the system
+- one jump surface should reach:
+  - seeds
+  - packages
+  - repos
+  - resources
+  - tickets
+
+Implication for `lgwks`:
+
+```text
+the machine packet compresses for agents
+the visual workbench compresses for humans
+both must derive from the same package
+```
+
+## 16. Layered control and anti-binning constraints
+
+The future `seed continue` flow should not become a god-command that hides many distinct decisions behind one verb.
+
+Relevant architectural lessons:
+
+1. intent is a transformed object, not raw prose
+- `jepa` should learn/project intent structure
+- deterministic control remains the final authority
+
+2. authorization must include predicted outcome
+- continuation should be gated by:
+  - identity/context
+  - capability
+  - declared intent
+  - predicted outcome
+
+3. capability vocabulary should be bounded
+- the agent should choose among stable machine capabilities
+- it should not mint new workflow ontology ad hoc at runtime
+
+4. handoffs should emit radar metadata
+- package and continuation transitions should be visible without replaying all payloads
+
+5. one product verb can still contain many typed engines
+- `seed continue` should orchestrate:
+  - resolution
+  - scope
+  - readiness
+  - preview
+  - execution
+  - evidence
+  - refresh
+
+Implication for `lgwks`:
+
+```text
+simple top-level verbs are good
+collapsed internal logic is not
+```

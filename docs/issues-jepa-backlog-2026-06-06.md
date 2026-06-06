@@ -260,6 +260,78 @@ This is the working issue list for the JEPA/product-seed path.
   - human projections
 - Make the tradeoff inspectable instead of implicit
 
+### JEPA-033 — Visual seed radar
+
+- Build a dense overview of:
+  - recent seeds
+  - project bindings
+  - freshness
+  - contradiction counts
+  - readiness
+
+### JEPA-034 — Package graph workbench
+
+- Build a drill-down graph surface for:
+  - anchors
+  - resources
+  - repo bindings
+  - continuations
+  - outcomes
+
+### JEPA-035 — Multi-surface package contract
+
+- Guarantee the same core package can drive:
+  - CLI surfaces
+  - visual workbench
+  - agent streams
+  - future API surfaces
+
+### JEPA-036 — Command-jump navigation
+
+- Add a unified jump surface for:
+  - seed
+  - repo
+  - resource
+  - package
+  - ticket
+
+### JEPA-037 — Capability registry / static tool graph
+
+- Build a registry of reusable machine capabilities instead of rebuilding orchestration logic ad hoc
+- Goal:
+  - stop rediscovering solved micro-tools in chat
+  - bind proven static tools into machine contracts
+
+### JEPA-038 — Intent x outcome continuation gate
+
+- Gate continuation actions on:
+  - declared continuation intent
+  - predicted touched scope
+  - expected outcome surface
+- Block or downgrade runs when the outcome mismatches the declared ask
+
+### JEPA-039 — Handoff radar metadata
+
+- Emit lightweight metadata for:
+  - seed creation
+  - package refinement
+  - repo binding
+  - continuation
+  - outcome refresh
+- Goal: visual observability without replaying full payloads
+
+### JEPA-040 — Typed continuation engine chain
+
+- Decompose `seed continue` into explicit internal stages:
+  - resolution
+  - package selection
+  - repo binding
+  - scope prediction
+  - readiness gate
+  - preview/evidence
+  - execution
+  - refresh
+
 ## Research issues
 
 ### JEPA-R01 — Thesis validation for `H1`
