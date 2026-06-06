@@ -51,6 +51,21 @@ Purpose: record useful product/runtime patterns from external references without
   - lean tool surface
   - per-tool safety and sandboxable execution
 
+6. gloomberb
+- https://github.com/vincelwt/gloomberb
+- useful for:
+  - dense multi-pane visual context
+  - keyboard-first drill-down
+  - command bar as global jump surface
+  - extensible pane/plugin surface
+
+7. OpenBB
+- https://github.com/OpenBB-finance/OpenBB
+- useful for:
+  - one infrastructure layer serving many consumption surfaces
+  - "connect once, consume everywhere" product framing
+  - agent-facing, API-facing, and human-facing surfaces over one core platform
+
 ## Direct implications for lgwks
 
 1. `seed` should be the default product noun
@@ -102,6 +117,17 @@ Purpose: record useful product/runtime patterns from external references without
 - a good setup flow does not ask for low-level knobs first
 - it asks what kind of work the user wants to do, then selects defaults
 - this fits the `seed` thesis better than manual config-first onboarding
+
+9. dense visuals can be a context compressor for humans
+- the human analogue to a compact machine packet is not more prose
+- it is a map with distinct panes and drill-down paths
+
+10. the infrastructure layer should not be surface-bound
+- one core layer should feed:
+  - CLI
+  - visual workbench
+  - machine packets
+  - future APIs and agent surfaces
 
 ## Translation rule
 
