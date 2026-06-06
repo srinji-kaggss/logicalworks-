@@ -1231,7 +1231,18 @@ def graph_command(args) -> int:
         print(json.dumps(payload, indent=2))
         return 0
 
-    print("[graph] nothing to do — specify --impact, --complexity, --path, --neighbors, --query, --patterns, or --schema-infer", file=sys.stderr)
+    # ── viz (visualization) ────────────────────────────────────────────────────
+    if getattr(args, "viz", False):
+        import lgwks_graph_viz as vizmod
+        return vizmod.viz_command(args)
+
+    # ── export-html (static export) ──────────────────────────────────────────────
+    export_html = getattr(args, "export_html", None)
+    if export_html:
+        import lgwks_graph_viz as vizmod
+        return vizmod.viz_command(args)
+
+    print("[graph] nothing to do — specify --impact, --complexity, --path, --neighbors, --query, --patterns, --schema-infer, or --viz", file=sys.stderr)
     return 1
 
 
@@ -1255,4 +1266,8 @@ def add_graph_parser(subparsers) -> None:
     p.add_argument("--query", default="", help='Cypher-like query, e.g. \'MATCH (n) WHERE n.kind = "file" RETURN n.id\'')
     p.add_argument("--patterns", action="store_true", help="detect architectural patterns (circular deps, god modules, orphans, etc.)")
     p.add_argument("--schema-infer", action="store_true", help="infer schema from graph topology (entity types, cardinality, coverage)")
+    p.add_argument("--viz", action="store_true", help="start interactive visualization server (localhost only)")
+    p.add_argument("--serve", action="store_true", help="alias for --viz: start HTTP server")
+    p.add_argument("--port", type=int, default=3000, help="server port for --viz (default: 3000)")
+    p.add_argument("--export-html", default="", help="export static HTML file (no server)")
     p.set_defaults(func=graph_command)

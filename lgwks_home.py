@@ -426,6 +426,7 @@ def _quick_actions_for_repo(repo: Path | None) -> list[tuple[str, str, str, list
     ]
     if repo:
         actions.append(("g", "gh issues", "open issues on GitHub", ["lgwks", "gh", "issues", "--repo", str(repo)]))
+        actions.append(("v", "viz", "open graph visualization", ["lgwks", "graph", "viz", "--serve", "--repo", str(repo)]))
         actions.append(("r", "repl", "interactive harness", []))
     else:
         actions.append(("r", "repl", "interactive harness", []))
