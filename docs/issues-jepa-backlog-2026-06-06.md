@@ -332,6 +332,53 @@ This is the working issue list for the JEPA/product-seed path.
   - execution
   - refresh
 
+### JEPA-041 — Goal-directed compaction engine
+
+- Build continuation compaction around current mission relevance
+- Preserve:
+  - active goal
+  - repo bindings
+  - contradictions
+  - next actions
+- Discard transcript ballast aggressively
+
+### JEPA-042 — Operator anomaly card layer
+
+- Emit plain-language anomaly cards for humans
+- Candidate cards:
+  - stale binding
+  - failed crawl
+  - contradiction spike
+  - risky continuation
+  - state drift
+
+### JEPA-043 — Replayable seed/package timeline
+
+- Record and scrub package/continuation history
+- Support:
+  - recent-state replay
+  - "then vs now" diff
+  - anomaly correlation over time
+
+### JEPA-044 — Branch-aware local state modes
+
+- Add explicit local state modes:
+  - shared
+  - per-branch
+- Candidate state classes:
+  - repo-local continuation cache
+  - resource snapshots
+  - portal packets
+
+### JEPA-045 — Git-hook assisted state sync
+
+- Explore non-blocking git-hook integration for branch transitions
+- Trigger:
+  - refresh
+  - snapshot
+  - drift detection
+- Must never make checkout brittle
+
 ## Research issues
 
 ### JEPA-R01 — Thesis validation for `H1`

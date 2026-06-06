@@ -501,3 +501,43 @@ Implication for `lgwks`:
 simple top-level verbs are good
 collapsed internal logic is not
 ```
+
+## 17. Local compaction, operator radar, and branch-state constraints
+
+The product needs three more practical layers: mission-shaped compaction, human anomaly visibility, and branch-aware local state.
+
+Relevant product lessons:
+
+1. compaction should be goal-directed
+- continuation packets should discard stale transcript ballast
+- they should preserve:
+  - current goal
+  - active repo bindings
+  - contradictory signals
+  - likely next actions
+
+2. the human operator needs a radar, not just a dump
+- dense panes should be paired with anomaly cards
+- the visual surface should highlight:
+  - stale packages
+  - contradictory views
+  - failed crawls
+  - risky next actions
+
+3. some local state should follow the active branch
+- repo-local continuation state, caches, or snapshots may need:
+  - shared mode
+  - per-branch mode
+- this should be explicit, not accidental
+
+4. branch-aware sync should be helpful, not brittle
+- branch transitions can trigger refresh/snapshot hooks
+- but the sync layer should fail open for checkout and degrade clearly
+
+Implication for `lgwks`:
+
+```text
+machine context should stay relevant
+human context should stay legible
+local state should stay aligned with active work
+```

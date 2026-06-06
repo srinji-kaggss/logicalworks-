@@ -66,6 +66,28 @@ Purpose: record useful product/runtime patterns from external references without
   - "connect once, consume everywhere" product framing
   - agent-facing, API-facing, and human-facing surfaces over one core platform
 
+8. miii-cli
+- https://github.com/maruakshay/miii-cli
+- useful for:
+  - local-first execution posture
+  - goal-directed context compaction
+  - repo-local instruction overlays
+
+9. syswatch
+- https://github.com/matthart1983/syswatch
+- useful for:
+  - dense multi-tab observability
+  - timeline + replay
+  - plain-English anomaly cards
+  - one terminal surface replacing many scattered tools
+
+10. db-git
+- https://github.com/earthcomfy/db-git
+- useful for:
+  - branch-affined local state
+  - shared vs per-branch storage modes
+  - git-hook-driven sync without blocking checkout
+
 ## Direct implications for lgwks
 
 1. `seed` should be the default product noun
@@ -128,6 +150,22 @@ Purpose: record useful product/runtime patterns from external references without
   - visual workbench
   - machine packets
   - future APIs and agent surfaces
+
+11. humans need anomaly cards, not only graphs
+- dense visuals are necessary but insufficient
+- the system should also emit plain-language cards for:
+  - contradictions
+  - stale bindings
+  - failed refreshes
+  - risky continuations
+
+12. local state should be branch-aware where it matters
+- some package/resource/cache state should track the active branch
+- one mode will not fit every repo
+
+13. compaction should preserve mission relevance, not just shorten text
+- the point is not “smaller context”
+- the point is “retain what still matters for the current goal”
 
 ## Translation rule
 

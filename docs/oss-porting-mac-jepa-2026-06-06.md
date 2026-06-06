@@ -28,6 +28,27 @@ Decide what external open-source work can be ported into `lgwks`, under what lic
   - URLs:
     - https://github.com/alexzhaosheng/huko
 
+### maruakshay
+
+- `miii-cli`: MIT
+  - Source: repo page shows MIT license.
+  - URLs:
+    - https://github.com/maruakshay/miii-cli
+
+### matthart1983
+
+- `syswatch`: MIT
+  - Source: repo page shows MIT license.
+  - URLs:
+    - https://github.com/matthart1983/syswatch
+
+### earthcomfy
+
+- `db-git`: MIT
+  - Source: repo page shows MIT license.
+  - URLs:
+    - https://github.com/earthcomfy/db-git
+
 ### ginwind
 
 - `VLA-JEPA`: no verified license captured from the repo surface during this pass
@@ -113,6 +134,54 @@ The strongest reusable patterns are agent-shell and setup patterns:
 - sandboxed wrapper mode for risky continuation
 - useful for future `seed continue --sandbox` and readiness tiers
 
+### From `miii-cli`
+
+The strongest reusable patterns are local context-governance patterns:
+
+1. Local-first execution posture
+- the agent runs on the user's machine by default
+- useful reinforcement for the `lgwks` local-first moat
+
+2. Goal-directed context compaction
+- keep task-relevant context, not raw tool transcript ballast
+- useful for continuation packet sizing and portal compilation
+
+3. Repo-local instruction overlay
+- a project instruction file steers the local agent
+- useful analogue for repo-local `seed` and continuation policy overlays
+
+### From `syswatch`
+
+The strongest reusable patterns are human observability patterns:
+
+1. Dense multi-tab observability
+- many system slices visible without opening many tools
+- useful for the JEPA visual workbench
+
+2. Timeline + replay
+- session history is scrub-able, not just current-state only
+- useful for continuation replay and handoff radar
+
+3. Plain-English anomaly cards
+- heuristics become immediately legible operator signals
+- useful for contradiction/risk/readiness cards
+
+### From `db-git`
+
+The strongest reusable patterns are branch-affined local-state patterns:
+
+1. State follows branch checkout
+- branch switch triggers local state reconciliation
+- useful for repo-local JEPA/portal/resource state
+
+2. Shared vs per-branch modes
+- one state store with snapshots, or one state store per branch
+- useful for continuation history, local caches, and future substrate snapshots
+
+3. Hook-driven but non-blocking sync
+- integrate with branch changes without making checkout brittle
+- useful for future `lgwks` git-aware state refresh behavior
+
 ## Porting map into lgwks
 
 ### Port now
@@ -144,6 +213,18 @@ The strongest reusable patterns are agent-shell and setup patterns:
 7. Compaction tiers
 - inspired by `huko`
 - maps to machine/human projection budgets and continuation packet sizing
+
+8. Goal-directed context compaction
+- inspired by `miii-cli`
+- maps to continuation packets that preserve relevance rather than transcript bulk
+
+9. Visual anomaly/radar workbench
+- inspired by `syswatch`
+- maps to dense human observability surfaces for package/repo state
+
+10. Branch-affined local state sync
+- inspired by `db-git`
+- maps to repo-local caches, portal state, and future branch-aware resource snapshots
 
 ### Translate first, port later
 

@@ -111,3 +111,21 @@ ln -sf /Users/srinji/logicalworks-/lgwks_refactor.py .
 ln -sf /Users/srinji/logicalworks-/lgwks_local_llm.py .
 ```
 This guarantees that all improvements to the core parser, diff utility, or CLI immediately benefit the private authenticated standard crawler pipeline.
+
+---
+
+## Planning Maps
+
+High-level planning work that is intentionally structured for cheaper follow-on agents lives in flat doc sets under `docs/`.
+
+Current planning entrypoints:
+
+- [docs/bot-fabric/README.md](/Users/srinji/logicalworks-/docs/bot-fabric/README.md) — non-AI bot fabric + JEPA + synthesis plan
+- [docs/jepa-program-map-2026-06-06.md](/Users/srinji/logicalworks-/docs/jepa-program-map-2026-06-06.md) — JEPA product/program map
+- [docs/spec-jepa-visual-workbench-2026-06-06.md](/Users/srinji/logicalworks-/docs/spec-jepa-visual-workbench-2026-06-06.md) — human visual workbench direction
+
+Local ML direction in this repo is Apple-native first:
+
+- [lgwks_foundation.py](/Users/srinji/logicalworks-/lgwks_foundation.py) — Foundation-backed on-device structured extraction seam
+- [lgwks_coreml.py](/Users/srinji/logicalworks-/lgwks_coreml.py) — CoreML classifier seam
+- [docs/ml-001-intent-classifier-sizing.md](/Users/srinji/logicalworks-/docs/ml-001-intent-classifier-sizing.md) — ANE-friendly membrane sizing

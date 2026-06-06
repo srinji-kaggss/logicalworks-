@@ -39,6 +39,15 @@ Useful pattern from `gloomberb`:
 Source:
 - https://github.com/vincelwt/gloomberb
 
+Useful pattern from `syswatch`:
+
+- multi-tab observability replacing many disconnected tools
+- replayable session timeline
+- plain-English anomaly cards layered over raw signals
+
+Source:
+- https://github.com/matthart1983/syswatch
+
 ## Core workbench panes
 
 ### 1. Seed radar
@@ -97,6 +106,16 @@ Shows:
 - test outputs
 - review artifacts
 
+### 7. Anomaly cards
+
+Shows:
+
+- stale binding detected
+- crawl failed or degraded
+- contradiction density spike
+- risky continuation requires preview
+- branch-local state drift
+
 ## Interaction model
 
 ### Overview first
@@ -122,6 +141,14 @@ Every pane should open into:
 - human explanation
 - raw evidence
 
+### Replay and scrub
+
+The workbench should support session/package replay:
+
+- scrub recent refreshes
+- inspect prior continuation states
+- compare "then vs now" for the same package
+
 ## Relationship to the machine package
 
 The workbench is not a second source of truth.
@@ -142,6 +169,8 @@ The visual workbench suggests future commands:
 - `lgwks seed graph`
 - `lgwks seed changes`
 - `lgwks seed readiness`
+- `lgwks seed replay`
+- `lgwks seed anomalies`
 
 ## PM/operator notes
 
