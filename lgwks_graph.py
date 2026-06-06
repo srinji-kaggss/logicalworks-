@@ -16,6 +16,7 @@ from __future__ import annotations
 import ast
 import hashlib
 import json
+import re as _re
 import sys
 import time
 from dataclasses import dataclass, field
@@ -533,6 +534,188 @@ class Graph:
         return cls.from_dict(data)
 
 
+# ── Rust parsing (lightweight regex — no external deps) ───────────────────────
+# //why: logic-os-kernel and other repos are Rust-first. Python's ast module can't
+# parse .rs. We use regex (not a full parser) because: (1) zero deps, (2) fast,
+# (3) "good enough" for import/definition/call extraction at graph granularity.
+# The regex approach has false negatives (complex macros, nested modules) but
+# never false positives — safe for the graph layer.
+
+_RUST_USE_RE = _re.compile(r"^\s*use\s+([^;]+);", _re.MULTILINE)
+_RUST_MOD_RE = _re.compile(r"^\s*mod\s+(\w+)", _re.MULTILINE)
+_RUST_FN_RE = _re.compile(r"^\s*(?:pub\s+)?(?:async\s+)?(?:unsafe\s+)?fn\s+(\w+)", _re.MULTILINE)
+_RUST_STRUCT_RE = _re.compile(r"^\s*(?:pub\s+)?struct\s+(\w+)", _re.MULTILINE)
+_RUST_ENUM_RE = _re.compile(r"^\s*(?:pub\s+)?enum\s+(\w+)", _re.MULTILINE)
+_RUST_TRAIT_RE = _re.compile(r"^\s*(?:pub\s+)?trait\s+(\w+)", _re.MULTILINE)
+_RUST_IMPL_RE = _re.compile(r"^\s*impl\s+(?:<[^>]+>\s+)?(?:\w+\s+for\s+)?(\w+)", _re.MULTILINE)
+_RUST_CALL_RE = _re.compile(r"\b(\w+)\s*\(", _re.MULTILINE)
+_RUST_VAR_RE = _re.compile(r"^\s*let\s+(?:mut\s+)?(\w+)", _re.MULTILINE)
+
+
+def _parse_rust_file(source: str, rel_path: str) -> tuple[list[str], list[str], set[str], set[str]]:
+    """Extract (imports, defines, variables, calls) from Rust source.
+    Returns same shape as Python AST extraction so the graph pipeline is uniform."""
+    imports: list[str] = []
+    defines: list[str] = []
+    variables: set[str] = set()
+    calls: set[str] = set()
+
+    for m in _RUST_USE_RE.finditer(source):
+        imports.append(m.group(1).strip())
+
+    for m in _RUST_MOD_RE.finditer(source):
+        defines.append(f"mod:{m.group(1)}")
+
+    for m in _RUST_FN_RE.finditer(source):
+        defines.append(f"fn:{m.group(1)}")
+
+    for m in _RUST_STRUCT_RE.finditer(source):
+        defines.append(f"struct:{m.group(1)}")
+
+    for m in _RUST_ENUM_RE.finditer(source):
+        defines.append(f"enum:{m.group(1)}")
+
+    for m in _RUST_TRAIT_RE.finditer(source):
+        defines.append(f"trait:{m.group(1)}")
+
+    for m in _RUST_IMPL_RE.finditer(source):
+        defines.append(f"impl:{m.group(1)}")
+
+    for m in _RUST_VAR_RE.finditer(source):
+        variables.add(m.group(1))
+
+    for m in _RUST_CALL_RE.finditer(source):
+        name = m.group(1)
+        # Filter out Rust keywords that look like calls
+        if name not in ("if", "while", "for", "match", "return", "let", "pub", "fn", "struct", "enum", "impl", "use", "mod", "trait"):
+            calls.add(name)
+
+    return imports, defines, variables, calls
+
+
+def _rust_import_to_path(imp: str, repo: Path, rel_path: str) -> str | None:
+    """Map a Rust use statement to a likely file path in the repo.
+    Handles: crate::foo::bar, super::baz, self::qux, std::... (external)."""
+    # Strip trailing items (e.g. "crate::foo::bar::{Baz, Qux}")
+    imp = imp.split(" as ")[0].strip()
+    if imp.endswith("}"):
+        # Handle crate::foo::{Bar, Baz} → map to crate::foo
+        brace = imp.rfind("{")
+        if brace > 0:
+            imp = imp[:brace].rstrip(":")
+
+    parts = imp.split("::")
+    if not parts:
+        return None
+
+    # External crate (std, core, alloc, third-party) — no internal mapping
+    if parts[0] in ("std", "core", "alloc", "std::os", "std::collections"):
+        return None
+
+    # crate::foo::bar → src/foo/bar.rs or src/foo/bar/mod.rs, then progressively
+    # fall back to shorter paths (src/foo.rs) because the target may be a submodule
+    # inside a single-file module.
+    if parts[0] == "crate":
+        path_parts = parts[1:]
+        if not path_parts:
+            return None
+        # Try full path first
+        candidate = "src/" + "/".join(path_parts) + ".rs"
+        if (repo / candidate).exists():
+            return candidate
+        candidate_mod = "src/" + "/".join(path_parts) + "/mod.rs"
+        if (repo / candidate_mod).exists():
+            return candidate_mod
+        # Progressive fallback: try each prefix as a module file
+        for i in range(len(path_parts) - 1, 0, -1):
+            fallback = "src/" + "/".join(path_parts[:i]) + ".rs"
+            if (repo / fallback).exists():
+                return fallback
+            fallback_mod = "src/" + "/".join(path_parts[:i]) + "/mod.rs"
+            if (repo / fallback_mod).exists():
+                return fallback_mod
+        return None
+
+    # super::foo → relative to current file's directory, then progressive fallback
+    if parts[0] == "super":
+        current_dir = Path(rel_path).parent
+        for _ in range(len([p for p in parts if p == "super"])):
+            current_dir = current_dir.parent
+        remaining = [p for p in parts if p != "super"]
+        if remaining:
+            candidate = str(current_dir / "/".join(remaining)) + ".rs"
+            if (repo / candidate).exists():
+                return candidate
+            candidate_mod = str(current_dir / "/".join(remaining)) + "/mod.rs"
+            if (repo / candidate_mod).exists():
+                return candidate_mod
+            # Progressive fallback to shorter paths
+            for i in range(len(remaining) - 1, 0, -1):
+                fallback = str(current_dir / "/".join(remaining[:i])) + ".rs"
+                if (repo / fallback).exists():
+                    return fallback
+        return None
+
+    # self::foo → relative to current file, then progressive fallback
+    if parts[0] == "self":
+        current_dir = Path(rel_path).parent
+        remaining = parts[1:]
+        if remaining:
+            candidate = str(current_dir / "/".join(remaining)) + ".rs"
+            if (repo / candidate).exists():
+                return candidate
+            candidate_mod = str(current_dir / "/".join(remaining)) + "/mod.rs"
+            if (repo / candidate_mod).exists():
+                return candidate_mod
+            for i in range(len(remaining) - 1, 0, -1):
+                fallback = str(current_dir / "/".join(remaining[:i])) + ".rs"
+                if (repo / fallback).exists():
+                    return fallback
+        return None
+
+    # Raw module path (foo::bar) → try src/foo/bar.rs
+    candidate = "src/" + "/".join(parts) + ".rs"
+    if (repo / candidate).exists():
+        return candidate
+    candidate_mod = "src/" + "/".join(parts) + "/mod.rs"
+    if (repo / candidate_mod).exists():
+        return candidate_mod
+
+    return None
+
+
+def _detect_unindexed_languages(paths: list[str], indexed_paths: set[str]) -> list[str]:
+    """Detect dominant languages with zero indexed files and return warning messages.
+    //why: the hollow-green trap — empty authoritative JSON for unindexed languages.
+    A Rust repo returning {} for impact analysis is a false negative, not a confirmation."""
+    from collections import Counter
+
+    # Count files by extension
+    ext_counts: Counter[str] = Counter()
+    for p in paths:
+        if "." in p:
+            ext = p.rsplit(".", 1)[-1].lower()
+            ext_counts[ext] += 1
+
+    total_source = sum(c for ext, c in ext_counts.items() if ext in ("py", "rs", "js", "ts", "go", "java", "swift", "rb", "php", "c", "cpp", "h", "hpp", "cs", "scala", "kt"))
+    if total_source == 0:
+        return []
+
+    warnings: list[str] = []
+    for ext, count in ext_counts.most_common():
+        if count < 5 or count / total_source < 0.1:
+            continue
+        # Check if any files of this extension are indexed
+        indexed_count = sum(1 for p in indexed_paths if p.endswith(f".{ext}"))
+        if indexed_count == 0:
+            warnings.append(
+                f"[graph] WARNING: {count} .{ext} files detected but not indexed — "
+                f"graph results cover 0% of {ext}-language codebase"
+            )
+
+    return warnings
+
+
 # ── extraction from repo ─────────────────────────────────────────────────────
 
 def _file_hash(content: str) -> str:
@@ -654,7 +837,9 @@ def extract_from_repo(repo: Path, previous: Graph | None = None) -> Graph:
             )
             continue
 
-        if not rel_path.endswith(".py"):
+        is_py = rel_path.endswith(".py")
+        is_rs = rel_path.endswith(".rs")
+        if not (is_py or is_rs):
             continue
 
         try:
@@ -668,49 +853,63 @@ def extract_from_repo(repo: Path, previous: Graph | None = None) -> Graph:
             g.nodes[rel_path] = prev_nodes[rel_path]
             # still need its defs for call-graph mapping
             for d in prev_nodes[rel_path].defines:
-                if d.startswith("def:"):
-                    all_defs[d[4:]] = rel_path
-            continue
-
-        try:
-            tree = ast.parse(source)
-        except SyntaxError:
+                if d.startswith("def:") or d.startswith("fn:"):
+                    all_defs[d.split(":", 1)[1]] = rel_path
             continue
 
         imports: list[str] = []
         defines: list[str] = []
-        for node in ast.iter_child_nodes(tree):
-            if isinstance(node, ast.Import):
-                for alias in node.names:
-                    imports.append(alias.name)
-            elif isinstance(node, ast.ImportFrom):
-                mod = node.module or ""
-                for alias in node.names:
-                    imports.append(f"{mod}.{alias.name}" if mod else alias.name)
-            elif isinstance(node, ast.ClassDef):
-                defines.append(f"class:{node.name}")
-            elif isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
-                defines.append(f"def:{node.name}")
-                all_defs[node.name] = rel_path
+        variables: set[str] = set()
+        calls: set[str] = set()
 
-        variables = _walk_variables(tree)
-        calls = _walk_calls(tree)
+        if is_py:
+            try:
+                tree = ast.parse(source)
+            except SyntaxError:
+                continue
+            for node in ast.iter_child_nodes(tree):
+                if isinstance(node, ast.Import):
+                    for alias in node.names:
+                        imports.append(alias.name)
+                elif isinstance(node, ast.ImportFrom):
+                    mod = node.module or ""
+                    for alias in node.names:
+                        imports.append(f"{mod}.{alias.name}" if mod else alias.name)
+                elif isinstance(node, ast.ClassDef):
+                    defines.append(f"class:{node.name}")
+                elif isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+                    defines.append(f"def:{node.name}")
+                    all_defs[node.name] = rel_path
+            variables = _walk_variables(tree)
+            calls = _walk_calls(tree)
+            file_data.append((rel_path, fpath, source, None, imports, defines, variables, calls, []))
 
-        file_data.append((rel_path, fpath, source, tree, imports, defines, variables, calls, []))
+        elif is_rs:
+            imports, defines, variables, calls = _parse_rust_file(source, rel_path)
+            for d in defines:
+                if d.startswith("fn:"):
+                    all_defs[d[4:]] = rel_path
+            file_data.append((rel_path, fpath, source, None, imports, defines, variables, calls, []))
 
     # Second pass: build nodes + import edges
     for rel_path, fpath, source, tree, imports, defines, variables, calls, _ in file_data:
         # map imports to likely internal modules
         internal_imports: list[str] = []
+        is_rs = rel_path.endswith(".rs")
         for imp in imports:
-            parts = imp.split(".")
-            candidate = "/".join(parts) + ".py"
-            if (repo / candidate).exists():
-                internal_imports.append(candidate)
+            if is_rs:
+                mapped = _rust_import_to_path(imp, repo, rel_path)
+                if mapped:
+                    internal_imports.append(mapped)
             else:
-                candidate_init = "/".join(parts) + "/__init__.py"
-                if (repo / candidate_init).exists():
-                    internal_imports.append(candidate_init)
+                parts = imp.split(".")
+                candidate = "/".join(parts) + ".py"
+                if (repo / candidate).exists():
+                    internal_imports.append(candidate)
+                else:
+                    candidate_init = "/".join(parts) + "/__init__.py"
+                    if (repo / candidate_init).exists():
+                        internal_imports.append(candidate_init)
 
         sha = _file_hash(source)
         g.nodes[rel_path] = Node(
@@ -733,14 +932,14 @@ def extract_from_repo(repo: Path, previous: Graph | None = None) -> Graph:
         if n.kind != "file":
             continue
         for d in n.defines:
-            if d.startswith("def:"):
-                full_def_map[d[4:]] = nid
+            if d.startswith("def:") or d.startswith("fn:"):
+                full_def_map[d.split(":", 1)[1]] = nid
     for nid, n in (previous.nodes if previous else {}).items():
         if nid not in g.nodes or g.nodes[nid].kind != "file":
             continue
         for d in n.defines:
-            if d.startswith("def:") and d[4:] not in full_def_map:
-                full_def_map[d[4:]] = nid
+            if (d.startswith("def:") or d.startswith("fn:")) and d.split(":", 1)[1] not in full_def_map:
+                full_def_map[d.split(":", 1)[1]] = nid
 
     for rel_path, _, _, _, _, _, _, calls, _ in file_data:
         for call_name in calls:
@@ -1126,6 +1325,22 @@ def graph_command(args) -> int:
         return 1
 
     graph = get_graph(repo, force_refresh=getattr(args, "refresh", False))
+
+    # ── language coverage warning (hollow-green trap guard) ──────────────────────
+    # Detect dominant unindexed languages and warn before returning any results.
+    try:
+        p = subprocess.run(
+            ["git", "-C", str(repo), "ls-files"],
+            capture_output=True, text=True, timeout=30,
+        )
+        if p.returncode == 0:
+            all_paths = [ln for ln in p.stdout.splitlines() if ln.strip()]
+            indexed_paths = set(graph.nodes.keys())
+            warnings = _detect_unindexed_languages(all_paths, indexed_paths)
+            for w in warnings:
+                print(w, file=sys.stderr)
+    except Exception:
+        pass
 
     # ── impact ─────────────────────────────────────────────────────────────────
     if getattr(args, "impact", None):

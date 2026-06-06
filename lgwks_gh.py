@@ -203,8 +203,25 @@ def _compute_issue_next(issue: IssueView) -> list[NextAction]:
     elif _git_log_has_issue_ref(issue.number):
         actions.append(NextAction("verify", "commit(s) reference this issue on main — verify landed", "read"))
     else:
-        actions.append(NextAction("start", "no linked PR — create branch + draft PR", "mutate",
-                                   cmd=f"gh issue develop {issue.number}"))
+        local_branches = _local_branches_for_issue(issue.number)
+        if local_branches:
+            current = ""
+            try:
+                cp = subprocess.run(["git", "branch", "--show-current"], capture_output=True, text=True, timeout=5)
+                if cp.returncode == 0:
+                    current = cp.stdout.strip()
+            except Exception:
+                pass
+            branch_list = ", ".join(local_branches)
+            if current in local_branches:
+                actions.append(NextAction("push", f"local branch '{current}' matches this issue — push and link to PR", "mutate",
+                                           cmd=f"git push -u origin {current}"))
+            else:
+                actions.append(NextAction("checkout", f"local branch(es) found: {branch_list} — checkout existing work", "mutate",
+                                           cmd=f"git checkout {local_branches[0]}"))
+        else:
+            actions.append(NextAction("start", "no linked PR — create branch + draft PR", "mutate",
+                                       cmd=f"gh issue develop {issue.number}"))
 
     return actions
 
@@ -512,6 +529,28 @@ def _git_log_has_issue_ref(number: int) -> bool:
     except Exception:
         pass
     return False
+
+
+def _local_branches_for_issue(number: int) -> list[str]:
+    """Check if local branches reference this issue number.
+    Matches: feat/352*, 352-*, issue-352*, etc."""
+    try:
+        p = subprocess.run(
+            ["git", "branch", "--list", f"*{number}*"],
+            capture_output=True,
+            text=True,
+            timeout=10,
+        )
+        if p.returncode == 0 and p.stdout.strip():
+            branches = []
+            for line in p.stdout.splitlines():
+                branch = line.strip().lstrip("* ").strip()
+                if branch:
+                    branches.append(branch)
+            return branches
+    except Exception:
+        pass
+    return []
 
 
 # ── CLI renderers ────────────────────────────────────────────────────────────
