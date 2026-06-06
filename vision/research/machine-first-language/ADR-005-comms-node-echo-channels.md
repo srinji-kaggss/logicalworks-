@@ -6,6 +6,12 @@ hash-chained fact-log / Causal Tape), ADR-073 (closed capability vocabulary), AD
 isolation), ADR-079 (metadata-ping) from logic-os-kernel. This is the node **between** plane (agent) ↔ radar
 (ADR-002 harness gauge) ↔ peers. Everything here is ADOPT, not invent.
 
+## D-scope · Comms is PROJECT-world, not life (Director, 2026-06-06)
+Every channel/echo/"global" tier below is scoped to **one shared project-world** — the bounded node-graph
+the agents collaborate in. "Global" means *global-within-this-project*, never a life-wide or cross-project
+persistent social layer. Agents overhear each other across the world they share *for that project*; close
+the project, the world closes. This is not the fleet's life-comms; it is one project's shared senses.
+
 ## D0 · The model is OVERHEAR, not address (Director: "eyes and ears through echoing")
 
 Agents are decoupled — they do not work *for* or *with* each other on a fixed wire. Comms is the sense
