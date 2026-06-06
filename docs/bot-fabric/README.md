@@ -23,6 +23,13 @@ Bottom-up implementation order:
 4. [U4-JEPA-PACKAGE.md](/Users/srinji/logicalworks-/docs/bot-fabric/U4-JEPA-PACKAGE.md)
 5. [U11-ARTIFACT-STRENGTH.md](/Users/srinji/logicalworks-/docs/bot-fabric/U11-ARTIFACT-STRENGTH.md)
 
+## Next lane specs
+
+After the schema/reducer/package base:
+
+1. [U5-CODE-HACKER.md](/Users/srinji/logicalworks-/docs/bot-fabric/U5-CODE-HACKER.md)
+2. [U6-SLOP-MATH.md](/Users/srinji/logicalworks-/docs/bot-fabric/U6-SLOP-MATH.md)
+
 ## One-paragraph thesis
 
 `lgwks` should use deterministic bots to generate evidence, a JEPA-style world model to align and compress evidence across views and time, and one optional high-reasoning LLM synthesis layer that further reduces tokens and improves final judgment without being required for the package to remain useful.
