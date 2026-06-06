@@ -50,9 +50,13 @@ class TestPublicRelevance(unittest.TestCase):
         query = "machine learning quantum"
         labelled = public._label_records(records, query)
         self.assertTrue(all("relevance_score" in rec for rec in labelled))
+        # DiD: EVERY record must carry an explicit ranking field; absence must never be interpreted as pass.
+        self.assertTrue(all("ranking" in rec for rec in labelled))
         # At least one should have the honest canon label because its title shares few/no terms
         labels = [r.get("ranking", "") for r in labelled]
         self.assertTrue(any("citation-canon" in lbl for lbl in labels))
+        # At least one should be relevance-verified
+        self.assertTrue(any("relevance-verified" in lbl for lbl in labels))
 
 
 class TestSourceValidity(unittest.TestCase):
@@ -82,6 +86,24 @@ class TestSourceValidity(unittest.TestCase):
         html = "<html><body><p>This is a detailed article about machine learning and artificial intelligence.</p></body></html>"
         ok, diag = search.source_validity(html, "http://example.com")
         self.assertTrue(ok)
+
+    def test_url_challenge_fragment_rejected(self):
+        """DiD layer 3: URL containing challenge fragments is rejected independently of body."""
+        html = "<html><body><p>Some legitimate content here that is long enough to pass the size check.</p></body></html>"
+        ok, diag = search.source_validity(html, "http://example.com/captcha-verify")
+        self.assertFalse(ok)
+        self.assertIn("URL challenge fragment", diag or "")
+
+    def test_high_script_ratio_rejected(self):
+        """DiD layer 4: extreme script-to-content ratio flags JS challenge pages."""
+        html = (
+            '<html><head><script src="a.js"></script><script src="b.js"></script>'
+            '<script src="c.js"></script><script src="d.js"></script></head>'
+            '<body><p>Short.</p></body></html>'
+        )
+        ok, diag = search.source_validity(html, "http://example.com")
+        self.assertFalse(ok)
+        self.assertIn("script-to-content", diag or "")
 
 
 if __name__ == "__main__":

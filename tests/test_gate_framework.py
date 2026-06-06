@@ -67,6 +67,22 @@ class TestG3Gate(unittest.TestCase):
         self.assertEqual(verdict.outcome, Outcome.PASS)
         self.assertTrue("fixture_crate::hello" in (verdict.evidence or []))
 
+    def test_token_based_layer_catches_macro_paths(self):
+        """DiD layer 2: token-based collector catches paths inside macro invocations
+        that the regex-based extractor misses."""
+        v = G3Verifier(crate_dir=self.fixture_dir)
+        v._installed_symbols = lambda: ({"fixture_crate::hello", "fixture_crate::Widget"}, [])
+        # The path appears inside a macro invocation with spaces — regex misses,
+        # but token-based collector should catch it.
+        code = 'macro_call! { fixture_crate :: hello }'
+        refs = v._extract_references(code)
+        self.assertIn("fixture_crate::hello", refs)
+
+    def test_false_pass_surface_declared(self):
+        """The verifier declares its false-PASS surface so consumers know the trust boundary."""
+        from lgwks_gate_framework import _FALSE_PASS_SURFACE
+        self.assertIn("regex-based", _FALSE_PASS_SURFACE)
+
 
 if __name__ == "__main__":
     unittest.main()

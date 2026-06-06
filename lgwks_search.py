@@ -439,13 +439,21 @@ def source_validity(text: str, url: str = "") -> tuple[bool, str | None]:
     """
     Reject CAPTCHA / bot-challenge / empty-result / login-wall pages before ingest.
     Returns (ok, diagnosis). ok=False means CANNOT_DECIDE — do not map into concepts.
+
+    DiD layers (independent; any one triggers rejection):
+      1. Body-size floor       — near-empty is likely a failed fetch or bot wall.
+      2. Content-marker scan   — literal strings for known challenge systems.
+      3. URL-pattern scan      — known challenge URL fragments (independent of body).
+      4. Structural heuristic  — password input fields, script-to-content ratio.
     """
     low = text.lower()
-    # empty / near-empty
+
+    # Layer 1: body-size floor
     stripped = re.sub(r"\s+", "", low)
     if len(stripped) < 20:
         return (False, "empty or near-empty body — likely bot-wall or failed fetch")
-    # known markers
+
+    # Layer 2: content-marker scan
     for marker in _CAPTCHA_MARKERS:
         if marker in low:
             return (False, f"CAPTCHA/bot-challenge marker detected: '{marker}'")
@@ -455,9 +463,24 @@ def source_validity(text: str, url: str = "") -> tuple[bool, str | None]:
     for marker in _ACCESS_DENIED_MARKERS:
         if marker in low:
             return (False, f"access-denied marker detected: '{marker}'")
-    # content heuristics: form with password field is a login wall
+
+    # Layer 3: URL-pattern scan (independent of body content)
+    url_low = (url or "").lower()
+    _URL_CHALLENGE_FRAGMENTS = ["captcha", "challenge", "bot-check", "areyouhuman", "security-check"]
+    for frag in _URL_CHALLENGE_FRAGMENTS:
+        if frag in url_low:
+            return (False, f"URL challenge fragment detected: '{frag}'")
+
+    # Layer 4: structural heuristics
+    # 4a: password input field
     if re.search(r"<input[^>>]*type=[\"']?password[\"']?", low):
         return (False, "password input field detected — login wall")
+    # 4b: extreme script-to-content ratio (JS-only challenge pages)
+    script_tags = len(re.findall(r"<script\b", low))
+    visible_text = len(re.sub(r"<[^>]+>", "", text).strip())
+    if script_tags > 3 and visible_text < 200:
+        return (False, "high script-to-content ratio — likely JS challenge page")
+
     return (True, None)
 
 

@@ -120,8 +120,11 @@ class G3Verifier:
         """
         Extract external crate references from candidate Rust code.
         //why: regex-based — see _FALSE_PASS_SURFACE above.
+        //why DiD layer 2: a token-based collector runs independently and merges
+        #   its findings. If one extractor misses a path, the other may catch it.
         """
         refs: set[str] = set()
+        # Layer 1: regex-based structured extraction
         # use some_crate::path::Item;
         for m in re.finditer(r"\buse\s+([a-zA-Z_][a-zA-Z0-9_]*(?:::[a-zA-Z_][a-zA-Z0-9_]*)*)\s*;", code):
             refs.add(m.group(1))
@@ -138,6 +141,24 @@ class G3Verifier:
             path = m.group(1)
             if "::" in path:
                 refs.add(path)
+
+        # Layer 2: token-based path collector (independent; catches paths
+        # split by whitespace or inside macro invocations that regex misses)
+        tokens = re.findall(r"[a-zA-Z_][a-zA-Z0-9_]*|::", code)
+        i = 0
+        while i < len(tokens):
+            if i + 2 < len(tokens) and tokens[i + 1] == "::":
+                # build the longest ::-chain starting here
+                chain = [tokens[i]]
+                j = i + 1
+                while j + 1 < len(tokens) and tokens[j] == "::":
+                    chain.append(tokens[j + 1])
+                    j += 2
+                if len(chain) >= 2:
+                    refs.add("::".join(chain))
+                i = j
+            else:
+                i += 1
         return refs
 
     def _grounding_context(self, symbols: set[str]) -> list[str]:

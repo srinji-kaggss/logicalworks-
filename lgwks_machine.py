@@ -128,6 +128,10 @@ def _authority(cls: str, abstain: bool, coverage_gap: bool) -> str:
         return "abstain"
     if coverage_gap or cls == "unknown":
         return "assist"
+    # DiD: runtime enforcement of the invariant — a bug that reaches here with
+    # conflicting state raises instead of silently emitting an invalid authority.
+    if cls == "unknown" or abstain:
+        raise ValueError(f"authority invariant violated: cls={cls} abstain={abstain}")
     return "execute"
 
 
