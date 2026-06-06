@@ -281,3 +281,253 @@ def graph_edges(cycles: list[dict]) -> list[dict]:
                 "attribution": {"top_features": [e["why"]]},
             })
     return edges
+
+
+# -- bot-fabric schema constants and validators (U1/U2) -------------------
+# Pure stdlib validation for lgwks.bot.record.v1 and lgwks.bot.plan.v1.
+# These functions are dependency-free so any bot lane can import them.
+
+BOT_RECORD_SCHEMA = "lgwks.bot.record.v1"
+BOT_PLAN_SCHEMA = "lgwks.bot.plan.v1"
+
+BOT_SEVERITY_LEVELS = {"info", "low", "medium", "high", "critical"}
+BOT_STATUS_VALUES = {"open", "confirmed", "suppressed", "duplicate", "resolved"}
+BOT_EVIDENCE_TYPES = {
+    "metric", "edge", "trace", "query",
+    "test_output", "file_excerpt", "history", "external_ref",
+}
+BOT_RUN_KINDS = {"review", "research", "continue", "stress", "optimize"}
+BOT_WORLD_DB_MODES = {"bind", "readonly", "skip"}
+BOT_BRANCH_STATE_MODES = {"shared", "per_branch"}
+
+# Default known bot registry. Callers may extend via validate_bot_plan(known_bots=...)
+BOT_REGISTRY_DEFAULT = {
+    "graph_anomaly",
+    "code_hacker",
+    "optimizer",
+    "intent_classifier",
+    "scope_creep_guard",
+    "review",
+}
+
+
+def _is_str(v) -> bool:
+    return isinstance(v, str)
+
+
+def _require(obj: dict, key: str, kind: str | None = None) -> list[str]:
+    errs: list[str] = []
+    if key not in obj:
+        errs.append(f"missing required field: {key}")
+        return errs
+    if kind is not None:
+        if kind == "str" and not _is_str(obj[key]):
+            errs.append(f"{key} must be a string")
+        elif kind == "number" and not isinstance(obj[key], (int, float)):
+            errs.append(f"{key} must be a number")
+        elif kind == "bool" and not isinstance(obj[key], bool):
+            errs.append(f"{key} must be a boolean")
+        elif kind == "list" and not isinstance(obj[key], list):
+            errs.append(f"{key} must be a list")
+        elif kind == "dict" and not isinstance(obj[key], dict):
+            errs.append(f"{key} must be an object")
+    return errs
+
+
+def validate_bot_record(record: dict) -> tuple[bool, list[str]]:
+    """
+    Validate a bot record against the lgwks.bot.record.v1 schema.
+
+    Returns (is_valid, error_messages).
+    Fail-closed: any deviation from the schema is reported.
+    """
+    errs: list[str] = []
+
+    if not isinstance(record, dict):
+        return False, ["record must be a JSON object"]
+
+    errs.extend(_require(record, "schema", "str"))
+    errs.extend(_require(record, "run_id", "str"))
+    errs.extend(_require(record, "bot", "str"))
+    errs.extend(_require(record, "target", "dict"))
+    errs.extend(_require(record, "kind", "str"))
+    errs.extend(_require(record, "severity", "str"))
+    errs.extend(_require(record, "confidence", "number"))
+    errs.extend(_require(record, "status", "str"))
+    errs.extend(_require(record, "evidence", "list"))
+    errs.extend(_require(record, "links", "dict"))
+    errs.extend(_require(record, "created_at", "str"))
+
+    if errs:
+        return False, errs
+
+    # schema discriminator
+    if record["schema"] != BOT_RECORD_SCHEMA:
+        errs.append(f"schema must be '{BOT_RECORD_SCHEMA}', got {record['schema']!r}")
+
+    # severity
+    sev = record["severity"]
+    if sev not in BOT_SEVERITY_LEVELS:
+        errs.append(f"severity {sev!r} is not in {sorted(BOT_SEVERITY_LEVELS)}")
+
+    # confidence clamp
+    conf = record["confidence"]
+    if not (0.0 <= conf <= 1.0):
+        errs.append(f"confidence {conf} must be in [0.0, 1.0]")
+
+    # status
+    st = record["status"]
+    if st not in BOT_STATUS_VALUES:
+        errs.append(f"status {st!r} is not in {sorted(BOT_STATUS_VALUES)}")
+
+    # target
+    target = record["target"]
+    if not isinstance(target, dict):
+        errs.append("target must be an object")
+    else:
+        if "kind" not in target:
+            errs.append("target.kind is required")
+        elif not _is_str(target["kind"]):
+            errs.append("target.kind must be a string")
+        if "id" not in target:
+            errs.append("target.id is required")
+        elif not _is_str(target["id"]):
+            errs.append("target.id must be a string")
+
+    # evidence: at least one item, each with a type
+    evidence = record["evidence"]
+    if len(evidence) == 0:
+        errs.append("evidence must contain at least one item")
+    for idx, ev in enumerate(evidence):
+        if not isinstance(ev, dict):
+            errs.append(f"evidence[{idx}] must be an object")
+            continue
+        ev_type = ev.get("type")
+        if not _is_str(ev_type):
+            errs.append(f"evidence[{idx}].type is required and must be a string")
+        elif ev_type not in BOT_EVIDENCE_TYPES:
+            errs.append(f"evidence[{idx}].type {ev_type!r} is not in {sorted(BOT_EVIDENCE_TYPES)}")
+
+    # links: at least one repo-local anchor (file, symbol, test, artifact)
+    links = record["links"]
+    if not isinstance(links, dict):
+        errs.append("links must be an object")
+    else:
+        if "repo" not in links:
+            errs.append("links.repo is required")
+        elif not _is_str(links["repo"]):
+            errs.append("links.repo must be a string")
+        has_anchor = bool(
+            _is_str(links.get("file"))
+            or _is_str(links.get("symbol"))
+            or (isinstance(links.get("tests"), list) and len(links["tests"]) > 0)
+            or (isinstance(links.get("artifacts"), list) and len(links["artifacts"]) > 0)
+        )
+        if not has_anchor:
+            errs.append(
+                "links must contain at least one repo-local anchor "
+                "(file, symbol, tests, or artifacts)"
+            )
+
+    return len(errs) == 0, errs
+
+
+def validate_bot_plan(plan: dict, known_bots: set[str] | None = None) -> tuple[bool, list[str]]:
+    """
+    Validate a bot plan against the lgwks.bot.plan.v1 schema.
+
+    Returns (is_valid, error_messages).
+    Unknown bot names fail closed.
+    """
+    errs: list[str] = []
+
+    if not isinstance(plan, dict):
+        return False, ["plan must be a JSON object"]
+
+    errs.extend(_require(plan, "schema", "str"))
+    errs.extend(_require(plan, "plan_id", "str"))
+    errs.extend(_require(plan, "run_kind", "str"))
+    errs.extend(_require(plan, "target_repo", "str"))
+    errs.extend(_require(plan, "bots", "list"))
+    errs.extend(_require(plan, "jepa", "dict"))
+    errs.extend(_require(plan, "synth", "dict"))
+    errs.extend(_require(plan, "policy", "dict"))
+    errs.extend(_require(plan, "outputs", "dict"))
+
+    if errs:
+        return False, errs
+
+    # schema discriminator
+    if plan["schema"] != BOT_PLAN_SCHEMA:
+        errs.append(f"schema must be '{BOT_PLAN_SCHEMA}', got {plan['schema']!r}")
+
+    # run_kind
+    rk = plan["run_kind"]
+    if rk not in BOT_RUN_KINDS:
+        errs.append(f"run_kind {rk!r} is not in {sorted(BOT_RUN_KINDS)}")
+
+    # world_db_mode (optional, default bind)
+    wdb = plan.get("world_db_mode", "bind")
+    if wdb not in BOT_WORLD_DB_MODES:
+        errs.append(f"world_db_mode {wdb!r} is not in {sorted(BOT_WORLD_DB_MODES)}")
+
+    # bots: at least one, known names only
+    bots = plan["bots"]
+    if len(bots) == 0:
+        errs.append("bots must contain at least one bot reference")
+    registry = BOT_REGISTRY_DEFAULT if known_bots is None else known_bots
+    for idx, b in enumerate(bots):
+        if not isinstance(b, dict):
+            errs.append(f"bots[{idx}] must be an object")
+            continue
+        name = b.get("name")
+        if not _is_str(name):
+            errs.append(f"bots[{idx}].name is required and must be a string")
+        elif name not in registry:
+            errs.append(f"bots[{idx}].name {name!r} is not in the bot registry")
+        enabled = b.get("enabled")
+        if not isinstance(enabled, bool):
+            errs.append(f"bots[{idx}].enabled is required and must be a boolean")
+
+    # jepa
+    jepa = plan["jepa"]
+    if "enabled" not in jepa:
+        errs.append("jepa.enabled is required")
+    elif not isinstance(jepa["enabled"], bool):
+        errs.append("jepa.enabled must be a boolean")
+
+    # synth
+    synth = plan["synth"]
+    if "enabled" not in synth:
+        errs.append("synth.enabled is required")
+    elif not isinstance(synth["enabled"], bool):
+        errs.append("synth.enabled must be a boolean")
+
+    # policy
+    policy = plan["policy"]
+    if "allow_external_research" not in policy:
+        errs.append("policy.allow_external_research is required")
+    elif not isinstance(policy["allow_external_research"], bool):
+        errs.append("policy.allow_external_research must be a boolean")
+    if "branch_state_mode" not in policy:
+        errs.append("policy.branch_state_mode is required")
+    elif policy["branch_state_mode"] not in BOT_BRANCH_STATE_MODES:
+        errs.append(
+            f"policy.branch_state_mode {policy['branch_state_mode']!r} "
+            f"is not in {sorted(BOT_BRANCH_STATE_MODES)}"
+        )
+    if "max_artifact_bytes" not in policy:
+        errs.append("policy.max_artifact_bytes is required")
+    elif not isinstance(policy["max_artifact_bytes"], int) or isinstance(policy["max_artifact_bytes"], bool):
+        errs.append("policy.max_artifact_bytes must be an integer")
+    elif policy["max_artifact_bytes"] < 0:
+        errs.append("policy.max_artifact_bytes must be >= 0")
+
+    # outputs
+    outputs = plan["outputs"]
+    if "root" not in outputs:
+        errs.append("outputs.root is required")
+    elif not _is_str(outputs["root"]):
+        errs.append("outputs.root must be a string")
+
+    return len(errs) == 0, errs
