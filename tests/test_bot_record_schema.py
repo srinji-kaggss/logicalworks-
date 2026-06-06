@@ -105,6 +105,12 @@ def test_confidence_boundary_zero_passes():
     assert ok, errs
 
 
+def test_confidence_boolean_fails():
+    ok, errs = artifacts.validate_bot_record(_canonical_record(confidence=True))
+    assert not ok
+    assert any("confidence" in e for e in errs)
+
+
 # -- acceptance 3: record without evidence fails -------------------------
 
 def test_missing_evidence_fails():
@@ -169,6 +175,32 @@ def test_links_with_artifacts_passes():
         _canonical_record(links={"repo": "/a/b", "artifacts": ["a.json"]})
     )
     assert ok, errs
+
+
+def test_unknown_top_level_field_fails():
+    ok, errs = artifacts.validate_bot_record(_canonical_record(unexpected=True))
+    assert not ok
+    assert any("unknown field" in e for e in errs)
+
+
+def test_empty_required_strings_fail():
+    ok, errs = artifacts.validate_bot_record(_canonical_record(run_id=""))
+    assert not ok
+    assert any("run_id" in e for e in errs)
+
+
+def test_links_tests_items_must_be_strings():
+    rec = _canonical_record()
+    rec["links"]["tests"] = [123]
+    ok, errs = artifacts.validate_bot_record(rec)
+    assert not ok
+    assert any("links.tests[0]" in e for e in errs)
+
+
+def test_created_at_must_be_iso_datetime():
+    ok, errs = artifacts.validate_bot_record(_canonical_record(created_at="not-a-date"))
+    assert not ok
+    assert any("created_at" in e for e in errs)
 
 
 # -- acceptance 5: schema simplicity / reusability -------------------------
