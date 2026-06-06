@@ -1,0 +1,167 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://logicalworks.ca/schemas/lgwks-bot-plan-v1.schema.json",
+  "title": "lgwks.bot.plan.v1",
+  "description": "Declarative run contract for a bot-fabric analysis. Terraform-like entrypoint: target repo, selected bot lanes, runtime policy, output roots, budget/gating knobs.",
+  "type": "object",
+  "required": [
+    "schema",
+    "plan_id",
+    "run_kind",
+    "target_repo",
+    "bots",
+    "jepa",
+    "synth",
+    "policy",
+    "outputs"
+  ],
+  "additionalProperties": false,
+  "properties": {
+    "schema": {
+      "type": "string",
+      "const": "lgwks.bot.plan.v1",
+      "description": "Schema discriminator. Must be exactly 'lgwks.bot.plan.v1'."
+    },
+    "plan_id": {
+      "type": "string",
+      "minLength": 1,
+      "description": "Unique plan identifier. Format: plan:<slug>."
+    },
+    "run_kind": {
+      "$ref": "#/$defs/RunKind",
+      "description": "High-level intent of the run."
+    },
+    "target_repo": {
+      "type": "string",
+      "minLength": 1,
+      "description": "Absolute or relative path to the repository under analysis."
+    },
+    "world_db_mode": {
+      "$ref": "#/$defs/WorldDbMode",
+      "default": "bind",
+      "description": "How the world-model database is used during the run."
+    },
+    "bots": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "$ref": "#/$defs/BotRef"
+      },
+      "description": "Ordered list of bot lanes to run. At least one bot required."
+    },
+    "jepa": {
+      "type": "object",
+      "required": ["enabled"],
+      "additionalProperties": false,
+      "properties": {
+        "enabled": {
+          "type": "boolean",
+          "description": "Whether JEPA view-binding is active."
+        },
+        "mode": {
+          "type": "string",
+          "minLength": 1,
+          "description": "JEPA operating mode: deterministic_package, etc."
+        }
+      }
+    },
+    "synth": {
+      "type": "object",
+      "required": ["enabled"],
+      "additionalProperties": false,
+      "properties": {
+        "enabled": {
+          "type": "boolean",
+          "description": "Whether synthesizer output is produced."
+        },
+        "provider": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Synthesizer provider name: reasoning, local, etc."
+        },
+        "optional": {
+          "type": "boolean",
+          "default": true,
+          "description": "If true, synth failure does not fail the whole plan."
+        }
+      }
+    },
+    "policy": {
+      "type": "object",
+      "required": [
+        "allow_external_research",
+        "branch_state_mode",
+        "max_artifact_bytes"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "allow_external_research": {
+          "type": "boolean",
+          "description": "Opt-in flag for external web research. Default false."
+        },
+        "branch_state_mode": {
+          "$ref": "#/$defs/BranchStateMode",
+          "description": "How branch state is shared or isolated."
+        },
+        "max_artifact_bytes": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Maximum bytes for a single artifact file."
+        }
+      }
+    },
+    "outputs": {
+      "type": "object",
+      "required": ["root"],
+      "additionalProperties": false,
+      "properties": {
+        "root": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Base output directory for the run."
+        },
+        "machine": {
+          "type": "string",
+          "description": "Directory for machine-consumable artifacts."
+        },
+        "human": {
+          "type": "string",
+          "description": "Directory for human-readable reports."
+        }
+      }
+    }
+  },
+  "$defs": {
+    "RunKind": {
+      "type": "string",
+      "enum": ["review", "research", "continue", "stress", "optimize"],
+      "description": "Allowed run kinds."
+    },
+    "WorldDbMode": {
+      "type": "string",
+      "enum": ["bind", "readonly", "skip"],
+      "description": "World DB interaction modes."
+    },
+    "BranchStateMode": {
+      "type": "string",
+      "enum": ["shared", "per_branch"],
+      "description": "Branch state isolation modes."
+    },
+    "BotRef": {
+      "type": "object",
+      "required": ["name", "enabled"],
+      "additionalProperties": false,
+      "properties": {
+        "name": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Registered bot lane name. Unknown names fail closed."
+        },
+        "enabled": {
+          "type": "boolean",
+          "description": "Whether this bot lane is active in the run."
+        }
+      }
+    }
+  }
+}

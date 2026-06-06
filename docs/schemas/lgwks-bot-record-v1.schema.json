@@ -1,0 +1,192 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://logicalworks.ca/schemas/lgwks-bot-record-v1.schema.json",
+  "title": "lgwks.bot.record.v1",
+  "description": "Canonical evidence unit emitted by every deterministic bot. One record = one claim. No nested prose blobs, no implicit severity, no free-form rationale.",
+  "type": "object",
+  "required": [
+    "schema",
+    "run_id",
+    "bot",
+    "target",
+    "kind",
+    "severity",
+    "confidence",
+    "status",
+    "evidence",
+    "links",
+    "created_at"
+  ],
+  "additionalProperties": false,
+  "properties": {
+    "schema": {
+      "type": "string",
+      "const": "lgwks.bot.record.v1",
+      "description": "Schema discriminator. Must be exactly 'lgwks.bot.record.v1'."
+    },
+    "run_id": {
+      "type": "string",
+      "minLength": 1,
+      "description": "Unique run identifier. Format: run:<ISO-date>:<random>."
+    },
+    "bot": {
+      "type": "string",
+      "minLength": 1,
+      "description": "Bot lane name that emitted this record."
+    },
+    "target": {
+      "type": "object",
+      "required": ["kind", "id"],
+      "additionalProperties": false,
+      "properties": {
+        "kind": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Target entity kind: file, symbol, module, repo, etc."
+        },
+        "id": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Target identifier within the repo."
+        }
+      }
+    },
+    "kind": {
+      "type": "string",
+      "minLength": 1,
+      "description": "Claim kind: hub_risk, bug, perf_issue, style_issue, etc."
+    },
+    "summary": {
+      "type": "string",
+      "description": "Human-readable summary of the finding."
+    },
+    "severity": {
+      "$ref": "#/$defs/Severity",
+      "description": "Impact level. No implicit severity allowed."
+    },
+    "confidence": {
+      "type": "number",
+      "minimum": 0.0,
+      "maximum": 1.0,
+      "description": "Calibrated confidence on closed interval [0.0, 1.0]."
+    },
+    "status": {
+      "$ref": "#/$defs/Status",
+      "description": "Lifecycle state of the finding."
+    },
+    "evidence": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "$ref": "#/$defs/Evidence"
+      },
+      "description": "At least one drillable evidence item required. No bot may emit a finding without evidence."
+    },
+    "links": {
+      "type": "object",
+      "required": ["repo"],
+      "additionalProperties": false,
+      "properties": {
+        "repo": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Absolute or relative path to the repository root."
+        },
+        "file": {
+          "type": ["string", "null"],
+          "description": "Target file path, relative to repo root."
+        },
+        "symbol": {
+          "type": ["string", "null"],
+          "description": "Target symbol (function, class, variable) within the file."
+        },
+        "tests": {
+          "type": "array",
+          "items": { "type": "string" },
+          "default": [],
+          "description": "Test files that exercise the target."
+        },
+        "artifacts": {
+          "type": "array",
+          "items": { "type": "string" },
+          "default": [],
+          "description": "Artifact paths produced by the bot run."
+        }
+      }
+    },
+    "world_refs": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["kind", "id"],
+        "additionalProperties": false,
+        "properties": {
+          "kind": { "type": "string", "minLength": 1 },
+          "id": { "type": "string", "minLength": 1 }
+        }
+      },
+      "default": [],
+      "description": "References to world-model concepts."
+    },
+    "tags": {
+      "type": "array",
+      "items": { "type": "string" },
+      "default": [],
+      "description": "Free-form tags for clustering and filtering."
+    },
+    "created_at": {
+      "type": "string",
+      "format": "date-time",
+      "description": "ISO 8601 timestamp when the record was created."
+    }
+  },
+  "$defs": {
+    "Severity": {
+      "type": "string",
+      "enum": ["info", "low", "medium", "high", "critical"],
+      "description": "Ordered severity levels."
+    },
+    "Status": {
+      "type": "string",
+      "enum": ["open", "confirmed", "suppressed", "duplicate", "resolved"],
+      "description": "Lifecycle states for a finding."
+    },
+    "Evidence": {
+      "type": "object",
+      "required": ["type"],
+      "additionalProperties": true,
+      "properties": {
+        "type": {
+          "type": "string",
+          "enum": [
+            "metric",
+            "edge",
+            "trace",
+            "query",
+            "test_output",
+            "file_excerpt",
+            "history",
+            "external_ref"
+          ],
+          "description": "Evidence type discriminator."
+        },
+        "name": {
+          "type": "string",
+          "description": "Human-readable name of the evidence item."
+        },
+        "value": {
+          "oneOf": [
+            { "type": "string" },
+            { "type": "number" },
+            { "type": "boolean" }
+          ],
+          "description": "Scalar evidence value."
+        },
+        "unit": {
+          "type": "string",
+          "description": "Unit of measurement for the value."
+        }
+      }
+    }
+  }
+}
