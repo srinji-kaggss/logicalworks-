@@ -10,6 +10,7 @@ Verifies:
 
 from __future__ import annotations
 
+import json
 import os
 import sys
 import tempfile
@@ -120,6 +121,56 @@ class TestArchGate(unittest.TestCase):
             self.assertIn(v.klass, {Klass.HARD, Klass.ADVISORY})
             # The rule id must be from arch-rules.json
             self.assertTrue(v.gate_id)
+
+    def test_dynamic_forbidden_import_detected(self):
+        with tempfile.NamedTemporaryFile(mode="w", suffix=".py", delete=False) as fh:
+            fh.write("import importlib\nmod = importlib.import_module('urllib.request')\n")
+            fh.flush()
+            path = Path(fh.name)
+        try:
+            rule = {
+                "id": "data-boundary-no-network",
+                "klass": "HARD",
+                "kind": "forbidden-import",
+                "from": [path.stem],
+                "must_not_import": ["urllib.request"],
+                "diagnosis_hint": "found a network import",
+            }
+            verdict = RuleVerifier(rule).check(path, {})
+            self.assertEqual(verdict.outcome, Outcome.FAIL)
+            self.assertIn("dynamic import", verdict.diagnosis or "")
+        finally:
+            os.unlink(path)
+
+    def test_dynamic_allowed_import_does_not_fail(self):
+        with tempfile.NamedTemporaryFile(mode="w", suffix=".py", delete=False) as fh:
+            fh.write("import importlib\nmod = importlib.import_module('json')\n")
+            fh.flush()
+            path = Path(fh.name)
+        try:
+            rule = {
+                "id": "data-boundary-no-network",
+                "klass": "HARD",
+                "kind": "forbidden-import",
+                "from": [path.stem],
+                "must_not_import": ["urllib.request"],
+                "diagnosis_hint": "found a network import",
+            }
+            verdict = RuleVerifier(rule).check(path, {})
+            self.assertEqual(verdict.outcome, Outcome.PASS)
+        finally:
+            os.unlink(path)
+
+    def test_malformed_rule_rejected(self):
+        with tempfile.NamedTemporaryFile(mode="w", suffix=".json", delete=False) as fh:
+            fh.write(json.dumps({"rules": [{"id": "bad-rule", "klass": "HARD"}]}))
+            fh.flush()
+            path = Path(fh.name)
+        try:
+            with self.assertRaises(ValueError):
+                make_arch_verifiers(rules_path=path)
+        finally:
+            os.unlink(path)
 
 
 if __name__ == "__main__":

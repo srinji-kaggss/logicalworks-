@@ -116,17 +116,30 @@ def _relevance_score(query: str, record: dict) -> float:
 
 def _label_records(records: list[dict], query: str, floor: float = 0.25) -> list[dict]:
     """
-    Relevance verifier: either filter below floor OR label honestly.
-    //why: no silent canon-as-relevance. If we cannot prove relevance, we say so.
+    Relevance verifier: label every record honestly — no silent canon-as-relevance.
+    //why DiD layer 1: explicit ranking on ALL records so absence-of-field is never
+    interpreted as "proven relevant". Consumers switch on the value, not existence.
+    //why DiD layer 2: floor is declared per-record so downstream gates can apply
+    their own stricter thresholds without re-computing.
     """
     out: list[dict] = []
     for r in records:
         score = _relevance_score(query, r)
         if score < floor:
             # honest label: canon ranking, not proven relevance
-            out.append({**r, "ranking": "citation-canon, not relevance", "relevance_score": score})
+            out.append({
+                **r,
+                "ranking": "citation-canon, not relevance",
+                "relevance_score": score,
+                "relevance_floor": floor,
+            })
         else:
-            out.append({**r, "relevance_score": score})
+            out.append({
+                **r,
+                "ranking": "relevance-verified",
+                "relevance_score": score,
+                "relevance_floor": floor,
+            })
     return out
 
 
@@ -167,4 +180,3 @@ def add_parser(sub) -> None:
     p.add_argument("--source", choices=["all", *sorted(SOURCES)], default="all")
     p.add_argument("--limit", type=int, default=5)
     p.set_defaults(func=public_command)
-

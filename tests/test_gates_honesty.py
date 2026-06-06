@@ -50,9 +50,12 @@ class TestPublicRelevance(unittest.TestCase):
         query = "machine learning quantum"
         labelled = public._label_records(records, query)
         self.assertTrue(all("relevance_score" in rec for rec in labelled))
+        self.assertTrue(all("ranking" in rec for rec in labelled))
+        self.assertTrue(all("relevance_floor" in rec for rec in labelled))
         # At least one should have the honest canon label because its title shares few/no terms
         labels = [r.get("ranking", "") for r in labelled]
         self.assertTrue(any("citation-canon" in lbl for lbl in labels))
+        self.assertTrue(any("relevance-verified" in lbl for lbl in labels))
 
 
 class TestSourceValidity(unittest.TestCase):
@@ -82,6 +85,28 @@ class TestSourceValidity(unittest.TestCase):
         html = "<html><body><p>This is a detailed article about machine learning and artificial intelligence.</p></body></html>"
         ok, diag = search.source_validity(html, "http://example.com")
         self.assertTrue(ok)
+
+    def test_url_challenge_fragment_rejected(self):
+        html = "<html><body><p>This is legitimate content with enough visible text to pass.</p></body></html>"
+        ok, diag = search.source_validity(html, "http://example.com/captcha-verify")
+        self.assertFalse(ok)
+        self.assertIn("URL challenge fragment", diag or "")
+
+    def test_non_security_challenge_article_passes(self):
+        html = "<html><body><p>This is a legitimate article body with enough content to pass every text check.</p></body></html>"
+        ok, diag = search.source_validity(html, "https://example.com/blog/coding-challenge-results")
+        self.assertTrue(ok)
+        self.assertIsNone(diag)
+
+    def test_high_script_ratio_rejected(self):
+        html = (
+            '<html><head><script src="a.js"></script><script src="b.js"></script>'
+            '<script src="c.js"></script><script src="d.js"></script></head>'
+            '<body><p>Short.</p></body></html>'
+        )
+        ok, diag = search.source_validity(html, "http://example.com")
+        self.assertFalse(ok)
+        self.assertIn("script-to-content", diag or "")
 
 
 if __name__ == "__main__":

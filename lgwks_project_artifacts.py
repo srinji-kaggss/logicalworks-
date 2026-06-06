@@ -35,7 +35,7 @@ import time
 import datetime as _dt
 from collections import Counter
 from pathlib import Path
-from typing import Optional
+from typing import Any, Optional
 
 import lgwks_cycle
 
@@ -622,3 +622,444 @@ def validate_bot_plan(plan: dict, known_bots: set[str] | None = None) -> tuple[b
             errs.append(f"outputs.{name} must be a non-empty string when present")
 
     return len(errs) == 0, errs
+
+
+# -- bot-fabric reducer / package / strength gate (U3/U4/U11) -------------
+
+_SEVERITY_RANK = {"info": 0, "low": 1, "medium": 2, "high": 3, "critical": 4}
+
+
+def _stable_json(value: Any) -> str:
+    return json.dumps(value, sort_keys=True, separators=(",", ":"), ensure_ascii=False)
+
+
+def _canonical_relpath(value: str | None) -> str:
+    if not value:
+        return ""
+    text = str(value).replace("\\", "/")
+    text = re.sub(r"/+", "/", text)
+    return text.strip()
+
+
+def _dedupe_strings(items: list[str]) -> list[str]:
+    out: list[str] = []
+    seen: set[str] = set()
+    for item in items:
+        if not _is_nonempty_str(item):
+            continue
+        if item not in seen:
+            seen.add(item)
+            out.append(item)
+    return out
+
+
+def _record_primary_evidence(record: dict) -> str:
+    evidence = record.get("evidence") or []
+    primary = evidence[0] if evidence else {}
+    return _stable_json(primary)
+
+
+def _normalized_record_id(record: dict) -> str:
+    base = {
+        "kind": record.get("kind", ""),
+        "target": record.get("target", {}),
+        "primary_evidence": _record_primary_evidence(record),
+    }
+    return "finding:" + hashlib.sha256(_stable_json(base).encode("utf-8")).hexdigest()[:16]
+
+
+def _normalize_bot_record(record: dict) -> dict:
+    ok, errs = validate_bot_record(record)
+    if not ok:
+        raise ValueError("invalid bot record: " + "; ".join(errs))
+    normalized = json.loads(json.dumps(record))
+    links = normalized["links"]
+    links["repo"] = _canonical_relpath(links["repo"])
+    if links.get("file") is not None:
+        links["file"] = _canonical_relpath(links["file"])
+    for key in ("tests", "artifacts"):
+        links[key] = [_canonical_relpath(item) for item in links.get(key, [])]
+    normalized["tags"] = _dedupe_strings(list(normalized.get("tags", [])))
+    normalized["record_id"] = _normalized_record_id(normalized)
+    normalized["severity_rank"] = _SEVERITY_RANK[normalized["severity"]]
+    normalized["summary"] = normalized.get("summary") or normalized["kind"].replace("_", " ")
+    normalized["source_records"] = [normalized["record_id"]]
+    normalized["contributing_bots"] = [normalized["bot"]]
+    return normalized
+
+
+def _merge_bot_records(records: list[dict]) -> dict:
+    best = max(records, key=lambda r: (_SEVERITY_RANK[r["severity"]], r["confidence"], r["created_at"]))
+    evidence_map: dict[str, dict] = {}
+    for rec in records:
+        for ev in rec["evidence"]:
+            evidence_map[_stable_json(ev)] = ev
+    merged_tests: list[str] = []
+    merged_artifacts: list[str] = []
+    tags: list[str] = []
+    world_refs: list[dict] = []
+    source_records: list[str] = []
+    bots: list[str] = []
+    for rec in records:
+        merged_tests.extend(rec["links"].get("tests", []))
+        merged_artifacts.extend(rec["links"].get("artifacts", []))
+        tags.extend(rec.get("tags", []))
+        world_refs.extend(rec.get("world_refs", []))
+        source_records.extend(rec.get("source_records", [rec["record_id"]]))
+        bots.extend(rec.get("contributing_bots", [rec["bot"]]))
+    merged = json.loads(json.dumps(best))
+    merged["evidence"] = [evidence_map[key] for key in sorted(evidence_map)]
+    merged["links"]["tests"] = _dedupe_strings(merged_tests)
+    merged["links"]["artifacts"] = _dedupe_strings(merged_artifacts)
+    merged["tags"] = _dedupe_strings(tags)
+    merged["world_refs"] = sorted(
+        {(_stable_json(ref),) for ref in world_refs},
+        key=lambda item: item[0],
+    )
+    merged["world_refs"] = [json.loads(item[0]) for item in merged["world_refs"]]
+    merged["source_records"] = _dedupe_strings(source_records)
+    merged["contributing_bots"] = _dedupe_strings(bots)
+    merged["bot_count"] = len(merged["contributing_bots"])
+    merged["confidence"] = round(max(rec["confidence"] for rec in records), 4)
+    merged["severity"] = max(records, key=lambda r: _SEVERITY_RANK[r["severity"]])["severity"]
+    merged["severity_rank"] = _SEVERITY_RANK[merged["severity"]]
+    return merged
+
+
+def _cluster_key(finding: dict) -> tuple[str, str]:
+    links = finding["links"]
+    if _is_nonempty_str(links.get("file")):
+        return "file", links["file"]
+    if _is_nonempty_str(links.get("symbol")):
+        return "symbol", links["symbol"]
+    if finding.get("world_refs"):
+        ref = finding["world_refs"][0]
+        return "world", f"{ref['kind']}:{ref['id']}"
+    return "target", finding["target"]["id"]
+
+
+def _blast_radius(finding: dict, repo_graph_metrics: dict | None = None) -> float:
+    if not repo_graph_metrics:
+        return 0.0
+    file_key = finding["links"].get("file") or finding["target"]["id"]
+    metric = repo_graph_metrics.get(file_key, {})
+    value = metric.get("blast_radius", metric.get("betweenness", 0.0))
+    try:
+        return float(value)
+    except Exception:
+        return 0.0
+
+
+def _recommended_read(finding: dict) -> str:
+    links = finding["links"]
+    if _is_nonempty_str(links.get("file")):
+        return links["file"]
+    if links.get("tests"):
+        return links["tests"][0]
+    if links.get("artifacts"):
+        return links["artifacts"][0]
+    return finding["target"]["id"]
+
+
+def _recommended_command(finding: dict) -> str:
+    links = finding["links"]
+    if _is_nonempty_str(links.get("file")) and _is_nonempty_str(links.get("symbol")):
+        return f"rg -n '{links['symbol']}' {links['file']}"
+    if _is_nonempty_str(links.get("file")):
+        return f"sed -n '1,220p' {links['file']}"
+    if links.get("tests"):
+        return f"python3 -m unittest {links['tests'][0].replace('/', '.').removesuffix('.py')}"
+    return f"rg -n '{finding['target']['id']}' ."
+
+
+def reduce_bot_records(
+    records: list[dict],
+    repo_graph_metrics: dict | None = None,
+    historical_package_fingerprints: list[str] | None = None,
+) -> dict:
+    """U3: deterministic reducer over validated bot records."""
+    normalized = [_normalize_bot_record(record) for record in records]
+    groups: dict[tuple[str, str, str], list[dict]] = {}
+    for record in normalized:
+        key = (
+            record["kind"],
+            _stable_json(record["target"]),
+            _record_primary_evidence(record),
+        )
+        groups.setdefault(key, []).append(record)
+    merged = [_merge_bot_records(groups[key]) for key in sorted(groups)]
+
+    clusters_by_key: dict[tuple[str, str], list[str]] = {}
+    contradictions: list[dict] = []
+    for finding in merged:
+        clusters_by_key.setdefault(_cluster_key(finding), []).append(finding["record_id"])
+        if "contradiction" in finding["kind"] or "contradiction" in finding.get("tags", []):
+            contradictions.append({
+                "id": "ctr:" + hashlib.sha256(finding["record_id"].encode("utf-8")).hexdigest()[:12],
+                "subject": finding["target"]["id"],
+                "finding_id": finding["record_id"],
+                "current_confidence": finding["confidence"],
+                "recommended_resolution": _recommended_command(finding),
+                "evidence_refs": [ev.get("name") or ev["type"] for ev in finding["evidence"]],
+            })
+    clusters: list[dict] = []
+    for idx, key in enumerate(sorted(clusters_by_key), start=1):
+        axis, value = key
+        finding_ids = sorted(clusters_by_key[key])
+        clusters.append({
+            "cluster_id": f"cluster:{idx}",
+            "axis": axis,
+            "key": value,
+            "finding_ids": finding_ids,
+        })
+    cluster_lookup = {fid: [] for fid in [f["record_id"] for f in merged]}
+    for cluster in clusters:
+        for fid in cluster["finding_ids"]:
+            cluster_lookup.setdefault(fid, []).append(cluster["cluster_id"])
+
+    historical_hits = set(historical_package_fingerprints or [])
+    for finding in merged:
+        recurrence = 1 if finding["record_id"] in historical_hits else 0
+        blast = _blast_radius(finding, repo_graph_metrics)
+        contradiction_density = 1 if any(c["finding_id"] == finding["record_id"] for c in contradictions) else 0
+        bot_count = max(1, finding.get("bot_count", 1))
+        rank = (
+            finding["severity_rank"] * 1000
+            + int(round(finding["confidence"] * 100))
+            + int(round(blast * 100))
+            + bot_count * 10
+            + contradiction_density * 5
+            + recurrence * 5
+        )
+        finding["rank"] = rank
+        finding["blast_radius"] = round(blast, 4)
+        finding["cluster_ids"] = sorted(cluster_lookup.get(finding["record_id"], []))
+
+    merged.sort(key=lambda r: (-r["rank"], -r["severity_rank"], r["record_id"]))
+    anomaly_cards = []
+    for finding in merged[: min(8, len(merged))]:
+        anomaly_cards.append({
+            "card_id": "card:" + finding["record_id"].split(":", 1)[1],
+            "title": finding["summary"],
+            "severity": finding["severity"],
+            "why_it_matters": (
+                f"{finding['kind']} on {finding['target']['id']} surfaced by "
+                f"{len(finding['contributing_bots'])} bot(s)"
+            ),
+            "drilldown_links": {
+                "file": finding["links"].get("file"),
+                "symbol": finding["links"].get("symbol"),
+                "tests": list(finding["links"].get("tests", [])),
+                "artifacts": list(finding["links"].get("artifacts", [])),
+            },
+            "finding_id": finding["record_id"],
+        })
+
+    top_findings = [{
+        "finding_id": finding["record_id"],
+        "summary": finding["summary"],
+        "severity": finding["severity"],
+        "confidence": finding["confidence"],
+        "rank": finding["rank"],
+        "read": _recommended_read(finding),
+        "command": _recommended_command(finding),
+    } for finding in merged[: min(10, len(merged))]]
+
+    review_packet = {
+        "schema": "lgwks.review.packet.v1",
+        "top_findings": top_findings,
+        "clusters": clusters,
+        "open_contradictions": contradictions,
+        "recommended_next_reads": _dedupe_strings([row["read"] for row in top_findings])[:10],
+        "recommended_next_commands": _dedupe_strings([row["command"] for row in top_findings])[:10],
+    }
+
+    return {
+        "findings_normalized": merged,
+        "clusters": clusters,
+        "anomaly_cards": anomaly_cards,
+        "review_packet": review_packet,
+    }
+
+
+def build_jepa_package(
+    reduced: dict,
+    *,
+    repo: str,
+    plan_id: str,
+    world_db_bindings: list[str] | None = None,
+    prior_package_refs: list[str] | None = None,
+    human_dump: str = "",
+) -> dict:
+    """U4: build one canonical JEPA package from reducer outputs."""
+    findings = list(reduced.get("findings_normalized", []))
+    clusters = list(reduced.get("clusters", []))
+    review_packet = dict(reduced.get("review_packet", {}))
+    anomaly_cards = list(reduced.get("anomaly_cards", []))
+    world_refs = _dedupe_strings(list(world_db_bindings or []))
+    for finding in findings:
+        for ref in finding.get("world_refs", []):
+            world_refs.append(f"wdb:{ref['kind']}:{ref['id']}")
+    world_refs = _dedupe_strings(world_refs)
+
+    anchors: list[dict] = []
+    seen_anchor_keys: set[tuple[str, str]] = set()
+    for finding in findings[:10]:
+        for kind, value in (
+            ("file", finding["links"].get("file")),
+            ("symbol", finding["links"].get("symbol")),
+            (finding["target"]["kind"], finding["target"]["id"]),
+        ):
+            if _is_nonempty_str(value):
+                key = (kind, value)
+                if key not in seen_anchor_keys:
+                    seen_anchor_keys.add(key)
+                    anchors.append({"kind": kind, "id": value})
+        for ref in finding.get("world_refs", []):
+            key = (ref["kind"], ref["id"])
+            if key not in seen_anchor_keys:
+                seen_anchor_keys.add(key)
+                anchors.append({"kind": ref["kind"], "id": ref["id"]})
+
+    contradiction_records = list(review_packet.get("open_contradictions", []))
+    package_seed = {
+        "repo": repo,
+        "plan_id": plan_id,
+        "finding_ids": [f["record_id"] for f in findings],
+        "cluster_ids": [c["cluster_id"] for c in clusters],
+        "prior": prior_package_refs or [],
+    }
+    package_id = "pkg:" + hashlib.sha256(_stable_json(package_seed).encode("utf-8")).hexdigest()[:16]
+
+    links_index = {
+        "schema": "lgwks.links.index.v1",
+        "package_id": package_id,
+        "findings": {
+            finding["record_id"]: {
+                "file": finding["links"].get("file"),
+                "symbol": finding["links"].get("symbol"),
+                "tests": list(finding["links"].get("tests", [])),
+                "artifacts": list(finding["links"].get("artifacts", [])),
+            }
+            for finding in findings
+        },
+    }
+
+    machine_packet = {
+        "schema": "lgwks.machine.packet.v1",
+        "package_id": package_id,
+        "top_anchors": anchors[:10],
+        "ranked_findings": [
+            {
+                "finding_id": finding["record_id"],
+                "summary": finding["summary"],
+                "severity": finding["severity"],
+                "confidence": finding["confidence"],
+                "rank": finding["rank"],
+            }
+            for finding in findings[:10]
+        ],
+        "contradictions": contradiction_records,
+        "recommended_reads": list(review_packet.get("recommended_next_reads", [])),
+        "recommended_commands": list(review_packet.get("recommended_next_commands", [])),
+        "prior_package_refs": list(prior_package_refs or []),
+    }
+
+    human_summary = {
+        "schema": "lgwks.human.summary.v1",
+        "package_id": package_id,
+        "anomaly_cards": anomaly_cards,
+        "top_blocks": [
+            {
+                "cluster_id": cluster["cluster_id"],
+                "axis": cluster["axis"],
+                "key": cluster["key"],
+                "finding_count": len(cluster["finding_ids"]),
+            }
+            for cluster in clusters[:10]
+        ],
+        "drilldown_links": links_index["findings"],
+        "what_changed": [finding["summary"] for finding in findings[:5]],
+        "what_matters_now": review_packet.get("recommended_next_reads", [])[:5],
+        "human_dump": human_dump[:500],
+    }
+
+    package = {
+        "schema": "lgwks.jepa.package.v1",
+        "package_id": package_id,
+        "plan_id": plan_id,
+        "repo": repo,
+        "anchors": anchors,
+        "clusters": [cluster["cluster_id"] for cluster in clusters],
+        "contradictions": [record["id"] for record in contradiction_records],
+        "world_refs": world_refs,
+        "next_actions": list(review_packet.get("recommended_next_commands", [])),
+        "synth_ready": False,
+    }
+
+    return {
+        "package": package,
+        "machine_packet": machine_packet,
+        "contradictions": contradiction_records,
+        "human_summary": human_summary,
+        "links_index": links_index,
+    }
+
+
+def evaluate_artifact_strength(
+    review_packet: dict,
+    package: dict,
+    machine_packet: dict,
+    links_index: dict,
+    *,
+    synth_status: str,
+) -> dict:
+    """U11: verify that the package is actionable without synth."""
+    top_findings = list(review_packet.get("top_findings", []))
+    finding_links = dict(links_index.get("findings", {}))
+    contradictions = list(machine_packet.get("contradictions", []))
+    next_steps = list(machine_packet.get("recommended_reads", [])) + list(machine_packet.get("recommended_commands", []))
+
+    ranked_findings = bool(top_findings) and all(
+        _is_nonempty_str(item.get("severity")) and item.get("confidence") is not None
+        for item in top_findings
+    )
+    drilldown = True
+    for item in top_findings:
+        refs = finding_links.get(item.get("finding_id", ""), {})
+        has_link = bool(
+            _is_nonempty_str(refs.get("file"))
+            or _is_nonempty_str(refs.get("symbol"))
+            or refs.get("tests")
+            or refs.get("artifacts")
+        )
+        if not has_link:
+            drilldown = False
+            break
+    contradictions_ok = all(
+        _is_nonempty_str(item.get("subject"))
+        and isinstance(item.get("evidence_refs"), list)
+        and _is_nonempty_str(item.get("recommended_resolution"))
+        for item in contradictions
+    )
+    next_steps_ok = any(_is_nonempty_str(step) for step in next_steps)
+    prose_dependency = bool(package.get("anchors")) and all(item.get("finding_id") in finding_links for item in top_findings)
+    degraded_mode = synth_status in {"skipped", "unavailable", "complete"}
+
+    checks = {
+        "ranked_findings": ranked_findings,
+        "drilldown": drilldown,
+        "contradictions": contradictions_ok,
+        "next_steps": next_steps_ok,
+        "prose_dependency": prose_dependency,
+        "degraded_mode": degraded_mode,
+    }
+    passed = all(checks.values())
+    return {
+        "schema": "lgwks.artifact.strength.v1",
+        "package_id": package.get("package_id", ""),
+        "pass": passed,
+        "checks": checks,
+        "actionable_without_synth": passed and synth_status in {"skipped", "unavailable", "complete"},
+        "synth_status": synth_status,
+    }

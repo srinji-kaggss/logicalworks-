@@ -8,6 +8,7 @@ On embedder failure → CANNOT_DECIDE (excluded from score aggregation, NOT a 0 
 
 from __future__ import annotations
 
+import hashlib
 import sys
 from pathlib import Path
 from typing import Any
@@ -23,31 +24,42 @@ class IdiomVerifier:
         self.corpus_dir = Path(corpus_dir) if corpus_dir else Path(__file__).resolve().parent
         self.max_files = max_files
 
-    def _corpus_embeddings(self) -> tuple[list[Path], list[list[float]]] | None:
-        """Embed .py files in corpus_dir. Returns (paths, embeddings) or None on failure."""
+    def _corpus_embeddings(self) -> tuple[list[Path], list[list[float]], list[str]] | None:
+        """Embed .py files in corpus_dir. Returns (paths, embeddings, notes) or None on failure."""
         try:
             import lgwks_embed
-        except Exception as exc:
+        except Exception:
             return None
         paths: list[Path] = []
         vecs: list[list[float]] = []
+        notes: list[str] = []
+        seen_hashes: set[str] = set()
         for p in sorted(self.corpus_dir.rglob("*.py")):
             if len(paths) >= self.max_files:
+                notes.append(f"reached max_files={self.max_files}; remaining files skipped")
                 break
             if any(part.startswith((".", "__")) for part in p.relative_to(self.corpus_dir).parts):
+                notes.append(f"skipped hidden file: {p}")
                 continue
             try:
                 text = p.read_text(encoding="utf-8", errors="replace")
                 if not text.strip():
+                    notes.append(f"skipped empty file: {p}")
                     continue
+                digest = hashlib.sha256(text.encode("utf-8")).hexdigest()
+                if digest in seen_hashes:
+                    notes.append(f"skipped duplicate content: {p}")
+                    continue
+                seen_hashes.add(digest)
                 vec = lgwks_embed._embedding(text)
                 paths.append(p)
                 vecs.append(vec)
             except Exception:
+                notes.append(f"failed to embed {p}")
                 continue
         if not paths:
             return None
-        return paths, vecs
+        return paths, vecs, notes
 
     def check(self, subject: object, context: object) -> Verdict:
         """
@@ -97,14 +109,24 @@ class IdiomVerifier:
                 diagnosis="corpus empty or embedder failed — cannot compute idiom score",
             )
 
-        paths, vecs = corpus
-        sims = [(p, lgwks_embed._cos(candidate_vec, v)) for p, v in zip(paths, vecs)]
+        paths, vecs, notes = corpus
+        try:
+            sims = [(p, lgwks_embed._cos(candidate_vec, v)) for p, v in zip(paths, vecs)]
+        except Exception as exc:
+            return Verdict(
+                gate_id=self.gate_id,
+                outcome=Outcome.CANNOT_DECIDE,
+                klass=self.klass,
+                diagnosis=f"similarity computation failed: {type(exc).__name__}: {exc}",
+            )
         sims.sort(key=lambda x: x[1], reverse=True)
         top = sims[:5]
         if top:
             score = round(sum(s for _, s in top) / len(top), 4)
         else:
             score = 0.0
+        if not (0.0 <= score <= 1.0):
+            raise ValueError(f"idiom score out of bounds: {score}; _cos returned invalid similarity")
 
         # nearest exemplars (highest similarity)
         exemplars = [f"{p.relative_to(self.corpus_dir)} (sim={s:.4f})" for p, s in top[:3]]
@@ -121,5 +143,5 @@ class IdiomVerifier:
                 f"idiom score = {score}",
                 f"nearest exemplars: {exemplars}",
                 f"deviations: {deviations}",
-            ],
+            ] + notes,
         )

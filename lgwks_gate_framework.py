@@ -30,6 +30,15 @@ _FALSE_PASS_SURFACE = (
 )
 
 
+def _strip_rust_noncode(code: str) -> str:
+    """Remove comments and string literals before heuristic path extraction."""
+    code = re.sub(r"/\*.*?\*/", " ", code, flags=re.S)
+    code = re.sub(r"//.*", " ", code)
+    code = re.sub(r'"(?:\\.|[^"\\])*"', '""', code)
+    code = re.sub(r"'(?:\\.|[^'\\])'", "''", code)
+    return code
+
+
 class G3Verifier:
     gate_id = "framework-reality"
     klass = Klass.HARD
@@ -120,8 +129,13 @@ class G3Verifier:
         """
         Extract external crate references from candidate Rust code.
         //why: regex-based — see _FALSE_PASS_SURFACE above.
+        //why DiD layer 2: a token-based collector runs independently and merges
+        //  its findings. Both layers work on comment/string-stripped code so
+        //  prose and string content cannot create false forbidden references.
         """
+        code = _strip_rust_noncode(code)
         refs: set[str] = set()
+        # Layer 1: regex-based structured extraction
         # use some_crate::path::Item;
         for m in re.finditer(r"\buse\s+([a-zA-Z_][a-zA-Z0-9_]*(?:::[a-zA-Z_][a-zA-Z0-9_]*)*)\s*;", code):
             refs.add(m.group(1))
@@ -138,6 +152,22 @@ class G3Verifier:
             path = m.group(1)
             if "::" in path:
                 refs.add(path)
+
+        # Layer 2: token-based path collector
+        tokens = re.findall(r"[a-zA-Z_][a-zA-Z0-9_]*|::", code)
+        i = 0
+        while i < len(tokens):
+            if i + 2 < len(tokens) and tokens[i + 1] == "::":
+                chain = [tokens[i]]
+                j = i + 1
+                while j + 1 < len(tokens) and tokens[j] == "::":
+                    chain.append(tokens[j + 1])
+                    j += 2
+                if len(chain) >= 2:
+                    refs.add("::".join(chain))
+                i = j
+            else:
+                i += 1
         return refs
 
     def _grounding_context(self, symbols: set[str]) -> list[str]:

@@ -64,6 +64,48 @@ class TestIdiomGate(unittest.TestCase):
             self.assertEqual(verdict.outcome, Outcome.CANNOT_DECIDE)
             self.assertIsNone(verdict.score)
 
+    def test_duplicate_content_skipped(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            corpus = Path(tmp) / "corpus"
+            corpus.mkdir()
+            (corpus / "a.py").write_text("def hello(): pass\n")
+            (corpus / "b.py").write_text("def hello(): pass\n")
+            v = IdiomVerifier(corpus_dir=corpus, max_files=10)
+            verdict = v.check("def world(): pass\n", {})
+            self.assertEqual(verdict.outcome, Outcome.PASS)
+            self.assertTrue(any("duplicate" in e.lower() for e in verdict.evidence or []))
+
+    def test_similarity_failure_cannot_decide(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            corpus = Path(tmp) / "corpus"
+            corpus.mkdir()
+            (corpus / "a.py").write_text("def hello(): pass\n")
+            v = IdiomVerifier(corpus_dir=corpus, max_files=10)
+            import lgwks_embed
+            orig_cos = lgwks_embed._cos
+            lgwks_embed._cos = lambda _a, _b: (_ for _ in ()).throw(RuntimeError("math domain error"))
+            try:
+                verdict = v.check("def foo(): pass\n", {})
+                self.assertEqual(verdict.outcome, Outcome.CANNOT_DECIDE)
+                self.assertIn("similarity computation failed", verdict.diagnosis or "")
+            finally:
+                lgwks_embed._cos = orig_cos
+
+    def test_score_bounds_enforced(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            corpus = Path(tmp) / "corpus"
+            corpus.mkdir()
+            (corpus / "a.py").write_text("def hello(): pass\n")
+            v = IdiomVerifier(corpus_dir=corpus, max_files=10)
+            import lgwks_embed
+            orig_cos = lgwks_embed._cos
+            lgwks_embed._cos = lambda _a, _b: 2.5
+            try:
+                with self.assertRaises(ValueError):
+                    v.check("def foo(): pass\n", {})
+            finally:
+                lgwks_embed._cos = orig_cos
+
 
 if __name__ == "__main__":
     unittest.main()

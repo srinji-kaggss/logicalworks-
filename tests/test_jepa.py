@@ -48,11 +48,14 @@ class TestJepa(unittest.TestCase):
             })()
             with mock.patch.object(jepa, "JEPA_ROOT", Path(td) / "jepa"):
                 packet = jepa.build_package(args)
-        self.assertEqual(packet["schema"], jepa.JEPA_SCHEMA)
+        self.assertEqual(packet["schema"], "lgwks.jepa.package.v1")
         self.assertTrue(packet["key"].startswith("jepa:"))
-        self.assertTrue(packet["machine"]["portal_key"].startswith("portal:"))
-        self.assertIn("summary", packet["human"])
+        self.assertEqual(packet["package"]["schema"], "lgwks.jepa.package.v1")
+        self.assertEqual(packet["machine"]["schema"], "lgwks.machine.packet.v1")
+        self.assertEqual(packet["human"]["schema"], "lgwks.human.summary.v1")
+        self.assertIn("anomaly_cards", packet["human"])
         self.assertTrue(packet["latent"]["anchors"])
+        self.assertIn("artifact_strength", packet)
 
     def test_doctor_reports_current_gap_honestly(self):
         report = jepa.doctor()

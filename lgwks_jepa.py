@@ -14,10 +14,11 @@ from typing import Any
 import lgwks_capture
 import lgwks_model_hub
 import lgwks_portal
+import lgwks_project_artifacts as project_artifacts
 
 ROOT = Path(__file__).resolve().parent
 JEPA_ROOT = ROOT / "store" / "jepa"
-JEPA_SCHEMA = "lgwks.jepa.v1"
+JEPA_SCHEMA = "lgwks.jepa.package.v1"
 
 _STOP = {
     "the", "and", "that", "with", "from", "this", "into", "your", "have", "just", "need", "what", "when",
@@ -109,6 +110,51 @@ def _machine_projection(anchors: list[dict[str, Any]], capture_packet: dict[str,
     }
 
 
+def _anchor_records(
+    anchors: list[dict[str, Any]],
+    views: list[dict[str, Any]],
+    repo: Path | None,
+    portal_packet: dict[str, Any] | None,
+) -> list[dict[str, Any]]:
+    candidate_files = list((portal_packet or {}).get("candidate_files") or [])
+    file_hint = candidate_files[0] if candidate_files else None
+    if isinstance(file_hint, dict):
+        file_hint = file_hint.get("path") or None
+    if not file_hint:
+        file_hint = None
+    repo_root = str(repo) if repo else "."
+    records: list[dict[str, Any]] = []
+    for anchor in anchors:
+        records.append({
+            "schema": project_artifacts.BOT_RECORD_SCHEMA,
+            "run_id": "run:" + _sha(repo_root + "|" + anchor["anchor"]),
+            "bot": "intent_classifier",
+            "target": {"kind": "concept", "id": anchor["anchor"]},
+            "kind": "latent_anchor",
+            "summary": f"shared latent anchor across {len(anchor['views'])} views: {anchor['anchor']}",
+            "severity": "medium" if len(anchor["views"]) > 1 else "low",
+            "confidence": min(1.0, max(0.0, anchor["score"])),
+            "status": "confirmed",
+            "evidence": [{
+                "type": "metric",
+                "name": "shared_views",
+                "value": len(anchor["views"]),
+                "unit": "views",
+            }],
+            "links": {
+                "repo": repo_root,
+                "file": file_hint or None,
+                "symbol": None,
+                "tests": [],
+                "artifacts": [view["source"] for view in views if view["source"] not in {"inline", "stdin"}],
+            },
+            "world_refs": [{"kind": "concept", "id": anchor["anchor"]}],
+            "tags": ["jepa", "latent-anchor", "multiview"],
+            "created_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
+        })
+    return records
+
+
 def _capture_for_views(args: argparse.Namespace, repo: Path | None, combined_text: str) -> dict[str, Any] | None:
     if getattr(args, "no_capture", False):
         return None
@@ -155,6 +201,25 @@ def build_package(args: argparse.Namespace) -> dict[str, Any]:
         portal_path.parent.mkdir(parents=True, exist_ok=True)
         portal_path.write_text(json.dumps(portal_packet, indent=2, ensure_ascii=False), encoding="utf-8")
     key = f"jepa:{_sha((str(repo or '') + '|' + combined + '|' + time.strftime('%Y%m%d')))}"
+    reduced = project_artifacts.reduce_bot_records(
+        _anchor_records(anchors, raw_views, repo, portal_packet)
+    )
+    built = project_artifacts.build_jepa_package(
+        reduced,
+        repo=str(repo) if repo else "",
+        plan_id=f"plan:{key.replace(':', '-')}",
+        world_db_bindings=[f"wdb:concept:{anchor['anchor']}" for anchor in anchors],
+        prior_package_refs=[],
+        human_dump=combined,
+    )
+    strength = project_artifacts.evaluate_artifact_strength(
+        reduced["review_packet"],
+        built["package"],
+        built["machine_packet"],
+        built["links_index"],
+        synth_status="skipped",
+    )
+    built["package"]["synth_ready"] = strength["pass"]
     packet = {
         "schema": JEPA_SCHEMA,
         "key": key,
@@ -162,11 +227,18 @@ def build_package(args: argparse.Namespace) -> dict[str, Any]:
         "repo": str(repo) if repo else "",
         "views": [_view_packet(v) for v in raw_views],
         "latent": {"anchors": anchors, "view_count": len(raw_views)},
-        "machine": _machine_projection(anchors, capture_packet, portal_packet),
-        "human": _human_projection(anchors, raw_views),
+        "capture": capture_packet or {},
+        "portal": portal_packet or {},
+        "reducer": reduced,
+        "package": built["package"],
+        "machine": built["machine_packet"],
+        "human": built["human_summary"],
+        "contradictions": built["contradictions"],
+        "links_index": built["links_index"],
+        "artifact_strength": strength,
         "summary": (
             "Deterministic JEPA runtime package. Multiple raw views are collapsed into shared anchors, "
-            "then rebound to capture/portal artifacts when a concrete repo is available."
+            "reduced into ranked findings, then emitted as one canonical package with machine and human projections."
         ),
     }
     out = JEPA_ROOT / f"{key.replace(':', '_')}.json"

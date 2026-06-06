@@ -67,6 +67,17 @@ class TestG3Gate(unittest.TestCase):
         self.assertEqual(verdict.outcome, Outcome.PASS)
         self.assertTrue("fixture_crate::hello" in (verdict.evidence or []))
 
+    def test_token_based_layer_catches_macro_paths(self):
+        v = G3Verifier(crate_dir=self.fixture_dir)
+        v._installed_symbols = lambda: ({"fixture_crate::hello", "fixture_crate::Widget"}, [])
+        refs = v._extract_references("macro_call! { fixture_crate :: hello }")
+        self.assertIn("fixture_crate::hello", refs)
+
+    def test_comment_path_does_not_create_reference(self):
+        v = G3Verifier(crate_dir=self.fixture_dir)
+        refs = v._extract_references("// docs mention fixture_crate :: missing_symbol only in prose")
+        self.assertEqual(refs, set())
+
 
 if __name__ == "__main__":
     unittest.main()
