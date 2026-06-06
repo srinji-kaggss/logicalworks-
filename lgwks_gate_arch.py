@@ -29,20 +29,30 @@ class RuleVerifier:
     def check(self, subject: object, context: object) -> Verdict:
         kind = self.rule.get("kind", "")
         if kind == "forbidden-import":
-            return self._check_forbidden_import(subject, context)
-        if kind == "no-global-mutable-state":
-            return self._check_no_global_mutable(subject, context)
-        if kind == "ast-pattern":
-            return self._check_ast_pattern(subject, context)
-        return Verdict(
-            gate_id=self.gate_id,
-            outcome=Outcome.CANNOT_DECIDE,
-            klass=self.klass,
-            diagnosis=f"unknown rule kind: {kind}",
-        )
+            verdict = self._check_forbidden_import(subject, context)
+        elif kind == "no-global-mutable-state":
+            verdict = self._check_no_global_mutable(subject, context)
+        elif kind == "ast-pattern":
+            verdict = self._check_ast_pattern(subject, context)
+        else:
+            verdict = Verdict(
+                gate_id=self.gate_id,
+                outcome=Outcome.CANNOT_DECIDE,
+                klass=self.klass,
+                diagnosis=f"unknown rule kind: {kind}",
+            )
+        # The Verdict dataclass enforces ADVISORY-only at construction time
+        # (lgwks_verify.py __post_init__); this is the fail-closed invariant.
+        return verdict
 
     def _check_forbidden_import(self, subject: object, context: object) -> Verdict:
-        """AST scan: detect forbidden import edges."""
+        """AST scan: detect forbidden import edges.
+
+        DiD layers:
+          1. Static import statements (Import / ImportFrom) — complete for explicit edges.
+          2. Dynamic imports (importlib.import_module, __import__) — catches runtime
+             resolution that layer 1 cannot see. Both layers must be satisfied.
+        """
         module_path = Path(subject) if isinstance(subject, (str, Path)) else None
         if module_path is None or not module_path.exists():
             ctx = context if isinstance(context, dict) else {}
@@ -72,6 +82,8 @@ class RuleVerifier:
                 diagnosis=f"syntax error parsing {module_path}: {exc}",
             )
         violations: list[str] = []
+
+        # Layer 1: static import statements
         for node in ast.walk(tree):
             if isinstance(node, ast.Import):
                 for alias in node.names:
@@ -84,6 +96,23 @@ class RuleVerifier:
                     if mod == f or mod.startswith(f + "."):
                         names = ", ".join(a.name for a in node.names)
                         violations.append(f"from {mod} import {names} in {module_path}")
+
+        # Layer 2: dynamic imports — importlib.import_module(name) and __import__(name)
+        for node in ast.walk(tree):
+            if isinstance(node, ast.Call):
+                func = node.func
+                call_name = ""
+                if isinstance(func, ast.Attribute) and isinstance(func.value, ast.Name):
+                    if func.value.id == "importlib" and func.attr == "import_module":
+                        call_name = "importlib.import_module"
+                    elif func.value.id == "builtins" and func.attr == "__import__":
+                        call_name = "builtins.__import__"
+                elif isinstance(func, ast.Name) and func.id == "__import__":
+                    call_name = "__import__"
+                if call_name:
+                    # flag every dynamic import call — we cannot statically resolve the target
+                    violations.append(f"dynamic import via {call_name} at line {node.lineno} in {module_path} — cannot verify target; treat as forbidden-edge risk")
+
         if violations:
             return Verdict(
                 gate_id=self.gate_id,
@@ -192,6 +221,20 @@ class RuleVerifier:
         return Verdict(gate_id=self.gate_id, outcome=Outcome.PASS, klass=self.klass)
 
 
+def _validate_rule(rule: dict[str, Any], index: int) -> None:
+    """DiD: reject malformed rules at load time so a corrupted arch-rules.json
+    cannot silently weaken the gate."""
+    required = {"id", "kind", "klass"}
+    missing = required - set(rule.keys())
+    if missing:
+        raise ValueError(f"arch-rules.json rule[{index}] missing required fields: {missing}")
+    if rule.get("klass") not in {"HARD", "ADVISORY"}:
+        raise ValueError(f"arch-rules.json rule[{index}] invalid klass: {rule.get('klass')!r}")
+    known_kinds = {"forbidden-import", "no-global-mutable-state", "ast-pattern"}
+    if rule.get("kind") not in known_kinds:
+        raise ValueError(f"arch-rules.json rule[{index}] unknown kind: {rule.get('kind')!r}")
+
+
 def make_arch_verifiers(rules_path: Path | None = None) -> list[RuleVerifier]:
     """Build one verifier per rule in arch-rules.json."""
     if rules_path is None:
@@ -201,6 +244,11 @@ def make_arch_verifiers(rules_path: Path | None = None) -> list[RuleVerifier]:
         fallback = Path.cwd() / "docs" / "frontier" / "arch-rules.json"
         if fallback.exists():
             rules_path = fallback
+    if not rules_path.exists():
+        raise FileNotFoundError(f"arch-rules.json not found at {rules_path}")
     with open(rules_path, "r", encoding="utf-8") as fh:
         data = json.load(fh)
-    return [RuleVerifier(r) for r in data.get("rules", [])]
+    rules = data.get("rules", [])
+    for i, r in enumerate(rules):
+        _validate_rule(r, i)
+    return [RuleVerifier(r) for r in rules]

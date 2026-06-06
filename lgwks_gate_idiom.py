@@ -8,6 +8,7 @@ On embedder failure → CANNOT_DECIDE (excluded from score aggregation, NOT a 0 
 
 from __future__ import annotations
 
+import hashlib
 import sys
 from pathlib import Path
 from typing import Any
@@ -23,31 +24,47 @@ class IdiomVerifier:
         self.corpus_dir = Path(corpus_dir) if corpus_dir else Path(__file__).resolve().parent
         self.max_files = max_files
 
-    def _corpus_embeddings(self) -> tuple[list[Path], list[list[float]]] | None:
-        """Embed .py files in corpus_dir. Returns (paths, embeddings) or None on failure."""
+    def _corpus_embeddings(self) -> tuple[list[Path], list[list[float]], list[str]] | None:
+        """Embed .py files in corpus_dir. Returns (paths, embeddings, notes) or None on failure.
+
+        DiD:
+          - deduplicate by content hash so identical files cannot inflate scores
+          - report skipped/unreadable files in notes so silent corpus degradation is visible
+        """
         try:
             import lgwks_embed
         except Exception as exc:
             return None
         paths: list[Path] = []
         vecs: list[list[float]] = []
+        notes: list[str] = []
+        seen_hashes: set[str] = set()
         for p in sorted(self.corpus_dir.rglob("*.py")):
             if len(paths) >= self.max_files:
+                notes.append(f"reached max_files={self.max_files}; remaining files skipped")
                 break
             if any(part.startswith((".", "__")) for part in p.relative_to(self.corpus_dir).parts):
+                notes.append(f"skipped hidden file: {p}")
                 continue
             try:
                 text = p.read_text(encoding="utf-8", errors="replace")
                 if not text.strip():
+                    notes.append(f"skipped empty file: {p}")
                     continue
+                h = hashlib.sha256(text.encode("utf-8")).hexdigest()
+                if h in seen_hashes:
+                    notes.append(f"skipped duplicate content: {p}")
+                    continue
+                seen_hashes.add(h)
                 vec = lgwks_embed._embedding(text)
                 paths.append(p)
                 vecs.append(vec)
-            except Exception:
+            except Exception as exc:
+                notes.append(f"failed to embed {p}: {type(exc).__name__}")
                 continue
         if not paths:
             return None
-        return paths, vecs
+        return paths, vecs, notes
 
     def check(self, subject: object, context: object) -> Verdict:
         """
@@ -97,8 +114,16 @@ class IdiomVerifier:
                 diagnosis="corpus empty or embedder failed — cannot compute idiom score",
             )
 
-        paths, vecs = corpus
-        sims = [(p, lgwks_embed._cos(candidate_vec, v)) for p, v in zip(paths, vecs)]
+        paths, vecs, notes = corpus
+        try:
+            sims = [(p, lgwks_embed._cos(candidate_vec, v)) for p, v in zip(paths, vecs)]
+        except Exception as exc:
+            return Verdict(
+                gate_id=self.gate_id,
+                outcome=Outcome.CANNOT_DECIDE,
+                klass=self.klass,
+                diagnosis=f"similarity computation failed: {type(exc).__name__}: {exc}",
+            )
         sims.sort(key=lambda x: x[1], reverse=True)
         top = sims[:5]
         if top:
@@ -106,13 +131,17 @@ class IdiomVerifier:
         else:
             score = 0.0
 
+        # DiD: clamp score to [0, 1] — a bug in _cos must not propagate out-of-range values
+        if not (0.0 <= score <= 1.0):
+            raise ValueError(f"idiom score out of bounds: {score}; _cos returned invalid similarity")
+
         # nearest exemplars (highest similarity)
         exemplars = [f"{p.relative_to(self.corpus_dir)} (sim={s:.4f})" for p, s in top[:3]]
         # deviations (lowest similarity)
         bottom = sims[-3:]
         deviations = [f"{p.relative_to(self.corpus_dir)} (sim={s:.4f})" for p, s in bottom]
 
-        return Verdict(
+        verdict = Verdict(
             gate_id=self.gate_id,
             outcome=Outcome.PASS,
             klass=self.klass,
@@ -121,5 +150,9 @@ class IdiomVerifier:
                 f"idiom score = {score}",
                 f"nearest exemplars: {exemplars}",
                 f"deviations: {deviations}",
-            ],
+            ] + notes,
         )
+        # DiD: runtime enforcement — idiom gate is ADVISORY-only; a bug that reaches FAIL raises
+        if verdict.outcome is Outcome.FAIL:
+            raise ValueError("IdiomVerifier emitted FAIL; ADVISORY gates must never block ship")
+        return verdict

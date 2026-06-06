@@ -64,6 +64,54 @@ class TestIdiomGate(unittest.TestCase):
             self.assertEqual(verdict.outcome, Outcome.CANNOT_DECIDE)
             self.assertIsNone(verdict.score)
 
+    def test_duplicate_content_skipped(self):
+        """DiD: identical corpus files are deduplicated so scores cannot inflate."""
+        with tempfile.TemporaryDirectory() as tmp:
+            corpus = Path(tmp) / "corpus"
+            corpus.mkdir()
+            (corpus / "a.py").write_text("def hello(): pass\n")
+            (corpus / "b.py").write_text("def hello(): pass\n")  # duplicate content
+            v = IdiomVerifier(corpus_dir=corpus, max_files=10)
+            verdict = v.check("def world(): pass\n", {})
+            self.assertEqual(verdict.outcome, Outcome.PASS)
+            evidence = " ".join(verdict.evidence or [])
+            self.assertIn("duplicate", evidence.lower())
+
+    def test_similarity_failure_cannot_decide(self):
+        """DiD: if _cos raises, the gate returns CANNOT_DECIDE, not an unhandled exception."""
+        with tempfile.TemporaryDirectory() as tmp:
+            corpus = Path(tmp) / "corpus"
+            corpus.mkdir()
+            (corpus / "a.py").write_text("def hello(): pass\n")
+            v = IdiomVerifier(corpus_dir=corpus, max_files=10)
+            # monkeypatch _cos to simulate a math failure
+            import lgwks_embed
+            orig_cos = lgwks_embed._cos
+            lgwks_embed._cos = lambda _a, _b: (_ for _ in ()).throw(RuntimeError("math domain error"))
+            try:
+                verdict = v.check("def foo(): pass\n", {})
+                self.assertEqual(verdict.outcome, Outcome.CANNOT_DECIDE)
+                self.assertIn("similarity computation failed", verdict.diagnosis or "")
+            finally:
+                lgwks_embed._cos = orig_cos
+
+    def test_score_bounds_enforced(self):
+        """DiD: a _cos bug producing an out-of-range score raises ValueError at runtime."""
+        with tempfile.TemporaryDirectory() as tmp:
+            corpus = Path(tmp) / "corpus"
+            corpus.mkdir()
+            (corpus / "a.py").write_text("def hello(): pass\n")
+            v = IdiomVerifier(corpus_dir=corpus, max_files=10)
+            import lgwks_embed
+            orig_cos = lgwks_embed._cos
+            lgwks_embed._cos = lambda _a, _b: 2.5  # impossible similarity
+            try:
+                with self.assertRaises(ValueError) as ctx:
+                    v.check("def foo(): pass\n", {})
+                self.assertIn("out of bounds", str(ctx.exception))
+            finally:
+                lgwks_embed._cos = orig_cos
+
 
 if __name__ == "__main__":
     unittest.main()

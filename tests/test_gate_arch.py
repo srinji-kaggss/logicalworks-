@@ -10,6 +10,7 @@ Verifies:
 
 from __future__ import annotations
 
+import json
 import os
 import sys
 import tempfile
@@ -120,6 +121,63 @@ class TestArchGate(unittest.TestCase):
             self.assertIn(v.klass, {Klass.HARD, Klass.ADVISORY})
             # The rule id must be from arch-rules.json
             self.assertTrue(v.gate_id)
+
+    def test_dynamic_import_detected(self):
+        """DiD layer 2: dynamic imports via importlib.import_module are flagged."""
+        with tempfile.NamedTemporaryFile(mode="w", suffix=".py", delete=False) as fh:
+            fh.write("import importlib\n\nmod = importlib.import_module('urllib.request')\n")
+            fh.flush()
+            path = Path(fh.name)
+        try:
+            rule = {
+                "id": "data-boundary-no-network",
+                "klass": "HARD",
+                "kind": "forbidden-import",
+                "from": [path.stem],
+                "must_not_import": ["urllib.request"],
+                "diagnosis_hint": "found a network import",
+            }
+            v = RuleVerifier(rule)
+            verdict = v.check(path, {})
+            self.assertEqual(verdict.outcome, Outcome.FAIL)
+            self.assertIn("dynamic import", verdict.diagnosis or "")
+        finally:
+            os.unlink(path)
+
+    def test_advisory_runtime_invariant(self):
+        """DiD: an ADVISORY rule that somehow emits FAIL is rejected by the Verdict
+        dataclass invariant — the gate cannot be weakened at runtime."""
+        with tempfile.NamedTemporaryFile(mode="w", suffix=".py", delete=False) as fh:
+            fh.write("import urllib.request\n")
+            fh.flush()
+            path = Path(fh.name)
+        try:
+            rule = {
+                "id": "data-boundary-no-network",
+                "klass": "ADVISORY",  # intentionally ADVISORY to trigger invariant
+                "kind": "forbidden-import",
+                "from": [path.stem],
+                "must_not_import": ["urllib.request"],
+                "diagnosis_hint": "found a network import",
+            }
+            v = RuleVerifier(rule)
+            with self.assertRaises(ValueError) as ctx:
+                v.check(path, {})
+            self.assertIn("ADVISORY verdict cannot have outcome FAIL", str(ctx.exception))
+        finally:
+            os.unlink(path)
+
+    def test_malformed_rule_rejected(self):
+        """DiD: arch-rules.json entries missing required fields raise at load time."""
+        with tempfile.NamedTemporaryFile(mode="w", suffix=".json", delete=False) as fh:
+            fh.write(json.dumps({"rules": [{"id": "bad-rule", "klass": "HARD"}]}))
+            fh.flush()
+            path = Path(fh.name)
+        try:
+            with self.assertRaises(ValueError):
+                make_arch_verifiers(rules_path=path)
+        finally:
+            os.unlink(path)
 
 
 if __name__ == "__main__":
