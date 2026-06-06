@@ -145,6 +145,31 @@ just reject" anymore. Post-commit change is **additive** — draw new relations 
 superseded (`sup`). //why a window: autonomy needs the change to *stick* without per-node human touch, while
 the window preserves cheap correction; after it, the comms-diagnostic (not a reject button) is the feedback.
 
+## §15 · The weight/gauge math (Director: "nodes become mathematical weights of health")
+A node is a **capsule that carries a weight** — two complementary layers: **validity** (discrete, the click,
+§4) and **health** (continuous, this section). Every node `n` carries a measured **weight vector**
+`w(n) ∈ ℝ^d` = `[test_health, debt, slop_risk, coverage, intent_align, coupling, …]`, each dimension a pure
+function of observed facts (test exit codes, complexity, click-log, divergence gauge) — strict math, 0-AI.
+
+**Physics frame:** the codebase is an energy landscape; energy = badness (debt + slop + missing coverage +
+misalignment); **health = low energy.** A **gauge** is a parameterized projection of that field:
+`γ(field; criterion c, scope S, end_user u) → (value, trajectory, next_step)` where
+- `value = Σ_{n∈S} αc · w(n)` — `αc` = criterion weighting over dimensions, **end-user-dependent** (designer
+  vs AI weight differently → different gauges over ONE field; this is the human-layer ⟷ AI-layer).
+- `trajectory = dV/dt` over the time-machine log — the field's evolution along commit history (computed, not drawn).
+- `next_step = argmax_n` (n's contribution to the worst criterion gap) — deterministic sensitivity = gradient
+  descent on badness-energy = the unique actionable next step. 0-AI (argmax over measured weights).
+Equilibrium = local minimum; an edit that raises energy = "that was wrong" → time-machine roll-back.
+Edits (human or AI) = operators on the field; the click gates *validity*, the weight-update measures *health*.
+**Human⟷AI comms-diagnostic:** divergence between the human-gauge trajectory and AI-gauge trajectory over
+the same field = where the two minds disagree on health/direction = where comms broke (JEPA framing, literal).
+
+**Honesty constraint:** the 0-AI claim holds only for fact-derived dimensions (tests, complexity, coverage);
+judgment-derived dimensions (slop_risk, intent_align) MUST be flagged as such in `w(n)` or the gradient is
+theater over a guess. OPEN: `αc` **declared** (designer sets weights; pure 0-AI, static) vs **learned** (fit
+from time-machine reverts via frozen Tier-E evaluator; adaptive but reintroduces a model). Instinct: declared
+first; learned as opt-in that only *proposes* a criterion the human ratifies, so the 0-AI floor never depends on it.
+
 ## OPEN forks (for the Director / Codex hardening pass)
 - **The primitive itself** (Director: "idk if node is correct"): node-first vs relation-first vs cell/triple;
   how to stay granular and avoid binning. The verifier is agnostic, but the authoring model depends on this.
