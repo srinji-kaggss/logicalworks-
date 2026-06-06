@@ -145,6 +145,7 @@ class TestCanonicalSeamIsHonestAboutSemantics(unittest.TestCase):
         # //why this is the linchpin of the authority law: if the deterministic
         # fallback ever returned is_semantic=True, a lexical vector could reach the
         # full-authority bar. Force the offline path and assert it is honest.
+        self.addCleanup(os.environ.pop, "LGWKS_NO_MODELS", None)  # always restore
         os.environ["LGWKS_NO_MODELS"] = "1"
         import importlib, sys
         sys.path.insert(0, str(REPO))
