@@ -386,6 +386,41 @@ _VERB_META: dict[str, dict] = {
         "output": "same as intent route; intent file path is .lgwks/intent.json",
         "tokens": "none",
     },
+    "portal build": {
+        "intent": "compile messy operator context into a deterministic repo-grounded portal packet",
+        "args": {"--repo": "path to repo/folder", "--intent": "inline operator intent",
+                 "--context-file": "repeatable context files", "--refresh": "refresh graph cache before build"},
+        "output": "stored lgwks.portal.v1 packet under .lgwks/portals/ plus JSON stdout",
+        "tokens": "none",
+    },
+    "portal show": {
+        "intent": "show a stored portal packet by key",
+        "args": {"key": "portal:<hash>", "--repo": "path to repo/folder"},
+        "output": "stored lgwks.portal.v1 packet",
+        "tokens": "none",
+    },
+    "portal code": {
+        "intent": "emit the compact AI-facing coding packet for a portal key",
+        "args": {"key": "portal:<hash>", "--repo": "path to repo/folder"},
+        "output": "lgwks.portal.code.v1 packet with top files, search edges, and hard edges",
+        "tokens": "none",
+    },
+    "capture build": {
+        "intent": "compile a messy target or inline context into a deterministic capture packet and optional repo portal binding",
+        "args": {"target": "optional url|file|folder|repo", "--intent": "inline context",
+                 "--context-file": "repeatable context files", "--repo": "optional repo/folder binding",
+                 "--project": "run label", "--source-type": "auto|url|file|folder|repo",
+                 "--embed-provider": "auto|ollama|openrouter-vl|deterministic",
+                 "--refresh-graph": "refresh repo graph cache before portal binding"},
+        "output": "stored lgwks.capture.v1 packet under store/captures/ plus JSON stdout",
+        "tokens": "none",
+    },
+    "capture show": {
+        "intent": "show a stored capture packet by key",
+        "args": {"key": "capture:<hash>"},
+        "output": "stored lgwks.capture.v1 packet",
+        "tokens": "none",
+    },
     # ── review ──
     "review": {
         "intent": "structured code review: pattern-based + graph-aware impact analysis",
@@ -636,7 +671,7 @@ def build_manifest() -> dict:
     try:
         import lgwks_capabilities as cap
         caps = [{"capability": r["capability"], "wired": r.get("chosen"), "missing": r.get("missing", False),
-                 "why": r.get("why", "")} for r in cap.doctor()]
+                 "risk": r.get("risk", "mutate"), "why": r.get("why", "")} for r in cap.doctor()]
     except Exception:
         caps = []
     try:
@@ -651,6 +686,7 @@ def build_manifest() -> dict:
     try:
         import lgwks_capabilities as cap
         tool_caps = {r["capability"]: {"wired": r.get("chosen"), "missing": r.get("missing", False),
+                     "risk": r.get("risk", "mutate"),
                      "install": r.get("install", ""), "why": r.get("why", "")}
                     for r in cap.doctor()
                     if r["capability"] not in {"search", "fetch", "browser", "extract", "github"}}

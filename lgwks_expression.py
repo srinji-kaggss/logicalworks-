@@ -93,6 +93,8 @@ def _check_injection(expr: str) -> None:
 _SEGMENT_RE = re.compile(r"[a-z][a-z0-9_]*")
 # KEY is slightly broader -- allows uppercase and underscore.
 _KEY_RE = re.compile(r"[a-zA-Z_][a-zA-Z0-9_]*")
+_VALID_RISKS = {"read", "mutate", "unknown", "destructive"}
+_NEGATION_STRINGS = {"0", "false", "no", "none", "null", "off", "disabled"}
 
 
 class _Parser:
@@ -248,6 +250,12 @@ class _Parser:
                 buf.append(_ESC_MAP[esc])
                 self._pos += 1
             else:
+                if ch == "\x00":
+                    raise ExpressionParseError(
+                        "null byte not allowed in string literal",
+                        pos=self._pos,
+                        token="\\x00",
+                    )
                 buf.append(ch)
                 self._pos += 1
         self._expect('"')
@@ -329,7 +337,21 @@ def _plan_id(canonical: str) -> str:
 from lgwks_multiply import _classify, _RISK_ORDER  # noqa: E402
 
 
-def _risk_for_primitive(primitive_ref: str | None) -> str:
+def _manifest_capability_entry(verb_id: str, manifest: dict) -> dict[str, Any] | None:
+    for cap_entry in manifest.get("capabilities", []):
+        if cap_entry.get("capability") == verb_id:
+            return cap_entry
+    return None
+
+
+def _is_live_mcp_wiring(wired: Any) -> bool:
+    if not isinstance(wired, str):
+        return False
+    stripped = wired.strip()
+    return bool(stripped) and stripped.lower() not in _NEGATION_STRINGS
+
+
+def _risk_for_primitive(primitive_ref: str | None, verb_id: str, manifest: dict) -> str:
     """Assign risk_class to a step based on its resolved primitive.
 
     Policy (spec Risk Classification):
@@ -345,6 +367,9 @@ def _risk_for_primitive(primitive_ref: str | None) -> str:
         cli_verb = primitive_ref[4:]  # strip "cli:" prefix
         return _classify(cli_verb)
     if primitive_ref.startswith("mcp:"):
+        cap_entry = _manifest_capability_entry(verb_id, manifest) or {}
+        if cap_entry.get("risk") == "read":
+            return "read"
         return "mutate"
     # skill: and agent: both default to unknown per spec.
     return "unknown"
@@ -377,14 +402,13 @@ def _resolve_verb_against_manifest(verb_id: str, manifest: dict) -> str | None:
     if cli_name in verb_names:
         return f"cli:{cli_name}"
 
-    # 2. mcp -- capabilities list with a wired, non-null non-empty string entry.
-    # //why isinstance(wired, str) and wired check: build_manifest() sets wired=r.get("chosen")
-    # // which is either None (unwired) or a non-empty string (capability path). Requiring a
-    # // non-empty string (rather than truthy) prevents string "false"/"0"/"null" from a
-    # // crafted manifest from activating MCP resolution when the capability is not live.
+    # 2. mcp -- capabilities list with a wired, live non-empty string entry.
+    # //why reject negation-looking strings: manifests are JSON-ish surfaces and hostile or
+    # // buggy producers can serialize "inactive" as "false"/"0"/"null". Treat those as
+    # // unwired here so the compiler fails closed instead of activating an MCP primitive.
     for cap_entry in manifest.get("capabilities", []):
         wired = cap_entry.get("wired")
-        if cap_entry.get("capability") == verb_id and isinstance(wired, str) and wired:
+        if cap_entry.get("capability") == verb_id and _is_live_mcp_wiring(wired):
             return f"mcp:{verb_id}"
 
     # 3. skill -- global skills directory.
@@ -465,10 +489,9 @@ def _validate_plan_schema(plan: dict) -> None:
             f"plan_id must be 64-char lowercase hex, got {plan['plan_id']!r}"
         )
 
-    valid_risks = {"read", "mutate", "unknown", "destructive"}
-    if plan["risk_class"] not in valid_risks:
+    if plan["risk_class"] not in _VALID_RISKS:
         raise ExpressionParseError(
-            f"risk_class must be one of {sorted(valid_risks)}"
+            f"risk_class must be one of {sorted(_VALID_RISKS)}"
         )
 
     cp = plan.get("compile_policy", {})
@@ -484,6 +507,13 @@ def _validate_plan_schema(plan: dict) -> None:
         "index", "verb_id", "resolved_primitive", "args",
         "input_schema", "output_schema", "risk_class", "needs_review",
     }
+    expected_indices = list(range(len(plan["steps"])))
+    actual_indices = [s.get("index") for s in plan["steps"]]
+    if actual_indices != expected_indices:
+        raise ExpressionParseError(
+            f"step indices must be sequential starting at 0, got {actual_indices!r}"
+        )
+
     for s in plan["steps"]:
         step_missing = step_required - set(s)
         if step_missing:
@@ -502,7 +532,7 @@ def _validate_plan_schema(plan: dict) -> None:
         # //why validate step-level risk_class: the schema enum applies per-step, not just
         # // plan-level. A malformed plan (e.g. produced by compile() with a crafted AST) could
         # // carry an invalid risk_class that confuses downstream risk aggregation.
-        if s["risk_class"] not in {"read", "mutate", "unknown", "destructive"}:
+        if s["risk_class"] not in _VALID_RISKS:
             raise ExpressionParseError(
                 f"step {s.get('index', '?')} risk_class {s['risk_class']!r} not in valid set"
             )
@@ -538,10 +568,9 @@ def compile_from_string(expr_string: str, manifest: dict) -> dict:
     steps_out: list[dict] = []
     prev_output_schema: dict = {}
 
-    for step in ast:
+    for idx, step in enumerate(ast):
         verb_id = step["verb_id"]
         args = step["args"]
-        idx = step["index"]
 
         primitive = _resolve_verb_against_manifest(verb_id, manifest)
         # //why agent:/skill: also need review: per spec and schema, needs_review must
@@ -563,7 +592,7 @@ def compile_from_string(expr_string: str, manifest: dict) -> dict:
                 f"step {idx}: primitive {primitive!r} requires human review; needs_review=true"
             )
 
-        risk = _risk_for_primitive(primitive)
+        risk = _risk_for_primitive(primitive, verb_id, manifest)
         input_schema, output_schema = _schema_for_verb(verb_id, manifest)
 
         # Emit schema_unknown warning -- all verbs currently lack schema metadata.
@@ -625,10 +654,9 @@ def compile(expr_ast: ExprAST, manifest: dict) -> dict:  # noqa: A001
     steps_out: list[dict] = []
     prev_output_schema: dict = {}
 
-    for step in expr_ast:
+    for idx, step in enumerate(expr_ast):
         verb_id = step["verb_id"]
         args = step["args"]
-        idx = step["index"]
 
         primitive = _resolve_verb_against_manifest(verb_id, manifest)
         # //why same fix as compile_from_string: agent:/skill: -> needs_review=True.
@@ -647,7 +675,7 @@ def compile(expr_ast: ExprAST, manifest: dict) -> dict:  # noqa: A001
                 f"step {idx}: primitive {primitive!r} requires human review; needs_review=true"
             )
 
-        risk = _risk_for_primitive(primitive)
+        risk = _risk_for_primitive(primitive, verb_id, manifest)
         input_schema, output_schema = _schema_for_verb(verb_id, manifest)
         warnings.append(f"step {idx}: schema_unknown for {verb_id!r}")
 

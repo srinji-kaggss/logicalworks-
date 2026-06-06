@@ -90,7 +90,9 @@ Resolution runs at compile time against the live manifest, in priority order:
 1. **cli:** — the verb_id matches a manifest verb name (space → dot in
    expression; "geo.compile" resolves to cli verb "geo compile").
 2. **mcp:** — the manifest `capabilities` list contains an entry whose
-   `capability` key matches the verb_id and `wired` is non-null.
+   `capability` key matches the verb_id and `wired` is a live non-empty string.
+   Negation markers like `"false"`, `"0"`, `"null"`, `"off"` are treated as
+   unwired so hostile or buggy manifests fail closed.
 3. **skill:** — a global skill registered under `~/.claude/skills/<verb_id>/`
    with a `SKILL.md` descriptor.
 4. **agent:** — the verb_id matches a role agent under `~/.claude/agents/`.
@@ -148,6 +150,10 @@ plan_id = sha256(canonical_expression_string).hexdigest()
 Same canonical expression → same plan_id, regardless of whitespace variation or
 arg ordering in the source string. This makes plan_id a stable reference for
 caching, deduplication, and audit trails.
+
+When compiling a pre-parsed AST, the compiler reindexes steps sequentially
+(`0..N-1`) before validation. Caller-supplied indices are treated as advisory,
+not authoritative.
 
 // why hash the expression string not the compiled plan object: the compiled
 // plan contains resolved primitives that vary across machines (different

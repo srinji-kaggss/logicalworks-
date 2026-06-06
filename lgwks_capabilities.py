@@ -52,6 +52,7 @@ def find_binary(name: str) -> str | None:
 _CAPABILITIES: dict[str, dict] = {
     "search": {
         "why": "find live-world facts (news, acquisitions, entities) — the eyes",
+        "risk": "read",
         "providers": [
             {"id": "keyed", "kind": "bin", "bin": "firecrawl", "note": "keyed API; richest, metered"},
             {"id": "rendered", "kind": "pymod", "mod": "playwright",
@@ -63,6 +64,7 @@ _CAPABILITIES: dict[str, dict] = {
     },
     "fetch": {
         "why": "turn a URL into clean text",
+        "risk": "read",
         "providers": [
             {"id": "crawler", "kind": "bin", "bin": "crwl", "note": "markdown-fit extraction"},
             {"id": "raw", "kind": "builtin", "note": "http + strip — raw floor"},
@@ -71,6 +73,7 @@ _CAPABILITIES: dict[str, dict] = {
     },
     "browser": {
         "why": "bot-resilient, JS-rendering fetch of SPA/auth-gated pages",
+        "risk": "read",
         "providers": [
             {"id": "headless", "kind": "pymod", "mod": "playwright", "note": "real browser engine"},
         ],
@@ -78,6 +81,7 @@ _CAPABILITIES: dict[str, dict] = {
     },
     "extract": {
         "why": "ingest every file format (pdf, docx, xlsx, pptx) → text",
+        "risk": "read",
         "providers": [
             {"id": "pdf", "kind": "bin", "bin": "pdftotext", "note": "fast pdf→text"},
             {"id": "pdf-layout", "kind": "pymod", "mod": "fitz", "note": "layout-aware pdf"},
@@ -87,6 +91,7 @@ _CAPABILITIES: dict[str, dict] = {
     },
     "github": {
         "why": "GitHub surface — issues, PRs, state maps, hardening, what's next",
+        "risk": "mutate",
         "providers": [
             {"id": "cli", "kind": "bin", "bin": "gh", "note": "GitHub CLI — auth-gated API access"},
         ],
@@ -95,6 +100,7 @@ _CAPABILITIES: dict[str, dict] = {
     # ── dev tool integrations (not lgwks reimplementations — wrappers + schema) ──
     "search-code": {
         "why": "blazing-fast regex search across codebase — the eyes for code archaeology",
+        "risk": "read",
         "providers": [
             {"id": "ripgrep", "kind": "bin", "bin": "rg", "note": "ripgrep — fastest, respects .gitignore"},
             {"id": "git-grep", "kind": "bin", "bin": "git", "note": "git grep — always present, slower"},
@@ -103,6 +109,7 @@ _CAPABILITIES: dict[str, dict] = {
     },
     "find-files": {
         "why": "user-friendly file discovery — replaces find with sensible defaults",
+        "risk": "read",
         "providers": [
             {"id": "fd", "kind": "bin", "bin": "fd", "note": "fd — fast, ignores hidden/gitignored by default"},
             {"id": "find", "kind": "builtin", "note": "POSIX find — universal floor"},
@@ -111,6 +118,7 @@ _CAPABILITIES: dict[str, dict] = {
     },
     "fuzzy-filter": {
         "why": "interactive fuzzy filtering of files, history, processes, git commits",
+        "risk": "read",
         "providers": [
             {"id": "fzf", "kind": "bin", "bin": "fzf", "note": "fzf — general-purpose interactive filter"},
         ],
@@ -118,6 +126,7 @@ _CAPABILITIES: dict[str, dict] = {
     },
     "json-processor": {
         "why": "slice, filter, map, transform structured JSON data",
+        "risk": "read",
         "providers": [
             {"id": "jq", "kind": "bin", "bin": "jq", "note": "jq — lightweight JSON processor"},
             {"id": "python", "kind": "builtin", "note": "Python json module — universal floor"},
@@ -126,6 +135,7 @@ _CAPABILITIES: dict[str, dict] = {
     },
     "yaml-processor": {
         "why": "YAML/JSON/XML command-line processor",
+        "risk": "read",
         "providers": [
             {"id": "yq", "kind": "bin", "bin": "yq", "note": "yq — jq syntax for YAML"},
             {"id": "python", "kind": "builtin", "note": "Python yaml module — floor"},
@@ -134,6 +144,7 @@ _CAPABILITIES: dict[str, dict] = {
     },
     "json-viewer": {
         "why": "interactive terminal JSON viewer for massive payloads",
+        "risk": "read",
         "providers": [
             {"id": "fx", "kind": "bin", "bin": "fx", "note": "fx — interactive browse"},
             {"id": "bat", "kind": "bin", "bin": "bat", "note": "bat — syntax-highlighted pager"},
@@ -142,6 +153,7 @@ _CAPABILITIES: dict[str, dict] = {
     },
     "file-list": {
         "why": "modern file listing with color, git status, metadata",
+        "risk": "read",
         "providers": [
             {"id": "eza", "kind": "bin", "bin": "eza", "note": "eza — modern ls replacement with git integration"},
             {"id": "ls", "kind": "builtin", "note": "POSIX ls — universal floor"},
@@ -150,6 +162,7 @@ _CAPABILITIES: dict[str, dict] = {
     },
     "file-view": {
         "why": "syntax-highlighted file viewing with git integration and paging",
+        "risk": "read",
         "providers": [
             {"id": "bat", "kind": "bin", "bin": "bat", "note": "bat — syntax highlight + git blame + paging"},
             {"id": "cat", "kind": "builtin", "note": "POSIX cat — universal floor"},
@@ -158,6 +171,7 @@ _CAPABILITIES: dict[str, dict] = {
     },
     "git-ui": {
         "why": "visual terminal UI for git branching, staging, rebasing",
+        "risk": "mutate",
         "providers": [
             {"id": "lazygit", "kind": "bin", "bin": "lazygit", "note": "lazygit — visual git UI in terminal"},
             {"id": "tig", "kind": "bin", "bin": "tig", "note": "tig — text-mode repository browser"},
@@ -166,6 +180,7 @@ _CAPABILITIES: dict[str, dict] = {
     },
     "http-client": {
         "why": "human-friendly API testing and debugging",
+        "risk": "mutate",
         "providers": [
             {"id": "httpie", "kind": "bin", "bin": "http", "note": "httpie — effortless API requests"},
             {"id": "curl", "kind": "builtin", "note": "curl — universal floor"},
@@ -174,6 +189,7 @@ _CAPABILITIES: dict[str, dict] = {
     },
     "env-manager": {
         "why": "automatic environment variable loading per directory",
+        "risk": "mutate",
         "providers": [
             {"id": "direnv", "kind": "bin", "bin": "direnv", "note": "direnv — auto-load env vars per directory"},
         ],
@@ -181,6 +197,7 @@ _CAPABILITIES: dict[str, dict] = {
     },
     "runtime-manager": {
         "why": "polyglot runtime version manager (replaces asdf, nvm, pyenv)",
+        "risk": "mutate",
         "providers": [
             {"id": "mise", "kind": "bin", "bin": "mise", "note": "mise — unified runtime manager"},
             {"id": "asdf", "kind": "bin", "bin": "asdf", "note": "asdf — plugin-based version manager"},
@@ -189,6 +206,7 @@ _CAPABILITIES: dict[str, dict] = {
     },
     "terminal-multiplexer": {
         "why": "split terminal into panes, manage persistent sessions",
+        "risk": "mutate",
         "providers": [
             {"id": "zellij", "kind": "bin", "bin": "zellij", "note": "zellij — Rust-based modern multiplexer"},
             {"id": "tmux", "kind": "bin", "bin": "tmux", "note": "tmux — battle-tested multiplexer"},
@@ -235,7 +253,7 @@ def resolve(capability: str) -> dict:
         chain.append({"id": p["id"], "present": bool(loc), "note": p["note"]})  # id, not brand
         if loc and not chosen:
             chosen, where = p["id"], loc
-    return {"capability": capability, "why": spec["why"], "chosen": chosen, "path": where,
+    return {"capability": capability, "why": spec["why"], "risk": spec.get("risk", "mutate"), "chosen": chosen, "path": where,
             "chain": chain, "missing": chosen is None, "install": spec["install"]}
 
 

@@ -27,6 +27,8 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
+import lgwks_sqlite
+
 # ── entity taxonomy ───────────────────────────────────────────────────────────
 
 ENTITY_TYPES = (
@@ -144,7 +146,7 @@ class GraphDB:
 
     def __post_init__(self) -> None:
         self.db_path.parent.mkdir(parents=True, exist_ok=True)
-        self._conn = sqlite3.connect(str(self.db_path), check_same_thread=False)
+        self._conn = lgwks_sqlite.connect(self.db_path, check_same_thread=False)
         self._conn.executescript(_DDL)
         self._conn.commit()
 

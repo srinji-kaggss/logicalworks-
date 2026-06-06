@@ -236,6 +236,7 @@ class TestManifest(unittest.TestCase):
         brands = {"firecrawl", "playwright", "crwl", "pdftotext"}
         for c in m["capabilities"]:
             self.assertNotIn(c["capability"], brands)
+            self.assertIn(c["risk"], {"read", "mutate"})
 
     def test_every_registered_subparser_appears_in_manifest(self):
         import importlib.machinery
@@ -255,6 +256,7 @@ class TestManifest(unittest.TestCase):
         for expected in ("manifest", "extract", "convert", "solve", "x", "refine", "store",
                          "jarvis crawl", "memory init", "project plan", "geo compile",
                          "agent-os", "auth", "akinator", "run", "context", "foundation",
+                         "portal build", "capture build",
                          "keyvault", "model-hub"):
             self.assertIn(expected, live, f"{expected!r} must appear in the live verb surface")
         m = man.build_manifest()
@@ -1587,6 +1589,16 @@ class TestExpressionHardenV1(unittest.TestCase):
         }
         self.assertIsNone(ex._resolve_verb_against_manifest("cap", manifest))
 
+    def test_mcp_negation_string_wired_does_not_resolve(self):
+        """wired='false' is an inactive marker on hostile/buggy manifests, not a live path."""
+        import lgwks_expression as ex
+        manifest = {
+            "manifest": "lgwks.manifest.v0",
+            "verbs": [],
+            "capabilities": [{"capability": "cap", "wired": "false"}],
+        }
+        self.assertIsNone(ex._resolve_verb_against_manifest("cap", manifest))
+
     def test_mcp_true_wired_resolves(self):
         """wired=True or a non-empty non-False string is a valid wired capability."""
         import lgwks_expression as ex
@@ -1618,3 +1630,60 @@ class TestExpressionHardenV1(unittest.TestCase):
         self.assertIn("\t", val)
         self.assertIn("\\", val)
         self.assertIn('"', val)
+
+    def test_null_byte_in_string_raises_parse_error(self):
+        """Literal null bytes must be rejected at compile time, not deferred to subprocess callers."""
+        import lgwks_expression as ex
+        with self.assertRaises(ex.ExpressionParseError):
+            ex.parse('extract["k":"abc\x00def"]')
+
+    def test_compile_reindexes_ast_steps_sequentially(self):
+        """compile() must ignore caller-supplied step indices and emit canonical 0..N-1 ordering."""
+        import lgwks_expression as ex
+        manifest = self._mock_manifest()
+        ast = [
+            {"verb_id": "research", "args": {"query": "X"}, "index": 99, "metadata": {}},
+            {"verb_id": "store", "args": {"tag": "Y"}, "index": 99, "metadata": {}},
+        ]
+        plan = ex.compile(ast, manifest)
+        self.assertEqual([step["index"] for step in plan["steps"]], [0, 1])
+
+    def test_validate_plan_schema_rejects_non_sequential_indices(self):
+        """A plan with duplicate or skipped step indices must fail validation."""
+        import lgwks_expression as ex
+        plan = {
+            "schema": "lgwks-expression/1",
+            "plan_id": "a" * 64,
+            "expression": "test | test2",
+            "canonical_expression": "test | test2",
+            "manifest_version": "v0",
+            "steps": [
+                {
+                    "index": 0, "verb_id": "test", "resolved_primitive": "cli:test",
+                    "args": {}, "input_schema": {}, "output_schema": {},
+                    "risk_class": "read", "needs_review": False,
+                },
+                {
+                    "index": 0, "verb_id": "test2", "resolved_primitive": "cli:test2",
+                    "args": {}, "input_schema": {}, "output_schema": {},
+                    "risk_class": "read", "needs_review": False,
+                },
+            ],
+            "risk_class": "read",
+            "compile_policy": {"shell": False, "unknown_requires_review": True, "destructive_requires_force": True},
+            "warnings": [],
+        }
+        with self.assertRaises(ex.ExpressionParseError):
+            ex._validate_plan_schema(plan)
+
+    def test_mcp_risk_read_override_downgrades_step_and_plan(self):
+        """Spec: mcp capabilities declaring risk=read should not be forced to mutate."""
+        import lgwks_expression as ex
+        manifest = {
+            "manifest": "lgwks.manifest.v0",
+            "verbs": [],
+            "capabilities": [{"capability": "search", "wired": "mcp://server", "risk": "read"}],
+        }
+        plan = ex.compile_from_string("search", manifest)
+        self.assertEqual(plan["steps"][0]["risk_class"], "read")
+        self.assertEqual(plan["risk_class"], "read")

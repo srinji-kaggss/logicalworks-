@@ -27,6 +27,7 @@ from typing import Any
 import lgwks_browser
 import lgwks_entity_graph as entity_graph
 import lgwks_run
+import lgwks_sqlite
 from lgwks_html import html_to_markdown
 
 ROOT = Path(__file__).resolve().parent
@@ -390,7 +391,7 @@ def _build_index_db(
     vector_rows: list[dict[str, Any]],
     frontier: list[dict[str, Any]],
 ) -> None:
-    conn = sqlite3.connect(path)
+    conn = lgwks_sqlite.connect(path)
     cur = conn.cursor()
     cur.executescript(
         """
@@ -508,7 +509,7 @@ def _upsert_global_fact_vectors(
     fact_vectors: list[dict[str, Any]],
 ) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
-    conn = sqlite3.connect(path)
+    conn = lgwks_sqlite.connect(path)
     cur = conn.cursor()
     cur.executescript(
         """

@@ -34,6 +34,8 @@ from html.parser import HTMLParser
 from pathlib import Path
 from typing import Iterable
 
+import lgwks_sqlite
+
 
 ROOT = Path(__file__).resolve().parent
 RUN_ROOT = ROOT / "vision" / "research" / "research-network" / "runs"
@@ -276,7 +278,7 @@ def semantic_type_scores(text: str) -> dict[str, float]:
 class JarvisDB:
     def __init__(self, path: Path):
         self.path = path
-        self.conn = sqlite3.connect(path)
+        self.conn = lgwks_sqlite.connect(path)
         self.conn.row_factory = sqlite3.Row
 
     def close(self):
@@ -1276,6 +1278,14 @@ def build_parser() -> argparse.ArgumentParser:
     # intent — schema-driven intent router: declare, probe, act
     import lgwks_intent
     lgwks_intent.add_parser(sub)
+
+    # portal — deterministic project/portal keys and coding-agent context packets
+    import lgwks_portal
+    lgwks_portal.add_parser(sub)
+
+    # capture — unified operator-facing capture compiler over substrate + portal
+    import lgwks_capture
+    lgwks_capture.add_parser(sub)
 
     # entity-graph — offline document entity graph builder (T1 regex / T2 CoreML / T3 Foundation Models)
     import lgwks_entity_graph
