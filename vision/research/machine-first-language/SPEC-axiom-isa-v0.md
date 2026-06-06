@@ -25,9 +25,19 @@ L1 Fabric           content-addressed hash-chained store + the time-machine (sup
 L0 Lowering         MLIR multi-dialect → WASM (off-ramp) / AOC / … ; effects via WASI handles; AI-free
 ```
 Keystone (from WASM/JVM): the L3 artifact carries enough to prove itself at L2 **before** L0. Untrusted
-producer → verifying consumer, as physics. **Horizontal:** a **frame** holds ≤5 live nodes (the cognitive
-limit); a 6th forces a min-cut spill into a child frame behind ONE typed interface node (AUTOLAYER). Frames
-nest into a tree — JVM-method/WASM-function frame-spilling, bounded by *consciousness*, not bytes.
+producer → verifying consumer, as physics.
+
+**Horizontal — gauges, NOT node-bins (corrected 2026-06-06).** Capsules are **separate, granular, and
+unbounded** — they are NOT packed into ≤5 frames (that was the binny error; no AUTOLAYER node-spilling).
+The 3–5 cognitive limit lives on **GAUGES**: a gauge is a *strictly statistical/physics/math* pure fold
+over the fabric, **parameterized by the end user**, whose output is a **unique, actionable next step**
+(not decoration) — 0-AI, same family as the radar fold (INV-7). At any moment a mind (human or AI) holds
+**≤5 live gauges** = ≤5 simultaneous ways-of-seeing the same granular capsule set. "I can think in
+different ways, as can you" → gauges are those ways; human and AI may pick different gauges over one fabric.
+
+**Naming caveat:** "node"/"capsule" is a *provisional* name for the L3 primitive, and whether the primitive
+is node-first or relation-first is OPEN (see OPEN forks). The verifier (§4) is name- and shape-agnostic: it
+checks a typed content-addressed record against its dependency edges, whatever we call it.
 
 ## §2 · The atom = the Intent Capsule (one shape, two inhabitants)
 One content-addressed typed record (ADR-004 atom, grounded as the wedge's Intent Capsule). Fields map 1:1
@@ -111,7 +121,8 @@ up `on[]`) · erasure (proof dropped at L0 lowering).
 1. **0-AI-utility**: strip AI → humans node, the click validates, the fabric replays, WASM runs. AI = proposal throughput only.
 2. **Decidable click**: verification = enum∈ + lattice⊆ + intervals; no theorem-proving; edge-runnable.
 3. **Base-first**: no capsule attaches above an un-noded base; verifier rejects dangling.
-4. **3–5 frame**: no layer exceeds 5 live; overflow → AUTOLAYER min-cut spill, never truncation/error.
+4. **3–5 gauges (not node-bins)**: capsules are separate/granular/unbounded; the ≤5 limit is on live gauges
+   (strict-math folds → actionable next-step, end-user-parameterized, 0-AI). No node-frame spilling.
 5. **Capability up the DAG**: a capsule can't claim/exercise authority its `on[]` didn't carry.
 6. **Intent-lattice honesty**: intent stored multi-valued; collapse deterministic; divergence visible, never silently 100.
 7. **Sad path by math**: deviation halts + escalates via gate, never AI judgment; AI never authors sad-path logic.
@@ -127,10 +138,19 @@ up `on[]`) · erasure (proof dropped at L0 lowering).
 5. Self-doc fold (§9) — emissions → tickets/docs.
 6. **WASM lowering target (UNBUILT, first real cost)** → then frontend "NodeUI" on the custom OS backend.
 
+## §14 · Pending→committed transaction (the time-machine, refined 2026-06-06)
+AI changes land **PENDING** (rejectable). A **commit window** elapses → **COMMITTED**: the human "cannot
+just reject" anymore. Post-commit change is **additive** — draw new relations / `sup`, never a bare reject
+(append-only). So three states: PENDING (revert freely) → COMMITTED (restructure via new relations) →
+superseded (`sup`). //why a window: autonomy needs the change to *stick* without per-node human touch, while
+the window preserves cheap correction; after it, the comms-diagnostic (not a reject button) is the feedback.
+
 ## OPEN forks (for the Director / Codex hardening pass)
-- **Time-machine revert**: cascade (orphan superstructure → noise) vs quarantine (freeze dependents as
-  stranded). Cascade depth = comms-failure severity.
-- **`cap:node-at-runtime`** (§10): what GRANTS it, what AUDITS each runtime-noding. The soundness frontier —
-  if it leaks or a generated node skips re-click, "no un-clicked code runs" collapses.
-- **Frame budget B**: confirm 3–5 (cognition) as the hard limit; the 50-node figure was too high.
+- **The primitive itself** (Director: "idk if node is correct"): node-first vs relation-first vs cell/triple;
+  how to stay granular and avoid binning. The verifier is agnostic, but the authoring model depends on this.
+- **Time-machine revert of committed nodes**: cascade (orphan superstructure → noise) vs quarantine (freeze
+  dependents as stranded). Cascade depth = comms-failure severity. (Pre-commit revert is free, §14.)
+- **`cap:node-at-runtime`** (§10): what GRANTS it, what AUDITS each runtime-noding. The soundness frontier.
+- **Gauge budget**: confirm ≤5 *live gauges* (not nodes) as the cognitive limit; the 50-node figure is dead.
+- **Commit-window length** (§14): fixed time, or activity-based (N dependent nodes attached on top = committed)?
 - **Syntax flavor**: text projection defaulted to S-expr/WAT-like (homogeneous, no whitespace-significance).
