@@ -13,6 +13,16 @@ This folder is flat on purpose. A cheaper coding agent should be able to enter h
 5. [RUNTIME.md](/Users/srinji/logicalworks-/docs/bot-fabric/RUNTIME.md)
 6. [UNITS.md](/Users/srinji/logicalworks-/docs/bot-fabric/UNITS.md)
 
+## First detailed build units
+
+Bottom-up implementation order:
+
+1. [U1-BOT-RECORD.md](/Users/srinji/logicalworks-/docs/bot-fabric/U1-BOT-RECORD.md)
+2. [U2-BOT-PLAN.md](/Users/srinji/logicalworks-/docs/bot-fabric/U2-BOT-PLAN.md)
+3. [U3-REDUCER.md](/Users/srinji/logicalworks-/docs/bot-fabric/U3-REDUCER.md)
+4. [U4-JEPA-PACKAGE.md](/Users/srinji/logicalworks-/docs/bot-fabric/U4-JEPA-PACKAGE.md)
+5. [U11-ARTIFACT-STRENGTH.md](/Users/srinji/logicalworks-/docs/bot-fabric/U11-ARTIFACT-STRENGTH.md)
+
 ## One-paragraph thesis
 
 `lgwks` should use deterministic bots to generate evidence, a JEPA-style world model to align and compress evidence across views and time, and one optional high-reasoning LLM synthesis layer that further reduces tokens and improves final judgment without being required for the package to remain useful.
