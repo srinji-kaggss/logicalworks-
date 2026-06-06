@@ -101,6 +101,12 @@ def test_outputs_with_root_passes():
     assert ok, errs
 
 
+def test_unknown_top_level_field_fails():
+    ok, errs = artifacts.validate_bot_plan(_canonical_plan(unexpected=True))
+    assert not ok
+    assert any("unknown field" in e for e in errs)
+
+
 # -- acceptance 3: plan can be loaded without network access ---------------
 
 def test_plan_is_pure_data():
@@ -205,3 +211,23 @@ def test_schema_discriminator_enforced():
     ok, errs = artifacts.validate_bot_plan(_canonical_plan(schema="wrong"))
     assert not ok
     assert any("lgwks.bot.plan.v1" in e for e in errs)
+
+
+def test_empty_plan_id_fails():
+    ok, errs = artifacts.validate_bot_plan(_canonical_plan(plan_id=""))
+    assert not ok
+    assert any("plan_id" in e for e in errs)
+
+
+def test_outputs_machine_human_when_present_must_be_strings():
+    ok, errs = artifacts.validate_bot_plan(_canonical_plan(outputs={"root": "runs/x", "machine": 1}))
+    assert not ok
+    assert any("outputs.machine" in e for e in errs)
+
+
+def test_unknown_nested_field_fails():
+    plan = _canonical_plan()
+    plan["policy"]["mystery"] = True
+    ok, errs = artifacts.validate_bot_plan(plan)
+    assert not ok
+    assert any("policy contains unknown field" in e for e in errs)

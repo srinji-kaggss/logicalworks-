@@ -32,6 +32,7 @@ import hashlib
 import json
 import re
 import time
+import datetime as _dt
 from collections import Counter
 from pathlib import Path
 from typing import Optional
@@ -315,15 +316,21 @@ def _is_str(v) -> bool:
     return isinstance(v, str)
 
 
+def _is_nonempty_str(v) -> bool:
+    return _is_str(v) and len(v) > 0
+
+
 def _require(obj: dict, key: str, kind: str | None = None) -> list[str]:
     errs: list[str] = []
     if key not in obj:
         errs.append(f"missing required field: {key}")
         return errs
     if kind is not None:
-        if kind == "str" and not _is_str(obj[key]):
+        if kind == "str" and not _is_nonempty_str(obj[key]):
             errs.append(f"{key} must be a string")
-        elif kind == "number" and not isinstance(obj[key], (int, float)):
+        elif kind == "number" and (
+            not isinstance(obj[key], (int, float)) or isinstance(obj[key], bool)
+        ):
             errs.append(f"{key} must be a number")
         elif kind == "bool" and not isinstance(obj[key], bool):
             errs.append(f"{key} must be a boolean")
@@ -332,6 +339,18 @@ def _require(obj: dict, key: str, kind: str | None = None) -> list[str]:
         elif kind == "dict" and not isinstance(obj[key], dict):
             errs.append(f"{key} must be an object")
     return errs
+
+
+def _reject_unknown_keys(obj: dict, allowed: set[str], path: str) -> list[str]:
+    return [f"{path} contains unknown field: {k}" for k in obj.keys() if k not in allowed]
+
+
+def _is_datetime_str(v: str) -> bool:
+    try:
+        _dt.datetime.fromisoformat(v.replace("Z", "+00:00"))
+        return True
+    except ValueError:
+        return False
 
 
 def validate_bot_record(record: dict) -> tuple[bool, list[str]]:
@@ -345,6 +364,12 @@ def validate_bot_record(record: dict) -> tuple[bool, list[str]]:
 
     if not isinstance(record, dict):
         return False, ["record must be a JSON object"]
+
+    errs.extend(_reject_unknown_keys(record, {
+        "schema", "run_id", "bot", "target", "kind", "summary", "severity",
+        "confidence", "status", "evidence", "links", "world_refs", "tags",
+        "created_at",
+    }, "record"))
 
     errs.extend(_require(record, "schema", "str"))
     errs.extend(_require(record, "run_id", "str"))
@@ -385,13 +410,14 @@ def validate_bot_record(record: dict) -> tuple[bool, list[str]]:
     if not isinstance(target, dict):
         errs.append("target must be an object")
     else:
+        errs.extend(_reject_unknown_keys(target, {"kind", "id"}, "target"))
         if "kind" not in target:
             errs.append("target.kind is required")
-        elif not _is_str(target["kind"]):
+        elif not _is_nonempty_str(target["kind"]):
             errs.append("target.kind must be a string")
         if "id" not in target:
             errs.append("target.id is required")
-        elif not _is_str(target["id"]):
+        elif not _is_nonempty_str(target["id"]):
             errs.append("target.id must be a string")
 
     # evidence: at least one item, each with a type
@@ -402,24 +428,43 @@ def validate_bot_record(record: dict) -> tuple[bool, list[str]]:
         if not isinstance(ev, dict):
             errs.append(f"evidence[{idx}] must be an object")
             continue
+        errs.extend(_reject_unknown_keys(ev, {"type", "name", "value", "unit"}, f"evidence[{idx}]"))
         ev_type = ev.get("type")
-        if not _is_str(ev_type):
+        if not _is_nonempty_str(ev_type):
             errs.append(f"evidence[{idx}].type is required and must be a string")
         elif ev_type not in BOT_EVIDENCE_TYPES:
             errs.append(f"evidence[{idx}].type {ev_type!r} is not in {sorted(BOT_EVIDENCE_TYPES)}")
+        if "name" in ev and ev["name"] is not None and not _is_nonempty_str(ev["name"]):
+            errs.append(f"evidence[{idx}].name must be a non-empty string when present")
+        if "unit" in ev and ev["unit"] is not None and not _is_nonempty_str(ev["unit"]):
+            errs.append(f"evidence[{idx}].unit must be a non-empty string when present")
 
     # links: at least one repo-local anchor (file, symbol, test, artifact)
     links = record["links"]
     if not isinstance(links, dict):
         errs.append("links must be an object")
     else:
+        errs.extend(_reject_unknown_keys(links, {"repo", "file", "symbol", "tests", "artifacts"}, "links"))
         if "repo" not in links:
             errs.append("links.repo is required")
-        elif not _is_str(links["repo"]):
+        elif not _is_nonempty_str(links["repo"]):
             errs.append("links.repo must be a string")
+        if "file" in links and links["file"] is not None and not _is_nonempty_str(links["file"]):
+            errs.append("links.file must be a non-empty string when present")
+        if "symbol" in links and links["symbol"] is not None and not _is_nonempty_str(links["symbol"]):
+            errs.append("links.symbol must be a non-empty string when present")
+        for name in ("tests", "artifacts"):
+            if name in links:
+                val = links[name]
+                if not isinstance(val, list):
+                    errs.append(f"links.{name} must be a list when present")
+                else:
+                    for i, item in enumerate(val):
+                        if not _is_nonempty_str(item):
+                            errs.append(f"links.{name}[{i}] must be a non-empty string")
         has_anchor = bool(
-            _is_str(links.get("file"))
-            or _is_str(links.get("symbol"))
+            _is_nonempty_str(links.get("file"))
+            or _is_nonempty_str(links.get("symbol"))
             or (isinstance(links.get("tests"), list) and len(links["tests"]) > 0)
             or (isinstance(links.get("artifacts"), list) and len(links["artifacts"]) > 0)
         )
@@ -428,6 +473,31 @@ def validate_bot_record(record: dict) -> tuple[bool, list[str]]:
                 "links must contain at least one repo-local anchor "
                 "(file, symbol, tests, or artifacts)"
             )
+
+    world_refs = record.get("world_refs", [])
+    if not isinstance(world_refs, list):
+        errs.append("world_refs must be a list when present")
+    else:
+        for idx, ref in enumerate(world_refs):
+            if not isinstance(ref, dict):
+                errs.append(f"world_refs[{idx}] must be an object")
+                continue
+            errs.extend(_reject_unknown_keys(ref, {"kind", "id"}, f"world_refs[{idx}]"))
+            if not _is_nonempty_str(ref.get("kind")):
+                errs.append(f"world_refs[{idx}].kind must be a non-empty string")
+            if not _is_nonempty_str(ref.get("id")):
+                errs.append(f"world_refs[{idx}].id must be a non-empty string")
+
+    tags = record.get("tags", [])
+    if not isinstance(tags, list):
+        errs.append("tags must be a list when present")
+    else:
+        for idx, tag in enumerate(tags):
+            if not _is_nonempty_str(tag):
+                errs.append(f"tags[{idx}] must be a non-empty string")
+
+    if not _is_datetime_str(record["created_at"]):
+        errs.append("created_at must be a valid ISO 8601 date-time string")
 
     return len(errs) == 0, errs
 
@@ -443,6 +513,11 @@ def validate_bot_plan(plan: dict, known_bots: set[str] | None = None) -> tuple[b
 
     if not isinstance(plan, dict):
         return False, ["plan must be a JSON object"]
+
+    errs.extend(_reject_unknown_keys(plan, {
+        "schema", "plan_id", "run_kind", "target_repo", "world_db_mode",
+        "bots", "jepa", "synth", "policy", "outputs",
+    }, "plan"))
 
     errs.extend(_require(plan, "schema", "str"))
     errs.extend(_require(plan, "plan_id", "str"))
@@ -480,8 +555,9 @@ def validate_bot_plan(plan: dict, known_bots: set[str] | None = None) -> tuple[b
         if not isinstance(b, dict):
             errs.append(f"bots[{idx}] must be an object")
             continue
+        errs.extend(_reject_unknown_keys(b, {"name", "enabled"}, f"bots[{idx}]"))
         name = b.get("name")
-        if not _is_str(name):
+        if not _is_nonempty_str(name):
             errs.append(f"bots[{idx}].name is required and must be a string")
         elif name not in registry:
             errs.append(f"bots[{idx}].name {name!r} is not in the bot registry")
@@ -491,20 +567,31 @@ def validate_bot_plan(plan: dict, known_bots: set[str] | None = None) -> tuple[b
 
     # jepa
     jepa = plan["jepa"]
+    errs.extend(_reject_unknown_keys(jepa, {"enabled", "mode"}, "jepa"))
     if "enabled" not in jepa:
         errs.append("jepa.enabled is required")
     elif not isinstance(jepa["enabled"], bool):
         errs.append("jepa.enabled must be a boolean")
+    if "mode" in jepa and jepa["mode"] is not None and not _is_nonempty_str(jepa["mode"]):
+        errs.append("jepa.mode must be a non-empty string when present")
 
     # synth
     synth = plan["synth"]
+    errs.extend(_reject_unknown_keys(synth, {"enabled", "provider", "optional"}, "synth"))
     if "enabled" not in synth:
         errs.append("synth.enabled is required")
     elif not isinstance(synth["enabled"], bool):
         errs.append("synth.enabled must be a boolean")
+    if "provider" in synth and synth["provider"] is not None and not _is_nonempty_str(synth["provider"]):
+        errs.append("synth.provider must be a non-empty string when present")
+    if "optional" in synth and not isinstance(synth["optional"], bool):
+        errs.append("synth.optional must be a boolean when present")
 
     # policy
     policy = plan["policy"]
+    errs.extend(_reject_unknown_keys(
+        policy, {"allow_external_research", "branch_state_mode", "max_artifact_bytes"}, "policy"
+    ))
     if "allow_external_research" not in policy:
         errs.append("policy.allow_external_research is required")
     elif not isinstance(policy["allow_external_research"], bool):
@@ -525,9 +612,13 @@ def validate_bot_plan(plan: dict, known_bots: set[str] | None = None) -> tuple[b
 
     # outputs
     outputs = plan["outputs"]
+    errs.extend(_reject_unknown_keys(outputs, {"root", "machine", "human"}, "outputs"))
     if "root" not in outputs:
         errs.append("outputs.root is required")
-    elif not _is_str(outputs["root"]):
+    elif not _is_nonempty_str(outputs["root"]):
         errs.append("outputs.root must be a string")
+    for name in ("machine", "human"):
+        if name in outputs and outputs[name] is not None and not _is_nonempty_str(outputs[name]):
+            errs.append(f"outputs.{name} must be a non-empty string when present")
 
     return len(errs) == 0, errs
