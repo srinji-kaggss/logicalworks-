@@ -17,6 +17,8 @@ import logging
 import os
 import shutil
 import subprocess
+import sys
+from contextlib import contextmanager
 from pathlib import Path
 from typing import Any
 
@@ -76,6 +78,19 @@ def _assert_under(parent: Path, child: Path) -> Path:
     return resolved
 
 
+@contextmanager
+def _temporary_env(name: str, value: str):
+    prev = os.environ.get(name)
+    os.environ[name] = value
+    try:
+        yield
+    finally:
+        if prev is None:
+            os.environ.pop(name, None)
+        else:
+            os.environ[name] = prev
+
+
 def list_models() -> list[dict[str, Any]]:
     """Return the scrubbed model catalog."""
     return [{"name": k, **v} for k, v in _MODEL_CATALOG.items()]
@@ -104,6 +119,123 @@ def load_model(name: str) -> dict[str, Any]:
             "reason": f"model {name} not found in {_models_dir()}. Run scripts/setup_models.py to download.",
         }
     return {"ok": True, "path": str(model_dir), "reason": "repo-resident"}
+
+
+def _python_coreml_eligible() -> tuple[bool, str]:
+    vi = sys.version_info
+    major = getattr(vi, "major", vi[0])
+    minor = getattr(vi, "minor", vi[1])
+    if (major, minor) >= (3, 13):
+        return (
+            False,
+            "CoreML conversion requires Python <=3.12; current interpreter is "
+            f"{major}.{minor}.",
+        )
+    return True, "Python version supports coremltools conversion."
+
+
+def _catalog_entry_status(name: str, meta: dict[str, Any]) -> dict[str, Any]:
+    safe = _safe_name(name)
+    model_dir = _models_dir() / safe
+    has_dir = model_dir.exists()
+    has_config = (model_dir / "config.json").exists()
+    has_weights = bool(list(model_dir.glob("*.bin")) or list(model_dir.glob("*.safetensors")))
+    coreml_pkg = (_models_dir() / f"{safe}.mlpackage").exists()
+    return {
+        "name": name,
+        "present": has_dir,
+        "path": str(model_dir),
+        "has_config": has_config,
+        "has_weights": has_weights,
+        "coreml_package": coreml_pkg,
+        "license": meta["license"],
+        "size_mb": meta["size_mb"],
+        "desc": meta["desc"],
+    }
+
+
+def doctor() -> dict[str, Any]:
+    """Machine-readable health report for the local ML stack."""
+    entries = [_catalog_entry_status(name, meta) for name, meta in _MODEL_CATALOG.items()]
+    py_ok, py_reason = _python_coreml_eligible()
+
+    try:
+        import coremltools as _ct  # type: ignore[import]
+        coreml = {"installed": True, "version": getattr(_ct, "__version__", "unknown")}
+    except Exception as exc:
+        coreml = {"installed": False, "version": "", "reason": f"{type(exc).__name__}: {exc}"}
+
+    try:
+        import lgwks_foundation
+        foundation = lgwks_foundation.available()
+    except Exception as exc:
+        foundation = {"foundation_models": False, "natural_language": False, "reason": f"{type(exc).__name__}: {exc}"}
+
+    try:
+        import lgwks_ollama
+        semantic_eye = {
+            "up": lgwks_ollama.is_up(),
+            "host": lgwks_ollama.HOST,
+            "model": lgwks_ollama.EYE_MODEL,
+            "disabled_by_env": bool(os.environ.get("LGWKS_NO_MODELS")),
+        }
+    except Exception as exc:
+        semantic_eye = {"up": False, "host": "", "model": "", "reason": f"{type(exc).__name__}: {exc}"}
+
+    try:
+        import lgwks_intent_classifier as ic
+        # Read-only doctor surface: never pull or warm models as a side effect.
+        with _temporary_env("LGWKS_NO_MODELS", "1"):
+            clf = ic.IntentClassifier.load()
+            probe = clf.classify("show me the tool manifest")
+        intent_classifier = {
+            "ready": clf.is_ready(),
+            "classes": len(clf.classes),
+            "semantic_centroids": bool(getattr(clf, "_semantic", False)),
+            "coreml_model_loaded": bool(getattr(clf, "_coreml", None) is not None),
+            "semantic_path_reported_via_eye_status": bool(semantic_eye.get("up", False)),
+            "probe": {
+                "label": probe.label,
+                "confidence": probe.confidence,
+                "method": probe.method,
+                "plan_only": probe.plan_only,
+            },
+        }
+    except Exception as exc:
+        intent_classifier = {
+            "ready": False,
+            "classes": 0,
+            "semantic_centroids": False,
+            "coreml_model_loaded": False,
+            "reason": f"{type(exc).__name__}: {exc}",
+        }
+
+    present = [row for row in entries if row["present"]]
+    converted = [row for row in entries if row["coreml_package"]]
+    return {
+        "schema": "lgwks.model_hub.doctor.v1",
+        "models_dir": str(_models_dir()),
+        "catalog": entries,
+        "summary": {
+            "catalog_models": len(entries),
+            "present_models": len(present),
+            "coreml_packages": len(converted),
+        },
+        "conversion": {
+            "python": f"{getattr(sys.version_info, 'major', sys.version_info[0])}.{getattr(sys.version_info, 'minor', sys.version_info[1])}",
+            "eligible": py_ok,
+            "reason": py_reason,
+            "coremltools": coreml,
+        },
+        "intent_classifier": intent_classifier,
+        "foundation": foundation,
+        "semantic_eye": semantic_eye,
+        "next_step": (
+            "Semantic local path is active."
+            if semantic_eye.get("up") and intent_classifier.get("semantic_centroids")
+            else "Run `python scripts/setup_models.py all tiny-bert` for local classifier weights; keep Ollama up for semantic embeddings."
+        ),
+    }
 
 
 def scrub_model_dir(model_dir: Path) -> dict[str, Any]:
@@ -147,13 +279,12 @@ def convert_to_coreml(
         output_path = model_dir.with_suffix(".mlpackage")
 
     # coremltools binary wheels are not available for Python 3.13+ as of 2024-Q2.
-    if sys.version_info >= (3, 13):
+    py_ok, py_reason = _python_coreml_eligible()
+    if not py_ok:
         return {
             "ok": True,
             "path": "",
-            "reason": "skipped: CoreML conversion requires Python <=3.12 (detected {}.{}).".format(
-                sys.version_info.major, sys.version_info.minor
-            ),
+            "reason": f"skipped: {py_reason}",
         }
 
     try:
@@ -213,6 +344,12 @@ def train_text_classifier(
     Returns {ok, path, reason, accuracy}."""
     if len(texts) != len(labels):
         return {"ok": False, "path": "", "reason": "texts and labels must have same length"}
+    if len(texts) < 4 or len(set(labels)) < 2:
+        return {
+            "ok": False,
+            "path": "",
+            "reason": "need at least 4 rows across 2 labels for a meaningful local fine-tune",
+        }
 
     loaded = load_model(model_name)
     if not loaded["ok"]:
@@ -301,7 +438,7 @@ def main(argv: list[str] | None = None) -> int:
     import argparse
 
     p = argparse.ArgumentParser(prog="lgwks_model_hub", description="repo-resident model loader")
-    p.add_argument("action", choices=["list", "load", "convert", "train"])
+    p.add_argument("action", choices=["list", "load", "convert", "train", "doctor"])
     p.add_argument("--model", default="tiny-bert", help="model name from catalog")
     p.add_argument("--texts", help="JSON file with list of strings for training")
     p.add_argument("--labels", help="JSON file with list of labels for training")
@@ -336,6 +473,10 @@ def main(argv: list[str] | None = None) -> int:
         r = train_text_classifier(texts, labels, model_name=args.model, output_name=args.output)
         print(json.dumps(r, indent=2))
         return 0 if r["ok"] else 1
+
+    if args.action == "doctor":
+        print(json.dumps(doctor(), indent=2))
+        return 0
 
     return 1
 

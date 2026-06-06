@@ -13,6 +13,13 @@ python scripts/setup_models.py all tiny-bert
 
 This downloads from HuggingFace Hub, scrubs non-essential files, and converts to CoreML `.mlpackage`.
 
+To inspect the entire local ML path without guessing:
+
+```bash
+./lgwks model-hub doctor
+./lgwks doctor
+```
+
 ## Git LFS
 
 Binary weight files (>100MB) are tracked via git-lfs. Ensure LFS is installed:

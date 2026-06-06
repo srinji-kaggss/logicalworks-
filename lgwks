@@ -1287,6 +1287,10 @@ def build_parser() -> argparse.ArgumentParser:
     import lgwks_capture
     lgwks_capture.add_parser(sub)
 
+    # jepa — multi-view package surface over capture + portal
+    import lgwks_jepa
+    lgwks_jepa.add_parser(sub)
+
     # entity-graph — offline document entity graph builder (T1 regex / T2 CoreML / T3 Foundation Models)
     import lgwks_entity_graph
     lgwks_entity_graph.add_parser(sub)
@@ -1482,6 +1486,29 @@ def _doctor_dispatch(args) -> int:
             ok = False
     except Exception as exc:
         checks.append({"name": "models_dir", "want": "readable", "got": str(exc), "ok": False})
+        ok = False
+
+    # 4b. ML pipeline doctor (advisory: deterministic fallback is acceptable)
+    try:
+        import lgwks_model_hub as mh
+        report = mh.doctor()
+        clf = report.get("intent_classifier", {})
+        eye = report.get("semantic_eye", {})
+        foundation = report.get("foundation", {})
+        checks.append({
+            "name": "ml_pipeline",
+            "want": "deterministic minimum; semantic local path optional",
+            "got": (
+                f"intent_ready={clf.get('ready', False)}, "
+                f"coreml_loaded={clf.get('coreml_model_loaded', False)}, "
+                f"eye_up={eye.get('up', False)}, "
+                f"foundation_models={foundation.get('foundation_models', False)}, "
+                f"natural_language={foundation.get('natural_language', False)}"
+            ),
+            "ok": bool(clf.get("ready", False)),
+        })
+    except Exception as exc:
+        checks.append({"name": "ml_pipeline", "want": "reportable", "got": str(exc), "ok": False})
         ok = False
 
     # 5. Session directory writable

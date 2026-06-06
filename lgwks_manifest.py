@@ -123,7 +123,7 @@ _VERB_META: dict[str, dict] = {
     },
     "model-hub": {
         "intent": "list, load, convert, or train repo-resident local models",
-        "args": {"action": "list|load|convert|train", "--model": "catalog name"},
+        "args": {"action": "list|load|convert|train|doctor", "--model": "catalog name"},
         "output": "model status JSON or model catalog lines",
         "tokens": "none",
     },
@@ -419,6 +419,26 @@ _VERB_META: dict[str, dict] = {
         "intent": "show a stored capture packet by key",
         "args": {"key": "capture:<hash>"},
         "output": "stored lgwks.capture.v1 packet",
+        "tokens": "none",
+    },
+    "jepa build": {
+        "intent": "compile multiple raw views into one deterministic JEPA package with machine and human projections",
+        "args": {"--intent": "inline world-model dump", "--view-file": "repeatable raw view file",
+                 "--context-file": "repeatable support file", "--repo": "optional repo binding",
+                 "--no-capture": "skip substrate pass and package views only"},
+        "output": "stored lgwks.jepa.v1 packet with latent anchors, machine packet, and human projection",
+        "tokens": "none",
+    },
+    "jepa show": {
+        "intent": "show a stored JEPA package by key",
+        "args": {"key": "jepa:<hash>"},
+        "output": "stored lgwks.jepa.v1 packet",
+        "tokens": "none",
+    },
+    "jepa doctor": {
+        "intent": "report whether the JEPA runtime ingredients and current ML gaps are actually present",
+        "args": {},
+        "output": "lgwks.jepa.doctor.v1 readiness report",
         "tokens": "none",
     },
     # ── review ──
