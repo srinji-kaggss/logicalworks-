@@ -214,3 +214,170 @@ The system is successful when:
 3. Add continuation command that emits compact AI stream
 4. Add event ledger for `seed -> continue -> outcome`
 5. Benchmark against raw-chat continuation
+
+## 9. OSS incorporation policy
+
+Open source should reduce implementation work, but not replace the `lgwks` ontology.
+
+Rules:
+
+1. Port behavior, not branding.
+2. Strip developer-facing narrative down to machine/product contracts.
+3. Preserve attribution and license obligations.
+4. Prefer borrowing seams/patterns over copying repo structure wholesale.
+5. Unlicensed or unclear-license repos are research references only, not source donors.
+
+Current assessment:
+
+- `JosefAlbers/mlx-code` is Apache-2.0 and functionally relevant.
+- `JosefAlbers/pvm` is MIT and functionally relevant.
+- `ginwind/VLA-JEPA` is relevant as a research reference, but no verified repo license is currently locked in this spec, so it should not be treated as a code donor yet.
+
+See also:
+
+- `docs/oss-porting-mac-jepa-2026-06-06.md`
+
+## 10. Product patterns worth absorbing from Factory
+
+Factory is useful here primarily as a product reference for reducing context tax.
+
+Relevant patterns:
+
+1. session search / resume
+- search across prior sessions, documents, and tool outputs
+- maps to `seed ls` + `seed continue`
+
+2. forkable continuation
+- resume one thread, fork it into a new branch of work
+- maps to `seed continue --fork`
+
+3. worktree-isolated sessions
+- keep risky continuation work out of the main checkout
+- maps to the `seed continue` shell and future continuation workspace
+
+4. interactive vs headless symmetry
+- one product, two surfaces:
+  - interactive continuation
+  - non-interactive automation
+- maps to `seed continue` and future `seed exec`
+
+5. mission mode
+- structured multi-step orchestration with worker roles
+- maps to future `seed continue --mission`
+
+6. readiness scoring
+- not just "can the agent run?"
+- but "is this repo/package mature enough for higher autonomy?"
+- maps to a future `seed readiness` / `jepa readiness`
+
+The important point:
+
+```text
+we should absorb the continuation ergonomics
+without adopting Factory's product language or visual structure
+```
+
+## 11. Beginner ingress constraints
+
+The Termdock beginner guide is useful mainly as a reminder that most users do not want a capability map first. They want one obvious door.
+
+Relevant product lessons:
+
+1. one command should feel sufficient
+- users should not need to choose between `capture`, `portal`, `jepa`, `substrate`, and `memory`
+- this reinforces `seed` as the main product verb
+
+2. the system should assume intent language, not file discipline
+- "build this idea", "organize these notes", "continue the thing from yesterday"
+- product language must accept vague asks and route them into machine structure
+
+3. basic terminal literacy is a ceiling for beginners
+- four-command mental models matter
+- product surface should avoid requiring users to reason about paths, worktrees, or schema names up front
+
+4. the core promise is working state, not explanation
+- the user should get a package, a continuation path, and a visible next action
+- documentation can explain later
+
+Implication for `lgwks`:
+
+```text
+seed is not just an alias
+it is the anti-tax membrane between human intent and machine ontology
+```
+
+## 12. Operator and trust-calibration constraints
+
+As the system gets better, the bottleneck shifts from generation to operator attention.
+
+Relevant product lessons:
+
+1. human-time becomes the new bottleneck
+- faster generation does not remove review, routing, or decision pressure
+- `lgwks` should optimize operator attention, not just model throughput
+
+2. the moat is not the base model
+- durable value comes from:
+  - grounding corpora
+  - schemas
+  - outcome-linked event history
+  - human judgement encoded into packages and reviews
+
+3. silent failure is worse than visible failure
+- seed/package continuations need checks that surface:
+  - missing sources
+  - stale repo bindings
+  - contradictions
+  - unverified transformations
+
+4. confident-but-wrong runs need preview gates
+- high-impact actions should support:
+  - preview
+  - sample review
+  - explicit promote/apply
+
+Implication for `lgwks`:
+
+```text
+the system should save tokens
+but spend operator attention exactly at the irreversible edge
+```
+
+## 13. Agent-first CLI constraints
+
+The machine-facing `lgwks` surface should be reviewable by downstream agents and humans without chat reconstruction.
+
+Relevant product lessons:
+
+1. structured output first, prose second
+- commands should expose stable machine-readable output
+- human summaries are projections, not the primary contract
+
+2. scope before side effects
+- higher-risk commands should declare intended files, resources, and external calls before mutation
+- unknown scope should fail closed
+
+3. dry-run and preview should be first-class
+- users and agents should be able to ask:
+  - what will this touch?
+  - what will it emit?
+  - what validations will run?
+
+4. capabilities should be introspectable
+- agent-facing commands should make modes, schemas, and expected artifacts discoverable
+
+5. every important run should emit an evidence pack
+- minimum pack:
+  - intent
+  - scope
+  - planned operations
+  - validations
+  - warnings
+  - final outputs
+
+Implication for `lgwks`:
+
+```text
+reviewability is not a nice-to-have
+it is part of the machine contract
+```

@@ -33,3 +33,34 @@ Messy notes, keep until cleaned.
   - one canonical package, many projections
 - biggest benchmark:
   - does this kill the 250k-token intent recovery tax?
+- josef useful:
+  - worktree isolation
+  - resume shell
+  - backend seam
+  - mac local runtime mindset
+- ginwind useful:
+  - research shape for latent world model over action
+  - benchmark mindset
+- do not treat unclear-license research repos as code donors
+- factory useful:
+  - session search
+  - resume/fork
+  - worktree isolation
+  - mission mode
+  - readiness scoring
+- termdock useful:
+  - one obvious door
+  - four-command mental model
+  - non-engineer promise is "describe the thing, get working state"
+  - beginner surface should hide ontology until needed
+- simon useful:
+  - operator-first framing
+  - human experience/data as moat above commodity models
+  - agent-readable site layer
+  - preview gates and silent-failure paranoia
+- propel useful:
+  - reviewability as CLI design requirement
+  - explicit scope before mutation
+  - dry-run + diff preview
+  - typed errors
+  - evidence packs
