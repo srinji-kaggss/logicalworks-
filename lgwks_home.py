@@ -903,7 +903,7 @@ def _browser_entryway(on: bool) -> int:
                 if label == "repl":
                     try:
                         import lgwks_repl
-                        lgwks_repl.run_repl()
+                        lgwks_repl.run_repl(repo_path=str(selected_repo) if selected_repo else ".")
                     except Exception as e:
                         print(fg(f"  · repl error: {type(e).__name__}: {e}", AMBER, on=on), file=sys.stderr)
                 elif label == "doctor":

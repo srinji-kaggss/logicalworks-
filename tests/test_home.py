@@ -335,3 +335,29 @@ def test_repo_for_command_coverage():
     for verb in ("doctor", "jarvis", "akinator", "fetch", "crawl", "plan", "pr", "issue"):
         assert home._repo_for_command(verb, repo) == []
 
+
+def test_browser_repl_uses_selected_repo():
+    """L0: pressing 'r' from home with a selected repo passes that repo to run_repl.
+    Regression: previously run_repl() was called with no args, so it fell back to
+    cwd and printed 'not a git repo' even though a project was picked."""
+    fake_repo = Path("/tmp/fake-repo")
+    with patch("lgwks_home.sys.stdin.isatty", return_value=True):
+        with patch("lgwks_home._ask", side_effect=["r", "q"]):
+            with patch("lgwks_home.print"):
+                with patch("lgwks_home._detect_repo_context", return_value=(fake_repo, [])):
+                    with patch("lgwks_repl.run_repl") as mock_repl:
+                        home._browser_entryway(on=False)
+    mock_repl.assert_called_once_with(repo_path=str(fake_repo))
+
+
+def test_browser_repl_without_repo_uses_cwd():
+    """L0: pressing 'r' when no repo is selected passes '.' so run_repl uses cwd.
+    Must press 'n' first to exit no_repo screen and enter home mode."""
+    with patch("lgwks_home.sys.stdin.isatty", return_value=True):
+        with patch("lgwks_home._ask", side_effect=["n", "r", "q"]):
+            with patch("lgwks_home.print"):
+                with patch("lgwks_home._detect_repo_context", return_value=(None, [])):
+                    with patch("lgwks_repl.run_repl") as mock_repl:
+                        home._browser_entryway(on=False)
+    mock_repl.assert_called_once_with(repo_path=".")
+
