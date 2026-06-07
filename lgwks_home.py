@@ -426,7 +426,7 @@ def _quick_actions_for_repo(repo: Path | None) -> list[tuple[str, str, str, list
     ]
     if repo:
         actions.append(("g", "gh issues", "open issues on GitHub", ["lgwks", "gh", "issues", "--repo", str(repo)]))
-        actions.append(("v", "viz", "open graph visualization", ["lgwks", "graph", "viz", "--serve", "--repo", str(repo)]))
+        actions.append(("v", "viz", "open graph visualization", []))
         actions.append(("r", "repl", "interactive harness", []))
     else:
         actions.append(("r", "repl", "interactive harness", []))
@@ -921,6 +921,16 @@ def _browser_entryway(on: bool) -> int:
                 elif label == "doctor":
                     _print_doctor(on)
                     _pause(on)
+                elif label == "viz":
+                    try:
+                        import lgwks_graph as gmod
+                        import lgwks_graph_viz as viz
+                        graph = gmod.get_graph(selected_repo)
+                        browser = viz.GraphBrowser(graph, on=on)
+                        browser.run()
+                    except Exception as e:
+                        print(fg(f"  · viz error: {type(e).__name__}: {e}", AMBER, on=on), file=sys.stderr)
+                        _pause(on)
                 elif argv:
                     _run(_resolve_argv(argv))
                     _pause(on)

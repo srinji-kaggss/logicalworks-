@@ -170,7 +170,7 @@ class ReplCompleter:
 
 # ── special commands ─────────────────────────────────────────────────────────
 
-_SPECIALS = [".help", ".quit", ".history", ".repo", ".refresh", ".graph"]
+_SPECIALS = [".help", ".quit", ".history", ".repo", ".refresh", ".graph", ".viz"]
 
 
 def _cmd_help() -> None:
@@ -208,6 +208,7 @@ _SPECIAL_HELP: dict[str, str] = {
     ".repo": "show current repo path",
     ".refresh": "reload the graph from disk",
     ".graph": "print graph stats",
+    ".viz": "launch interactive visual graph browser",
 }
 
 
@@ -437,6 +438,19 @@ def run_repl(repo_path: str = ".", no_color: bool = False, *, welcome_hint: str 
             s = ctx.stats()
             for k, v in s.items():
                 print(f"  {k}: {v}")
+            continue
+        if line == ".viz":
+            if not ctx.graph:
+                print("  no graph loaded. Please load a valid repository.")
+            else:
+                try:
+                    import lgwks_ui as ui
+                    on = ui.color_on()
+                except Exception:
+                    on = True
+                import lgwks_graph_viz as viz
+                browser = viz.GraphBrowser(ctx.graph, on=on)
+                browser.run()
             continue
         if line.startswith("!"):
             # shell escape — parsed via shlex (no shell=True) to block injection

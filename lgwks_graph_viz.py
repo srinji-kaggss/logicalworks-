@@ -34,6 +34,7 @@ from typing import Any
 from urllib.parse import parse_qs, urlparse
 
 import lgwks_graph as gmod
+import lgwks_ui as ui
 
 ROOT = Path(__file__).resolve().parent
 
@@ -609,28 +610,527 @@ class VizHandler(http.server.BaseHTTPRequestHandler):
 
     @staticmethod
     def _to_dot(graph: gmod.Graph) -> str:
-        lines = ["digraph lgwks {", "  rankdir=LR;", "  node [shape=box, fontname=\"monospace\", fontsize=10];"]
-        kind_color = {"file": "#3b82f6", "config": "#22c55e", "data": "#f97316"}
-        for nid, node in graph.nodes.items():
-            color = kind_color.get(node.kind, "#6b7280")
-            label = nid.split("/")[-1] if "/" in nid else nid
-            lines.append(f'  "{nid}" [label="{label}", color="{color}", fontcolor="#e2e8f0"];')
-        for e in graph.edges:
-            style = {"import": "solid", "call": "dashed", "inherit": "dotted", "contains": "solid"}.get(e.kind, "solid")
-            lines.append(f'  "{e.source}" -> "{e.target}" [style={style}, color="#64748b", fontsize=9];')
-        lines.append("}")
-        return "\n".join(lines)
+        return graph.to_dot()
+
+
+# ── renderers ──────────────────────────────────────────────────────────────────
+
+class GraphRenderer:
+    """ASCII/Unicode tree rendering of a Graph subgraph."""
+
+    def render_tree(self, graph: gmod.Graph, root_ids: list[str], depth: int = 3, *, on: bool = True, node_indices: dict[str, int] | None = None) -> list[str]:
+        """Return lines of Unicode box-drawing text."""
+        pageranks = graph.pagerank()
+        betweennesses = graph.betweenness_centrality()
+        
+        pr_thresh = max(pageranks.values()) * 0.3 if pageranks else 0.1
+        bc_thresh = max(betweennesses.values()) * 0.3 if betweennesses else 0.1
+        
+        lines: list[str] = []
+        visited: set[str] = set()
+
+        def _build_tree(node_id: str, current_depth: int, prefix: str, is_last: bool):
+            if node_id not in graph.nodes:
+                return
+            
+            node = graph.nodes[node_id]
+            pr = pageranks.get(node_id, 0.0)
+            bc = betweennesses.get(node_id, 0.0)
+            
+            is_orphan = len(graph.neighbors(node_id)) == 0 and len(graph.predecessors(node_id)) == 0
+            
+            if is_orphan:
+                color = ui.SLATE_DIM
+            elif pr > pr_thresh:
+                color = ui.EMERALD
+            elif bc > bc_thresh:
+                color = ui.AMBER
+            else:
+                color = ui.CREAM
+            
+            node_label = node_id.split("/")[-1] if "/" in node_id else node_id
+            if node_indices is not None and node_id in node_indices:
+                idx = node_indices[node_id]
+                node_label = f"[{idx}] {node_label}"
+                
+            connector = ""
+            if current_depth > 0:
+                connector = "┗━ " if is_last else "┣━ "
+            
+            line_str = f"{prefix}{connector}{ui.fg(node_label, color, on=on, bold=(pr > pr_thresh))}"
+            if current_depth == 0:
+                line_str = f"{ui.fg('▸', ui.EMERALD, on=on)} {line_str}"
+            lines.append(line_str)
+            
+            if current_depth >= depth:
+                return
+            
+            if node_id in visited:
+                if current_depth < depth:
+                    child_prefix = prefix + ("   " if is_last else "┃  ")
+                    lines.append(f"{child_prefix}┗━ {ui.fg('↺ cycle', ui.SLATE_DIM, on=on)}")
+                return
+            
+            visited.add(node_id)
+            
+            successors = graph.neighbors(node_id)
+            if not successors:
+                return
+                
+            child_prefix = prefix + ("   " if is_last else "┃  ") if current_depth > 0 else "  "
+            
+            for idx, succ in enumerate(successors):
+                _build_tree(succ, current_depth + 1, child_prefix, idx == len(successors) - 1)
+
+        for root in root_ids:
+            _build_tree(root, 0, "", True)
+            
+        return lines
+
+    def render_impact_heatmap(self, graph: gmod.Graph, scores: dict[str, float], *, on: bool = True) -> list[str]:
+        """Render nodes colored by impact score (0→green, 1→red)."""
+        lines: list[str] = []
+        sorted_scores = sorted(scores.items(), key=lambda x: -x[1])
+        for nid, val in sorted_scores:
+            if nid not in graph.nodes:
+                continue
+            if val >= 0.75:
+                color = ui.RUST
+            elif val >= 0.25:
+                color = ui.AMBER
+            else:
+                color = ui.CREAM_DIM
+            
+            filled = round(val * 10)
+            meter = "█" * filled + "░" * (10 - filled)
+            meter_colored = ui.fg(meter, color, on=on)
+            
+            node_label = nid.split("/")[-1] if "/" in nid else nid
+            line = f"  {ui.fg('┃', ui.SLATE, on=on)} {ui.fg(node_label.ljust(30), ui.CREAM, on=on)} {meter_colored} {ui.fg(f'{val:.2f}', ui.CREAM, on=on)}"
+            lines.append(line)
+        return lines
+
+    def render_path(self, graph: gmod.Graph, path: list[str], *, on: bool = True) -> list[str]:
+        """Render a shortest path as a connected chain."""
+        lines: list[str] = []
+        if not path:
+            return [f"  {ui.fg('┃', ui.SLATE, on=on)} {ui.fg('No path found', ui.RUST, on=on)}"]
+            
+        for i, nid in enumerate(path):
+            node = graph.nodes.get(nid)
+            node_label = nid.split("/")[-1] if "/" in nid else nid
+            kind_color = {"file": ui.CREAM, "config": ui.EMERALD, "data": ui.AMBER}.get(node.kind if node else "", ui.CREAM)
+            
+            if i > 0:
+                lines.append(f"  {ui.fg('┃', ui.SLATE, on=on)}   {ui.fg('▾', ui.EMERALD, on=on)}")
+                
+            lines.append(f"  {ui.fg('┃', ui.SLATE, on=on)} {ui.fg(node_label, kind_color, on=on, bold=True)}")
+            
+        return lines
+
+    def render_query_table(self, result: gmod.QueryResult, max_width: int = 80, *, on: bool = True) -> list[str]:
+        """Render QueryResult as a bordered table."""
+        lines: list[str] = []
+        if not result.columns or not result.rows:
+            return [f"  {ui.fg('┃', ui.SLATE, on=on)} {ui.fg('No results', ui.SLATE_DIM, on=on)}"]
+
+        col_widths: dict[str, int] = {}
+        for col in result.columns:
+            col_widths[col] = len(col)
+            
+        for row in result.rows:
+            for col in result.columns:
+                val = row.get(col, "")
+                if isinstance(val, dict) and "id" in val:
+                    val_str = val["id"]
+                else:
+                    val_str = str(val)
+                col_widths[col] = max(col_widths[col], len(val_str))
+                
+        header_parts = []
+        for col in result.columns:
+            header_parts.append(ui.fg(col.ljust(col_widths[col]), ui.EMERALD, on=on, bold=True))
+        lines.append("  " + ui.fg("┃", ui.SLATE, on=on) + " " + " │ ".join(header_parts) + " ")
+        
+        divider_parts = ["─" * col_widths[col] for col in result.columns]
+        lines.append("  " + ui.fg("┃", ui.SLATE, on=on) + " " + "─┼─".join(divider_parts) + " ")
+        
+        for row in result.rows:
+            row_parts = []
+            for col in result.columns:
+                val = row.get(col, "")
+                if isinstance(val, dict) and "id" in val:
+                    val_str = val["id"]
+                else:
+                    val_str = str(val)
+                row_parts.append(ui.fg(val_str.ljust(col_widths[col]), ui.CREAM, on=on))
+            lines.append("  " + ui.fg("┃", ui.SLATE, on=on) + " " + " │ ".join(row_parts) + " ")
+            
+        return lines
+
+
+# ── DotExporter ─────────────────────────────────────────────────────────────
+
+class DotExporter:
+    """Export Graph or subgraph to DOT format for Graphviz."""
+    def export(self, graph: gmod.Graph, path: Path | str, highlight: set[str] | None = None) -> None:
+        """Write .dot file. highlight = node IDs to color differently."""
+        dot_str = graph.to_dot(highlight=highlight)
+        if str(path) == "-":
+            sys.stdout.write(dot_str + "\n")
+        else:
+            p = Path(path)
+            p.parent.mkdir(parents=True, exist_ok=True)
+            p.write_text(dot_str, encoding="utf-8")
+            print(f"[viz] exported graph to {p}")
+
+
+# ── interactive browser ─────────────────────────────────────────────────────
+
+class GraphBrowser:
+    """Stack-based TUI for graph exploration. Same navigation model as lgwks_home browser."""
+    def __init__(self, graph: gmod.Graph, on: bool = True):
+        self.graph = graph
+        self.on = on
+        self.stack: list[tuple[str, ...]] = [("overview",)]
+        self.selected_node: str | None = None
+        self.renderer = GraphRenderer()
+
+    def run(self) -> int:
+        """Main loop. Returns exit code."""
+        if not sys.stdin.isatty():
+            return 0
+            
+        self._render_current()
+        
+        while True:
+            try:
+                choice = self._ask("")
+            except (EOFError, KeyboardInterrupt):
+                print()
+                return 0
+                
+            low = choice.strip().lower()
+            if low in ("q", "quit", "exit"):
+                print(f"  {ui.fg('← stay curious.', ui.EMERALD_DIM, on=self.on)}")
+                return 0
+                
+            if low in ("b", "back"):
+                if len(self.stack) > 1:
+                    self.stack.pop()
+                    print(ui.spine(on=self.on))
+                    self._render_current()
+                else:
+                    print(f"  {ui.fg('already at overview', ui.CREAM_DIM, on=self.on)}")
+                continue
+                
+            frame = self.stack[-1]
+            frame_type = frame[0]
+            
+            if frame_type == "overview":
+                if low == "s":
+                    query = self._ask("search pattern: ")
+                    matched = [nid for nid in self.graph.nodes if query.lower() in nid.lower()]
+                    if not matched:
+                        print(f"  {ui.fg('No nodes match pattern', ui.RUST, on=self.on)}")
+                    elif len(matched) == 1:
+                        self.stack.append(("node", matched[0]))
+                        self._render_current()
+                    else:
+                        self.stack.append(("search_results", query, tuple(matched)))
+                        self._render_current()
+                elif low == "p":
+                    src = self._ask("source node id: ")
+                    dst = self._ask("target node id: ")
+                    self.stack.append(("path", src, dst))
+                    self._render_current()
+                elif low == "q":
+                    self._render_query_input()
+                elif low.isdigit():
+                    idx = int(low) - 1
+                    top_nodes = self._get_overview_nodes()
+                    if 0 <= idx < len(top_nodes):
+                        self.stack.append(("node", top_nodes[idx]))
+                        self._render_current()
+                else:
+                    if choice in self.graph.nodes:
+                        self.stack.append(("node", choice))
+                        self._render_current()
+                    else:
+                        print(f"  {ui.fg('Invalid option or unknown node', ui.RUST, on=self.on)}")
+                        
+            elif frame_type == "search_results":
+                if low.isdigit():
+                    idx = int(low) - 1
+                    nodes = frame[2]
+                    if 0 <= idx < len(nodes):
+                        self.stack.append(("node", nodes[idx]))
+                        self._render_current()
+                else:
+                    print(f"  {ui.fg('Invalid option', ui.RUST, on=self.on)}")
+                    
+            elif frame_type == "node":
+                node_id = frame[1]
+                if low == "n":
+                    self.stack.append(("neighbors", node_id))
+                    self._render_current()
+                elif low == "i":
+                    self.stack.append(("impact", node_id))
+                    self._render_current()
+                elif low == "p":
+                    dst = self._ask("target node id: ")
+                    self.stack.append(("path", node_id, dst))
+                    self._render_current()
+                elif low == "e":
+                    self.stack.append(("expand", node_id))
+                    self._render_current()
+                else:
+                    print(f"  {ui.fg('Invalid option', ui.RUST, on=self.on)}")
+
+            elif frame_type in ("neighbors", "impact", "path", "expand", "query_results"):
+                if low.isdigit():
+                    idx = int(low) - 1
+                    nodes_list = self._get_frame_nodes(frame)
+                    if 0 <= idx < len(nodes_list):
+                        self.stack.append(("node", nodes_list[idx]))
+                        self._render_current()
+                else:
+                    print(f"  {ui.fg('Invalid option', ui.RUST, on=self.on)}")
+
+    def _ask(self, prompt: str) -> str:
+        sys.stdout.write(f"  {ui.fg('┃', ui.SLATE, on=self.on)} {prompt}")
+        sys.stdout.flush()
+        return sys.stdin.readline().strip()
+
+    def _get_overview_nodes(self) -> list[str]:
+        pageranks = self.graph.pagerank()
+        sorted_nodes = sorted(self.graph.nodes.keys(), key=lambda x: -pageranks.get(x, 0.0))
+        return sorted_nodes[:15]
+
+    def _get_frame_nodes(self, frame: tuple[str, ...]) -> list[str]:
+        frame_type = frame[0]
+        if frame_type == "neighbors":
+            node_id = frame[1]
+            out_n = self.graph.neighbors(node_id)
+            in_n = self.graph.predecessors(node_id)
+            return sorted(list(set(out_n + in_n)))
+        elif frame_type == "impact":
+            node_id = frame[1]
+            scores = self.graph.change_propagation_score([node_id], radius=3)
+            return sorted(scores.keys(), key=lambda x: -scores[x])
+        elif frame_type == "path":
+            path = self.graph.shortest_path(frame[1], frame[2])
+            return path if path else []
+        elif frame_type == "expand":
+            node_id = frame[1]
+            visited = set()
+            nodes_list = []
+            def collect(nid, d):
+                if d > 2 or nid in visited: return
+                visited.add(nid)
+                nodes_list.append(nid)
+                for s in self.graph.neighbors(nid):
+                    collect(s, d+1)
+            collect(node_id, 0)
+            return sorted(nodes_list)
+        elif frame_type == "query_results":
+            rows = frame[1]
+            nodes = set()
+            for row in rows:
+                for v in row.values():
+                    if isinstance(v, dict) and "id" in v:
+                        nodes.add(v["id"])
+                    elif isinstance(v, str) and v in self.graph.nodes:
+                        nodes.add(v)
+            return sorted(list(nodes))
+        return []
+
+    def _render_current(self) -> None:
+        frame = self.stack[-1]
+        frame_type = frame[0]
+        
+        subtitle = " · ".join(str(x) for x in frame[1:]) if len(frame) > 1 else ""
+        for line in ui.band(f"graph {frame_type}", subtitle, on=self.on):
+            print(line)
+            
+        if frame_type == "overview":
+            self._render_overview()
+        elif frame_type == "search_results":
+            self._render_search_results(frame[1], frame[2])
+        elif frame_type == "node":
+            self._render_node_detail(frame[1])
+        elif frame_type == "neighbors":
+            self._render_neighbors_view(frame[1])
+        elif frame_type == "impact":
+            self._render_impact_view(frame[1])
+        elif frame_type == "path":
+            self._render_path_view(frame[1], frame[2])
+        elif frame_type == "expand":
+            self._render_expand_view(frame[1])
+        elif frame_type == "query_results":
+            self._render_query_results_view(frame[1], frame[2])
+
+    def _render_overview(self) -> None:
+        s = self.graph.stats()
+        print(f"  {ui.fg('┃', ui.SLATE, on=self.on)} {ui.fg('Stats:', ui.CREAM_DIM, on=self.on)} {s['nodes']} nodes · {s['edges']} edges")
+        print(ui.spine(on=self.on))
+        
+        top_nodes = self._get_overview_nodes()
+        print(f"  {ui.fg('┃', ui.SLATE, on=self.on)} {ui.fg('Top modules (by PageRank):', ui.CREAM_DIM, on=self.on)}")
+        for idx, nid in enumerate(top_nodes):
+            pr = self.graph.pagerank().get(nid, 0.0)
+            node_label = nid.split("/")[-1] if "/" in nid else nid
+            print(f"  {ui.fg('┃', ui.SLATE, on=self.on)}   {idx+1:2d} {ui.fg(node_label.ljust(30), ui.CREAM, on=self.on)} {ui.fg(f'PR: {pr:.4f}', ui.SLATE_DIM, on=self.on)}")
+            
+        print(ui.spine(on=self.on))
+        print(f"  {ui.fg('┃', ui.SLATE, on=self.on)} {ui.fg('q quit  ·  [number] pick node  ·  s search  ·  p path  ·  q query', ui.SLATE_DIM, on=self.on)}")
+
+    def _render_search_results(self, query: str, results: tuple[str, ...]) -> None:
+        print(f"  {ui.fg('┃', ui.SLATE, on=self.on)} {ui.fg(f'Search results for {query!r}:', ui.CREAM_DIM, on=self.on)}")
+        for idx, nid in enumerate(results[:15]):
+            node_label = nid.split("/")[-1] if "/" in nid else nid
+            print(f"  {ui.fg('┃', ui.SLATE, on=self.on)}   {idx+1:2d} {ui.fg(node_label.ljust(30), ui.CREAM, on=self.on)} {ui.fg(nid, ui.SLATE_DIM, on=self.on)}")
+        if len(results) > 15:
+            print(f"  {ui.fg('┃', ui.SLATE, on=self.on)}   ... and {len(results)-15} more")
+        print(ui.spine(on=self.on))
+        print(f"  {ui.fg('┃', ui.SLATE, on=self.on)} {ui.fg('b back  ·  [number] pick node', ui.SLATE_DIM, on=self.on)}")
+
+    def _render_node_detail(self, node_id: str) -> None:
+        node = self.graph.nodes.get(node_id)
+        if not node:
+            print(f"  {ui.fg('┃', ui.SLATE, on=self.on)} {ui.fg('Node not found', ui.RUST, on=self.on)}")
+            return
+            
+        pr = self.graph.pagerank().get(node_id, 0.0)
+        bc = self.graph.betweenness_centrality().get(node_id, 0.0)
+        
+        print(f"  {ui.fg('┃', ui.SLATE, on=self.on)} {ui.fg('ID:', ui.CREAM_DIM, on=self.on)} {ui.fg(node_id, ui.CREAM, on=self.on)}")
+        print(f"  {ui.fg('┃', ui.SLATE, on=self.on)} {ui.fg('Kind:', ui.CREAM_DIM, on=self.on)} {ui.fg(node.kind, ui.EMERALD, on=self.on)}")
+        
+        print(ui.scale("PageRank", pr, "low", "high", on=self.on))
+        print(ui.scale("Betweenness", bc, "low", "high", on=self.on))
+        
+        if node.defines:
+            print(f"  {ui.fg('┃', ui.SLATE, on=self.on)} {ui.fg('Defines:', ui.CREAM_DIM, on=self.on)} {', '.join(node.defines)}")
+        if node.calls:
+            print(f"  {ui.fg('┃', ui.SLATE, on=self.on)} {ui.fg('Calls:', ui.CREAM_DIM, on=self.on)} {', '.join(node.calls[:5])}{'...' if len(node.calls) > 5 else ''}")
+        if node.imports:
+            print(f"  {ui.fg('┃', ui.SLATE, on=self.on)} {ui.fg('Imports:', ui.CREAM_DIM, on=self.on)} {', '.join(node.imports[:5])}{'...' if len(node.imports) > 5 else ''}")
+            
+        print(ui.spine(on=self.on))
+        print(f"  {ui.fg('┃', ui.SLATE, on=self.on)} {ui.fg('b back  ·  [n] neighbors  ·  [i] impact  ·  [p] path to...  ·  [e] expand', ui.SLATE_DIM, on=self.on)}")
+
+    def _render_neighbors_view(self, node_id: str) -> None:
+        out_n = self.graph.neighbors(node_id)
+        in_n = self.graph.predecessors(node_id)
+        all_n = sorted(list(set(out_n + in_n)))
+        
+        print(f"  {ui.fg('┃', ui.SLATE, on=self.on)} {ui.fg('Neighbors of:', ui.CREAM_DIM, on=self.on)} {ui.fg(node_id, ui.CREAM, on=self.on)}")
+        print(ui.spine(on=self.on))
+        
+        for idx, nid in enumerate(all_n):
+            node_label = nid.split("/")[-1] if "/" in nid else nid
+            direction = ""
+            if nid in out_n and nid in in_n:
+                direction = "⇄"
+            elif nid in out_n:
+                direction = "▸"
+            else:
+                direction = "◂"
+            print(f"  {ui.fg('┃', ui.SLATE, on=self.on)}   {idx+1:2d} {ui.fg(direction, ui.EMERALD, on=self.on)} {ui.fg(node_label.ljust(30), ui.CREAM, on=self.on)} {ui.fg(nid, ui.SLATE_DIM, on=self.on)}")
+            
+        print(ui.spine(on=self.on))
+        print(f"  {ui.fg('┃', ui.SLATE, on=self.on)} {ui.fg('b back  ·  [number] pick node', ui.SLATE_DIM, on=self.on)}")
+
+    def _render_impact_view(self, node_id: str) -> None:
+        print(f"  {ui.fg('┃', ui.SLATE, on=self.on)} {ui.fg('Change propagation impact radius (r=3) for:', ui.CREAM_DIM, on=self.on)} {ui.fg(node_id, ui.CREAM, on=self.on)}")
+        print(ui.spine(on=self.on))
+        
+        scores = self.graph.change_propagation_score([node_id], radius=3)
+        heatmap_lines = self.renderer.render_impact_heatmap(self.graph, scores, on=self.on)
+        for line in heatmap_lines[:15]:
+            print(line)
+        if len(heatmap_lines) > 15:
+            print(f"  {ui.fg('┃', ui.SLATE, on=self.on)}   ... and {len(heatmap_lines)-15} more")
+            
+        print(ui.spine(on=self.on))
+        print(f"  {ui.fg('┃', ui.SLATE, on=self.on)} {ui.fg('b back  ·  [number] pick node', ui.SLATE_DIM, on=self.on)}")
+
+    def _render_path_view(self, src: str, dst: str) -> None:
+        print(f"  {ui.fg('┃', ui.SLATE, on=self.on)} {ui.fg('Shortest path:', ui.CREAM_DIM, on=self.on)} {ui.fg(src, ui.CREAM, on=self.on)} → {ui.fg(dst, ui.CREAM, on=self.on)}")
+        print(ui.spine(on=self.on))
+        
+        path = self.graph.shortest_path(src, dst)
+        path_lines = self.renderer.render_path(self.graph, path, on=self.on)
+        for line in path_lines:
+            print(line)
+            
+        print(ui.spine(on=self.on))
+        print(f"  {ui.fg('┃', ui.SLATE, on=self.on)} {ui.fg('b back  ·  [number] pick node', ui.SLATE_DIM, on=self.on)}")
+
+    def _render_expand_view(self, node_id: str) -> None:
+        print(f"  {ui.fg('┃', ui.SLATE, on=self.on)} {ui.fg('Expanded tree view for:', ui.CREAM_DIM, on=self.on)} {ui.fg(node_id, ui.CREAM, on=self.on)}")
+        print(ui.spine(on=self.on))
+        
+        nodes_list = self._get_frame_nodes(("expand", node_id))
+        node_indices = {nid: idx + 1 for idx, nid in enumerate(nodes_list)}
+        
+        tree_lines = self.renderer.render_tree(self.graph, [node_id], depth=2, on=self.on, node_indices=node_indices)
+        for line in tree_lines:
+            print(f"  {ui.fg('┃', ui.SLATE, on=self.on)} {line}")
+            
+        print(ui.spine(on=self.on))
+        print(f"  {ui.fg('┃', ui.SLATE, on=self.on)} {ui.fg('b back  ·  [number] pick node', ui.SLATE_DIM, on=self.on)}")
+
+    def _render_query_input(self) -> None:
+        print(f"  {ui.fg('┃', ui.SLATE, on=self.on)} {ui.fg('Enter Cypher-like query:', ui.CREAM_DIM, on=self.on)}")
+        query_str = self._ask("query: ")
+        if not query_str:
+            return
+        try:
+            res = gmod.execute_query(self.graph, query_str)
+            self.stack.append(("query_results", res.rows, res.columns))
+            self._render_current()
+        except Exception as e:
+            print(f"  {ui.fg('┃', ui.SLATE, on=self.on)} {ui.fg(f'Query error: {e}', ui.RUST, on=self.on)}")
+
+    def _render_query_results_view(self, rows: list[dict[str, Any]], columns: list[str]) -> None:
+        print(f"  {ui.fg('┃', ui.SLATE, on=self.on)} {ui.fg('Query Results:', ui.CREAM_DIM, on=self.on)}")
+        print(ui.spine(on=self.on))
+        
+        col_with_idx = ["#"] + columns
+        rows_with_idx = []
+        for idx, row in enumerate(rows):
+            new_row = row.copy()
+            new_row["#"] = str(idx + 1)
+            rows_with_idx.append(new_row)
+            
+        res = gmod.QueryResult(col_with_idx, rows_with_idx)
+        table_lines = self.renderer.render_query_table(res, on=self.on)
+        for line in table_lines:
+            print(line)
+            
+        print(ui.spine(on=self.on))
+        print(f"  {ui.fg('┃', ui.SLATE, on=self.on)} {ui.fg('b back  ·  [number] pick node in results', ui.SLATE_DIM, on=self.on)}")
 
 
 # ── CLI ─────────────────────────────────────────────────────────────────────
 
 def viz_command(args) -> int:
-    """CLI entry point: lgwks graph viz --serve [--port 3000] [--repo .] [--export-html file]"""
+    """CLI entry point for lgwks graph viz."""
     repo = Path(getattr(args, "repo", ".")).resolve()
     adapter = GraphDataAdapter(repo)
     if not adapter.load():
         print(f"[viz] not a git repo or graph load failed: {repo}", file=sys.stderr)
         return 1
+
+    # Export DOT
+    export_dot = getattr(args, "export_dot", None)
+    if export_dot:
+        hl = set(getattr(args, "files", "").split(",")) if getattr(args, "files", "") else None
+        exporter = DotExporter()
+        exporter.export(adapter.graph, export_dot, highlight=hl)
+        return 0
 
     # Export HTML
     export_path = getattr(args, "export_html", None)
@@ -640,30 +1140,35 @@ def viz_command(args) -> int:
         print(f"[viz] exported static HTML to {path}")
         return 0
 
-    # Serve
-    if not getattr(args, "serve", False):
-        print("[viz] use --serve to start the visualization server", file=sys.stderr)
-        return 1
+    # Serve HTTP
+    if getattr(args, "serve", False) or (getattr(args, "graph_command", None) == "viz" and getattr(args, "serve", False)):
+        port = getattr(args, "port", 3000)
+        VizHandler.adapter = adapter
 
-    port = getattr(args, "port", 3000)
-    VizHandler.adapter = adapter
-
-    with socketserver.TCPServer(("", port), VizHandler) as httpd:
-        url = f"http://localhost:{port}"
-        print(f"[viz] serving graph for {repo.name} at {url}")
-        print(f"[viz] nodes: {len(adapter.graph.nodes)}, edges: {len(adapter.graph.edges)}")
-        print(f"[viz] press Ctrl+C to stop")
-        # Open browser in background thread so server stays responsive
-        def _open():
-            import time
-            time.sleep(0.5)
-            webbrowser.open(url)
-        threading.Thread(target=_open, daemon=True).start()
-        try:
-            httpd.serve_forever()
-        except KeyboardInterrupt:
-            print("\n[viz] stopped")
-            return 0
+        with socketserver.TCPServer(("", port), VizHandler) as httpd:
+            url = f"http://localhost:{port}"
+            print(f"[viz] serving graph for {repo.name} at {url}")
+            print(f"[viz] nodes: {len(adapter.graph.nodes)}, edges: {len(adapter.graph.edges)}")
+            print(f"[viz] press Ctrl+C to stop")
+            def _open():
+                import time
+                time.sleep(0.5)
+                webbrowser.open(url)
+            threading.Thread(target=_open, daemon=True).start()
+            try:
+                httpd.serve_forever()
+            except KeyboardInterrupt:
+                print("\n[viz] stopped")
+                return 0
+            
+    # Otherwise: Terminal TUI (GraphBrowser)
+    try:
+        on = ui.color_on()
+    except Exception:
+        on = True
+        
+    browser = GraphBrowser(adapter.graph, on=on)
+    return browser.run()
 
 
 if __name__ == "__main__":
@@ -673,5 +1178,7 @@ if __name__ == "__main__":
     parser.add_argument("--serve", action="store_true", help="start HTTP server")
     parser.add_argument("--port", type=int, default=3000, help="server port")
     parser.add_argument("--export-html", help="export static HTML file")
+    parser.add_argument("--export-dot", help="export DOT file (use - for stdout)")
+    parser.add_argument("--files", default="", help="comma-separated changed files to highlight in DOT export")
     args = parser.parse_args()
     sys.exit(viz_command(args))

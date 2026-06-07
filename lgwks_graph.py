@@ -168,6 +168,26 @@ class Graph:
             "orphan_nodes": [n.id for n in self.nodes.values() if not self.neighbors(n.id) and not self.predecessors(n.id)],
         }
 
+    def to_dot(self, highlight: set[str] | None = None) -> str:
+        """Export the graph to Graphviz DOT format."""
+        lines = ["digraph lgwks {", "  rankdir=LR;", "  node [shape=box, fontname=\"monospace\", fontsize=10];"]
+        kind_color = {"file": "#3b82f6", "config": "#22c55e", "data": "#f97316"}
+        hl = highlight or set()
+        for nid, node in self.nodes.items():
+            if nid in hl:
+                color = "#f59e0b"
+                fontcolor = "#f59e0b"
+            else:
+                color = kind_color.get(node.kind, "#6b7280")
+                fontcolor = "#e2e8f0"
+            label = nid.split("/")[-1] if "/" in nid else nid
+            lines.append(f'  "{nid}" [label="{label}", color="{color}", fontcolor="{fontcolor}"];')
+        for e in self.edges:
+            style = {"import": "solid", "call": "dashed", "inherit": "dotted", "contains": "solid"}.get(e.kind, "solid")
+            lines.append(f'  "{e.source}" -> "{e.target}" [style={style}, color="#64748b", fontsize=9];')
+        lines.append("}")
+        return "\n".join(lines)
+
     # ── complex graph math (deterministic, no AI/LLM) ─────────────────────
 
     def pagerank(self, damping: float = 0.85, iterations: int = 30) -> dict[str, float]:
@@ -1498,7 +1518,7 @@ def graph_command(args) -> int:
         return 0
 
     # ── viz (visualization) ────────────────────────────────────────────────────
-    if getattr(args, "viz", False):
+    if getattr(args, "graph_command", None) == "viz" or getattr(args, "viz", False):
         import lgwks_graph_viz as vizmod
         return vizmod.viz_command(args)
 
@@ -1538,3 +1558,12 @@ def add_graph_parser(subparsers) -> None:
     p.add_argument("--export-html", default="", help="export static HTML file (no server)")
     p.add_argument("--json", action="store_true", help="structured output (default when piped or LGWRS_MACHINE set)")
     p.set_defaults(func=graph_command)
+
+    gp = p.add_subparsers(dest="graph_command", required=False)
+    viz_parser = gp.add_parser("viz", help="interactive visual graph browser and exporter")
+    viz_parser.add_argument("--repo", default=".", help="repository path")
+    viz_parser.add_argument("--serve", action="store_true", help="start HTTP server instead of terminal TUI")
+    viz_parser.add_argument("--port", type=int, default=3000, help="server port")
+    viz_parser.add_argument("--export-html", help="export static HTML file")
+    viz_parser.add_argument("--export-dot", help="export DOT file (use - for stdout)")
+    viz_parser.add_argument("--files", default="", help="comma-separated changed files to highlight in DOT export")
