@@ -14,6 +14,7 @@ import hashlib
 import hmac
 import json
 import os
+import re
 import subprocess
 import sys
 import time
@@ -29,6 +30,8 @@ SCHEMA = "lgwks.axiom.harness.v0"
 RUN_ROOT = Path(".lgwks") / "axiom" / "runs"
 HARNESS_KEY = b"lgwks-axiom-harness-v0"
 HARNESS_GRANTS = frozenset({"observe", "diff", "test", "narrate"})
+MATRIX_SCHEMA = "lgwks.axiom.test_matrix.v0"
+MAX_TEST_TIMEOUT = 3600
 
 
 @dataclass(frozen=True)
@@ -36,6 +39,13 @@ class CapturedFact:
     kind: str
     label: str
     value: dict[str, Any]
+
+
+@dataclass(frozen=True)
+class TestSpec:
+    label: str
+    command: str
+    timeout: int
 
 
 def _utc() -> str:
@@ -153,7 +163,46 @@ def _repo_facts(repo: Path) -> list[CapturedFact]:
     return facts
 
 
-def _test_fact(command: str, repo: Path, timeout: int) -> CapturedFact:
+def _normalize_label(label: str) -> str:
+    clean = re.sub(r"[^A-Za-z0-9_.-]+", "-", label.strip()).strip("-")
+    if not clean:
+        raise ValueError("test label must not be empty")
+    return clean[:64]
+
+
+def _normalize_timeout(value: Any, default: int = 120) -> int:
+    try:
+        timeout = int(value if value is not None else default)
+    except Exception as exc:
+        raise ValueError(f"timeout must be an integer, got {value!r}") from exc
+    if timeout < 1 or timeout > MAX_TEST_TIMEOUT:
+        raise ValueError(f"timeout must be in 1..{MAX_TEST_TIMEOUT}, got {timeout}")
+    return timeout
+
+
+def load_test_matrix(path: Path, default_timeout: int = 120) -> list[TestSpec]:
+    payload = json.loads(path.read_text(encoding="utf-8"))
+    raw_tests = payload.get("tests") if isinstance(payload, dict) else payload
+    if not isinstance(raw_tests, list) or not raw_tests:
+        raise ValueError("test matrix requires a non-empty tests list")
+    tests: list[TestSpec] = []
+    seen: set[str] = set()
+    for index, item in enumerate(raw_tests):
+        if not isinstance(item, dict):
+            raise ValueError(f"test #{index} must be an object")
+        label = _normalize_label(str(item.get("label", "")))
+        if label in seen:
+            raise ValueError(f"duplicate test label: {label}")
+        seen.add(label)
+        command = str(item.get("command", "")).strip()
+        if not command:
+            raise ValueError(f"test {label!r} command must not be empty")
+        timeout = _normalize_timeout(item.get("timeout"), default_timeout)
+        tests.append(TestSpec(label, command, timeout))
+    return tests
+
+
+def _test_fact(command: str, repo: Path, timeout: int, label: str = "command") -> CapturedFact:
     started = time.time()
     try:
         proc = subprocess.run(
@@ -167,8 +216,9 @@ def _test_fact(command: str, repo: Path, timeout: int) -> CapturedFact:
         )
         return CapturedFact(
             "test",
-            "command",
+            label,
             {
+                "label": label,
                 "command": command,
                 "returncode": proc.returncode,
                 "elapsed_seconds": round(time.time() - started, 3),
@@ -179,8 +229,9 @@ def _test_fact(command: str, repo: Path, timeout: int) -> CapturedFact:
     except subprocess.TimeoutExpired as exc:
         return CapturedFact(
             "test",
-            "command",
+            label,
             {
+                "label": label,
                 "command": command,
                 "returncode": 124,
                 "elapsed_seconds": round(time.time() - started, 3),
@@ -190,7 +241,14 @@ def _test_fact(command: str, repo: Path, timeout: int) -> CapturedFact:
         )
 
 
-def build_capture(repo: Path, intent: str = "", test_command: str = "", timeout: int = 120, out_dir: Path | None = None) -> dict[str, Any]:
+def build_capture(
+    repo: Path,
+    intent: str = "",
+    test_command: str = "",
+    timeout: int = 120,
+    out_dir: Path | None = None,
+    test_specs: list[TestSpec] | None = None,
+) -> dict[str, Any]:
     repo = repo.resolve()
     run_id = _run_id(repo, intent)
     root = (out_dir or (repo / RUN_ROOT / run_id)).resolve()
@@ -204,7 +262,10 @@ def build_capture(repo: Path, intent: str = "", test_command: str = "", timeout:
     facts = _repo_facts(repo)
     if intent:
         facts.append(CapturedFact("intent", "operator", {"text": intent}))
-    if test_command:
+    if test_specs:
+        for spec in test_specs:
+            facts.append(_test_fact(spec.command, repo, spec.timeout, spec.label))
+    elif test_command:
         facts.append(_test_fact(test_command, repo, timeout))
 
     emissions = [genesis_record]
@@ -331,8 +392,8 @@ def check_narration(claim: str, emissions: list[dict[str, Any]]) -> dict[str, An
     if "test" in text and any(word in text for word in ("pass", "passed", "green")):
         if not test_facts:
             findings.append({"level": "pan_pan", "claim": "tests passed", "evidence": "no captured test command"})
-        elif not any(f.get("value", {}).get("returncode") == 0 for f in test_facts):
-            findings.append({"level": "mayday", "claim": "tests passed", "evidence": "captured test command did not pass"})
+        elif not all(f.get("value", {}).get("returncode") == 0 for f in test_facts):
+            findings.append({"level": "mayday", "claim": "tests passed", "evidence": "one or more captured test commands did not pass"})
     if any(word in text for word in ("changed", "modified", "implemented", "edited")):
         dirty = sum(int(f.get("value", {}).get("dirty_count", 0)) for f in status_facts)
         diff_files = sum(int(f.get("value", {}).get("file_count", 0)) for f in diff_facts)
@@ -397,6 +458,20 @@ def capture_command(args: argparse.Namespace) -> int:
     return 0
 
 
+def test_matrix_command(args: argparse.Namespace) -> int:
+    try:
+        specs = load_test_matrix(Path(args.file), args.timeout)
+        packet = build_capture(Path(args.repo), args.intent, out_dir=Path(args.out) if args.out else None, test_specs=specs)
+    except ValueError as exc:
+        print(json.dumps({"schema": MATRIX_SCHEMA, "ok": False, "error": str(exc)}, indent=2, sort_keys=True), file=sys.stderr)
+        return 1
+    packet["matrix"] = {"schema": MATRIX_SCHEMA, "tests": [asdict(spec) for spec in specs]}
+    packet_path = Path(packet["paths"]["packet"])
+    packet_path.write_text(json.dumps(packet, indent=2, sort_keys=True), encoding="utf-8")
+    _print_packet(packet, args.json or os.environ.get("LGWRS_MACHINE") == "1")
+    return 0
+
+
 def check_command(args: argparse.Namespace) -> int:
     result = check_narration(args.claim, _load_emissions(Path(args.run)))
     print(json.dumps(result, indent=2, sort_keys=True))
@@ -438,6 +513,15 @@ def add_parser(subparsers) -> None:
     replay.add_argument("run", help="run directory or emissions.jsonl path")
     replay.add_argument("--json", action="store_true", help="structured output (default; flag exists for caller intent)")
     replay.set_defaults(func=replay_command)
+
+    matrix = sp.add_parser("test-matrix", help="run a bounded labeled test matrix and capture it as Axiom IR")
+    matrix.add_argument("--repo", default=".", help="repo to capture")
+    matrix.add_argument("--file", required=True, help="JSON test matrix file")
+    matrix.add_argument("--intent", default="", help="operator intent/narration seed")
+    matrix.add_argument("--timeout", type=int, default=120, help="default timeout for tests missing timeout")
+    matrix.add_argument("--out", default="", help="optional output directory; default .lgwks/axiom/runs/<id>")
+    matrix.add_argument("--json", action="store_true", help="print full packet JSON")
+    matrix.set_defaults(func=test_matrix_command)
 
     doctor = sp.add_parser("doctor", help="check Axiom byte-layer independence")
     doctor.add_argument("--repo", default=".", help="repo root")

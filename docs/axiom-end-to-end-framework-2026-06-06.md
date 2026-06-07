@@ -67,6 +67,13 @@ classloader/harness equivalent: it observes the host world and turns facts into 
 - Reconstructs the hash-chained fabric log.
 - Fails if emission bytes, CIDs, or `fabric-log.json` were tampered.
 
+`lgwks axiom test-matrix`
+
+- Runs a JSON-declared set of labeled test commands.
+- Normalizes labels into stable ASCII-safe identifiers.
+- Bounds every command with a timeout and captures bounded output tails.
+- Emits ordinary replayable Axiom evidence capsules.
+
 `lgwks axiom doctor`
 
 - Verifies the byte layer does not import upward `lgwks*` modules.
@@ -91,5 +98,5 @@ classloader/harness equivalent: it observes the host world and turns facts into 
 1. Add `axiom` to the agent manifest with expected JSON schemas.
 2. Add a run index under `.lgwks/runs/` that links session/capture/portal/axiom packets by CID.
 3. Replace string narration matching with typed narration capsules.
-4. Add `lgwks axiom test-matrix` for multiple test commands with bounded output, timeout, and deterministic
-   labels.
+4. Replace string narration matching with typed narration capsules.
+5. Replace shell command strings with typed argv vectors for the test matrix.

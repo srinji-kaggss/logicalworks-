@@ -87,6 +87,46 @@ class TestAxiomHarness(unittest.TestCase):
         self.assertFalse(result["ok"])
         self.assertFalse(result["log_matches"])
 
+    def test_test_matrix_runs_multiple_labeled_tests_and_replays(self):
+        repo = _repo()
+        matrix = repo / "matrix.json"
+        matrix.write_text(json.dumps({
+            "schema": lgwks_axiom.MATRIX_SCHEMA,
+            "tests": [
+                {"label": "unit", "command": "python -c 'print(123)'", "timeout": 10},
+                {"label": "compile check", "command": "python -m py_compile app.py", "timeout": 10},
+            ],
+        }), encoding="utf-8")
+        specs = lgwks_axiom.load_test_matrix(matrix)
+        self.assertEqual([s.label for s in specs], ["unit", "compile-check"])
+        out = repo / "matrix-out"
+        packet = lgwks_axiom.build_capture(repo, "matrix", out_dir=out, test_specs=specs)
+        self.assertTrue(lgwks_axiom.replay_emissions(out)["ok"])
+        tests = [e["fact"] for e in packet["emissions"] if e.get("fact", {}).get("kind") == "test"]
+        self.assertEqual([t["label"] for t in tests], ["unit", "compile-check"])
+        self.assertTrue(lgwks_axiom.check_narration("tests passed", packet["emissions"])["ok"])
+
+    def test_test_matrix_duplicate_labels_rejected(self):
+        repo = _repo()
+        matrix = repo / "matrix.json"
+        matrix.write_text(json.dumps([
+            {"label": "unit", "command": "python -c 'print(1)'"},
+            {"label": "unit", "command": "python -c 'print(2)'"},
+        ]), encoding="utf-8")
+        with self.assertRaises(ValueError):
+            lgwks_axiom.load_test_matrix(matrix)
+
+    def test_test_matrix_one_failure_makes_tests_passed_diverge(self):
+        repo = _repo()
+        specs = [
+            lgwks_axiom.TestSpec("ok", "python -c 'print(1)'", 10),
+            lgwks_axiom.TestSpec("fail", "python -c 'raise SystemExit(7)'", 10),
+        ]
+        packet = lgwks_axiom.build_capture(repo, "matrix", test_specs=specs)
+        result = lgwks_axiom.check_narration("tests passed", packet["emissions"])
+        self.assertFalse(result["ok"])
+        self.assertEqual(result["findings"][0]["level"], "mayday")
+
     def test_axiom_layer_has_no_lgwks_imports(self):
         report = lgwks_axiom.independence_report(Path(__file__).resolve().parents[1])
         self.assertTrue(report["independent"], report["violations"])

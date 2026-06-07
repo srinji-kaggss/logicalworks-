@@ -482,6 +482,14 @@ _VERB_META: dict[str, dict] = {
         "output": "lgwks.axiom.replay.v0 with CID, chain, and fabric-log verification",
         "tokens": "none",
     },
+    "axiom test-matrix": {
+        "intent": "run a bounded labeled test matrix and capture it as replayable Axiom IR",
+        "args": {"--repo": "repo path", "--file": "lgwks.axiom.test_matrix.v0 JSON",
+                 "--intent": "operator context", "--timeout": "default timeout seconds",
+                 "--out": "run output directory", "--json": "full packet JSON"},
+        "output": "lgwks.axiom.harness.v0 packet with matrix metadata and test evidence capsules",
+        "tokens": "none (deterministic local test commands)",
+    },
     "axiom doctor": {
         "intent": "verify Axiom byte-layer independence from lgwks/CLI imports",
         "args": {"--repo": "repo root", "--json": "structured output"},
