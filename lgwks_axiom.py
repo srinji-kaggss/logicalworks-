@@ -58,6 +58,14 @@ def classify_argv(argv: tuple[str, ...], repo: Path) -> dict[str, Any]:
 
     # Allow list
     if cmd in ("python", "python3", "uv", "pytest"):
+        # HARDEN: Block dangerous python -c
+        if cmd in ("python", "python3") and "-c" in argv:
+            idx = argv.index("-c")
+            if idx + 1 < len(argv):
+                code = argv[idx + 1]
+                for dangerous in ("import os", "import subprocess", "import shutil", "eval(", "exec("):
+                    if dangerous in code:
+                        return {"risk": "blocked", "reason": f"dangerous code in {cmd} -c"}
         return {"risk": "safe"}
     
     if cmd == "git":
@@ -147,6 +155,10 @@ def write_run_index(root: Path, run_id: str, artifacts: list[dict[str, str]]) ->
     # Merge artifacts by kind and path
     artifact_map = {(a["kind"], a["path"]): a for a in existing_artifacts}
     for a in artifacts:
+        # HARDEN: Ensure path is relative and safe
+        p = Path(a["path"])
+        if p.is_absolute() or ".." in p.parts:
+            continue
         artifact_map[(a["kind"], a["path"])] = a
     
     index["artifacts"] = sorted(
@@ -154,6 +166,7 @@ def write_run_index(root: Path, run_id: str, artifacts: list[dict[str, str]]) ->
         key=lambda x: (x["kind"], x["path"])
     )
     
+    root.mkdir(parents=True, exist_ok=True)
     index_path.write_text(json.dumps(index, indent=2, sort_keys=True), encoding="utf-8")
     return index
 
@@ -468,11 +481,16 @@ def _test_fact(
     policy: dict[str, Any] | None = None
 ) -> CapturedFact:
     started = time.time()
-    shell = isinstance(command, str)
+    # HARDEN: Consistently use argv list, never shell=True
+    if isinstance(command, str):
+        argv = command.split()
+    else:
+        argv = list(command)
+
     try:
         proc = subprocess.run(
-            command,
-            shell=shell,
+            argv,
+            shell=False,
             cwd=repo,
             capture_output=True,
             text=True,
@@ -481,8 +499,8 @@ def _test_fact(
         )
         val = {
             "label": label,
-            "command": _command_display(command),
-            "argv": list(command) if not shell else [],
+            "command": " ".join(argv),
+            "argv": argv,
             "returncode": proc.returncode,
             "elapsed_seconds": round(time.time() - started, 3),
             "stdout_tail": (proc.stdout or "")[-2000:],
@@ -494,8 +512,8 @@ def _test_fact(
     except subprocess.TimeoutExpired as exc:
         val = {
             "label": label,
-            "command": _command_display(command),
-            "argv": list(command) if not shell else [],
+            "command": " ".join(argv),
+            "argv": argv,
             "returncode": 124,
             "elapsed_seconds": round(time.time() - started, 3),
             "stdout_tail": (exc.stdout or "")[-2000:] if isinstance(exc.stdout, str) else "",
@@ -694,7 +712,13 @@ def replay_run(root: Path) -> dict[str, Any]:
             index = json.loads(index_path.read_text(encoding="utf-8"))
             for art in index.get("artifacts", []):
                 if art["kind"] in ("emissions", "narration_emissions"):
-                    emission_paths.append((art["kind"], root / art["path"]))
+                    p = Path(art["path"])
+                    # HARDEN: Path traversal protection
+                    if p.is_absolute() or ".." in p.parts:
+                        continue
+                    full_path = root / p
+                    if full_path.exists():
+                        emission_paths.append((art["kind"], full_path))
         except Exception:
             pass
     

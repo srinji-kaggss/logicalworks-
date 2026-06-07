@@ -247,6 +247,47 @@ class TestAxiomHarness(unittest.TestCase):
         with self.assertRaises(lgwks_axiom.CommandPolicyError):
             lgwks_axiom.build_capture(repo, test_command="rm x", allow_risky=True)
 
+    def test_classify_argv_blocks_dangerous_python_code(self):
+        repo = Path("/tmp/repo")
+        self.assertEqual(
+            lgwks_axiom.classify_argv(("python", "-c", "import os; os.system('ls')"), repo)["risk"],
+            "blocked"
+        )
+        self.assertEqual(
+            lgwks_axiom.classify_argv(("python", "-c", "eval('1+1')"), repo)["risk"],
+            "blocked"
+        )
+
+    def test_write_run_index_blocks_path_traversal(self):
+        repo = _repo()
+        out = repo / "out"
+        lgwks_axiom.write_run_index(out, "run1", [
+            {"kind": "malicious", "path": "/etc/passwd"},
+            {"kind": "malicious2", "path": "../../../etc/passwd"},
+            {"kind": "safe", "path": "safe.json"}
+        ])
+        index = json.loads((out / "index.json").read_text(encoding="utf-8"))
+        kinds = {a["kind"] for a in index["artifacts"]}
+        self.assertNotIn("malicious", kinds)
+        self.assertNotIn("malicious2", kinds)
+        self.assertIn("safe", kinds)
+
+    def test_replay_run_blocks_path_traversal(self):
+        repo = _repo()
+        out = repo / "out"
+        out.mkdir()
+        (out / "index.json").write_text(json.dumps({
+            "schema": "lgwks.axiom.run_index.v0",
+            "run_id": "run1",
+            "artifacts": [
+                {"kind": "emissions", "path": "/etc/passwd"}
+            ]
+        }))
+        # Should not attempt to read /etc/passwd
+        result = lgwks_axiom.replay_run(out)
+        self.assertFalse(result["ok"])
+        self.assertEqual(len(result["artifacts"]), 0)
+
     def test_replay_all_covers_capture_and_narration(self):
         repo = _repo()
         out = repo / "out"
