@@ -466,7 +466,8 @@ _VERB_META: dict[str, dict] = {
     "axiom capture": {
         "intent": "capture repo/test facts as verified Axiom capsules rooted in harness genesis",
         "args": {"--repo": "repo path", "--intent": "operator context", "--test": "optional test command",
-                 "--timeout": "test timeout seconds", "--out": "run output directory", "--json": "full packet JSON"},
+                 "--timeout": "test timeout seconds", "--out": "run output directory",
+                 "--allow-risky": "allow non-standard commands", "--json": "full packet JSON"},
         "output": "lgwks.axiom.harness.v0 packet + emissions.jsonl + fabric-log.json",
         "tokens": "none (deterministic capture; optional local test command)",
     },
@@ -486,15 +487,17 @@ _VERB_META: dict[str, dict] = {
     },
     "axiom replay": {
         "intent": "reload persisted Axiom emissions and reconstruct the verified fabric",
-        "args": {"run": "run directory or emissions.jsonl", "--json": "structured output"},
-        "output": "lgwks.axiom.replay.v0 with CID, chain, and fabric-log verification",
+        "args": {"run": "run directory or emissions.jsonl", "--all": "replay all artifacts in run",
+                 "--json": "structured output"},
+        "output": "lgwks.axiom.replay.v0 or lgwks.axiom.replay_all.v0 with verification",
         "tokens": "none",
     },
     "axiom test-matrix": {
         "intent": "run a bounded labeled test matrix and capture it as replayable Axiom IR",
         "args": {"--repo": "repo path", "--file": "lgwks.axiom.test_matrix.v0 JSON",
                  "--intent": "operator context", "--timeout": "default timeout seconds",
-                 "--out": "run output directory", "--json": "full packet JSON"},
+                 "--out": "run output directory", "--allow-risky": "allow non-standard commands",
+                 "--json": "full packet JSON"},
         "output": "lgwks.axiom.harness.v0 packet with matrix metadata and test evidence capsules",
         "tokens": "none (deterministic local test commands)",
     },
@@ -502,6 +505,12 @@ _VERB_META: dict[str, dict] = {
         "intent": "verify Axiom byte-layer independence from lgwks/CLI imports",
         "args": {"--repo": "repo root", "--json": "structured output"},
         "output": "lgwks.axiom.doctor.v0 independence report",
+        "tokens": "none",
+    },
+    "axiom index": {
+        "intent": "print the unified run index JSON",
+        "args": {"run": "run directory", "--json": "structured output"},
+        "output": "lgwks.axiom.run_index.v0 JSON object",
         "tokens": "none",
     },
     "refactor add_types": {

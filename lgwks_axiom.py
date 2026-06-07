@@ -15,6 +15,8 @@ import hmac
 import json
 import os
 import re
+import shlex
+import shutil
 import subprocess
 import sys
 import time
@@ -36,6 +38,84 @@ MAX_TEST_TIMEOUT = 3600
 MAX_MATRIX_TESTS = 50
 MAX_JSON_BYTES = 1_000_000
 NARRATION_KINDS = frozenset({"tests_passed", "worktree_clean", "files_changed", "work_implemented"})
+
+
+class CommandPolicyError(ValueError):
+    pass
+
+
+def _argv_from_command(command: str | tuple[str, ...] | list[str]) -> tuple[str, ...]:
+    if isinstance(command, str):
+        try:
+            argv = tuple(shlex.split(command))
+        except ValueError as exc:
+            raise CommandPolicyError(f"invalid command quoting: {exc}") from exc
+    else:
+        argv = tuple(str(part) for part in command)
+    if not argv or any(part == "" for part in argv):
+        raise CommandPolicyError("command argv must not be empty")
+    return argv
+
+
+def classify_argv(argv: tuple[str, ...], repo: Path) -> dict[str, Any]:
+    if not argv:
+        return {"risk": "blocked", "reason": "empty command"}
+    
+    cmd = argv[0]
+    cmd_name = Path(cmd).name
+    repo_abs = repo.resolve()
+    cmd_is_untrusted_absolute = False
+    if os.path.isabs(cmd) and not _is_relative_to(Path(cmd).resolve(), repo_abs):
+        resolved_tool = shutil.which(cmd_name)
+        cmd_is_untrusted_absolute = resolved_tool is None or Path(resolved_tool).resolve() != Path(cmd).resolve()
+    
+    # Check for absolute paths outside repo
+    for arg in argv[1:]:
+        if os.path.isabs(arg):
+            arg_path = Path(arg).resolve()
+            if not _is_relative_to(arg_path, repo_abs):
+                return {"risk": "blocked", "reason": f"absolute path outside repo: {arg}"}
+
+    # Allow list
+    if cmd_name in ("python", "python3", "uv", "pytest"):
+        if cmd_is_untrusted_absolute:
+            return {"risk": "risky", "reason": f"absolute command path is not the PATH-resolved {cmd_name}: {cmd}"}
+        # HARDEN: Block dangerous python -c
+        if cmd_name in ("python", "python3") and "-c" in argv:
+            idx = argv.index("-c")
+            if idx + 1 < len(argv):
+                code = argv[idx + 1]
+                for dangerous in ("import os", "import subprocess", "import shutil", "eval(", "exec("):
+                    if dangerous in code:
+                        return {"risk": "blocked", "reason": f"dangerous code in {cmd_name} -c"}
+        return {"risk": "safe"}
+    
+    if cmd_name == "git":
+        if cmd_is_untrusted_absolute:
+            return {"risk": "risky", "reason": f"absolute command path is not the PATH-resolved git: {cmd}"}
+        if len(argv) > 1:
+            sub = argv[1]
+            if sub in ("status", "diff", "log", "rev-parse"):
+                return {"risk": "safe"}
+            if sub == "branch" and "--show-current" in argv:
+                return {"risk": "safe"}
+            
+            # Block list for git
+            if sub in ("push", "reset", "checkout", "clean", "commit", "merge", "rebase"):
+                return {"risk": "blocked", "reason": f"destructive git command: {sub}"}
+        else:
+            return {"risk": "safe"} # bare git is safe (shows help)
+
+    # Block list
+    if cmd_name in ("rm", "mv", "chmod", "chown", "curl", "wget", "ssh", "scp"):
+        return {"risk": "blocked", "reason": f"blocked tool: {cmd_name}"}
+    
+    if cmd_name == "cp":
+        if any(arg in ("-r", "-R", "--recursive") for arg in argv):
+            return {"risk": "blocked", "reason": "recursive copy blocked"}
+        return {"risk": "safe"} # non-recursive cp is likely ok
+
+    return {"risk": "risky", "reason": "unknown command"}
 
 
 @dataclass(frozen=True)
@@ -78,6 +158,47 @@ def _sha(text: str, n: int = 16) -> str:
 def _run_id(repo: Path, intent: str) -> str:
     seed = f"{repo.resolve()}|{intent}|{time.time_ns()}"
     return f"axiom-{_sha(seed, 20)}"
+
+
+def write_run_index(root: Path, run_id: str, artifacts: list[dict[str, str]]) -> dict[str, Any]:
+    index_path = root / "index.json"
+    if index_path.exists():
+        try:
+            index = json.loads(index_path.read_text(encoding="utf-8"))
+        except Exception:
+            index = {}
+    else:
+        index = {}
+
+    index.setdefault("schema", "lgwks.axiom.run_index.v0")
+    index.setdefault("run_id", run_id)
+    index.setdefault("root", str(root))
+    index.setdefault("created_at", _utc())
+    existing_artifacts = index.get("artifacts", [])
+    if not isinstance(existing_artifacts, list):
+        existing_artifacts = []
+    
+    # Merge artifacts by kind and path
+    artifact_map = {
+        (a["kind"], a["path"]): a
+        for a in existing_artifacts
+        if isinstance(a, dict) and isinstance(a.get("kind"), str) and isinstance(a.get("path"), str)
+    }
+    for a in artifacts:
+        # HARDEN: Ensure path is relative and safe
+        p = Path(a["path"])
+        if p.is_absolute() or ".." in p.parts:
+            continue
+        artifact_map[(a["kind"], a["path"])] = a
+    
+    index["artifacts"] = sorted(
+        [v for v in artifact_map.values()],
+        key=lambda x: (x["kind"], x["path"])
+    )
+    
+    root.mkdir(parents=True, exist_ok=True)
+    index_path.write_text(json.dumps(index, indent=2, sort_keys=True), encoding="utf-8")
+    return index
 
 
 def _git(repo: Path, *args: str, timeout: int = 15) -> tuple[int, str, str]:
@@ -355,6 +476,18 @@ def build_narration_artifact(claim_text: str = "", claims_file: Path | None = No
         "\n".join(json.dumps(e, sort_keys=True) for e in emissions) + "\n",
         encoding="utf-8",
     )
+    (root / "narration-fabric-log.json").write_text(
+        json.dumps(artifact["fabric"], indent=2, sort_keys=True),
+        encoding="utf-8",
+    )
+    
+    # Update run index
+    write_run_index(root, f"narration-{_sha(json.dumps(narration, sort_keys=True), 20)}", [
+        {"kind": "narration", "path": "narration.json", "schema": NARRATION_SCHEMA},
+        {"kind": "narration_emissions", "path": "narration-emissions.jsonl"},
+        {"kind": "narration_fabric_log", "path": "narration-fabric-log.json"}
+    ])
+    
     return artifact
 
 
@@ -370,46 +503,51 @@ def _command_display(command: str | tuple[str, ...]) -> str:
     return command if isinstance(command, str) else " ".join(command)
 
 
-def _test_fact(command: str | tuple[str, ...], repo: Path, timeout: int, label: str = "command") -> CapturedFact:
+def _test_fact(
+    command: str | tuple[str, ...],
+    repo: Path,
+    timeout: int,
+    label: str = "command",
+    policy: dict[str, Any] | None = None
+) -> CapturedFact:
     started = time.time()
-    shell = isinstance(command, str)
+    argv = list(_argv_from_command(command))
+
     try:
         proc = subprocess.run(
-            command,
-            shell=shell,
+            argv,
+            shell=False,
             cwd=repo,
             capture_output=True,
             text=True,
             timeout=timeout,
             check=False,
         )
-        return CapturedFact(
-            "test",
-            label,
-            {
-                "label": label,
-                "command": _command_display(command),
-                "argv": list(command) if not shell else [],
-                "returncode": proc.returncode,
-                "elapsed_seconds": round(time.time() - started, 3),
-                "stdout_tail": (proc.stdout or "")[-2000:],
-                "stderr_tail": (proc.stderr or "")[-2000:],
-            },
-        )
+        val = {
+            "label": label,
+            "command": " ".join(argv),
+            "argv": argv,
+            "returncode": proc.returncode,
+            "elapsed_seconds": round(time.time() - started, 3),
+            "stdout_tail": (proc.stdout or "")[-2000:],
+            "stderr_tail": (proc.stderr or "")[-2000:],
+        }
+        if policy:
+            val["policy"] = policy
+        return CapturedFact("test", label, val)
     except subprocess.TimeoutExpired as exc:
-        return CapturedFact(
-            "test",
-            label,
-            {
-                "label": label,
-                "command": _command_display(command),
-                "argv": list(command) if not shell else [],
-                "returncode": 124,
-                "elapsed_seconds": round(time.time() - started, 3),
-                "stdout_tail": (exc.stdout or "")[-2000:] if isinstance(exc.stdout, str) else "",
-                "stderr_tail": "timeout",
-            },
-        )
+        val = {
+            "label": label,
+            "command": " ".join(argv),
+            "argv": argv,
+            "returncode": 124,
+            "elapsed_seconds": round(time.time() - started, 3),
+            "stdout_tail": (exc.stdout or "")[-2000:] if isinstance(exc.stdout, str) else "",
+            "stderr_tail": "timeout",
+        }
+        if policy:
+            val["policy"] = policy
+        return CapturedFact("test", label, val)
 
 
 def build_capture(
@@ -419,6 +557,7 @@ def build_capture(
     timeout: int = 120,
     out_dir: Path | None = None,
     test_specs: list[TestSpec] | None = None,
+    allow_risky: bool = False,
 ) -> dict[str, Any]:
     repo = repo.resolve()
     run_id = _run_id(repo, intent)
@@ -433,11 +572,27 @@ def build_capture(
     facts = _repo_facts(repo)
     if intent:
         facts.append(CapturedFact("intent", "operator", {"text": intent}))
-    if test_specs:
-        for spec in test_specs:
-            facts.append(_test_fact(spec.command, repo, spec.timeout, spec.label))
-    elif test_command:
-        facts.append(_test_fact(test_command, repo, timeout))
+    
+    specs = test_specs or []
+    if not specs and test_command:
+        specs = [TestSpec("command", _argv_from_command(test_command), timeout)]
+
+    for spec in specs:
+        policy = classify_argv(spec.command, repo)
+        if policy["risk"] == "blocked":
+            raise CommandPolicyError(f"Policy blocked command {spec.command!r}: {policy.get('reason')}")
+        
+        if policy["risk"] == "risky" and not allow_risky:
+            raise CommandPolicyError(
+                f"Policy flagged command {spec.command!r} as risky. "
+                "Use --allow-risky to proceed."
+            )
+        
+        # Record if allowed by flag
+        if policy["risk"] == "risky" and allow_risky:
+            policy["allowed_by"] = "flag"
+            
+        facts.append(_test_fact(spec.command, repo, spec.timeout, spec.label, policy=policy))
 
     emissions = [genesis_record]
     for fact in facts:
@@ -471,6 +626,14 @@ def build_capture(
     (root / "emissions.jsonl").write_text("\n".join(json.dumps(e, sort_keys=True) for e in emissions) + "\n", encoding="utf-8")
     (root / "fabric-log.json").write_text(json.dumps(packet["fabric"], indent=2, sort_keys=True), encoding="utf-8")
     (root / "packet.json").write_text(json.dumps(packet, indent=2, sort_keys=True), encoding="utf-8")
+    
+    # Update run index
+    write_run_index(root, run_id, [
+        {"kind": "capture", "path": "packet.json", "schema": SCHEMA},
+        {"kind": "emissions", "path": "emissions.jsonl"},
+        {"kind": "fabric_log", "path": "fabric-log.json"}
+    ])
+    
     return packet
 
 
@@ -520,7 +683,12 @@ def replay_emissions(path: Path) -> dict[str, Any]:
             continue
         replayed.append({"index": index, "cid": cid, "event": emission.get("event", ""), "ok": True})
 
-    expected_log_path = root / "fabric-log.json"
+    # Find expected log path based on emission file name
+    log_name = "fabric-log.json"
+    if path.name == "narration-emissions.jsonl":
+        log_name = "narration-fabric-log.json"
+    
+    expected_log_path = root / log_name
     expected_log: list[dict[str, Any]] | None = None
     log_matches = None
     if expected_log_path.exists():
@@ -549,6 +717,72 @@ def replay_emissions(path: Path) -> dict[str, Any]:
         "log_matches": log_matches,
         "failures": failures,
         "replayed": replayed,
+    }
+
+
+def replay_run(root: Path) -> dict[str, Any]:
+    """Replay all artifacts in a run directory."""
+    if not root.is_dir():
+        raise ValueError(f"not a directory: {root}")
+
+    index_path = root / "index.json"
+    emission_paths: list[tuple[str, Path]] = []
+
+    if index_path.exists():
+        try:
+            index = json.loads(index_path.read_text(encoding="utf-8"))
+            if not isinstance(index, dict) or index.get("schema") != "lgwks.axiom.run_index.v0":
+                return {
+                    "schema": "lgwks.axiom.replay_all.v0",
+                    "ok": False,
+                    "artifacts": [],
+                    "failures": [{"path": "index.json", "reason": "invalid run index schema"}],
+                }
+            for art in index.get("artifacts", []):
+                if not isinstance(art, dict):
+                    continue
+                kind = art.get("kind")
+                art_path = art.get("path")
+                if kind in ("emissions", "narration_emissions") and isinstance(art_path, str):
+                    p = Path(art_path)
+                    # HARDEN: Path traversal protection
+                    if p.is_absolute() or ".." in p.parts:
+                        continue
+                    full_path = root / p
+                    if full_path.exists():
+                        emission_paths.append((kind, full_path))
+        except Exception as exc:
+            return {
+                "schema": "lgwks.axiom.replay_all.v0",
+                "ok": False,
+                "artifacts": [],
+                "failures": [{"path": "index.json", "reason": f"{type(exc).__name__}: {exc}"}],
+            }
+    
+    if not emission_paths:
+        # Fallback detection
+        for p in (root / "emissions.jsonl", root / "narration-emissions.jsonl"):
+            if p.exists():
+                kind = "emissions" if p.name == "emissions.jsonl" else "narration"
+                emission_paths.append((kind, p))
+
+    results: list[dict[str, Any]] = []
+    overall_ok = True
+    for kind, path in emission_paths:
+        res = replay_emissions(path)
+        results.append({
+            "kind": "capture" if kind == "emissions" else "narration",
+            "ok": res["ok"],
+            "path": str(path.relative_to(root) if _is_relative_to(path, root) else path)
+        })
+        if not res["ok"]:
+            overall_ok = False
+
+    return {
+        "schema": "lgwks.axiom.replay_all.v0",
+        "ok": overall_ok and bool(results),
+        "artifacts": results,
+        "failures": [],
     }
 
 
@@ -637,7 +871,18 @@ def _print_packet(packet: dict[str, Any], as_json: bool) -> None:
 
 
 def capture_command(args: argparse.Namespace) -> int:
-    packet = build_capture(Path(args.repo), args.intent, args.test_command, args.timeout, Path(args.out) if args.out else None)
+    try:
+        packet = build_capture(
+            Path(args.repo),
+            args.intent,
+            args.test_command,
+            args.timeout,
+            Path(args.out) if args.out else None,
+            allow_risky=getattr(args, "allow_risky", False)
+        )
+    except CommandPolicyError as exc:
+        print(json.dumps({"ok": False, "error": str(exc)}, indent=2), file=sys.stderr)
+        return 1
     _print_packet(packet, args.json or os.environ.get("LGWRS_MACHINE") == "1")
     return 0
 
@@ -645,8 +890,14 @@ def capture_command(args: argparse.Namespace) -> int:
 def test_matrix_command(args: argparse.Namespace) -> int:
     try:
         specs = load_test_matrix(Path(args.file), args.timeout)
-        packet = build_capture(Path(args.repo), args.intent, out_dir=Path(args.out) if args.out else None, test_specs=specs)
-    except ValueError as exc:
+        packet = build_capture(
+            Path(args.repo),
+            args.intent,
+            out_dir=Path(args.out) if args.out else None,
+            test_specs=specs,
+            allow_risky=getattr(args, "allow_risky", False)
+        )
+    except (ValueError, CommandPolicyError) as exc:
         print(json.dumps({"schema": MATRIX_SCHEMA, "ok": False, "error": str(exc)}, indent=2, sort_keys=True), file=sys.stderr)
         return 1
     packet["matrix"] = {"schema": MATRIX_SCHEMA, "tests": [asdict(spec) for spec in specs]}
@@ -683,7 +934,11 @@ def check_command(args: argparse.Namespace) -> int:
 
 
 def replay_command(args: argparse.Namespace) -> int:
-    result = replay_emissions(Path(args.run))
+    run_path = Path(args.run)
+    if getattr(args, "all", False):
+        result = replay_run(run_path)
+    else:
+        result = replay_emissions(run_path)
     print(json.dumps(result, indent=2, sort_keys=True))
     return 0 if result["ok"] else 1
 
@@ -692,6 +947,24 @@ def doctor_command(args: argparse.Namespace) -> int:
     report = independence_report(Path(args.repo).resolve())
     print(json.dumps(report, indent=2, sort_keys=True))
     return 0 if report["independent"] else 1
+
+
+def index_command(args: argparse.Namespace) -> int:
+    run_dir = Path(args.run)
+    if not run_dir.is_dir():
+        print(json.dumps({"ok": False, "error": f"not a directory: {run_dir}"}, indent=2), file=sys.stderr)
+        return 1
+    index_path = run_dir / "index.json"
+    if not index_path.exists():
+        print(json.dumps({"ok": False, "error": f"index.json not found in {run_dir}"}, indent=2), file=sys.stderr)
+        return 1
+    try:
+        index = json.loads(index_path.read_text(encoding="utf-8"))
+        print(json.dumps(index, indent=2, sort_keys=True))
+        return 0
+    except Exception as exc:
+        print(json.dumps({"ok": False, "error": str(exc)}, indent=2), file=sys.stderr)
+        return 1
 
 
 def add_parser(subparsers) -> None:
@@ -704,6 +977,7 @@ def add_parser(subparsers) -> None:
     capture.add_argument("--test", dest="test_command", default="", help="optional test command to run and capture")
     capture.add_argument("--timeout", type=int, default=120, help="test command timeout in seconds")
     capture.add_argument("--out", default="", help="optional output directory; default .lgwks/axiom/runs/<id>")
+    capture.add_argument("--allow-risky", action="store_true", help="allow risky commands to proceed")
     capture.add_argument("--json", action="store_true", help="print full packet JSON")
     capture.set_defaults(func=capture_command)
 
@@ -716,6 +990,7 @@ def add_parser(subparsers) -> None:
 
     replay = sp.add_parser("replay", help="replay persisted emissions into a fresh verified fabric")
     replay.add_argument("run", help="run directory or emissions.jsonl path")
+    replay.add_argument("--all", action="store_true", help="replay all artifact types in the run")
     replay.add_argument("--json", action="store_true", help="structured output (default; flag exists for caller intent)")
     replay.set_defaults(func=replay_command)
 
@@ -725,6 +1000,7 @@ def add_parser(subparsers) -> None:
     matrix.add_argument("--intent", default="", help="operator intent/narration seed")
     matrix.add_argument("--timeout", type=int, default=120, help="default timeout for tests missing timeout")
     matrix.add_argument("--out", default="", help="optional output directory; default .lgwks/axiom/runs/<id>")
+    matrix.add_argument("--allow-risky", action="store_true", help="allow risky commands to proceed")
     matrix.add_argument("--json", action="store_true", help="print full packet JSON")
     matrix.set_defaults(func=test_matrix_command)
 
@@ -739,6 +1015,11 @@ def add_parser(subparsers) -> None:
     doctor.add_argument("--repo", default=".", help="repo root")
     doctor.add_argument("--json", action="store_true", help="structured output (default; flag exists for caller intent)")
     doctor.set_defaults(func=doctor_command)
+
+    index = sp.add_parser("index", help="print the run index JSON")
+    index.add_argument("run", help="run directory")
+    index.add_argument("--json", action="store_true", help="structured output (default; flag exists for caller intent)")
+    index.set_defaults(func=index_command)
 
 
 if __name__ == "__main__":

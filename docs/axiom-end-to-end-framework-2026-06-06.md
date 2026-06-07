@@ -52,6 +52,14 @@ classloader/harness equivalent: it observes the host world and turns facts into 
   - `.lgwks/axiom/runs/<run>/fabric-log.json`
   - `.lgwks/axiom/runs/<run>/packet.json`
 
+`lgwks axiom index`
+
+- Prints the unified run index linking capture, emissions, fabric logs, and narration.
+- Enables machine-first navigation of run artifacts without path inference.
+- Persists:
+  - `.lgwks/axiom/runs/<run>/index.json`
+
+
 `lgwks axiom check`
 
 - Compares a narration claim against captured emissions.
@@ -73,6 +81,8 @@ classloader/harness equivalent: it observes the host world and turns facts into 
 - Recomputes each capsule CID from canonical bytes.
 - Reconstructs the hash-chained fabric log.
 - Fails if emission bytes, CIDs, or `fabric-log.json` were tampered.
+- Supports `--all` flag to replay both capture and narration artifacts in a run.
+- Automatically detects artifacts using the unified run index or fallback filenames.
 
 `lgwks axiom test-matrix`
 
@@ -80,6 +90,11 @@ classloader/harness equivalent: it observes the host world and turns facts into 
 - Normalizes labels into stable ASCII-safe identifiers.
 - Bounds every command with a timeout and captures bounded output tails.
 - Emits ordinary replayable Axiom evidence capsules.
+- Enforces a deterministic argv policy gate to prevent destructive operations.
+- Blocks `rm`, `mv`, destructive `git`, `curl`, and absolute paths outside repo by default.
+- Allows `python`, `pytest`, `uv`, and read-only `git` by default.
+- Provides `--allow-risky` override for non-standard commands.
+- Persists policy risk assessment and allowance reason in test evidence.
 
 `lgwks axiom doctor`
 

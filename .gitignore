@@ -15,6 +15,10 @@ runs/
 store/
 .lgwks/
 
+# Rust build products.
+target/
+axiom/rust/target/
+
 # hermetic test / CI: force deterministic fallbacks (no Ollama)
 # LGWKS_NO_MODELS=1
 
