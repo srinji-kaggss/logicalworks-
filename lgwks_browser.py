@@ -31,6 +31,49 @@ _UA = ("Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 "
        "(KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36")
 _SESSION_DIR = Path.home() / ".config" / "lgwks" / "sessions"
 _INSTALL = "pipx install playwright && playwright install chromium webkit"
+NO_ACCESS_RE = re.compile(
+    r"\b(access forbidden|access denied|not authorized|not authorised|permission denied|"
+    r"do not have access|don't have access|no access|read-protected|insufficient privileges)\b",
+    re.I,
+)
+
+
+def _click_candidate_score(candidate: dict) -> int:
+    """Rank click candidates from DOM structure, not site-specific labels."""
+    area = int(float(candidate.get("area") or 0))
+    text_len = int(candidate.get("text_len") or 0)
+    score = 0
+
+    if candidate.get("in_main"):
+        score += 80
+    if candidate.get("in_article"):
+        score += 30
+    if candidate.get("in_chrome"):
+        score -= 90
+    if candidate.get("in_dialog"):
+        score -= 50
+
+    if candidate.get("tag") == "button" or candidate.get("role") in {"button", "link"}:
+        score += 20
+    if candidate.get("href"):
+        score += 3
+
+    # Tiles/cards are usually larger than chrome links; cap to avoid one huge
+    # container dominating every real control.
+    score += min(60, area // 2500)
+    if 4 <= text_len <= 80:
+        score += 12
+    elif text_len > 140:
+        score -= 20
+
+    y = float(candidate.get("y") or 0)
+    if y < 80:
+        score -= 20
+    if candidate.get("depth", 0) > 18:
+        score -= 10
+    if not str(candidate.get("text") or "").strip() and not str(candidate.get("href") or "").strip():
+        score -= 100
+    return score
 
 
 def _browser_path(engine: str) -> Path | None:
@@ -186,6 +229,163 @@ def render(url: str, max_chars: int = 8000, *, use_session: bool = False,
         return {"ok": False, "text": "", "reason": f"render failed: {type(e).__name__}"}
 
 
+def _click_candidates_js() -> str:
+    return """
+    () => {
+      const nodes = Array.from(document.querySelectorAll(
+        "a[href], button, [role='button'], [role='link'], [onclick], [data-url], [data-href], [aria-label]"
+      ));
+      const chromeSelector = "header, footer, nav, aside, [role='navigation'], [role='banner'], [role='contentinfo'], [class*='nav' i], [class*='menu' i], [class*='footer' i], [class*='header' i]";
+      const mainSelector = "main, [role='main'], article, section, [class*='content' i], [class*='card' i], [class*='tile' i], [class*='app' i]";
+      const out = [];
+      const seen = new Set();
+      const depthOf = (el) => {
+        let depth = 0;
+        for (let p = el; p; p = p.parentElement) depth += 1;
+        return depth;
+      };
+      for (const el of nodes) {
+        const rect = el.getBoundingClientRect();
+        const style = window.getComputedStyle(el);
+        if (rect.width < 2 || rect.height < 2 || style.visibility === "hidden" || style.display === "none") continue;
+        const text = (el.innerText || el.textContent || el.getAttribute("aria-label") || el.getAttribute("title") || "").trim().replace(/\\s+/g, " ");
+        const href = el.href || el.getAttribute("href") || el.getAttribute("data-url") || el.getAttribute("data-href") || "";
+        if (!text && !href) continue;
+        const key = `${text}|${href}|${el.tagName}|${el.getAttribute("role") || ""}`;
+        if (seen.has(key)) continue;
+        seen.add(key);
+        const id = out.length;
+        el.setAttribute("data-lgwks-click-id", String(id));
+        out.push({
+          id,
+          text: text.slice(0, 120),
+          text_len: text.length,
+          href,
+          tag: el.tagName.toLowerCase(),
+          role: el.getAttribute("role") || "",
+          area: Math.round(rect.width * rect.height),
+          x: Math.round(rect.x),
+          y: Math.round(rect.y),
+          depth: depthOf(el),
+          in_main: Boolean(el.closest(mainSelector)),
+          in_article: Boolean(el.closest("article")),
+          in_chrome: Boolean(el.closest(chromeSelector)),
+          in_dialog: Boolean(el.closest("dialog, [role='dialog'], [aria-modal='true'], [class*='modal' i]"))
+        });
+      }
+      return out;
+    }
+    """
+
+
+def discover_clicks(
+    url: str,
+    *,
+    max_clicks: int = 20,
+    wait_ms: int = 2500,
+    browser_engine: str = "chromium",
+) -> list[dict]:
+    """Deterministically click visible same-page controls from an authorized browser session.
+
+    Each candidate is clicked in a fresh page/context state so a dead branch does not poison
+    the remaining exploration. This is discovery, not auth bypass: it only uses the user's
+    saved session and records no-access outcomes explicitly.
+    """
+    if not _remote_allowed(url):
+        return [{"ok": False, "status": "blocked", "url": url, "reason": "blocked URL"}]
+    ok, why = available(browser_engine)
+    if not ok:
+        return [{"ok": False, "status": "error", "url": url, "reason": why}]
+    if browser_engine not in ("chromium", "webkit"):
+        return [{"ok": False, "status": "error", "url": url, "reason": f"unknown browser_engine: {browser_engine!r}"}]
+
+    from playwright.sync_api import sync_playwright
+
+    session_path = _session_for_url(url)
+    storage = str(session_path) if session_path else None
+    lock_host = urllib.parse.urlparse(url).hostname or ""
+    auth_headers = _headers(url)
+    rows: list[dict] = []
+    try:
+        with sync_playwright() as p:
+            engine = p.webkit if browser_engine == "webkit" else p.chromium
+            launch_kwargs: dict = {"headless": True}
+            if browser_engine == "chromium":
+                launch_kwargs["args"] = ["--disable-blink-features=AutomationControlled"]
+            browser = engine.launch(**launch_kwargs)
+            ctx = browser.new_context(
+                user_agent=_UA, locale="en-CA", timezone_id="America/Toronto",
+                viewport={"width": 1366, "height": 900},
+                storage_state=storage,
+            )
+            if auth_headers:
+                ctx.route("**/*", _route_handler(lock_host, auth_headers))
+
+            seed = ctx.new_page()
+            seed.goto(url, wait_until="domcontentloaded", timeout=30000)
+            seed.wait_for_timeout(wait_ms)
+            candidates = sorted(
+                seed.evaluate(_click_candidates_js()),
+                key=_click_candidate_score,
+                reverse=True,
+            )[:max_clicks]
+            seed.close()
+
+            for cand in candidates:
+                page = ctx.new_page()
+                try:
+                    page.goto(url, wait_until="domcontentloaded", timeout=30000)
+                    page.wait_for_timeout(wait_ms)
+                    page.evaluate(_click_candidates_js())
+                    selector = f"[data-lgwks-click-id='{cand['id']}']"
+                    before = page.url
+                    try:
+                        with page.expect_popup(timeout=3000) as popup_info:
+                            page.locator(selector).click(timeout=5000)
+                        popup = popup_info.value
+                        popup.wait_for_load_state("domcontentloaded", timeout=15000)
+                        popup.wait_for_timeout(wait_ms)
+                        target_page = popup
+                    except Exception:
+                        page.locator(selector).click(timeout=5000)
+                        try:
+                            page.wait_for_load_state("domcontentloaded", timeout=15000)
+                        except Exception:
+                            pass
+                        page.wait_for_timeout(wait_ms)
+                        target_page = page
+                    html = target_page.content()
+                    text = _text_from(html, 120_000)
+                    status = "no_access" if NO_ACCESS_RE.search(text) else "ok"
+                    rows.append({
+                        "ok": status == "ok",
+                        "status": status,
+                        "url": before,
+                        "final_url": target_page.url,
+                        "text": text,
+                        "html": html,
+                        "html_len": len(html),
+                        "candidate": cand,
+                    })
+                    if target_page is not page:
+                        target_page.close()
+                except Exception as exc:
+                    rows.append({
+                        "ok": False,
+                        "status": "error",
+                        "url": url,
+                        "final_url": "",
+                        "reason": f"click failed: {type(exc).__name__}",
+                        "candidate": cand,
+                    })
+                finally:
+                    page.close()
+            browser.close()
+    except Exception as exc:
+        return [{"ok": False, "status": "error", "url": url, "reason": f"click discovery failed: {type(exc).__name__}"}]
+    return rows
+
+
 def save_session(
     login_url: str = "https://www.linkedin.com/login",
     *,
@@ -294,5 +494,3 @@ def save_session(
         return {"ok": True, "path": str(session_path), "reason": "session saved"}
     except Exception as e:
         return {"ok": False, "reason": f"login capture failed: {type(e).__name__}: {e}"}
-
-

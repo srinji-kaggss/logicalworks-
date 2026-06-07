@@ -494,6 +494,7 @@ def embed(
     provider: str = "auto",
     *,
     model: str | None = None,
+    dims: int | None = None,
 ) -> tuple[list[float] | None, str, bool]:
     """Returns (vector, provider, is_semantic). is_semantic gates L2 edge labelling.
     provider 'auto'|'ollama' tries the real local Eye (qwen3-embedding via Ollama) → semantic vector.
@@ -506,7 +507,8 @@ def embed(
         lgwks_ollama.ensure_eye_model()      # pull the local Eye on first use (no-op if present/down)
         vec = lgwks_ollama.embed_one(text)
         if vec is not None:
-            return lgwks_ollama.slice_mrl(vec, DIMS), f"ollama:{lgwks_ollama.EYE_MODEL}", True
+            target_dims = DIMS if dims is None else dims
+            return lgwks_ollama.slice_mrl(vec, target_dims), f"ollama:{lgwks_ollama.EYE_MODEL}", True
     if provider == "openrouter-vl":
         import lgwks_openrouter_embed
         chosen = model or lgwks_openrouter_embed.DEFAULT_MODEL

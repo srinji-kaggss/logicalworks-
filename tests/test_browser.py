@@ -176,5 +176,45 @@ class TestSessionForUrl(unittest.TestCase):
                 self.assertEqual(result, session_dir / "portal.fundserv.com.json")
 
 
+class TestClickCandidateRanking(unittest.TestCase):
+    def test_content_tile_ranks_above_chrome_by_structure(self):
+        content_tile = {
+            "text": "Any Product Area",
+            "text_len": 16,
+            "href": "",
+            "tag": "button",
+            "role": "",
+            "area": 80_000,
+            "y": 280,
+            "depth": 8,
+            "in_main": True,
+            "in_article": False,
+            "in_chrome": False,
+            "in_dialog": False,
+        }
+        chrome_link = {
+            "text": "Any Footer Link",
+            "text_len": 15,
+            "href": "https://example.com/footer",
+            "tag": "a",
+            "role": "",
+            "area": 2_000,
+            "y": 780,
+            "depth": 8,
+            "in_main": False,
+            "in_article": False,
+            "in_chrome": True,
+            "in_dialog": False,
+        }
+        modal_button = {
+            **content_tile,
+            "in_main": False,
+            "in_dialog": True,
+        }
+
+        self.assertGreater(browser._click_candidate_score(content_tile), browser._click_candidate_score(chrome_link))
+        self.assertGreater(browser._click_candidate_score(content_tile), browser._click_candidate_score(modal_button))
+
+
 if __name__ == "__main__":
     unittest.main()
