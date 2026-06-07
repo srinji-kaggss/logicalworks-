@@ -318,6 +318,50 @@ class TestVectorSpaceIdentity(unittest.TestCase):
         self.assertIn("hint", result)
         self.assertEqual(result["rows"], [])
 
+    def test_explicit_deterministic_selector_matches_resolved_hash_provider(self):
+        """The CLI token 'deterministic' must match stored deterministic-feature-hash vectors."""
+        with tempfile.TemporaryDirectory() as td:
+            run_dir = self._make_run_dir(td, provider="deterministic-feature-hash")
+            with mock.patch.object(
+                substrate.lgwks_run,
+                "embed",
+                return_value=([0.1, 0.2, 0.3, 0.4], "deterministic-feature-hash", False),
+            ):
+                result = substrate._vector_search(run_dir, "test query", 10, "deterministic", "")
+
+        self.assertTrue(result.get("ok"), msg=result)
+        self.assertNotIn("cross_space_forced", result)
+
+    def test_explicit_ollama_selector_matches_resolved_ollama_model_provider(self):
+        """The CLI token 'ollama' must match stored ollama:<model> vectors."""
+        with tempfile.TemporaryDirectory() as td:
+            run_dir = self._make_run_dir(td, provider="ollama:qwen3-embedding:8b")
+            with mock.patch.object(
+                substrate.lgwks_run,
+                "embed",
+                return_value=([0.1, 0.2, 0.3, 0.4], "ollama:qwen3-embedding:8b", True),
+            ):
+                result = substrate._vector_search(run_dir, "test query", 10, "ollama", "")
+
+        self.assertTrue(result.get("ok"), msg=result)
+        self.assertNotIn("cross_space_forced", result)
+
+    def test_explicit_model_matches_model_qualified_provider_label(self):
+        """A model embedded in the provider label should satisfy explicit --embed-model."""
+        with tempfile.TemporaryDirectory() as td:
+            run_dir = self._make_run_dir(td, provider="ollama:qwen3-embedding:8b")
+            with mock.patch.object(
+                substrate.lgwks_run,
+                "embed",
+                return_value=([0.1, 0.2, 0.3, 0.4], "ollama:qwen3-embedding:8b", True),
+            ):
+                result = substrate._vector_search(
+                    run_dir, "test query", 10, "ollama", "qwen3-embedding:8b"
+                )
+
+        self.assertTrue(result.get("ok"), msg=result)
+        self.assertNotIn("cross_space_forced", result)
+
     # ------------------------------------------------------------------
     # 3. Mismatch + --force-cross-space → rows + warning
     # ------------------------------------------------------------------
@@ -500,4 +544,3 @@ class TestVectorSpaceIdentity(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
-

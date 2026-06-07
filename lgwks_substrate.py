@@ -655,6 +655,32 @@ def _stored_vector_space(run_dir: Path) -> dict[str, Any]:
     }
 
 
+def _provider_matches_vector_space(requested: str, canonical: str) -> bool:
+    """Return whether a CLI provider token names the stored provider space.
+
+    Build/query args use coarse provider selectors like "ollama" and "deterministic",
+    while stored vectors record the resolved provider labels returned by lgwks_run.embed().
+    Compare the identity of the resulting space, not the literal CLI token.
+    """
+    if requested == canonical:
+        return True
+    if requested == "deterministic" and canonical == "deterministic-feature-hash":
+        return True
+    if requested == "ollama" and canonical.startswith("ollama:"):
+        return True
+    if requested == "openrouter-vl" and canonical.startswith("openrouter:"):
+        return True
+    return False
+
+
+def _model_matches_vector_space(requested: str, canonical_model: str, canonical_provider: str) -> bool:
+    if requested == canonical_model:
+        return True
+    if not canonical_model and ":" in canonical_provider:
+        return requested == canonical_provider.split(":", 1)[1]
+    return False
+
+
 def _vector_search(
     run_dir: Path,
     text: str,
@@ -709,8 +735,10 @@ def _vector_search(
         # Mismatch check: if the user explicitly asked for a different provider/model.
         requested_vs = {"provider": resolved_provider, "model": resolved_model}
         mismatch = (
-            (user_specified_provider and resolved_provider != canonical_provider) or
-            (user_specified_model and resolved_model and resolved_model != canonical_model)
+            (user_specified_provider and not _provider_matches_vector_space(resolved_provider, canonical_provider)) or
+            (user_specified_model and resolved_model and not _model_matches_vector_space(
+                resolved_model, canonical_model, canonical_provider
+            ))
         )
         if mismatch and not force_cross_space:
             return {
