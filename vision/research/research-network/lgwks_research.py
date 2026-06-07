@@ -18,10 +18,16 @@ import urllib.request
 
 
 ROOT = Path(__file__).resolve().parents[3]
+if str(ROOT) not in sys.path:
+    sys.path.insert(0, str(ROOT))
+
+import lgwks_openrouter
+
 NETWORK_ROOT = ROOT / "vision" / "research" / "research-network"
 DEFAULT_SEED = NETWORK_ROOT / "seeds" / "gnn-compiler-expedition.json"
 DEFAULT_OUTPUT_ROOT = NETWORK_ROOT / "runs"
 DEFAULT_CRWL = "/Users/srinji/.local/bin/crwl"
+DEFAULT_REASONING_MODEL = lgwks_openrouter.DEFAULT_MODEL
 
 SOURCE_CATALOG = [
     {
@@ -287,16 +293,14 @@ def ollama_embedding(text, model, host="http://127.0.0.1:11434"):
     return deterministic_embedding(text), "deterministic-fallback"
 
 
-def ollama_generate(prompt, model, host="http://127.0.0.1:11434"):
-    req = urllib.request.Request(
-        f"{host.rstrip('/')}/api/generate",
-        data=json.dumps({"model": model, "prompt": prompt, "stream": False}).encode("utf-8"),
-        headers={"Content-Type": "application/json"},
-        method="POST",
-    )
-    with urllib.request.urlopen(req, timeout=600) as response:
-        data = json.loads(response.read().decode("utf-8"))
-    return data.get("response", "").strip()
+def openrouter_generate(prompt, model):
+    if not model or model.lower() in {"none", "off", "deterministic"}:
+        return ""
+    schema = '{"markdown":"concise advisory markdown"}'
+    out = lgwks_openrouter.generate_json(prompt, schema, model=model)
+    if not out:
+        return ""
+    return str(out.get("markdown", "")).strip()
 
 
 def cosine(a, b):
@@ -823,7 +827,10 @@ Return concise markdown with:
         write_text(run_dir / "advisory" / "prompt.md", prompt)
         print(json.dumps({"prompt": str(run_dir / "advisory" / "prompt.md"), "dry_run": True}, indent=2))
         return
-    text = ollama_generate(prompt, args.model)
+    text = openrouter_generate(prompt, args.model)
+    if not text:
+        print(json.dumps({"advisory": None, "model": args.model, "reason": "no llm output"}, indent=2))
+        return
     out_path = run_dir / "advisory" / f"expert-{dt.datetime.now().strftime('%Y%m%d-%H%M%S')}.md"
     write_text(out_path, text + "\n")
     append_jsonl(
@@ -1184,7 +1191,8 @@ def build_parser():
     website.add_argument("--bypass-cache", action="store_true")
     website.add_argument("--skip-crawl", action="store_true")
     website.add_argument("--embed-model", default="qwen3-embedding:8b")
-    website.add_argument("--reasoning-model", default="gemma4:31b")
+    website.add_argument("--reasoning-model", default=DEFAULT_REASONING_MODEL,
+                         help="OpenRouter reasoning model id, or 'none' to record no reasoning model")
     website.add_argument("--words-per-chunk", type=int, default=450)
     website.add_argument("--chunk-overlap", type=int, default=80)
     website.add_argument("--concepts-per-source", type=int, default=80)
@@ -1228,7 +1236,8 @@ def build_parser():
     expert = sub.add_parser("expert", help="AI advisory over a completed run. Does not mutate DB/graph.")
     expert.add_argument("run_dir", nargs="?", default="latest")
     expert.add_argument("--output-root", default=str(DEFAULT_OUTPUT_ROOT))
-    expert.add_argument("--model", default="gemma4:31b")
+    expert.add_argument("--model", default=DEFAULT_REASONING_MODEL,
+                        help="OpenRouter model id for advisory generation, or 'none'/'off' to skip LLM output")
     expert.add_argument("--question", default="")
     expert.add_argument("--dry-run", action="store_true")
     expert.set_defaults(func=expert_command)
