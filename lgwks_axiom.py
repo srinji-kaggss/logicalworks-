@@ -33,6 +33,9 @@ HARNESS_GRANTS = frozenset({"observe", "diff", "test", "narrate"})
 MATRIX_SCHEMA = "lgwks.axiom.test_matrix.v0"
 NARRATION_SCHEMA = "lgwks.axiom.narration.v0"
 MAX_TEST_TIMEOUT = 3600
+MAX_MATRIX_TESTS = 50
+MAX_JSON_BYTES = 1_000_000
+NARRATION_KINDS = frozenset({"tests_passed", "worktree_clean", "files_changed", "work_implemented"})
 
 
 @dataclass(frozen=True)
@@ -45,7 +48,7 @@ class CapturedFact:
 @dataclass(frozen=True)
 class TestSpec:
     label: str
-    command: str
+    command: tuple[str, ...]
     timeout: int
 
 
@@ -219,10 +222,14 @@ def _normalize_timeout(value: Any, default: int = 120) -> int:
 
 
 def load_test_matrix(path: Path, default_timeout: int = 120) -> list[TestSpec]:
+    if path.stat().st_size > MAX_JSON_BYTES:
+        raise ValueError(f"test matrix exceeds {MAX_JSON_BYTES} bytes")
     payload = json.loads(path.read_text(encoding="utf-8"))
     raw_tests = payload.get("tests") if isinstance(payload, dict) else payload
     if not isinstance(raw_tests, list) or not raw_tests:
         raise ValueError("test matrix requires a non-empty tests list")
+    if len(raw_tests) > MAX_MATRIX_TESTS:
+        raise ValueError(f"test matrix may contain at most {MAX_MATRIX_TESTS} tests")
     tests: list[TestSpec] = []
     seen: set[str] = set()
     for index, item in enumerate(raw_tests):
@@ -232,8 +239,14 @@ def load_test_matrix(path: Path, default_timeout: int = 120) -> list[TestSpec]:
         if label in seen:
             raise ValueError(f"duplicate test label: {label}")
         seen.add(label)
-        command = str(item.get("command", "")).strip()
-        if not command:
+        raw_command = item.get("command")
+        if isinstance(raw_command, list):
+            command = tuple(str(part) for part in raw_command)
+        elif isinstance(raw_command, str):
+            raise ValueError(f"test {label!r} command must be an argv list, not a shell string")
+        else:
+            command = ()
+        if not command or any(not part for part in command):
             raise ValueError(f"test {label!r} command must not be empty")
         timeout = _normalize_timeout(item.get("timeout"), default_timeout)
         tests.append(TestSpec(label, command, timeout))
@@ -268,6 +281,8 @@ def parse_narration(text: str) -> dict[str, Any]:
 
 
 def load_narration(path: Path) -> dict[str, Any]:
+    if path.stat().st_size > MAX_JSON_BYTES:
+        raise ValueError(f"narration file exceeds {MAX_JSON_BYTES} bytes")
     payload = json.loads(path.read_text(encoding="utf-8"))
     if not isinstance(payload, dict) or payload.get("schema") != NARRATION_SCHEMA:
         raise ValueError(f"narration file must have schema {NARRATION_SCHEMA}")
@@ -275,12 +290,25 @@ def load_narration(path: Path) -> dict[str, Any]:
     payload.setdefault("holes", [])
     if not isinstance(payload["claims"], list) or not isinstance(payload["holes"], list):
         raise ValueError("narration claims/holes must be lists")
+    for item in payload["claims"]:
+        if not isinstance(item, dict):
+            raise ValueError("narration claim entries must be objects")
+        kind = item.get("kind")
+        if kind not in NARRATION_KINDS:
+            raise ValueError(f"unsupported narration claim kind: {kind}")
+        confidence = float(item.get("confidence", 1.0))
+        if not (0.0 <= confidence <= 1.0):
+            raise ValueError(f"narration confidence must be in 0..1, got {confidence}")
+    for item in payload["holes"]:
+        if not isinstance(item, dict):
+            raise ValueError("narration hole entries must be objects")
     return payload
 
 
 def build_narration_artifact(claim_text: str = "", claims_file: Path | None = None, run: Path | None = None) -> dict[str, Any]:
     narration = load_narration(claims_file) if claims_file else parse_narration(claim_text)
-    root = run.resolve() if run else (Path.cwd() / RUN_ROOT / f"narration-{_sha(json.dumps(narration, sort_keys=True), 20)}").resolve()
+    default_root = Path.cwd().resolve() / RUN_ROOT
+    root = run.resolve() if run else (default_root / f"narration-{_sha(json.dumps(narration, sort_keys=True), 20)}").resolve()
     root.mkdir(parents=True, exist_ok=True)
     fabric = Fabric(trusted_key=HARNESS_KEY)
     genesis = _genesis()
@@ -330,12 +358,25 @@ def build_narration_artifact(claim_text: str = "", claims_file: Path | None = No
     return artifact
 
 
-def _test_fact(command: str, repo: Path, timeout: int, label: str = "command") -> CapturedFact:
+def _is_relative_to(path: Path, base: Path) -> bool:
+    try:
+        path.relative_to(base)
+        return True
+    except ValueError:
+        return False
+
+
+def _command_display(command: str | tuple[str, ...]) -> str:
+    return command if isinstance(command, str) else " ".join(command)
+
+
+def _test_fact(command: str | tuple[str, ...], repo: Path, timeout: int, label: str = "command") -> CapturedFact:
     started = time.time()
+    shell = isinstance(command, str)
     try:
         proc = subprocess.run(
             command,
-            shell=True,
+            shell=shell,
             cwd=repo,
             capture_output=True,
             text=True,
@@ -347,7 +388,8 @@ def _test_fact(command: str, repo: Path, timeout: int, label: str = "command") -
             label,
             {
                 "label": label,
-                "command": command,
+                "command": _command_display(command),
+                "argv": list(command) if not shell else [],
                 "returncode": proc.returncode,
                 "elapsed_seconds": round(time.time() - started, 3),
                 "stdout_tail": (proc.stdout or "")[-2000:],
@@ -360,7 +402,8 @@ def _test_fact(command: str, repo: Path, timeout: int, label: str = "command") -
             label,
             {
                 "label": label,
-                "command": command,
+                "command": _command_display(command),
+                "argv": list(command) if not shell else [],
                 "returncode": 124,
                 "elapsed_seconds": round(time.time() - started, 3),
                 "stdout_tail": (exc.stdout or "")[-2000:] if isinstance(exc.stdout, str) else "",
@@ -618,7 +661,10 @@ def narrate_command(args: argparse.Namespace) -> int:
         print(json.dumps({"schema": NARRATION_SCHEMA, "ok": False, "error": "provide --claim or --claims"}, indent=2, sort_keys=True), file=sys.stderr)
         return 1
     try:
-        artifact = build_narration_artifact(args.claim, Path(args.claims) if args.claims else None, Path(args.run) if args.run else None)
+        run = Path(args.run).resolve() if args.run else None
+        if run and not _is_relative_to(run, Path.cwd().resolve()):
+            raise ValueError("narration --run must stay within the current repo/worktree")
+        artifact = build_narration_artifact(args.claim, Path(args.claims) if args.claims else None, run)
     except ValueError as exc:
         print(json.dumps({"schema": NARRATION_SCHEMA, "ok": False, "error": str(exc)}, indent=2, sort_keys=True), file=sys.stderr)
         return 1

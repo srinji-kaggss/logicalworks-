@@ -93,8 +93,8 @@ class TestAxiomHarness(unittest.TestCase):
         matrix.write_text(json.dumps({
             "schema": lgwks_axiom.MATRIX_SCHEMA,
             "tests": [
-                {"label": "unit", "command": "python -c 'print(123)'", "timeout": 10},
-                {"label": "compile check", "command": "python -m py_compile app.py", "timeout": 10},
+                {"label": "unit", "command": ["python", "-c", "print(123)"], "timeout": 10},
+                {"label": "compile check", "command": ["python", "-m", "py_compile", "app.py"], "timeout": 10},
             ],
         }), encoding="utf-8")
         specs = lgwks_axiom.load_test_matrix(matrix)
@@ -110,8 +110,8 @@ class TestAxiomHarness(unittest.TestCase):
         repo = _repo()
         matrix = repo / "matrix.json"
         matrix.write_text(json.dumps([
-            {"label": "unit", "command": "python -c 'print(1)'"},
-            {"label": "unit", "command": "python -c 'print(2)'"},
+            {"label": "unit", "command": ["python", "-c", "print(1)"]},
+            {"label": "unit", "command": ["python", "-c", "print(2)"]},
         ]), encoding="utf-8")
         with self.assertRaises(ValueError):
             lgwks_axiom.load_test_matrix(matrix)
@@ -120,12 +120,21 @@ class TestAxiomHarness(unittest.TestCase):
         repo = _repo()
         specs = [
             lgwks_axiom.TestSpec("ok", "python -c 'print(1)'", 10),
-            lgwks_axiom.TestSpec("fail", "python -c 'raise SystemExit(7)'", 10),
+            lgwks_axiom.TestSpec("fail", ("python", "-c", "raise SystemExit(7)"), 10),
         ]
         packet = lgwks_axiom.build_capture(repo, "matrix", test_specs=specs)
         result = lgwks_axiom.check_narration("tests passed", packet["emissions"])
         self.assertFalse(result["ok"])
         self.assertEqual(result["findings"][0]["level"], "mayday")
+
+    def test_test_matrix_shell_string_rejected(self):
+        repo = _repo()
+        matrix = repo / "matrix.json"
+        matrix.write_text(json.dumps([
+            {"label": "unit", "command": "python -c 'print(1)'"},
+        ]), encoding="utf-8")
+        with self.assertRaises(ValueError):
+            lgwks_axiom.load_test_matrix(matrix)
 
     def test_parse_narration_known_claims(self):
         parsed = lgwks_axiom.parse_narration("tests passed and implemented changes")
@@ -156,6 +165,17 @@ class TestAxiomHarness(unittest.TestCase):
         result = lgwks_axiom.check_narration("", packet["emissions"], claims)
         self.assertTrue(result["ok"])
         self.assertEqual(result["typed_claims"][0]["kind"], "tests_passed")
+
+    def test_load_narration_rejects_unsupported_claim_kind(self):
+        repo = _repo()
+        claims = repo / "claims.json"
+        claims.write_text(json.dumps({
+            "schema": lgwks_axiom.NARRATION_SCHEMA,
+            "claims": [{"kind": "admin_override", "source": "x", "requires": [], "confidence": 1.0}],
+            "holes": [],
+        }), encoding="utf-8")
+        with self.assertRaises(ValueError):
+            lgwks_axiom.load_narration(claims)
 
     def test_unknown_narration_hole_diverges(self):
         repo = _repo()

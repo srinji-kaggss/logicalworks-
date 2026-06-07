@@ -35,7 +35,8 @@ or a bare list of the same test objects.
 ## Invariants
 
 - Labels are required, unique, ASCII-safe, and deterministic after normalization.
-- Commands are required non-empty strings.
+- Commands are required non-empty argv lists. A legacy string command may be accepted only by compatibility
+  paths; matrix files must use argv.
 - Timeouts are bounded to `1..3600` seconds.
 - Each result captures return code, elapsed seconds, and bounded stdout/stderr tails.
 - Matrix output is a normal `lgwks.axiom.harness.v0` packet and must pass `axiom replay`.
@@ -44,6 +45,5 @@ or a bare list of the same test objects.
 
 ## Deferred
 
-- Replace shell command strings with typed argv vectors.
 - Add policy gates for destructive test commands.
 - Add dependency-aware test grouping.
