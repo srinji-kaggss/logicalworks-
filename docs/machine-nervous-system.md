@@ -187,6 +187,45 @@ The backend should treat the CLI as a stable RPC surface:
 
 The CLI is not the product UI. It is the control bus.
 
+## Runtime Language Split
+
+The current implementation is Python-heavy because the system is still
+contract-discovery heavy:
+
+- model setup and training use PyTorch/Transformers/CoreMLTools/MLX-class tools;
+- browser/auth/crawl glue changes quickly;
+- substrate schemas and machine JSON contracts are still being stabilized;
+- tests can cover behavior faster than an FFI boundary can be designed.
+
+That is not the final compute posture. The intended split is:
+
+| Layer | Current | Target | Reason |
+|---|---|---|---|
+| CLI/control bus | Python | Python or thin Rust wrapper | Contract orchestration, subprocess glue, JSON surface |
+| Model training | Python | Python/MLX/PyTorch | Training libraries, autograd, CoreML export tooling |
+| Model inference adapters | Python | CoreML/MLX/Ollama/OpenRouter ports | Provider-specific, swappable |
+| Content hashing / CID | Rust island exists under `axiom/rust` | Rust | Small, deterministic, security-sensitive |
+| Canonical wire/schema validation | Python today | Rust | Stable, low-level, audit-critical |
+| Substrate indexing/search hot path | Python/SQLite today | Rust service/library where measured | Throughput, memory, concurrency |
+| Graph algorithms | Python today | Rust where graph size justifies it | Traversal/search hot path |
+| Browser automation/auth | Python today | Keep behind provider port | Browser APIs dominate cost; optimize only after contract stabilizes |
+| TUI | not built | Rust or native frontend over JSON | Human rendering only; no business logic |
+
+So Python is not the optimization answer; it is the current integration and
+training lane. Rust should absorb stable, deterministic, high-throughput, or
+security-sensitive pieces once their data contracts stop moving.
+
+Do not rewrite the whole system in Rust. Move seams in this order:
+
+1. content-addressing / canonical wire / schema validation;
+2. substrate JSONL -> SQLite/index writer;
+3. vector search and graph traversal hot paths;
+4. long-running backend daemon if the CLI becomes too process-heavy.
+
+Keep model training in Python/MLX/PyTorch. CoreML is a deployment artifact, not
+a training framework. Rust can call frozen model artifacts later, but it should
+not be the first training runtime.
+
 ## Open Decisions
 
 1. Should every new substrate build write dual lanes by default:
@@ -199,4 +238,5 @@ The CLI is not the product UI. It is the control bus.
    entity/type classification?
 5. What should count as a JEPA package promotion: repeated anchors, substrate
    graph agreement, or a future trained predictor score?
-
+6. Which substrate hot path should be the first Rust migration:
+   canonical wire/schema, index writer, vector search, or graph traversal?
