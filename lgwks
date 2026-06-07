@@ -1307,6 +1307,10 @@ def build_parser() -> argparse.ArgumentParser:
     import lgwks_refactor
     lgwks_refactor.add_parser(sub)
 
+    # axiom — verified byte-layer harness and narration/emission divergence checks
+    import lgwks_axiom
+    lgwks_axiom.add_parser(sub)
+
 
     # hooks — comprehensive audit-first hook system: lifecycle events, registry, audit log
     import lgwks_hooks

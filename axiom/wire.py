@@ -44,8 +44,8 @@ def encode(fields: list[Field]) -> bytes:
     """Encode fields into canonical TLV bytes: sorted by (field_no, value), minimal varints."""
     out = bytearray()
     for field_no, wire_type, value in sorted(fields, key=_field_sort_key):
-        if field_no < 0:
-            raise WireError(f"negative field number {field_no}")
+        if field_no <= 0:
+            raise WireError(f"field number must be >= 1, got {field_no}")
         if wire_type not in _WIRE_TYPES:
             raise WireError(f"unknown wire type {wire_type}")
         out += encode_uleb128((field_no << 3) | wire_type)
@@ -74,6 +74,8 @@ def decode(data: bytes) -> list[Field]:
             raise WireError(f"bad tag varint: {e}") from e
         field_no = tag >> 3
         wire_type = tag & 0x7
+        if field_no == 0:
+            raise WireError("field number 0 is reserved/invalid")
         if wire_type not in _WIRE_TYPES:
             raise WireError(f"unknown wire type {wire_type} for field {field_no}")
         if wire_type == VARINT:

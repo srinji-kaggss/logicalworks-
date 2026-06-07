@@ -463,6 +463,31 @@ _VERB_META: dict[str, dict] = {
         "output": "structured JSON stats or diagram file",
         "tokens": "none (local SQLite)",
     },
+    "axiom capture": {
+        "intent": "capture repo/test facts as verified Axiom capsules rooted in harness genesis",
+        "args": {"--repo": "repo path", "--intent": "operator context", "--test": "optional test command",
+                 "--timeout": "test timeout seconds", "--out": "run output directory", "--json": "full packet JSON"},
+        "output": "lgwks.axiom.harness.v0 packet + emissions.jsonl + fabric-log.json",
+        "tokens": "none (deterministic capture; optional local test command)",
+    },
+    "axiom check": {
+        "intent": "compare narration claims against captured Axiom emissions",
+        "args": {"run": "run directory or emissions.jsonl", "--claim": "narration claim", "--json": "structured output"},
+        "output": "lgwks.axiom.divergence.v0 with PAN PAN/MAYDAY findings",
+        "tokens": "none",
+    },
+    "axiom replay": {
+        "intent": "reload persisted Axiom emissions and reconstruct the verified fabric",
+        "args": {"run": "run directory or emissions.jsonl", "--json": "structured output"},
+        "output": "lgwks.axiom.replay.v0 with CID, chain, and fabric-log verification",
+        "tokens": "none",
+    },
+    "axiom doctor": {
+        "intent": "verify Axiom byte-layer independence from lgwks/CLI imports",
+        "args": {"--repo": "repo root", "--json": "structured output"},
+        "output": "lgwks.axiom.doctor.v0 independence report",
+        "tokens": "none",
+    },
     "refactor add_types": {
         "intent": "annotate Python function arguments with type annotations",
         "args": {"--file": "target Python file", "--preview": "dry-run preview",

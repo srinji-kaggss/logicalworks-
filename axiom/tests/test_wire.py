@@ -39,6 +39,13 @@ def test_decode_rejects_unknown_wire_type():
         decode(bytes([13]))
 
 
+def test_field_zero_rejected():
+    with pytest.raises(WireError):
+        encode([(0, VARINT, 1)])
+    with pytest.raises(WireError):
+        decode(b"\x00\x01")
+
+
 def test_decode_rejects_truncated_len():
     # field 1 LEN, claims 10 bytes, supplies 2
     data = bytes([(1 << 3) | LEN, 10, 0x41, 0x42])

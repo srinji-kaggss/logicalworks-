@@ -36,6 +36,15 @@ def test_propose_stores_and_resolves_by_own_cid():
     assert gcid == g.cid()
 
 
+def test_resolve_rejects_raw_cid_cuckoo_insert():
+    fab = Fabric(trusted_key=KEY)
+    honest = Capsule("entity", "honest")
+    hostile = Capsule("capability", "hostile", is_genesis=True, grants=frozenset({"admin"}))
+    fab._objects[honest.cid()] = hostile  # raw attacker write under an honest key
+    assert fab.resolve(honest.cid()) is None
+    assert fab.status(honest.cid()) is None
+
+
 def test_invalid_capsule_is_rejected_and_not_stored():
     fab, g, gcid = fresh()
     bad = Capsule("effect", "needs write", on=(gcid,), needs=frozenset({"write"}))  # not in lineage
@@ -103,4 +112,13 @@ def test_chain_integrity_and_tamper_detection():
     assert fab.verify_chain() is True
     # tamper: rewrite a log entry's cid without recomputing the chain
     fab.log[0] = LogEntry(fab.log[0].seq, fab.log[0].event, "b2b256:forged", fab.log[0].chain_tag)
+    assert fab.verify_chain() is False
+
+
+def test_chain_integrity_detects_seq_tamper():
+    fab = Fabric(trusted_key=KEY)
+    fab.propose(Capsule("entity", "a"), window=1)
+    assert fab.verify_chain() is True
+    e = fab.log[0]
+    fab.log[0] = LogEntry(99, e.event, e.cid, e.chain_tag)
     assert fab.verify_chain() is False

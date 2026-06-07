@@ -9,6 +9,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 import pytest  # noqa: E402
 
 from axiom.capsule import Capsule, CapsuleError  # noqa: E402
+from axiom.wire import VARINT, encode  # noqa: E402
 
 
 def test_roundtrip_claim():
@@ -70,3 +71,9 @@ def test_genesis_and_signature_survive_roundtrip():
                 grants=frozenset({"charge", "admin"}))
     back = Capsule.from_bytes(g.to_bytes())
     assert back.is_genesis and back.signature == b"\x01\x02\x03" and back == g
+
+
+def test_bool_fields_reject_non_bool_varints():
+    fields = [(1, 2, b"entity"), (2, 2, b"x"), (7, VARINT, 2), (8, VARINT, 0), (10, 2, b"")]
+    with pytest.raises(CapsuleError):
+        Capsule.from_bytes(encode(fields))

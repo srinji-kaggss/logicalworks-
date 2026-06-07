@@ -24,7 +24,7 @@ from enum import Enum
 from typing import Optional
 
 from .capsule import Capsule
-from .cid import compute_cid
+from .cid import CidError, compute_cid, require_cid
 from .verify import Verdict, verify
 
 
@@ -69,12 +69,20 @@ class Fabric:
 
     # --- immutable resolve: an object, once stored, always resolves (even if superseded) ---
     def resolve(self, cid: str) -> Optional[Capsule]:
-        return self._objects.get(cid)
+        capsule = self._objects.get(cid)
+        if capsule is None:
+            return None
+        try:
+            require_cid(capsule.to_bytes(), cid)
+        except CidError:
+            return None
+        return capsule
 
     def _append_log(self, event: str, cid: str) -> None:
         prev = self.log[-1].chain_tag if self.log else ""
-        tag = compute_cid((prev + "|" + event + "|" + cid).encode("utf-8"))
-        self.log.append(LogEntry(len(self.log), event, cid, tag))
+        seq = len(self.log)
+        tag = compute_cid(f"{prev}\n{seq}\n{event}\n{cid}".encode("utf-8"))
+        self.log.append(LogEntry(seq, event, cid, tag))
 
     # --- propose: verify (the click) → store immutably → PENDING with a commit window in ticks ---
     def propose(self, capsule: Capsule, window: int = 1) -> tuple[Optional[str], Verdict]:
@@ -93,7 +101,7 @@ class Fabric:
         return cid, v
 
     def status(self, cid: str) -> Optional[TxState]:
-        if cid not in self._objects:
+        if self.resolve(cid) is None:
             return None
         if cid in self._superseded:
             return TxState.SUPERSEDED
@@ -111,7 +119,7 @@ class Fabric:
         return Verdict(ok=True)
 
     def supersede(self, old_cid: str, new_capsule: Capsule, window: int = 1) -> tuple[Optional[str], Verdict]:
-        if old_cid not in self._objects:
+        if self.resolve(old_cid) is None:
             return None, Verdict(False, "no such capsule to supersede")
         new_cid, v = self.propose(new_capsule, window)   # store+verify replacement FIRST (F-07)
         if not v.ok:
@@ -123,8 +131,12 @@ class Fabric:
     # --- integrity: recompute the chain; any tamper breaks it ---
     def verify_chain(self) -> bool:
         prev = ""
-        for entry in self.log:
-            tag = compute_cid((prev + "|" + entry.event + "|" + entry.cid).encode("utf-8"))
+        for expected_seq, entry in enumerate(self.log):
+            if entry.seq != expected_seq:
+                return False
+            if self.resolve(entry.cid) is None:
+                return False
+            tag = compute_cid(f"{prev}\n{entry.seq}\n{entry.event}\n{entry.cid}".encode("utf-8"))
             if tag != entry.chain_tag:
                 return False
             prev = tag

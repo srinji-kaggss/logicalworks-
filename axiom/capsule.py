@@ -134,8 +134,12 @@ class Capsule:
             elif fno == _F_GRANTS and wtype == LEN:
                 grants.add(bytes(value).decode("utf-8"))  # type: ignore[arg-type]
             elif fno == _F_IS_HOLE and wtype == VARINT:
+                if value not in (0, 1):
+                    raise CapsuleError("is_hole must be canonical bool 0 or 1")
                 is_hole = bool(value)
             elif fno == _F_IS_GENESIS and wtype == VARINT:
+                if value not in (0, 1):
+                    raise CapsuleError("is_genesis must be canonical bool 0 or 1")
                 is_genesis = bool(value)
             elif fno == _F_SIG and wtype == LEN:
                 signature = bytes(value)  # type: ignore[arg-type]
