@@ -178,7 +178,7 @@ def add_parser(subparsers) -> None:
     build.add_argument("--chunk-words", type=int, default=320)
     build.add_argument("--chunk-overlap", type=int, default=48)
     build.add_argument("--fact-threshold", type=float, default=0.6)
-    build.add_argument("--embed-provider", choices=["auto", "ollama", "openrouter-vl", "deterministic"], default="auto")
+    build.add_argument("--embed-provider", choices=["auto", "ollama", "openrouter-vl", "deterministic", "apple-local"], default="auto")
     build.add_argument("--embed-model", default="")
     build.add_argument("--login-if-needed", action=argparse.BooleanOptionalAction, default=True)
     build.add_argument("--login-url", default="")

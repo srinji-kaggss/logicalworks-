@@ -513,6 +513,16 @@ def embed(
         vec = lgwks_openrouter_embed.embed_one(text, model=chosen)
         if vec is not None:
             return vec, f"openrouter:{chosen}", True
+    if provider == "apple-local":
+        import lgwks_apple
+        chosen_model = model or lgwks_apple.DEFAULT_MODEL
+        chosen_dims = lgwks_apple.DEFAULT_DIMS
+        vec = lgwks_apple.embed_one(text, model_id=chosen_model, dims=chosen_dims)
+        if vec is not None:
+            return vec, lgwks_apple.provider_label(chosen_model), True
+        # apple-local requested but runtime absent: fail closed by returning None
+        # so the caller can emit a clear error rather than silently using deterministic.
+        return None, "apple-local:unavailable", False
     # MLX path lands here in the migration (also semantic). Until a real provider answers:
     return _deterministic_embed(text), "deterministic-feature-hash", False
 

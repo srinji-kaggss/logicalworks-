@@ -313,7 +313,7 @@ def add_parser(subparsers) -> None:
     build.add_argument("--context-file", action="append", default=[], help="repeatable supporting context file")
     build.add_argument("--repo", default="", help="optional repo to bind through portal/capture")
     build.add_argument("--project", default="")
-    build.add_argument("--embed-provider", choices=["auto", "ollama", "openrouter-vl", "deterministic"], default="deterministic")
+    build.add_argument("--embed-provider", choices=["auto", "ollama", "openrouter-vl", "deterministic", "apple-local"], default="deterministic")
     build.add_argument("--embed-model", default="")
     build.add_argument("--max-pages", type=int, default=25)
     build.add_argument("--max-depth", type=int, default=2)

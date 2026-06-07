@@ -57,7 +57,7 @@ The legacy path output format is unchanged (human-readable, writes to runs/).
 | `--login-url` | `""` | Explicit login URL (defaults to target when auth is detected) |
 | `--auth-selector` | `None` | CSS selector for post-auth SPA success confirmation |
 | `--chromium` | `False` (WebKit) | Use Chromium instead of WebKit for browser sessions |
-| `--embed-provider` | `deterministic` | Embedding provider for URL crawls; use `auto` or `ollama` to opt into semantic local embeddings |
+| `--embed-provider` | `deterministic` | Embedding provider for URL crawls; use `auto`, `ollama`, or `apple-local` to opt into semantic local embeddings |
 | `--embed-model` | `""` | Optional explicit embedding model id |
 
 ---
