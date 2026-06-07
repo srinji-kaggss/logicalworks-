@@ -28,6 +28,8 @@ from axiom.capsule import Capsule
 from axiom.cid import require_cid
 from axiom.fabric import Fabric
 
+import lgwks_run
+
 SCHEMA = "lgwks.axiom.harness.v0"
 RUN_ROOT = Path(".lgwks") / "axiom" / "runs"
 HARNESS_KEY = b"lgwks-axiom-harness-v0"
@@ -426,7 +428,12 @@ def load_narration(path: Path) -> dict[str, Any]:
     return payload
 
 
-def build_narration_artifact(claim_text: str = "", claims_file: Path | None = None, run: Path | None = None) -> dict[str, Any]:
+def build_narration_artifact(
+    claim_text: str = "",
+    claims_file: Path | None = None,
+    run: Path | None = None,
+    adopt: bool = True
+) -> dict[str, Any]:
     narration = load_narration(claims_file) if claims_file else parse_narration(claim_text)
     default_root = Path.cwd().resolve() / RUN_ROOT
     root = run.resolve() if run else (default_root / f"narration-{_sha(json.dumps(narration, sort_keys=True), 20)}").resolve()
@@ -488,6 +495,12 @@ def build_narration_artifact(claim_text: str = "", claims_file: Path | None = No
         {"kind": "narration_fabric_log", "path": "narration-fabric-log.json"}
     ])
     
+    if adopt:
+        try:
+            lgwks_run.adopt_axiom_run(root, repo=Path.cwd())
+        except Exception:
+            pass # Adoption failure should not break narration build
+
     return artifact
 
 
@@ -558,6 +571,7 @@ def build_capture(
     out_dir: Path | None = None,
     test_specs: list[TestSpec] | None = None,
     allow_risky: bool = False,
+    adopt: bool = True
 ) -> dict[str, Any]:
     repo = repo.resolve()
     run_id = _run_id(repo, intent)
@@ -634,6 +648,12 @@ def build_capture(
         {"kind": "fabric_log", "path": "fabric-log.json"}
     ])
     
+    if adopt:
+        try:
+            lgwks_run.adopt_axiom_run(root, repo=repo)
+        except Exception:
+            pass # Adoption failure should not break capture build
+
     return packet
 
 
@@ -878,7 +898,8 @@ def capture_command(args: argparse.Namespace) -> int:
             args.test_command,
             args.timeout,
             Path(args.out) if args.out else None,
-            allow_risky=getattr(args, "allow_risky", False)
+            allow_risky=getattr(args, "allow_risky", False),
+            adopt=not getattr(args, "no_adopt", False)
         )
     except CommandPolicyError as exc:
         print(json.dumps({"ok": False, "error": str(exc)}, indent=2), file=sys.stderr)
@@ -895,7 +916,8 @@ def test_matrix_command(args: argparse.Namespace) -> int:
             args.intent,
             out_dir=Path(args.out) if args.out else None,
             test_specs=specs,
-            allow_risky=getattr(args, "allow_risky", False)
+            allow_risky=getattr(args, "allow_risky", False),
+            adopt=not getattr(args, "no_adopt", False)
         )
     except (ValueError, CommandPolicyError) as exc:
         print(json.dumps({"schema": MATRIX_SCHEMA, "ok": False, "error": str(exc)}, indent=2, sort_keys=True), file=sys.stderr)
@@ -915,7 +937,12 @@ def narrate_command(args: argparse.Namespace) -> int:
         run = Path(args.run).resolve() if args.run else None
         if run and not _is_relative_to(run, Path.cwd().resolve()):
             raise ValueError("narration --run must stay within the current repo/worktree")
-        artifact = build_narration_artifact(args.claim, Path(args.claims) if args.claims else None, run)
+        artifact = build_narration_artifact(
+            args.claim,
+            Path(args.claims) if args.claims else None,
+            run,
+            adopt=not getattr(args, "no_adopt", False)
+        )
     except ValueError as exc:
         print(json.dumps({"schema": NARRATION_SCHEMA, "ok": False, "error": str(exc)}, indent=2, sort_keys=True), file=sys.stderr)
         return 1
@@ -978,6 +1005,7 @@ def add_parser(subparsers) -> None:
     capture.add_argument("--timeout", type=int, default=120, help="test command timeout in seconds")
     capture.add_argument("--out", default="", help="optional output directory; default .lgwks/axiom/runs/<id>")
     capture.add_argument("--allow-risky", action="store_true", help="allow risky commands to proceed")
+    capture.add_argument("--no-adopt", action="store_true", help="do not adopt into the universal run spine")
     capture.add_argument("--json", action="store_true", help="print full packet JSON")
     capture.set_defaults(func=capture_command)
 
@@ -1001,6 +1029,7 @@ def add_parser(subparsers) -> None:
     matrix.add_argument("--timeout", type=int, default=120, help="default timeout for tests missing timeout")
     matrix.add_argument("--out", default="", help="optional output directory; default .lgwks/axiom/runs/<id>")
     matrix.add_argument("--allow-risky", action="store_true", help="allow risky commands to proceed")
+    matrix.add_argument("--no-adopt", action="store_true", help="do not adopt into the universal run spine")
     matrix.add_argument("--json", action="store_true", help="print full packet JSON")
     matrix.set_defaults(func=test_matrix_command)
 
@@ -1008,6 +1037,7 @@ def add_parser(subparsers) -> None:
     narrate.add_argument("--claim", default="", help="raw narration claim")
     narrate.add_argument("--claims", default="", help="existing lgwks.axiom.narration.v0 JSON file")
     narrate.add_argument("--run", default="", help="optional run directory to store narration artifacts")
+    narrate.add_argument("--no-adopt", action="store_true", help="do not adopt into the universal run spine")
     narrate.add_argument("--json", action="store_true", help="structured output (default; flag exists for caller intent)")
     narrate.set_defaults(func=narrate_command)
 

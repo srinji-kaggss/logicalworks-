@@ -97,10 +97,22 @@ _VERB_META: dict[str, dict] = {
         "output": "research map, autonomous run artifacts, or report",
         "tokens": "bounded by --budget in auto mode",
     },
-    "run": {
+    "run crawl": {
         "intent": "execute the post-gate crawl spine over a frozen declared scope",
         "args": {"--demo": "offline CRM demo", "--fail-gate": "demo fail-closed gate refusal"},
         "output": "run summary with integrity, gate verification, and pre-vector graph path",
+        "tokens": "none",
+    },
+    "run index": {
+        "intent": "print a universal run index linking cross-subsystem artifacts",
+        "args": {"path": "run directory or index.json", "--json": "structured output"},
+        "output": "lgwks.run_index.v0 JSON object",
+        "tokens": "none",
+    },
+    "run adopt-axiom": {
+        "intent": "link an existing Axiom run into the universal run spine",
+        "args": {"run_dir": "Axiom run directory", "--repo": "optional repo root", "--json": "structured output"},
+        "output": "lgwks.run_index.v0 JSON object",
         "tokens": "none",
     },
     "context": {
