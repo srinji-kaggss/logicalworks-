@@ -129,13 +129,24 @@ _VERB_META: dict[str, dict] = {
         "tokens": "none",
     },
     "jarvis crawl": {
-        "intent": "deterministic research-graph crawl of a site/keyword frontier",
-        "args": {"source": "url or keyword seed", "--max-pages": "int", "--max-depth": "int", "--estimate-only": "plan only",
-                 "--workers": "parallel fetch workers", "--include-external": "follow off-site links",
-                 "--keywords": "newline/comma/semicolon-delimited keywords",
-                 "--search-expansion": "use googler site: expansion for URL+keyword crawls",
-                 "--name": "run name prefix", "--prompt": "research intent"},
-        "output": "run db + prevector graph + embeddings under runs/",
+        "intent": "research-graph crawl of a site/keyword frontier — URL sources use substrate auth-aware runtime by default",
+        "args": {
+            "source": "url or keyword seed",
+            "--max-pages": "int", "--max-depth": "int", "--estimate-only": "plan only",
+            "--workers": "parallel fetch workers (legacy engine)", "--include-external": "follow off-site links (legacy)",
+            "--keywords": "newline/comma/semicolon-delimited keywords",
+            "--search-expansion": "use googler site: expansion for URL+keyword crawls",
+            "--name": "run name prefix", "--prompt": "research intent",
+            "--engine": "substrate (default for URL) | legacy (original Jarvis path)",
+            "--login-if-needed/--no-login-if-needed": "substrate: detect auth walls and prompt browser session",
+            "--login-url": "substrate: explicit login URL override",
+            "--auth-selector": "substrate: CSS selector for post-auth SPA success detection",
+            "--chromium": "substrate: use Chromium instead of WebKit for browser sessions",
+        },
+        "output": (
+            "URL crawls: schema=lgwks.jarvis.substrate_crawl.v0, engine=substrate, artifact paths. "
+            "Keyword crawls: legacy run db + prevector graph + embeddings under runs/."
+        ),
         "tokens": "none (crawl); embedding optional",
     },
     "jarvis remap-db": {
