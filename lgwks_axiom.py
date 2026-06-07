@@ -15,6 +15,8 @@ import hmac
 import json
 import os
 import re
+import shlex
+import shutil
 import subprocess
 import sys
 import time
@@ -42,12 +44,30 @@ class CommandPolicyError(ValueError):
     pass
 
 
+def _argv_from_command(command: str | tuple[str, ...] | list[str]) -> tuple[str, ...]:
+    if isinstance(command, str):
+        try:
+            argv = tuple(shlex.split(command))
+        except ValueError as exc:
+            raise CommandPolicyError(f"invalid command quoting: {exc}") from exc
+    else:
+        argv = tuple(str(part) for part in command)
+    if not argv or any(part == "" for part in argv):
+        raise CommandPolicyError("command argv must not be empty")
+    return argv
+
+
 def classify_argv(argv: tuple[str, ...], repo: Path) -> dict[str, Any]:
     if not argv:
         return {"risk": "blocked", "reason": "empty command"}
     
     cmd = argv[0]
+    cmd_name = Path(cmd).name
     repo_abs = repo.resolve()
+    cmd_is_untrusted_absolute = False
+    if os.path.isabs(cmd) and not _is_relative_to(Path(cmd).resolve(), repo_abs):
+        resolved_tool = shutil.which(cmd_name)
+        cmd_is_untrusted_absolute = resolved_tool is None or Path(resolved_tool).resolve() != Path(cmd).resolve()
     
     # Check for absolute paths outside repo
     for arg in argv[1:]:
@@ -57,18 +77,22 @@ def classify_argv(argv: tuple[str, ...], repo: Path) -> dict[str, Any]:
                 return {"risk": "blocked", "reason": f"absolute path outside repo: {arg}"}
 
     # Allow list
-    if cmd in ("python", "python3", "uv", "pytest"):
+    if cmd_name in ("python", "python3", "uv", "pytest"):
+        if cmd_is_untrusted_absolute:
+            return {"risk": "risky", "reason": f"absolute command path is not the PATH-resolved {cmd_name}: {cmd}"}
         # HARDEN: Block dangerous python -c
-        if cmd in ("python", "python3") and "-c" in argv:
+        if cmd_name in ("python", "python3") and "-c" in argv:
             idx = argv.index("-c")
             if idx + 1 < len(argv):
                 code = argv[idx + 1]
                 for dangerous in ("import os", "import subprocess", "import shutil", "eval(", "exec("):
                     if dangerous in code:
-                        return {"risk": "blocked", "reason": f"dangerous code in {cmd} -c"}
+                        return {"risk": "blocked", "reason": f"dangerous code in {cmd_name} -c"}
         return {"risk": "safe"}
     
-    if cmd == "git":
+    if cmd_name == "git":
+        if cmd_is_untrusted_absolute:
+            return {"risk": "risky", "reason": f"absolute command path is not the PATH-resolved git: {cmd}"}
         if len(argv) > 1:
             sub = argv[1]
             if sub in ("status", "diff", "log", "rev-parse"):
@@ -83,10 +107,10 @@ def classify_argv(argv: tuple[str, ...], repo: Path) -> dict[str, Any]:
             return {"risk": "safe"} # bare git is safe (shows help)
 
     # Block list
-    if cmd in ("rm", "mv", "chmod", "chown", "curl", "wget", "ssh", "scp"):
-        return {"risk": "blocked", "reason": f"blocked tool: {cmd}"}
+    if cmd_name in ("rm", "mv", "chmod", "chown", "curl", "wget", "ssh", "scp"):
+        return {"risk": "blocked", "reason": f"blocked tool: {cmd_name}"}
     
-    if cmd == "cp":
+    if cmd_name == "cp":
         if any(arg in ("-r", "-R", "--recursive") for arg in argv):
             return {"risk": "blocked", "reason": "recursive copy blocked"}
         return {"risk": "safe"} # non-recursive cp is likely ok
@@ -151,9 +175,15 @@ def write_run_index(root: Path, run_id: str, artifacts: list[dict[str, str]]) ->
     index.setdefault("root", str(root))
     index.setdefault("created_at", _utc())
     existing_artifacts = index.get("artifacts", [])
+    if not isinstance(existing_artifacts, list):
+        existing_artifacts = []
     
     # Merge artifacts by kind and path
-    artifact_map = {(a["kind"], a["path"]): a for a in existing_artifacts}
+    artifact_map = {
+        (a["kind"], a["path"]): a
+        for a in existing_artifacts
+        if isinstance(a, dict) and isinstance(a.get("kind"), str) and isinstance(a.get("path"), str)
+    }
     for a in artifacts:
         # HARDEN: Ensure path is relative and safe
         p = Path(a["path"])
@@ -481,11 +511,7 @@ def _test_fact(
     policy: dict[str, Any] | None = None
 ) -> CapturedFact:
     started = time.time()
-    # HARDEN: Consistently use argv list, never shell=True
-    if isinstance(command, str):
-        argv = command.split()
-    else:
-        argv = list(command)
+    argv = list(_argv_from_command(command))
 
     try:
         proc = subprocess.run(
@@ -549,12 +575,7 @@ def build_capture(
     
     specs = test_specs or []
     if not specs and test_command:
-        # Single command from legacy --test
-        if isinstance(test_command, str):
-            cmd_tuple = tuple(test_command.split())
-        else:
-            cmd_tuple = tuple(test_command)
-        specs = [TestSpec("command", cmd_tuple, timeout)]
+        specs = [TestSpec("command", _argv_from_command(test_command), timeout)]
 
     for spec in specs:
         policy = classify_argv(spec.command, repo)
@@ -710,17 +731,33 @@ def replay_run(root: Path) -> dict[str, Any]:
     if index_path.exists():
         try:
             index = json.loads(index_path.read_text(encoding="utf-8"))
+            if not isinstance(index, dict) or index.get("schema") != "lgwks.axiom.run_index.v0":
+                return {
+                    "schema": "lgwks.axiom.replay_all.v0",
+                    "ok": False,
+                    "artifacts": [],
+                    "failures": [{"path": "index.json", "reason": "invalid run index schema"}],
+                }
             for art in index.get("artifacts", []):
-                if art["kind"] in ("emissions", "narration_emissions"):
-                    p = Path(art["path"])
+                if not isinstance(art, dict):
+                    continue
+                kind = art.get("kind")
+                art_path = art.get("path")
+                if kind in ("emissions", "narration_emissions") and isinstance(art_path, str):
+                    p = Path(art_path)
                     # HARDEN: Path traversal protection
                     if p.is_absolute() or ".." in p.parts:
                         continue
                     full_path = root / p
                     if full_path.exists():
-                        emission_paths.append((art["kind"], full_path))
-        except Exception:
-            pass
+                        emission_paths.append((kind, full_path))
+        except Exception as exc:
+            return {
+                "schema": "lgwks.axiom.replay_all.v0",
+                "ok": False,
+                "artifacts": [],
+                "failures": [{"path": "index.json", "reason": f"{type(exc).__name__}: {exc}"}],
+            }
     
     if not emission_paths:
         # Fallback detection
@@ -744,7 +781,8 @@ def replay_run(root: Path) -> dict[str, Any]:
     return {
         "schema": "lgwks.axiom.replay_all.v0",
         "ok": overall_ok and bool(results),
-        "artifacts": results
+        "artifacts": results,
+        "failures": [],
     }
 
 

@@ -231,6 +231,11 @@ class TestAxiomHarness(unittest.TestCase):
         self.assertEqual(lgwks_axiom.classify_argv(("python", "/etc/passwd"), repo)["risk"], "blocked")
         self.assertEqual(lgwks_axiom.classify_argv(("python", "/tmp/repo/app.py"), repo)["risk"], "safe")
 
+    def test_classify_argv_untrusted_absolute_tool_path_is_risky(self):
+        repo = Path("/tmp/repo")
+        result = lgwks_axiom.classify_argv(("/tmp/not-the-path-python", "-c", "print(1)"), repo)
+        self.assertEqual(result["risk"], "risky")
+
     def test_build_capture_rejects_risky_without_flag(self):
         repo = _repo()
         with self.assertRaises(lgwks_axiom.CommandPolicyError):
@@ -241,6 +246,13 @@ class TestAxiomHarness(unittest.TestCase):
         test_fact = [e["fact"] for e in packet["emissions"] if e.get("fact", {}).get("kind") == "test"][0]
         self.assertEqual(test_fact["value"]["policy"]["risk"], "risky")
         self.assertEqual(test_fact["value"]["policy"]["allowed_by"], "flag")
+
+    def test_legacy_test_command_preserves_shell_quoting_without_shell(self):
+        repo = _repo()
+        packet = lgwks_axiom.build_capture(repo, test_command="python -c 'print(123)'")
+        test_fact = [e["fact"] for e in packet["emissions"] if e.get("fact", {}).get("kind") == "test"][0]
+        self.assertEqual(test_fact["value"]["argv"], ["python", "-c", "print(123)"])
+        self.assertEqual(test_fact["value"]["returncode"], 0)
 
     def test_build_capture_rejects_blocked_even_with_flag(self):
         repo = _repo()
