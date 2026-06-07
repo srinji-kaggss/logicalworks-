@@ -4,6 +4,8 @@ import json
 import os
 import tempfile
 import unittest
+from contextlib import redirect_stderr, redirect_stdout
+from io import StringIO
 from pathlib import Path
 
 import lgwks_axiom
@@ -98,6 +100,25 @@ class TestRunSpine(unittest.TestCase):
         with self.assertRaises(ValueError) as cm:
             lgwks_run.adopt_axiom_run(out, repo=repo)
         self.assertIn("unknown artifact kind 'mysterious' missing schema", str(cm.exception))
+
+    def test_index_command_reports_missing_path_as_json_error(self):
+        err = StringIO()
+        missing = Path(tempfile.mkdtemp()) / "missing"
+        with redirect_stderr(err):
+            code = lgwks_run.main(["run", "index", str(missing)])
+
+        self.assertEqual(code, 1)
+        payload = json.loads(err.getvalue())
+        self.assertFalse(payload["ok"])
+        self.assertIn("not found", payload["error"])
+
+    def test_standalone_main_preserves_legacy_crawl_flags(self):
+        out = StringIO()
+        with redirect_stdout(out):
+            code = lgwks_run.main(["--fail-gate"])
+
+        self.assertEqual(code, 3)
+        self.assertIn("REFUSED", out.getvalue())
 
 
 if __name__ == "__main__":

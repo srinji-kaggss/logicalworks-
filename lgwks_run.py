@@ -29,6 +29,7 @@ import json
 import math
 import re
 import socket
+import sys
 import time
 import urllib.error
 import urllib.parse
@@ -189,6 +190,10 @@ def adopt_axiom_command(args: argparse.Namespace) -> int:
 
 def add_parser(subparsers) -> None:
     p = subparsers.add_parser("run", help="post-gate crawl execution spine and universal run management")
+    p.add_argument("--dry", action="store_true", help=argparse.SUPPRESS)
+    p.add_argument("--demo", action="store_true", help=argparse.SUPPRESS)
+    p.add_argument("--fail-gate", action="store_true", help=argparse.SUPPRESS)
+    p.set_defaults(func=_run_compat_dispatch)
     sp = p.add_subparsers(dest="run_command")
     
     # post-gate crawl dispatch (legacy main logic)
@@ -208,6 +213,13 @@ def add_parser(subparsers) -> None:
     adopt.add_argument("--repo", help="optional repo root")
     adopt.add_argument("--json", action="store_true", help="structured output (default)")
     adopt.set_defaults(func=adopt_axiom_command)
+
+
+def _run_compat_dispatch(args: argparse.Namespace) -> int:
+    if getattr(args, "demo", False) or getattr(args, "fail_gate", False):
+        return _crawl_dispatch(args)
+    print("Use `lgwks run crawl --demo`, `lgwks run index <path>`, or `lgwks run adopt-axiom <dir>`.", file=sys.stderr)
+    return 1
 
 
 def _crawl_dispatch(args: argparse.Namespace) -> int:
@@ -235,13 +247,20 @@ def _crawl_dispatch(args: argparse.Namespace) -> int:
 
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(prog="lgwks_run")
+    raw = list(sys.argv[1:] if argv is None else argv)
+    if not raw or raw[0] != "run":
+        raw = ["run", *raw]
     add_parser(parser.add_subparsers(dest="command", required=True))
-    args = parser.parse_args(argv)
+    args = parser.parse_args(raw)
     return args.func(args)
 
 
 class ScopeError(Exception):
     """An attempt to touch a URL outside the frozen declared set (L6)."""
+
+
+class GateError(Exception):
+    """A required gate is missing or red. Fail-closed: the crawler does not run."""
 
 
 @dataclass(frozen=True)
@@ -646,33 +665,6 @@ def _demo_plan(all_pass: bool = True) -> tuple[RunPlan, dict[str, str]]:
                    frozen_scope=scope, keywords=("crm", "lambda", "cognito", "github", "jira", "cdp", "contact"),
                    max_pages=12, per_host_seconds=0.0, tier_floor="secondary", embed=True, verdicts=verdicts)
     return plan, synthetic
-
-
-def main(argv: list[str] | None = None) -> int:
-    p = argparse.ArgumentParser(prog="lgwks_run", description="post-gate crawl execution spine")
-    p.add_argument("--dry", action="store_true", help="synthetic pages, no network (testable)")
-    p.add_argument("--demo", action="store_true", help="run the offline CRM demo")
-    p.add_argument("--fail-gate", action="store_true", help="demo with a RED gate (shows fail-closed)")
-    args = p.parse_args(argv)
-    if not (args.demo or args.fail_gate):
-        p.print_help(); return 1
-    plan, synthetic = _demo_plan(all_pass=not args.fail_gate)
-    out = ROOT / "runs" / plan.run_id
-    try:
-        res = execute_plan(plan, dry=True, synthetic=synthetic, out_dir=out)
-    except GateError as exc:
-        print(f"  REFUSED (fail-closed): {exc}")
-        return 3
-    print(f"  run {res.run_id}: fetched={res.fetched} docs={res.documents} nodes={res.nodes} "
-          f"edges={res.edges} quarantined={res.quarantined}")
-    print(f"  embed={res.embed_provider}  coverage={res.coverage}  uncertainty={res.uncertainty}")
-    print(f"  run log chain intact: {res.runlog_intact}  integrity={res.integrity_mode}  "
-          f"gates_verified={res.gates_verified}")
-    if res.integrity_mode == "unanchored":
-        print("  note: unanchored signer — detects corruption only, NOT adversarial rewrite. "
-              "Provision a key: security add-generic-password -U -s lgwks:signing-key -w")
-    print(f"  pre-vector graph: {res.prevector_path}")
-    return 0
 
 
 if __name__ == "__main__":

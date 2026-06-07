@@ -1329,8 +1329,8 @@ def build_parser() -> argparse.ArgumentParser:
     akinator.set_defaults(func=_akinator_dispatch, _passthrough=True)
 
     # run — post-gate execution spine and universal run management
-    import lgwks_run
-    lgwks_run.add_parser(sub)
+    run = sub.add_parser("run", help="post-gate crawl execution spine and universal run management")
+    run.set_defaults(func=_run_dispatch, _passthrough=True)
 
     # context — spawn context pack assembler for autonomous runs
     context = sub.add_parser("context", help="build a graduated-resolution spawn context pack")
@@ -1707,6 +1707,10 @@ def _auth_dispatch(args) -> int:
 
 def _akinator_dispatch(args) -> int:
     return _script_main_dispatch(ROOT / "lgwks-akinator", "lgwks_akinator_tool", _forward_argv(args))
+
+
+def _run_dispatch(args) -> int:
+    return _module_main_dispatch("lgwks_run", _forward_argv(args))
 
 
 def _context_dispatch(args) -> int:

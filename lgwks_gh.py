@@ -545,7 +545,8 @@ def _git_log_has_issue_ref(number: int) -> bool:
 
 def _local_branches_for_issue(number: int) -> list[str]:
     """Check if local branches reference this issue number.
-    Matches: feat/352*, 352-*, issue-352*, etc."""
+    Matches explicit issue markers: issue-352, gh-352, #352, or 352-*."""
+    marker = re.compile(rf"(^|[/_-])(issue|gh)?[#_-]?{number}($|[/_-])", re.IGNORECASE)
     try:
         p = subprocess.run(
             ["git", "branch", "--list", f"*{number}*"],
@@ -557,7 +558,7 @@ def _local_branches_for_issue(number: int) -> list[str]:
             branches = []
             for line in p.stdout.splitlines():
                 branch = line.strip().lstrip("* ").strip()
-                if branch:
+                if branch and marker.search(branch):
                     branches.append(branch)
             return branches
     except Exception:
