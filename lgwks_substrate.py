@@ -584,29 +584,169 @@ def _upsert_global_fact_vectors(
     conn.close()
 
 
-def _vector_search(run_dir: Path, text: str, limit: int, provider: str, model: str) -> dict[str, Any]:
+
+def _load_run_manifest(run_dir: Path) -> dict[str, Any]:
+    """Load manifest.json from a substrate run directory. Returns empty dict if missing."""
+    manifest_path = run_dir / "manifest.json"
+    if not manifest_path.exists():
+        return {}
+    try:
+        return json.loads(manifest_path.read_text(encoding="utf-8"))
+    except Exception:
+        return {}
+
+
+def _stored_vector_space(run_dir: Path) -> dict[str, Any]:
+    """Return the stored vector-space metadata for a run.
+
+    Source of truth priority:
+    1. manifest.json → vector_space field (stable, canonical).
+    2. Fallback: inspect vectors.jsonl for a homogeneous single provider.
+    3. If ambiguous or missing, returns {"ambiguous": True, "error": <reason>}.
+    """
+    manifest = _load_run_manifest(run_dir)
+    if manifest and "vector_space" in manifest:
+        return manifest["vector_space"]
+
+    # Fallback: inspect vectors.jsonl directly.
+    vector_file = run_dir / "vectors.jsonl"
+    if not vector_file.exists():
+        return {"ambiguous": True, "error": "no manifest.json and no vectors.jsonl found"}
+
+    providers: Counter[str] = Counter()
+    dims_seen: set[int] = set()
+    semantic_seen: set[bool] = set()
+    for line in vector_file.read_text(encoding="utf-8").splitlines():
+        if not line.strip():
+            continue
+        try:
+            row = json.loads(line)
+        except Exception:
+            continue
+        p = row.get("provider", "")
+        d = row.get("dims", 0)
+        s = bool(row.get("is_semantic", False))
+        if p:
+            providers[p] += 1
+        if d:
+            dims_seen.add(d)
+        semantic_seen.add(s)
+
+    if not providers:
+        return {"ambiguous": True, "error": "vectors.jsonl is empty or has no provider metadata"}
+
+    if len(providers) > 1 or len(dims_seen) > 1:
+        return {
+            "ambiguous": True,
+            "error": "mixed providers or dims in vectors.jsonl; cannot derive a single canonical space",
+            "providers_used": dict(providers),
+        }
+
+    canonical_provider = next(iter(providers))
+    canonical_dims = next(iter(dims_seen)) if dims_seen else 0
+    is_semantic = (True in semantic_seen)
+    return {
+        "canonical_provider": canonical_provider,
+        "canonical_model": "",
+        "dims": canonical_dims,
+        "semantic": is_semantic,
+        "providers_used": dict(providers),
+        "source": "vectors.jsonl fallback (no manifest)",
+    }
+
+
+def _vector_search(
+    run_dir: Path,
+    text: str,
+    limit: int,
+    provider: str,
+    model: str,
+    *,
+    force_cross_space: bool = False,
+) -> dict[str, Any]:
     vector_file = run_dir / "vectors.jsonl"
     if not vector_file.exists():
         return {
             "schema": "lgwks.substrate.vector_query.v0",
+            "ok": False,
             "run": str(run_dir),
             "query": text,
-            "provider": "none",
-            "semantic": False,
             "rows": [],
             "error": f"missing vector artifact: {vector_file}",
         }
-    query_vec, query_provider, semantic = lgwks_run.embed(text, embed_on=True, provider=provider, model=(model or None))
+
+    # --- Vector-space identity check -----------------------------------------
+    stored_vs = _stored_vector_space(run_dir)
+
+    if stored_vs.get("ambiguous"):
+        if not force_cross_space:
+            return {
+                "schema": "lgwks.substrate.vector_query.v0",
+                "ok": False,
+                "run": str(run_dir),
+                "query": text,
+                "rows": [],
+                "error": "ambiguous stored vector space",
+                "stored_vector_space": stored_vs,
+                "hint": "rerun substrate build with a single provider, or pass --force-cross-space",
+            }
+
+    # Determine the effective query provider/model.
+    # Empty string means the user did not specify — resolve from stored space.
+    user_specified_provider = bool(provider)  # True only when explicitly passed
+    user_specified_model = bool(model)
+    resolved_provider = provider
+    resolved_model = model
+
+    if not stored_vs.get("ambiguous"):
+        canonical_provider = stored_vs.get("canonical_provider", "")
+        canonical_model = stored_vs.get("canonical_model", "")
+        if not user_specified_provider:
+            resolved_provider = canonical_provider
+        if not user_specified_model:
+            resolved_model = canonical_model
+
+        # Mismatch check: if the user explicitly asked for a different provider/model.
+        requested_vs = {"provider": resolved_provider, "model": resolved_model}
+        mismatch = (
+            (user_specified_provider and resolved_provider != canonical_provider) or
+            (user_specified_model and resolved_model and resolved_model != canonical_model)
+        )
+        if mismatch and not force_cross_space:
+            return {
+                "schema": "lgwks.substrate.vector_query.v0",
+                "ok": False,
+                "run": str(run_dir),
+                "query": text,
+                "rows": [],
+                "error": "embedding provider mismatch",
+                "stored_vector_space": stored_vs,
+                "requested_vector_space": requested_vs,
+                "hint": "rerun without --embed-provider / --embed-model, or pass --force-cross-space",
+            }
+    else:
+        requested_vs = {"provider": resolved_provider, "model": resolved_model}
+
+    # --- Embed the query ------------------------------------------------------
+    query_vec, query_provider, semantic = lgwks_run.embed(
+        text,
+        embed_on=True,
+        provider=resolved_provider or "auto",
+        model=(resolved_model or None),
+    )
     if not query_vec:
         return {
             "schema": "lgwks.substrate.vector_query.v0",
+            "ok": False,
             "run": str(run_dir),
             "query": text,
-            "provider": query_provider,
-            "semantic": semantic,
             "rows": [],
             "error": "query vector unavailable",
+            "resolved_query_provider": query_provider,
+            "stored_vector_space": stored_vs,
         }
+
+    # --- Score stored vectors -------------------------------------------------
     rows: list[dict[str, Any]] = []
     for line in vector_file.read_text(encoding="utf-8").splitlines():
         if not line.strip():
@@ -626,14 +766,24 @@ def _vector_search(run_dir: Path, text: str, limit: int, provider: str, model: s
             "text": row["vector_text"],
         })
     rows.sort(key=lambda item: item["score"], reverse=True)
-    return {
+
+    result: dict[str, Any] = {
         "schema": "lgwks.substrate.vector_query.v0",
+        "ok": True,
         "run": str(run_dir),
         "query": text,
-        "provider": query_provider,
-        "semantic": semantic,
+        "query_vector_space": {
+            "provider": query_provider,
+            "model": resolved_model or "",
+            "semantic": semantic,
+        },
+        "stored_vector_space": stored_vs,
         "rows": rows[:limit],
     }
+    if force_cross_space:
+        result["cross_space_forced"] = True
+        result["warning"] = "scores are cross-space and not semantically comparable"
+    return result
 
 
 def _build_from_local(root: Path, source_type: str, max_files: int, max_chars: int) -> list[dict[str, Any]]:
@@ -819,6 +969,30 @@ def build_run(args: argparse.Namespace) -> dict[str, Any]:
     )
     _upsert_global_fact_vectors(GLOBAL_FACT_DB, run_id=run_id, fact_vectors=fact_vector_rows)
 
+    # Derive canonical vector-space descriptor from the completed build.
+    _unique_providers = dict(provider_counts)
+    _unique_dims: set[int] = {row["dims"] for row in vector_rows if row.get("dims")}
+    _ambiguous_vs = len(_unique_providers) > 1 or len(_unique_dims) > 1
+    if _ambiguous_vs:
+        _canonical_provider = ""
+        _canonical_dims = 0
+    else:
+        _canonical_provider = next(iter(_unique_providers), "")
+        _canonical_dims = next(iter(_unique_dims), 0)
+    _canonical_model = args.embed_model or ""
+    _is_semantic = semantic_vectors > 0
+
+    vector_space: dict[str, Any] = {
+        "provider_requested": args.embed_provider,
+        "model_requested": _canonical_model,
+        "providers_used": _unique_providers,
+        "canonical_provider": _canonical_provider,
+        "canonical_model": _canonical_model,
+        "dims": _canonical_dims,
+        "semantic": _is_semantic,
+        "ambiguous": _ambiguous_vs,
+    }
+
     manifest = {
         "schema": "lgwks.substrate.run.v0",
         "run_id": run_id,
@@ -834,6 +1008,7 @@ def build_run(args: argparse.Namespace) -> dict[str, Any]:
             "total_vectors": len(vector_rows),
             "global_fact_vectors_written": len(fact_vector_rows),
         },
+        "vector_space": vector_space,
         "auth": {
             "login_if_needed": bool(args.login_if_needed),
             "login_url": args.login_url,
@@ -876,7 +1051,14 @@ def build_run(args: argparse.Namespace) -> dict[str, Any]:
 def query_run(args: argparse.Namespace) -> dict[str, Any]:
     run_dir = Path(args.run).resolve()
     if getattr(args, "vector", ""):
-        return _vector_search(run_dir, args.vector, args.limit, args.embed_provider, args.embed_model)
+        return _vector_search(
+            run_dir,
+            args.vector,
+            args.limit,
+            args.embed_provider,
+            args.embed_model,
+            force_cross_space=getattr(args, "force_cross_space", False),
+        )
     rows: list[dict[str, Any]] = []
     path = run_dir / ("facts.jsonl" if args.kind == "facts" else "chunks.jsonl")
     if path.exists():
@@ -984,7 +1166,27 @@ def add_parser(sub) -> None:
     query.add_argument("--match", default="")
     query.add_argument("--neighbors", help="also resolve graph neighbors for a node label/id")
     query.add_argument("--vector", default="", help="semantic/vector query text over stored chunk vectors")
-    query.add_argument("--embed-provider", choices=["auto", "ollama", "openrouter-vl", "deterministic"], default="auto")
+    # Default is empty string (not supplied); code treats empty as 'resolve from run manifest'.
+    # Explicit choices are still validated when supplied; empty string bypasses validation intentionally.
+    query.add_argument(
+        "--embed-provider",
+        default="",
+        help=(
+            "embedding provider for vector query. When omitted (default), the provider recorded in "
+            "the run manifest is used. Explicit values: auto, ollama, openrouter-vl, deterministic. "
+            "If the explicit value does not match the stored vector space, the query fails closed "
+            "unless --force-cross-space is supplied."
+        ),
+    )
     query.add_argument("--embed-model", default="", help="optional explicit embedding model id for vector query")
+    query.add_argument(
+        "--force-cross-space",
+        action="store_true",
+        default=False,
+        help=(
+            "allow querying with a provider/model that does not match the stored vector space. "
+            "Scores will be cross-space and not semantically comparable. Use only for debugging."
+        ),
+    )
     query.add_argument("--limit", type=int, default=20)
     query.set_defaults(func=query_command)
