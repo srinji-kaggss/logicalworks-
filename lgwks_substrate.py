@@ -21,6 +21,7 @@ import sqlite3
 import time
 import urllib.parse
 from collections import Counter, deque
+from datetime import date
 from pathlib import Path
 from typing import Any
 
@@ -67,6 +68,130 @@ AUTH_GATE_RE = re.compile(
     r")\b",
     re.I,
 )
+STRONG_AUTH_GATE_RE = re.compile(
+    r"\b("
+    r"sign in|log in|password|multi-factor|two-factor|passkey|touch id|face id|verify identity|"
+    r"one-time code|magic link|otp|captcha|cloudflare|checking your browser|verify you are human|"
+    r"go to sign in|access denied|enable javascript|challenge|bot detection|unusual traffic"
+    r")\b",
+    re.I,
+)
+UPCOMING_EFFECTIVE_DATE = date(2026, 6, 15)
+VERSION_BUCKETS = ("Current", "Upcoming", "Previous")
+PREVIOUS_VERSION_RE = re.compile(r"\bV(?:3[0-5]|[12]\d)\b", re.I)
+
+
+def _parse_iso_date(value: str) -> date:
+    if not value:
+        return date.today()
+    return date.fromisoformat(value)
+
+
+def _read_jsonl(path: Path, limit: int | None = None) -> list[dict[str, Any]]:
+    if not path.exists():
+        return []
+    rows: list[dict[str, Any]] = []
+    for line in path.read_text(encoding="utf-8").splitlines():
+        if not line.strip():
+            continue
+        try:
+            rows.append(json.loads(line))
+        except Exception:
+            continue
+        if limit is not None and len(rows) >= limit:
+            break
+    return rows
+
+
+def _version_bucket(text: str, *, as_of: date) -> str:
+    low = text.lower()
+    if "v36" in low:
+        return "Upcoming" if as_of < UPCOMING_EFFECTIVE_DATE else "Current"
+    if "upcoming" in low or "future" in low or "effective june 15, 2026" in low or "effective 2026-06-15" in low:
+        return "Upcoming"
+    if "previous" in low or "prior" in low or "retired" in low or "legacy" in low or "deprecated" in low or "superseded" in low:
+        return "Previous"
+    if PREVIOUS_VERSION_RE.search(text):
+        return "Previous"
+    return "Current"
+
+
+def _bucket_facts(facts: list[dict[str, Any]], *, as_of: date, limit: int) -> dict[str, list[dict[str, Any]]]:
+    buckets: dict[str, list[dict[str, Any]]] = {name: [] for name in VERSION_BUCKETS}
+    sorted_facts = sorted(
+        facts,
+        key=lambda row: (float(row.get("fact_score") or 0), row.get("fact_id", "")),
+        reverse=True,
+    )
+    for row in sorted_facts:
+        text = str(row.get("fact_text", ""))
+        if not text.strip():
+            continue
+        bucket = _version_bucket(text, as_of=as_of)
+        if len(buckets[bucket]) >= limit:
+            continue
+        buckets[bucket].append({
+            "fact_id": row.get("fact_id", ""),
+            "chunk_id": row.get("chunk_id", ""),
+            "document_id": row.get("document_id", ""),
+            "fact_score": row.get("fact_score", 0),
+            "chunk_kind": row.get("chunk_kind", ""),
+            "text": text,
+        })
+    return buckets
+
+
+def _frontier_status_counts(frontier: list[dict[str, Any]]) -> dict[str, int]:
+    counts: Counter[str] = Counter()
+    for row in frontier:
+        status = str(row.get("status", "") or "unknown")
+        counts[status] += 1
+    return dict(counts)
+
+
+def _policy_pack_gaps(manifest: dict[str, Any], facts: list[dict[str, Any]], frontier: list[dict[str, Any]], buckets: dict[str, list[dict[str, Any]]]) -> list[dict[str, Any]]:
+    gaps: list[dict[str, Any]] = []
+    counts = manifest.get("counts", {}) if isinstance(manifest.get("counts", {}), dict) else {}
+    if int(counts.get("documents") or 0) == 0:
+        gaps.append({
+            "id": "no-documents",
+            "severity": "high",
+            "reason": "substrate run captured no documents; authenticated baseline is not usable yet",
+            "next_action": "complete human auth handoff and rerun substrate map",
+        })
+    if int(counts.get("facts") or 0) == 0 or not facts:
+        gaps.append({
+            "id": "no-facts",
+            "severity": "high",
+            "reason": "no fact rows were extracted for Current / Upcoming / Previous classification",
+            "next_action": "rerun with authenticated content and inspect extraction profile",
+        })
+    auth_blockers = [
+        row for row in frontier
+        if str(row.get("status", "")) in {"auth_failed", "auth_exhausted", "auth_saved_but_failed", "error", "blocked"}
+    ]
+    if auth_blockers:
+        gaps.append({
+            "id": "auth-frontier-blockers",
+            "severity": "high",
+            "reason": f"{len(auth_blockers)} frontier entries ended in blocked/auth/error states",
+            "next_action": "review frontier.jsonl, renew the browser session, and rerun the blocked URLs",
+        })
+    if not buckets["Upcoming"]:
+        gaps.append({
+            "id": "missing-upcoming-v36",
+            "severity": "medium",
+            "reason": "no V36/upcoming facts were found; V36 must remain Upcoming until 2026-06-15",
+            "next_action": "add or crawl V36-specific source pages before treating the baseline as complete",
+        })
+    if not buckets["Previous"]:
+        gaps.append({
+            "id": "missing-previous-layer",
+            "severity": "medium",
+            "reason": "no previous/legacy facts were found for regression comparison",
+            "next_action": "crawl prior-version or archived standard pages, or record that none are available",
+        })
+    return gaps
 
 
 def _sha(text: str) -> str:
@@ -113,8 +238,17 @@ def _looks_like_login_gate(title: str, text: str, url: str) -> bool:
     low_url = url.lower()
     if any(term in low_url for term in ("/login", "/signin", "signin", "authenticate", "sso")):
         return True
-    sample = " ".join(part for part in (title, text[:2500]) if part).strip()
-    return bool(AUTH_GATE_RE.search(sample))
+    title_sample = title.strip()
+    if title_sample and AUTH_GATE_RE.search(title_sample):
+        return True
+    sample = text[:2500].strip()
+    if STRONG_AUTH_GATE_RE.search(sample):
+        return True
+    # A body that merely mentions "login" can be authenticated content
+    # ("access these services using your login"). Treat bare login/logins as
+    # a gate only when repeated or paired with an obvious form/challenge term.
+    weak_hits = re.findall(r"\blogins?\b", sample, flags=re.I)
+    return len(weak_hits) >= 2 and bool(re.search(r"\b(username|user id|password|submit|remote logins?)\b", sample, re.I))
 
 
 def _crawl_site(
@@ -128,6 +262,8 @@ def _crawl_site(
     success_selector: str | None,
     max_auto_bypass_attempts: int,
     max_auth_handoffs: int,
+    click_discovery: bool,
+    max_clicks_per_page: int,
 ) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
     parsed = urllib.parse.urlparse(base_url)
     base_host = parsed.hostname or ""
@@ -270,6 +406,52 @@ def _crawl_site(
         })
         if depth >= max_depth:
             continue
+        if click_discovery:
+            click_rows = lgwks_browser.discover_clicks(
+                clean,
+                max_clicks=max_clicks_per_page,
+                wait_ms=2500,
+                browser_engine=browser_engine,
+            )
+            for row in click_rows:
+                cand = row.get("candidate", {})
+                label = cand.get("text") or cand.get("href") or "click"
+                final_url = urllib.parse.urldefrag(row.get("final_url") or clean)[0]
+                status = row.get("status", "error")
+                frontier.append({
+                    "url": final_url or clean,
+                    "depth": depth + 1,
+                    "status": f"click_{status}",
+                    "reason": row.get("reason", label),
+                    "discovered_by": clean,
+                    "links_found": 0,
+                })
+                if status != "ok" or not row.get("html"):
+                    continue
+                c_md, c_title, c_links = html_to_markdown(row["html"], final_url or clean)
+                if login_if_needed and _looks_like_login_gate(c_title or "", c_md or row.get("text", ""), final_url or clean):
+                    frontier.append({
+                        "url": final_url or clean,
+                        "depth": depth + 1,
+                        "status": "click_gate",
+                        "reason": label,
+                        "discovered_by": clean,
+                        "links_found": len(c_links),
+                    })
+                    continue
+                docs.append({
+                    "source": final_url or f"{clean}#click-{cand.get('id', '')}",
+                    "title": c_title or label,
+                    "text": c_md or row.get("text", ""),
+                    "html_len": row.get("html_len", 0),
+                    "depth": depth + 1,
+                    "discovered_by": clean,
+                })
+                final_host = urllib.parse.urlparse(final_url).hostname or ""
+                if final_url and final_host == base_host and final_url not in seen:
+                    queue.append((final_url, depth + 1, clean))
+                if len(docs) >= max_pages:
+                    break
         for link in links:
             href = urllib.parse.urldefrag(link.get("href", ""))[0]
             host = urllib.parse.urlparse(href).hostname or ""
@@ -704,6 +886,19 @@ def _model_matches_vector_space(requested: str, canonical_model: str, canonical_
     return False
 
 
+def _query_embed_args(provider: str, model: str) -> tuple[str, str]:
+    """Convert stored provider labels back into embed() selector args."""
+    if provider == "deterministic-feature-hash":
+        return "deterministic", model
+    if provider.startswith("ollama:"):
+        return "ollama", model or provider.split(":", 1)[1]
+    if provider.startswith("openrouter:"):
+        return "openrouter-vl", model or provider.split(":", 1)[1]
+    if provider.startswith("apple-local:"):
+        return "apple-local", model or provider.split(":", 1)[1]
+    return provider or "auto", model
+
+
 def _vector_search(
     run_dir: Path,
     text: str,
@@ -779,11 +974,14 @@ def _vector_search(
         requested_vs = {"provider": resolved_provider, "model": resolved_model}
 
     # --- Embed the query ------------------------------------------------------
+    embed_provider, embed_model = _query_embed_args(resolved_provider, resolved_model)
+    query_dims = stored_vs.get("dims") if not stored_vs.get("ambiguous") else None
     query_vec, query_provider, semantic = lgwks_run.embed(
         text,
         embed_on=True,
-        provider=resolved_provider or "auto",
-        model=(resolved_model or None),
+        provider=embed_provider,
+        model=(embed_model or None),
+        dims=(int(query_dims) if query_dims else None),
     )
     if not query_vec:
         return {
@@ -881,6 +1079,8 @@ def build_run(args: argparse.Namespace) -> dict[str, Any]:
             success_selector=args.success_selector,
             max_auto_bypass_attempts=args.max_auto_bypass_attempts,
             max_auth_handoffs=args.max_auth_handoffs,
+            click_discovery=bool(getattr(args, "click_discovery", False)),
+            max_clicks_per_page=int(getattr(args, "max_clicks_per_page", 20)),
         )
     else:
         docs = _build_from_local(Path(args.target).resolve(), source_kind, args.max_files, args.max_chars)
@@ -897,8 +1097,9 @@ def build_run(args: argparse.Namespace) -> dict[str, Any]:
     semantic_vectors = 0
 
     for idx, doc in enumerate(docs, start=1):
-        source_id = f"src-{_sha(doc['source'])[:16]}"
-        doc_id = f"doc-{_sha(doc['source'] + doc['title'])[:16]}"
+        source_identity = f"{doc['source']}|{doc['discovered_by']}|{doc['depth']}|{idx}"
+        source_id = f"src-{_sha(source_identity)[:16]}"
+        doc_id = f"doc-{_sha(source_identity + doc['title'])[:16]}"
         source_rows.append({
             "source_id": source_id,
             "source": doc["source"],
@@ -954,6 +1155,7 @@ def build_run(args: argparse.Namespace) -> dict[str, Any]:
                         embed_on=True,
                         provider=args.embed_provider,
                         model=(args.embed_model or None),
+                        dims=0,
                     )
                     if fact_vec is None and args.embed_provider == "apple-local":
                         raise EmbeddingProviderUnavailable(
@@ -977,6 +1179,7 @@ def build_run(args: argparse.Namespace) -> dict[str, Any]:
                 embed_on=True,
                 provider=args.embed_provider,
                 model=(args.embed_model or None),
+                dims=0,
             )
             if vector is None and args.embed_provider == "apple-local":
                 raise EmbeddingProviderUnavailable(
@@ -1075,6 +1278,8 @@ def build_run(args: argparse.Namespace) -> dict[str, Any]:
             "max_auto_bypass_attempts": args.max_auto_bypass_attempts,
             "max_auth_handoffs": args.max_auth_handoffs,
             "browser_engine": args.browser_engine,
+            "click_discovery": bool(getattr(args, "click_discovery", False)),
+            "max_clicks_per_page": int(getattr(args, "max_clicks_per_page", 20)),
         },
         "counts": {
             "sources": len(source_rows),
@@ -1139,13 +1344,59 @@ def query_run(args: argparse.Namespace) -> dict[str, Any]:
     }
     if args.neighbors:
         db = entity_graph.GraphDB(run_dir / "graph.db")
-        node, err = entity_graph._resolve_single_node(db, args.neighbors)
-        if err:
-            payload["graph_error"] = err
-        else:
-            payload["node"] = node
-            payload["neighbors"] = db.neighbors(node["node_id"], limit=args.limit)
-        db.close()
+        try:
+            node, err = entity_graph._resolve_single_node(db, args.neighbors)
+            if err:
+                payload["graph_error"] = err
+            else:
+                payload["node"] = node
+                payload["neighbors"] = db.neighbors(node["node_id"], limit=args.limit)
+        finally:
+            db.close()
+    return payload
+
+
+def baseline_run(args: argparse.Namespace) -> dict[str, Any]:
+    run_dir = Path(args.run).resolve()
+    manifest = _load_run_manifest(run_dir)
+    facts = _read_jsonl(run_dir / "facts.jsonl")
+    frontier = _read_jsonl(run_dir / "frontier.jsonl")
+    as_of = _parse_iso_date(args.as_of)
+    buckets = _bucket_facts(facts, as_of=as_of, limit=args.limit)
+    gaps = _policy_pack_gaps(manifest, facts, frontier, buckets)
+    payload = {
+        "schema": "lgwks.substrate.baseline.v0",
+        "ok": bool(manifest) and bool(facts) and not any(gap["severity"] == "high" for gap in gaps),
+        "run": str(run_dir),
+        "run_id": manifest.get("run_id", run_dir.name),
+        "target": manifest.get("target", ""),
+        "project": manifest.get("project", ""),
+        "as_of": as_of.isoformat(),
+        "version_policy": {
+            "order": list(VERSION_BUCKETS),
+            "upcoming_label": "V36",
+            "upcoming_effective_date": UPCOMING_EFFECTIVE_DATE.isoformat(),
+            "rule": "V36 is Upcoming before 2026-06-15 and Current on/after 2026-06-15",
+        },
+        "counts": manifest.get("counts", {}),
+        "embedding": manifest.get("embedding", {}),
+        "auth": manifest.get("auth", {}),
+        "frontier_status_counts": _frontier_status_counts(frontier),
+        "sections": [{"name": name, "facts": buckets[name]} for name in VERSION_BUCKETS],
+        "policy_pack_gaps": gaps,
+        "artifacts": {
+            "manifest": str(run_dir / "manifest.json"),
+            "facts": str(run_dir / "facts.jsonl"),
+            "frontier": str(run_dir / "frontier.jsonl") if (run_dir / "frontier.jsonl").exists() else "",
+            "crawl_map": str(run_dir / "crawl_map.json") if (run_dir / "crawl_map.json").exists() else "",
+            "graph_json": str(run_dir / "graph.json") if (run_dir / "graph.json").exists() else "",
+            "substrate_db": str(run_dir / "substrate.db") if (run_dir / "substrate.db").exists() else "",
+        },
+    }
+    if args.write:
+        out_path = run_dir / "baseline.json"
+        _emit_json(out_path, payload)
+        payload["artifacts"]["baseline"] = str(out_path)
     return payload
 
 
@@ -1188,6 +1439,11 @@ def query_command(args: argparse.Namespace) -> int:
     return 0
 
 
+def baseline_command(args: argparse.Namespace) -> int:
+    print(json.dumps(baseline_run(args), indent=2))
+    return 0
+
+
 def add_parser(sub) -> None:
     p = sub.add_parser("substrate", help="deterministic crawl+vector substrate for local or web content")
     ps = p.add_subparsers(dest="substrate_command", required=True)
@@ -1218,6 +1474,10 @@ def add_parser(sub) -> None:
                          help="how many times the crawler may pause for human auth before giving up")
         cmd.add_argument("--chromium", dest="browser_engine", action="store_const", const="chromium",
                          default="webkit", help="use Chromium instead of WebKit (for Chrome-cookie compatibility or anti-detection flag)")
+        cmd.add_argument("--click-discovery", action="store_true", default=False,
+                         help="deterministically click visible controls and record no-access/dead branches")
+        cmd.add_argument("--max-clicks-per-page", type=int, default=20,
+                         help="max visible controls to click per rendered page when --click-discovery is enabled")
 
     build = ps.add_parser("build", help="build a substrate run from a url, file, folder, or repo")
     _add_build_args(build)
@@ -1257,3 +1517,10 @@ def add_parser(sub) -> None:
     )
     query.add_argument("--limit", type=int, default=20)
     query.set_defaults(func=query_command)
+
+    baseline = ps.add_parser("baseline", help="summarize a substrate run as Current / Upcoming / Previous baseline")
+    baseline.add_argument("run")
+    baseline.add_argument("--as-of", default="", help="YYYY-MM-DD date for version classification; defaults to today")
+    baseline.add_argument("--limit", type=int, default=20, help="max facts per version section")
+    baseline.add_argument("--write", action="store_true", help="write baseline.json into the run directory")
+    baseline.set_defaults(func=baseline_command)
