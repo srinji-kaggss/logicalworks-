@@ -32,7 +32,7 @@ class TestAxiomHarness(unittest.TestCase):
     def test_capture_writes_verified_packet(self):
         repo = _repo()
         out = repo / "out"
-        packet = lgwks_axiom.build_capture(repo, "run tests", "python -c 'print(123)'", out_dir=out)
+        packet = lgwks_axiom.build_capture(repo, "run tests", ("python", "-c", "print(123)"), out_dir=out)
         self.assertEqual(packet["schema"], lgwks_axiom.SCHEMA)
         self.assertTrue(packet["fabric"]["chain_ok"])
         self.assertTrue((out / "emissions.jsonl").exists())
@@ -50,14 +50,14 @@ class TestAxiomHarness(unittest.TestCase):
 
     def test_divergence_accepts_captured_passing_test(self):
         repo = _repo()
-        packet = lgwks_axiom.build_capture(repo, "test run", "python -c 'print(123)'")
+        packet = lgwks_axiom.build_capture(repo, "test run", ("python", "-c", "print(123)"))
         result = lgwks_axiom.check_narration("tests passed", packet["emissions"])
         self.assertTrue(result["ok"])
 
     def test_replay_reconstructs_persisted_emissions(self):
         repo = _repo()
         out = repo / "out"
-        lgwks_axiom.build_capture(repo, "replay", "python -c 'print(123)'", out_dir=out)
+        lgwks_axiom.build_capture(repo, "replay", ("python", "-c", "print(123)"), out_dir=out)
         result = lgwks_axiom.replay_emissions(out)
         self.assertTrue(result["ok"], result["failures"])
         self.assertTrue(result["chain_ok"])
@@ -119,7 +119,7 @@ class TestAxiomHarness(unittest.TestCase):
     def test_test_matrix_one_failure_makes_tests_passed_diverge(self):
         repo = _repo()
         specs = [
-            lgwks_axiom.TestSpec("ok", "python -c 'print(1)'", 10),
+            lgwks_axiom.TestSpec("ok", ("python", "-c", "print(1)"), 10),
             lgwks_axiom.TestSpec("fail", ("python", "-c", "raise SystemExit(7)"), 10),
         ]
         packet = lgwks_axiom.build_capture(repo, "matrix", test_specs=specs)
@@ -160,7 +160,7 @@ class TestAxiomHarness(unittest.TestCase):
 
     def test_check_accepts_typed_claim_file_payload(self):
         repo = _repo()
-        packet = lgwks_axiom.build_capture(repo, "test run", "python -c 'print(123)'")
+        packet = lgwks_axiom.build_capture(repo, "test run", ("python", "-c", "print(123)"))
         claims = lgwks_axiom.parse_narration("tests passed")
         result = lgwks_axiom.check_narration("", packet["emissions"], claims)
         self.assertTrue(result["ok"])
@@ -179,7 +179,7 @@ class TestAxiomHarness(unittest.TestCase):
 
     def test_unknown_narration_hole_diverges(self):
         repo = _repo()
-        packet = lgwks_axiom.build_capture(repo, "test run", "python -c 'print(123)'")
+        packet = lgwks_axiom.build_capture(repo, "test run", ("python", "-c", "print(123)"))
         result = lgwks_axiom.check_narration("the vibes are excellent", packet["emissions"])
         self.assertFalse(result["ok"])
         self.assertEqual(result["findings"][0]["claim"], "unsupported narration")
@@ -195,6 +195,7 @@ class TestAxiomHarness(unittest.TestCase):
         index_path = out / "index.json"
         self.assertTrue(index_path.exists())
         index = json.loads(index_path.read_text(encoding="utf-8"))
+        self.assertEqual(index["run_id"], index["run_id"])
         self.assertEqual(len(index["artifacts"]), 3)
         kinds = {a["kind"] for a in index["artifacts"]}
         self.assertIn("capture", kinds)
@@ -207,6 +208,43 @@ class TestAxiomHarness(unittest.TestCase):
         kinds = {a["kind"] for a in index["artifacts"]}
         self.assertIn("narration", kinds)
         self.assertIn("narration_emissions", kinds)
+
+    def test_classify_argv_safe_commands(self):
+        repo = Path("/tmp/repo")
+        self.assertEqual(lgwks_axiom.classify_argv(("python", "-c", "1"), repo)["risk"], "safe")
+        self.assertEqual(lgwks_axiom.classify_argv(("pytest",), repo)["risk"], "safe")
+        self.assertEqual(lgwks_axiom.classify_argv(("git", "status"), repo)["risk"], "safe")
+
+    def test_classify_argv_blocked_commands(self):
+        repo = Path("/tmp/repo")
+        self.assertEqual(lgwks_axiom.classify_argv(("rm", "-rf", "/"), repo)["risk"], "blocked")
+        self.assertEqual(lgwks_axiom.classify_argv(("git", "push"), repo)["risk"], "blocked")
+        self.assertEqual(lgwks_axiom.classify_argv(("curl", "http://x.com"), repo)["risk"], "blocked")
+
+    def test_classify_argv_risky_commands(self):
+        repo = Path("/tmp/repo")
+        self.assertEqual(lgwks_axiom.classify_argv(("ls",), repo)["risk"], "risky")
+
+    def test_classify_argv_absolute_path_outside_repo(self):
+        repo = Path("/tmp/repo")
+        self.assertEqual(lgwks_axiom.classify_argv(("python", "/etc/passwd"), repo)["risk"], "blocked")
+        self.assertEqual(lgwks_axiom.classify_argv(("python", "/tmp/repo/app.py"), repo)["risk"], "safe")
+
+    def test_build_capture_rejects_risky_without_flag(self):
+        repo = _repo()
+        with self.assertRaises(lgwks_axiom.CommandPolicyError):
+            lgwks_axiom.build_capture(repo, test_command="ls")
+
+        # Should pass with flag
+        packet = lgwks_axiom.build_capture(repo, test_command="ls", allow_risky=True)
+        test_fact = [e["fact"] for e in packet["emissions"] if e.get("fact", {}).get("kind") == "test"][0]
+        self.assertEqual(test_fact["value"]["policy"]["risk"], "risky")
+        self.assertEqual(test_fact["value"]["policy"]["allowed_by"], "flag")
+
+    def test_build_capture_rejects_blocked_even_with_flag(self):
+        repo = _repo()
+        with self.assertRaises(lgwks_axiom.CommandPolicyError):
+            lgwks_axiom.build_capture(repo, test_command="rm x", allow_risky=True)
 
 
 if __name__ == "__main__":

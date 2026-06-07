@@ -38,6 +38,54 @@ MAX_JSON_BYTES = 1_000_000
 NARRATION_KINDS = frozenset({"tests_passed", "worktree_clean", "files_changed", "work_implemented"})
 
 
+class CommandPolicyError(ValueError):
+    pass
+
+
+def classify_argv(argv: tuple[str, ...], repo: Path) -> dict[str, Any]:
+    if not argv:
+        return {"risk": "blocked", "reason": "empty command"}
+    
+    cmd = argv[0]
+    repo_abs = repo.resolve()
+    
+    # Check for absolute paths outside repo
+    for arg in argv[1:]:
+        if os.path.isabs(arg):
+            arg_path = Path(arg).resolve()
+            if not _is_relative_to(arg_path, repo_abs):
+                return {"risk": "blocked", "reason": f"absolute path outside repo: {arg}"}
+
+    # Allow list
+    if cmd in ("python", "python3", "uv", "pytest"):
+        return {"risk": "safe"}
+    
+    if cmd == "git":
+        if len(argv) > 1:
+            sub = argv[1]
+            if sub in ("status", "diff", "log", "rev-parse"):
+                return {"risk": "safe"}
+            if sub == "branch" and "--show-current" in argv:
+                return {"risk": "safe"}
+            
+            # Block list for git
+            if sub in ("push", "reset", "checkout", "clean", "commit", "merge", "rebase"):
+                return {"risk": "blocked", "reason": f"destructive git command: {sub}"}
+        else:
+            return {"risk": "safe"} # bare git is safe (shows help)
+
+    # Block list
+    if cmd in ("rm", "mv", "chmod", "chown", "curl", "wget", "ssh", "scp"):
+        return {"risk": "blocked", "reason": f"blocked tool: {cmd}"}
+    
+    if cmd == "cp":
+        if any(arg in ("-r", "-R", "--recursive") for arg in argv):
+            return {"risk": "blocked", "reason": "recursive copy blocked"}
+        return {"risk": "safe"} # non-recursive cp is likely ok
+
+    return {"risk": "risky", "reason": "unknown command"}
+
+
 @dataclass(frozen=True)
 class CapturedFact:
     kind: str
@@ -407,7 +455,13 @@ def _command_display(command: str | tuple[str, ...]) -> str:
     return command if isinstance(command, str) else " ".join(command)
 
 
-def _test_fact(command: str | tuple[str, ...], repo: Path, timeout: int, label: str = "command") -> CapturedFact:
+def _test_fact(
+    command: str | tuple[str, ...],
+    repo: Path,
+    timeout: int,
+    label: str = "command",
+    policy: dict[str, Any] | None = None
+) -> CapturedFact:
     started = time.time()
     shell = isinstance(command, str)
     try:
@@ -420,33 +474,31 @@ def _test_fact(command: str | tuple[str, ...], repo: Path, timeout: int, label: 
             timeout=timeout,
             check=False,
         )
-        return CapturedFact(
-            "test",
-            label,
-            {
-                "label": label,
-                "command": _command_display(command),
-                "argv": list(command) if not shell else [],
-                "returncode": proc.returncode,
-                "elapsed_seconds": round(time.time() - started, 3),
-                "stdout_tail": (proc.stdout or "")[-2000:],
-                "stderr_tail": (proc.stderr or "")[-2000:],
-            },
-        )
+        val = {
+            "label": label,
+            "command": _command_display(command),
+            "argv": list(command) if not shell else [],
+            "returncode": proc.returncode,
+            "elapsed_seconds": round(time.time() - started, 3),
+            "stdout_tail": (proc.stdout or "")[-2000:],
+            "stderr_tail": (proc.stderr or "")[-2000:],
+        }
+        if policy:
+            val["policy"] = policy
+        return CapturedFact("test", label, val)
     except subprocess.TimeoutExpired as exc:
-        return CapturedFact(
-            "test",
-            label,
-            {
-                "label": label,
-                "command": _command_display(command),
-                "argv": list(command) if not shell else [],
-                "returncode": 124,
-                "elapsed_seconds": round(time.time() - started, 3),
-                "stdout_tail": (exc.stdout or "")[-2000:] if isinstance(exc.stdout, str) else "",
-                "stderr_tail": "timeout",
-            },
-        )
+        val = {
+            "label": label,
+            "command": _command_display(command),
+            "argv": list(command) if not shell else [],
+            "returncode": 124,
+            "elapsed_seconds": round(time.time() - started, 3),
+            "stdout_tail": (exc.stdout or "")[-2000:] if isinstance(exc.stdout, str) else "",
+            "stderr_tail": "timeout",
+        }
+        if policy:
+            val["policy"] = policy
+        return CapturedFact("test", label, val)
 
 
 def build_capture(
@@ -456,6 +508,7 @@ def build_capture(
     timeout: int = 120,
     out_dir: Path | None = None,
     test_specs: list[TestSpec] | None = None,
+    allow_risky: bool = False,
 ) -> dict[str, Any]:
     repo = repo.resolve()
     run_id = _run_id(repo, intent)
@@ -470,11 +523,32 @@ def build_capture(
     facts = _repo_facts(repo)
     if intent:
         facts.append(CapturedFact("intent", "operator", {"text": intent}))
-    if test_specs:
-        for spec in test_specs:
-            facts.append(_test_fact(spec.command, repo, spec.timeout, spec.label))
-    elif test_command:
-        facts.append(_test_fact(test_command, repo, timeout))
+    
+    specs = test_specs or []
+    if not specs and test_command:
+        # Single command from legacy --test
+        if isinstance(test_command, str):
+            cmd_tuple = tuple(test_command.split())
+        else:
+            cmd_tuple = tuple(test_command)
+        specs = [TestSpec("command", cmd_tuple, timeout)]
+
+    for spec in specs:
+        policy = classify_argv(spec.command, repo)
+        if policy["risk"] == "blocked":
+            raise CommandPolicyError(f"Policy blocked command {spec.command!r}: {policy.get('reason')}")
+        
+        if policy["risk"] == "risky" and not allow_risky:
+            raise CommandPolicyError(
+                f"Policy flagged command {spec.command!r} as risky. "
+                "Use --allow-risky to proceed."
+            )
+        
+        # Record if allowed by flag
+        if policy["risk"] == "risky" and allow_risky:
+            policy["allowed_by"] = "flag"
+            
+        facts.append(_test_fact(spec.command, repo, spec.timeout, spec.label, policy=policy))
 
     emissions = [genesis_record]
     for fact in facts:
@@ -682,7 +756,18 @@ def _print_packet(packet: dict[str, Any], as_json: bool) -> None:
 
 
 def capture_command(args: argparse.Namespace) -> int:
-    packet = build_capture(Path(args.repo), args.intent, args.test_command, args.timeout, Path(args.out) if args.out else None)
+    try:
+        packet = build_capture(
+            Path(args.repo),
+            args.intent,
+            args.test_command,
+            args.timeout,
+            Path(args.out) if args.out else None,
+            allow_risky=getattr(args, "allow_risky", False)
+        )
+    except CommandPolicyError as exc:
+        print(json.dumps({"ok": False, "error": str(exc)}, indent=2), file=sys.stderr)
+        return 1
     _print_packet(packet, args.json or os.environ.get("LGWRS_MACHINE") == "1")
     return 0
 
@@ -690,8 +775,14 @@ def capture_command(args: argparse.Namespace) -> int:
 def test_matrix_command(args: argparse.Namespace) -> int:
     try:
         specs = load_test_matrix(Path(args.file), args.timeout)
-        packet = build_capture(Path(args.repo), args.intent, out_dir=Path(args.out) if args.out else None, test_specs=specs)
-    except ValueError as exc:
+        packet = build_capture(
+            Path(args.repo),
+            args.intent,
+            out_dir=Path(args.out) if args.out else None,
+            test_specs=specs,
+            allow_risky=getattr(args, "allow_risky", False)
+        )
+    except (ValueError, CommandPolicyError) as exc:
         print(json.dumps({"schema": MATRIX_SCHEMA, "ok": False, "error": str(exc)}, indent=2, sort_keys=True), file=sys.stderr)
         return 1
     packet["matrix"] = {"schema": MATRIX_SCHEMA, "tests": [asdict(spec) for spec in specs]}
@@ -767,6 +858,7 @@ def add_parser(subparsers) -> None:
     capture.add_argument("--test", dest="test_command", default="", help="optional test command to run and capture")
     capture.add_argument("--timeout", type=int, default=120, help="test command timeout in seconds")
     capture.add_argument("--out", default="", help="optional output directory; default .lgwks/axiom/runs/<id>")
+    capture.add_argument("--allow-risky", action="store_true", help="allow risky commands to proceed")
     capture.add_argument("--json", action="store_true", help="print full packet JSON")
     capture.set_defaults(func=capture_command)
 
@@ -788,6 +880,7 @@ def add_parser(subparsers) -> None:
     matrix.add_argument("--intent", default="", help="operator intent/narration seed")
     matrix.add_argument("--timeout", type=int, default=120, help="default timeout for tests missing timeout")
     matrix.add_argument("--out", default="", help="optional output directory; default .lgwks/axiom/runs/<id>")
+    matrix.add_argument("--allow-risky", action="store_true", help="allow risky commands to proceed")
     matrix.add_argument("--json", action="store_true", help="print full packet JSON")
     matrix.set_defaults(func=test_matrix_command)
 
