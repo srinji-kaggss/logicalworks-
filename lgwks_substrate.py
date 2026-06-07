@@ -34,6 +34,12 @@ ROOT = Path(__file__).resolve().parent
 RUN_ROOT = ROOT / "store" / "substrate"
 GLOBAL_ROOT = ROOT / "store" / "substrate-global"
 GLOBAL_FACT_DB = GLOBAL_ROOT / "fact_vectors.db"
+
+
+class EmbeddingProviderUnavailable(RuntimeError):
+    """Raised when an explicitly requested semantic embedding provider cannot produce vectors."""
+
+
 TEXT_EXT = {
     ".txt", ".md", ".json", ".jsonl", ".yaml", ".yml", ".toml", ".ini", ".cfg", ".xml", ".csv",
     ".py", ".js", ".ts", ".tsx", ".jsx", ".rs", ".go", ".java", ".kt", ".swift", ".rb", ".php",
@@ -338,6 +344,21 @@ def _emit_jsonl(path: Path, rows: list[dict[str, Any]]) -> None:
 def _emit_json(path: Path, payload: dict[str, Any]) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(json.dumps(payload, indent=2, sort_keys=True), encoding="utf-8")
+
+
+def _provider_unavailable_payload(args: argparse.Namespace, exc: Exception) -> dict[str, Any]:
+    return {
+        "schema": "lgwks.substrate.error.v0",
+        "ok": False,
+        "target": getattr(args, "target", ""),
+        "project": getattr(args, "project", ""),
+        "error": "embedding provider unavailable",
+        "detail": str(exc),
+        "embedding": {
+            "provider_requested": getattr(args, "embed_provider", ""),
+            "model_requested": getattr(args, "embed_model", ""),
+        },
+    }
 
 
 def _crawl_map(frontier: list[dict[str, Any]]) -> dict[str, Any]:
@@ -670,6 +691,8 @@ def _provider_matches_vector_space(requested: str, canonical: str) -> bool:
         return True
     if requested == "openrouter-vl" and canonical.startswith("openrouter:"):
         return True
+    if requested == "apple-local" and canonical.startswith("apple-local:"):
+        return True
     return False
 
 
@@ -932,6 +955,10 @@ def build_run(args: argparse.Namespace) -> dict[str, Any]:
                         provider=args.embed_provider,
                         model=(args.embed_model or None),
                     )
+                    if fact_vec is None and args.embed_provider == "apple-local":
+                        raise EmbeddingProviderUnavailable(
+                            f"apple-local provider unavailable for model {args.embed_model or 'default'}"
+                        )
                     provider_counts[fact_provider] += 1
                     if fact_semantic:
                         semantic_vectors += 1
@@ -951,6 +978,10 @@ def build_run(args: argparse.Namespace) -> dict[str, Any]:
                 provider=args.embed_provider,
                 model=(args.embed_model or None),
             )
+            if vector is None and args.embed_provider == "apple-local":
+                raise EmbeddingProviderUnavailable(
+                    f"apple-local provider unavailable for model {args.embed_model or 'default'}"
+                )
             provider_counts[provider] += 1
             if is_semantic:
                 semantic_vectors += 1
@@ -1119,13 +1150,21 @@ def query_run(args: argparse.Namespace) -> dict[str, Any]:
 
 
 def build_command(args: argparse.Namespace) -> int:
-    payload = build_run(args)
+    try:
+        payload = build_run(args)
+    except EmbeddingProviderUnavailable as exc:
+        print(json.dumps(_provider_unavailable_payload(args, exc), indent=2))
+        return 1
     print(json.dumps(payload, indent=2))
     return 0
 
 
 def map_command(args: argparse.Namespace) -> int:
-    payload = build_run(args)
+    try:
+        payload = build_run(args)
+    except EmbeddingProviderUnavailable as exc:
+        print(json.dumps(_provider_unavailable_payload(args, exc), indent=2))
+        return 1
     artifacts = payload["artifacts"]
     root = Path(artifacts["root"])
     summary = {
@@ -1164,7 +1203,7 @@ def add_parser(sub) -> None:
         cmd.add_argument("--chunk-words", type=int, default=320)
         cmd.add_argument("--chunk-overlap", type=int, default=48)
         cmd.add_argument("--fact-threshold", type=float, default=0.6)
-        cmd.add_argument("--embed-provider", choices=["auto", "ollama", "openrouter-vl", "deterministic"], default="auto")
+        cmd.add_argument("--embed-provider", choices=["auto", "ollama", "openrouter-vl", "deterministic", "apple-local"], default="auto")
         cmd.add_argument("--embed-model", default="",
                          help="optional explicit embedding model id; openrouter-vl defaults to NVIDIA Nemotron Embed VL")
         cmd.add_argument("--login-if-needed", action=argparse.BooleanOptionalAction, default=True,
@@ -1201,7 +1240,7 @@ def add_parser(sub) -> None:
         default="",
         help=(
             "embedding provider for vector query. When omitted (default), the provider recorded in "
-            "the run manifest is used. Explicit values: auto, ollama, openrouter-vl, deterministic. "
+            "the run manifest is used. Explicit values: auto, ollama, openrouter-vl, deterministic, apple-local. "
             "If the explicit value does not match the stored vector space, the query fails closed "
             "unless --force-cross-space is supplied."
         ),
