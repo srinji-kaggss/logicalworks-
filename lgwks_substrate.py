@@ -41,6 +41,12 @@ class EmbeddingProviderUnavailable(RuntimeError):
     """Raised when an explicitly requested semantic embedding provider cannot produce vectors."""
 
 
+class FrontierList(list):
+    def __init__(self, *args, click_telemetry=None, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.click_telemetry = click_telemetry or {}
+
+
 TEXT_EXT = {
     ".txt", ".md", ".json", ".jsonl", ".yaml", ".yml", ".toml", ".ini", ".cfg", ".xml", ".csv",
     ".py", ".js", ".ts", ".tsx", ".jsx", ".rs", ".go", ".java", ".kt", ".swift", ".rb", ".php",
@@ -293,13 +299,15 @@ def _crawl_site(
     max_auth_handoffs: int,
     click_discovery: bool,
     max_clicks_per_page: int,
+    crawl_mode: str = "link-then-click",
 ) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
     parsed = urllib.parse.urlparse(base_url)
     base_host = parsed.hostname or ""
     seen: set[str] = set()
     queue: deque[tuple[str, int, str]] = deque([(_canonicalize_crawl_url(base_url), 0, "seed")])
     docs: list[dict[str, Any]] = []
-    frontier: list[dict[str, Any]] = []
+    frontier = FrontierList()
+    click_telemetry_by_page: dict[str, dict[str, Any]] = {}
     doc_fingerprints: set[tuple[str, str]] = set()
     blocker_retries_used = 0
     url_attempts: Counter[str] = Counter()
@@ -453,13 +461,25 @@ def _crawl_site(
         })
         if depth >= max_depth:
             continue
-        click_allowed = click_discovery and _should_discover_clicks(clean, links)
+        if crawl_mode == "link-only":
+            click_allowed = False
+        elif crawl_mode == "click-heavy":
+            click_allowed = click_discovery
+        else:  # default/fallback: "link-then-click"
+            click_allowed = click_discovery and _should_discover_clicks(clean, links)
+
         if click_discovery and not click_allowed:
+            if crawl_mode == "link-only":
+                reason = "crawl mode is link-only"
+            elif crawl_mode == "link-then-click":
+                reason = f"href frontier already productive ({len(links)} extracted links)"
+            else:
+                reason = "click discovery disabled or skipped"
             frontier.append({
                 "url": clean,
                 "depth": depth,
                 "status": "click_skipped",
-                "reason": f"href frontier already productive ({len(links)} extracted links)",
+                "reason": reason,
                 "discovered_by": clean,
                 "links_found": len(links),
             })
@@ -470,11 +490,44 @@ def _crawl_site(
                 wait_ms=2500,
                 browser_engine=browser_engine,
             )
+            page_attempts = 0
+            page_ok = 0
+            page_timeouts = 0
+            page_url_changes = 0
+            page_content_only_changes = 0
+            page_same_state = 0
+
             for row in click_rows:
-                cand = row.get("candidate", {})
+                cand = row.get("candidate") or {}
                 label = cand.get("text") or cand.get("href") or "click"
                 final_url = _canonicalize_crawl_url(row.get("final_url") or clean)
                 status = row.get("status", "error")
+                text = row.get("text", "")
+                reason = row.get("reason", "")
+
+                page_attempts += 1
+                is_timeout = "TimeoutError" in str(reason)
+                if is_timeout:
+                    page_timeouts += 1
+
+                is_url_change = False
+                is_content = False
+                is_same_state = False
+
+                if status == "ok":
+                    page_ok += 1
+                    if final_url != clean:
+                        page_url_changes += 1
+                        is_url_change = True
+                    else:
+                        seed_text = rendered.get("text", "")
+                        if text != seed_text:
+                            page_content_only_changes += 1
+                            is_content = True
+                        else:
+                            page_same_state += 1
+                            is_same_state = True
+
                 frontier.append({
                     "url": final_url or clean,
                     "depth": depth + 1,
@@ -482,6 +535,18 @@ def _crawl_site(
                     "reason": row.get("reason", label),
                     "discovered_by": clean,
                     "links_found": 0,
+                    "click_telemetry": {
+                        "is_url_change": is_url_change,
+                        "is_content_only_change": is_content,
+                        "is_same_state": is_same_state,
+                        "is_timeout": is_timeout,
+                        "target_info": {
+                            "text": cand.get("text"),
+                            "href": cand.get("href"),
+                            "tag": cand.get("tag"),
+                            "selector": f"[data-lgwks-click-id='{cand.get('id') if cand.get('id') is not None else ''}']"
+                        }
+                    }
                 })
                 if status != "ok" or not row.get("html"):
                     continue
@@ -509,11 +574,27 @@ def _crawl_site(
                     queue.append((final_url, depth + 1, clean))
                 if len(docs) >= max_pages:
                     break
+
+            if page_attempts > 0:
+                novelty_yield = round((page_url_changes + page_content_only_changes) / page_attempts, 4)
+            else:
+                novelty_yield = 0.0
+
+            click_telemetry_by_page[clean] = {
+                "attempts": page_attempts,
+                "ok": page_ok,
+                "timeouts": page_timeouts,
+                "url_changes": page_url_changes,
+                "content_only_changes": page_content_only_changes,
+                "same_state": page_same_state,
+                "novelty_yield": novelty_yield,
+            }
         for link in links:
             href = _canonicalize_crawl_url(link.get("href", ""))
             host = urllib.parse.urlparse(href).hostname or ""
             if href and host == base_host and href not in seen:
                 queue.append((href, depth + 1, clean))
+    frontier.click_telemetry = click_telemetry_by_page
     return docs, frontier
 
 
@@ -1138,6 +1219,7 @@ def build_run(args: argparse.Namespace) -> dict[str, Any]:
             max_auth_handoffs=args.max_auth_handoffs,
             click_discovery=bool(getattr(args, "click_discovery", False)),
             max_clicks_per_page=int(getattr(args, "max_clicks_per_page", 20)),
+            crawl_mode=getattr(args, "crawl_mode", "link-then-click"),
         )
     else:
         docs = _build_from_local(Path(args.target).resolve(), source_kind, args.max_files, args.max_chars)
@@ -1337,7 +1419,10 @@ def build_run(args: argparse.Namespace) -> dict[str, Any]:
             "browser_engine": args.browser_engine,
             "click_discovery": bool(getattr(args, "click_discovery", False)),
             "max_clicks_per_page": int(getattr(args, "max_clicks_per_page", 20)),
+            "crawl_mode": getattr(args, "crawl_mode", "link-then-click"),
+            "click_telemetry": getattr(frontier, "click_telemetry", {}),
         },
+        "click_telemetry": getattr(frontier, "click_telemetry", {}),
         "counts": {
             "sources": len(source_rows),
             "documents": len(doc_rows),
@@ -1535,6 +1620,8 @@ def add_parser(sub) -> None:
                          help="deterministically click visible controls and record no-access/dead branches")
         cmd.add_argument("--max-clicks-per-page", type=int, default=20,
                          help="max visible controls to click per rendered page when --click-discovery is enabled")
+        cmd.add_argument("--crawl-mode", choices=["link-only", "link-then-click", "click-heavy"], default="link-then-click",
+                         help="crawl mode: link-only (no clicks), link-then-click (click only when href extraction is weak), click-heavy (always click visible controls)")
 
     build = ps.add_parser("build", help="build a substrate run from a url, file, folder, or repo")
     _add_build_args(build)

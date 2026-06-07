@@ -38,6 +38,7 @@ _CLASSES: dict[str, list[str]] = {
     "comparison": ["vs", "versus", "compare", "better than", "difference between", "or "],
     "build": ["build", "implement", "create", "design", "spec", "add a", "make a"],
     "explain": ["what is", "how does", "explain", "understand", "meaning of"],
+    "research": ["research", "search", "crawl", "explore", "algorithm", "find out"],
 }
 # What each class MUST have to be answerable. A missing slot is a gap → a leading question.
 _REQUIRED: dict[str, dict[str, list[str]]] = {
@@ -51,6 +52,8 @@ _REQUIRED: dict[str, dict[str, list[str]]] = {
     "build": {"goal": ["so that", "to ", "goal", "need", "want"],
               "constraints": ["must", "without", "only", "constraint", "limit", "budget"]},
     "explain": {"purpose": ["because", "for", "so", "to ", "trying"]},
+    "research": {"topic": ["about", "on ", "for ", "into ", "subject", "algorithm", "tiktok"],
+                 "focus": ["why", "how", "what", "impact", "effect", "future", "algorithm", "algorithim", "code", "explain", "detail", "inner workings", "everything", "all"]},
 }
 _VAGUE = {"stuff", "things", "everything", "all", "something", "etc", "whatever", "good", "best", "nice"}
 
@@ -105,6 +108,8 @@ def _questions(gaps: list[str]) -> list[str]:
         "symptom": "what exactly goes wrong (the observed symptom)?", "repro": "when does it happen — the steps to reproduce?",
         "axis": "compare them on what axis (cost, speed, quality)?", "goal": "what outcome should this achieve?",
         "constraints": "any hard constraints (must/without/only)?", "purpose": "what's the why behind it?",
+        "topic": "what topic or subject are we researching?",
+        "focus": "what specific aspect or question should we focus on?",
     }
     return [phrasing.get(g, f"please specify: {g}") for g in gaps]
 

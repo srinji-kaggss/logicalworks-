@@ -632,6 +632,9 @@ def _crawl_via_substrate(args: argparse.Namespace) -> dict:
         browser_engine=(
             "chromium" if getattr(args, "chromium", False) else "webkit"
         ),
+        click_discovery=bool(getattr(args, "click_discovery", False)),
+        max_clicks_per_page=int(getattr(args, "max_clicks_per_page", 20)),
+        crawl_mode=getattr(args, "crawl_mode", "link-then-click"),
     )
     manifest = sub.build_run(sub_args)
     arts = manifest.get("artifacts", {})
@@ -1243,6 +1246,18 @@ def build_parser() -> argparse.ArgumentParser:
         "--embed-model",
         default="",
         help="(substrate engine) optional explicit embedding model id",
+    )
+    crawl.add_argument(
+        "--click-discovery", action="store_true", default=False,
+        help="(substrate engine) deterministically click visible controls and record no-access/dead branches",
+    )
+    crawl.add_argument(
+        "--max-clicks-per-page", type=int, default=20,
+        help="(substrate engine) max visible controls to click per rendered page when --click-discovery is enabled",
+    )
+    crawl.add_argument(
+        "--crawl-mode", choices=["link-only", "link-then-click", "click-heavy"], default="link-then-click",
+        help="(substrate engine) crawl mode: link-only, link-then-click (default), or click-heavy",
     )
     crawl.set_defaults(func=crawl_command)
     remap = jarvis_sub.add_parser("remap-db", help="upgrade an existing run database to the current Jarvis schema")

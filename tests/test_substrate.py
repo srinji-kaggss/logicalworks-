@@ -880,6 +880,145 @@ class TestVectorSpaceIdentity(unittest.TestCase):
         # Should still return deterministic from manifest, not ollama from jsonl
         self.assertEqual(vs.get("canonical_provider"), "deterministic")
 
+    def test_crawl_modes_and_telemetry(self):
+        """crawl_mode must control click discovery behavior and populate rich telemetry."""
+        def fake_render(url, **_kwargs):
+            return {"ok": True, "html": "<html>Portal home</html>", "text": "Portal home"}
+
+        def fake_html_to_markdown(html, url):
+            # Return 3 links so href extraction is not considered "weak" (link-then-click should skip)
+            links = [
+                {"href": "https://portal.example.com/page1", "text": "p1"},
+                {"href": "https://portal.example.com/page2", "text": "p2"},
+                {"href": "https://portal.example.com/page3", "text": "p3"},
+            ]
+            return "Portal home.", "Portal", links
+
+        def fake_clicks(url, **_kwargs):
+            return [
+                {
+                    "ok": True,
+                    "status": "ok",
+                    "url": url,
+                    "final_url": "https://portal.example.com/page-other",
+                    "html": "<html>Click state</html>",
+                    "text": "Click state",
+                    "html_len": 24,
+                    "candidate": {"id": 0, "text": "Standards"},
+                },
+                {
+                    "ok": True,
+                    "status": "ok",
+                    "url": url,
+                    "final_url": url,
+                    "html": "<html>Portal home changed text</html>",
+                    "text": "Portal home changed text",
+                    "html_len": 40,
+                    "candidate": {"id": 1, "text": "Docs"},
+                },
+                {
+                    "ok": True,
+                    "status": "ok",
+                    "url": url,
+                    "final_url": url,
+                    "html": "<html>Portal home</html>",
+                    "text": "Portal home",
+                    "html_len": 24,
+                    "candidate": {"id": 2, "text": "SameState"},
+                },
+            ]
+
+        # 1. Test crawl_mode="link-only"
+        with mock.patch.object(substrate.lgwks_browser, "_remote_allowed", return_value=True):
+            with mock.patch.object(substrate.lgwks_browser, "render", side_effect=fake_render):
+                with mock.patch.object(substrate, "html_to_markdown", side_effect=fake_html_to_markdown):
+                    docs, frontier = substrate._crawl_site(
+                        "https://portal.example.com",
+                        max_pages=1,
+                        max_depth=1,
+                        browser_engine="webkit",
+                        login_if_needed=False,
+                        login_url="",
+                        success_selector=None,
+                        max_auto_bypass_attempts=0,
+                        max_auth_handoffs=1,
+                        click_discovery=True,
+                        max_clicks_per_page=20,
+                        crawl_mode="link-only",
+                    )
+        self.assertTrue(isinstance(frontier, substrate.FrontierList))
+        self.assertTrue(any(row["status"] == "click_skipped" and "link-only" in row["reason"] for row in frontier))
+        self.assertEqual(frontier.click_telemetry, {})
+
+        # 2. Test crawl_mode="link-then-click" (skipped because 3 links >= 2 limit)
+        with mock.patch.object(substrate.lgwks_browser, "_remote_allowed", return_value=True):
+            with mock.patch.object(substrate.lgwks_browser, "render", side_effect=fake_render):
+                with mock.patch.object(substrate, "html_to_markdown", side_effect=fake_html_to_markdown):
+                    docs, frontier = substrate._crawl_site(
+                        "https://portal.example.com",
+                        max_pages=1,
+                        max_depth=1,
+                        browser_engine="webkit",
+                        login_if_needed=False,
+                        login_url="",
+                        success_selector=None,
+                        max_auto_bypass_attempts=0,
+                        max_auth_handoffs=1,
+                        click_discovery=True,
+                        max_clicks_per_page=20,
+                        crawl_mode="link-then-click",
+                    )
+        self.assertTrue(any(row["status"] == "click_skipped" and "already productive" in row["reason"] for row in frontier))
+        self.assertEqual(frontier.click_telemetry, {})
+
+        # 3. Test crawl_mode="click-heavy" (always clicks)
+        with mock.patch.object(substrate.lgwks_browser, "_remote_allowed", return_value=True):
+            with mock.patch.object(substrate.lgwks_browser, "render", side_effect=fake_render):
+                with mock.patch.object(substrate.lgwks_browser, "discover_clicks", side_effect=fake_clicks):
+                    with mock.patch.object(substrate, "html_to_markdown", side_effect=fake_html_to_markdown):
+                        docs, frontier = substrate._crawl_site(
+                            "https://portal.example.com",
+                            max_pages=5,
+                            max_depth=1,
+                            browser_engine="webkit",
+                            login_if_needed=False,
+                            login_url="",
+                            success_selector=None,
+                            max_auto_bypass_attempts=0,
+                            max_auth_handoffs=1,
+                            click_discovery=True,
+                            max_clicks_per_page=20,
+                            crawl_mode="click-heavy",
+                        )
+        self.assertFalse(any(row["status"] == "click_skipped" for row in frontier))
+        self.assertIn("https://portal.example.com/", frontier.click_telemetry)
+        telemetry = frontier.click_telemetry["https://portal.example.com/"]
+        self.assertEqual(telemetry["attempts"], 3)
+        self.assertEqual(telemetry["ok"], 3)
+        self.assertEqual(telemetry["timeouts"], 0)
+        self.assertEqual(telemetry["url_changes"], 1) # page-other
+        self.assertEqual(telemetry["content_only_changes"], 1) # text change
+        self.assertEqual(telemetry["same_state"], 1) # same url & text
+        self.assertEqual(telemetry["novelty_yield"], round(2/3, 4))
+        
+        # Verify click_telemetry metadata in frontier entries
+        click_rows = [row for row in frontier if row["status"].startswith("click_")]
+        self.assertEqual(len(click_rows), 3)
+        self.assertTrue(click_rows[0]["click_telemetry"]["is_url_change"])
+        self.assertFalse(click_rows[0]["click_telemetry"]["is_content_only_change"])
+        self.assertFalse(click_rows[0]["click_telemetry"]["is_same_state"])
+        self.assertEqual(click_rows[0]["click_telemetry"]["target_info"]["text"], "Standards")
+        self.assertEqual(click_rows[0]["click_telemetry"]["target_info"]["selector"], "[data-lgwks-click-id='0']")
+
+        self.assertFalse(click_rows[1]["click_telemetry"]["is_url_change"])
+        self.assertTrue(click_rows[1]["click_telemetry"]["is_content_only_change"])
+        self.assertFalse(click_rows[1]["click_telemetry"]["is_same_state"])
+
+        self.assertFalse(click_rows[2]["click_telemetry"]["is_url_change"])
+        self.assertFalse(click_rows[2]["click_telemetry"]["is_content_only_change"])
+        self.assertTrue(click_rows[2]["click_telemetry"]["is_same_state"])
+
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -22,9 +22,9 @@ import lgwks_search as search
 
 class TestRefineHonesty(unittest.TestCase):
     def test_high_specificity_unknown_does_not_blame_human(self):
-        """refine('Find me machine focused research on how ML to AI training occurs') does NOT abstain
+        """refine('Tabulate Seventeen Discrete Telemetry Samples Numbered 2026 Precisely') does NOT abstain
         blaming the human; it proceeds or returns classifier_coverage_gap."""
-        intent = "Find me machine focused research on how ML to AI training occurs"
+        intent = "Tabulate Seventeen Discrete Telemetry Samples Numbered 2026 Precisely"
         r = machine.refine(intent, log=False)
         self.assertFalse(r["abstain"])
         self.assertTrue(r.get("classifier_coverage_gap", False))

@@ -61,6 +61,29 @@ class TestRefiner(unittest.TestCase):
         corpus = lgwks_cognition.CognitionLog("intent").corpus("intent_commit")
         self.assertEqual(len(corpus), 1, "every refine seeds the distillation corpus")
 
+    def test_research_intent_classification_and_refinement(self):
+        # Test class classification
+        cls, conf = machine.classify_intent("research everything about the tiktok algorithim")
+        self.assertEqual(cls, "research")
+        self.assertGreater(conf, 0.0)
+
+        # Test gaps on a query with missing slots
+        gaps = machine.detect_gaps("research", "research")
+        self.assertIn("topic", gaps)
+        self.assertIn("focus", gaps)
+
+        # Test questions for the gaps
+        qs = machine._questions(gaps)
+        self.assertIn("what topic or subject are we researching?", qs)
+        self.assertIn("what specific aspect or question should we focus on?", qs)
+
+        # Test refine on a high specificity research query proceeds
+        intent = "Research the inner workings of the TikTok recommendation algorithm based on 2026 leaked docs"
+        r = machine.refine(intent, actor="human", log=False)
+        self.assertEqual(r["intent_class"], "research")
+        self.assertFalse(r["abstain"])
+        self.assertEqual(r["authority"], "execute")
+
 
 class TestGovernance(unittest.TestCase):
     def test_promote_blocks_calibration_regression(self):

@@ -36,6 +36,15 @@ def _post(path: str, payload: dict, timeout: int) -> dict | None:
         return None
 
 
+def _get(path: str, timeout: int) -> dict | None:
+    try:
+        req = urllib.request.Request(f"{HOST}{path}")
+        with urllib.request.urlopen(req, timeout=timeout) as resp:
+            return json.loads(resp.read().decode("utf-8"))
+    except (urllib.error.URLError, TimeoutError, OSError, json.JSONDecodeError):
+        return None
+
+
 def is_up(timeout: int = 2) -> bool:
     if os.environ.get("LGWKS_NO_MODELS"):   # hermetic kill-switch: forces all fallbacks (tests/CI)
         return False
@@ -47,9 +56,10 @@ def is_up(timeout: int = 2) -> bool:
 
 
 def _have_model(name: str, timeout: int = 2) -> bool:
-    data = _post("/api/tags", {}, timeout) or {}
+    data = _get("/api/tags", timeout) or {}
     return any(str(m.get("name", "")).split(":")[0] == name.split(":")[0]
                for m in data.get("models", []))
+
 
 
 _eye_ready = False

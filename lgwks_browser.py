@@ -376,21 +376,22 @@ def discover_clicks(
                     page.evaluate(_click_candidates_js())
                     selector = f"[data-lgwks-click-id='{cand['id']}']"
                     before = page.url
+                    popup = None
+                    def on_popup(p):
+                        nonlocal popup
+                        popup = p
+                    page.on("popup", on_popup)
                     try:
-                        with page.expect_popup(timeout=3000) as popup_info:
-                            page.locator(selector).click(timeout=5000)
-                        popup = popup_info.value
-                        popup.wait_for_load_state("domcontentloaded", timeout=15000)
-                        popup.wait_for_timeout(wait_ms)
-                        target_page = popup
-                    except Exception:
                         page.locator(selector).click(timeout=5000)
+                        page.wait_for_timeout(1000)
+                        target_page = popup if popup else page
                         try:
-                            page.wait_for_load_state("domcontentloaded", timeout=15000)
+                            target_page.wait_for_load_state("domcontentloaded", timeout=15000)
                         except Exception:
                             pass
-                        page.wait_for_timeout(wait_ms)
-                        target_page = page
+                        target_page.wait_for_timeout(wait_ms)
+                    finally:
+                        page.remove_listener("popup", on_popup)
                     html = target_page.content()
                     text = _text_from(html, 120_000)
                     status = "no_access" if NO_ACCESS_RE.search(text) else "ok"
