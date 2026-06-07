@@ -98,9 +98,10 @@ _VERB_META: dict[str, dict] = {
         "tokens": "bounded by --budget in auto mode",
     },
     "run": {
-        "intent": "execute the post-gate crawl spine over a frozen declared scope",
-        "args": {"--demo": "offline CRM demo", "--fail-gate": "demo fail-closed gate refusal"},
-        "output": "run summary with integrity, gate verification, and pre-vector graph path",
+        "intent": "post-gate crawl spine and universal run index management",
+        "args": {"crawl --demo": "offline CRM demo", "index": "print a run index",
+                 "adopt-axiom": "link an Axiom run into the universal spine"},
+        "output": "lgwks.run_index.v0 JSON object",
         "tokens": "none",
     },
     "context": {

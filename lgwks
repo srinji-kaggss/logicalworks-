@@ -1328,8 +1328,8 @@ def build_parser() -> argparse.ArgumentParser:
     akinator = sub.add_parser("akinator", help="curious research interface and auto deep-research driver")
     akinator.set_defaults(func=_akinator_dispatch, _passthrough=True)
 
-    # run — post-gate execution spine
-    run = sub.add_parser("run", help="post-gate crawl execution spine")
+    # run — post-gate execution spine and universal run management
+    run = sub.add_parser("run", help="post-gate crawl execution spine and universal run management")
     run.set_defaults(func=_run_dispatch, _passthrough=True)
 
     # context — spawn context pack assembler for autonomous runs

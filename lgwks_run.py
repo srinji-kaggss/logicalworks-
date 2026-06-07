@@ -29,30 +29,238 @@ import json
 import math
 import re
 import socket
+import sys
 import time
 import urllib.error
 import urllib.parse
 import urllib.request
-from dataclasses import dataclass
+from dataclasses import asdict, dataclass
 from pathlib import Path
+from typing import Any
 
 import lgwks_sign
+from axiom.cid import compute_cid as axiom_compute_cid
 
 ROOT = Path(__file__).resolve().parent
 DIMS = 256
 MAX_BYTES = 3_000_000          # H4: hard response-body cap (both fetch paths)
 MAX_REDIRECTS = 3
+UNIVERSAL_SCHEMA = "lgwks.run_index.v0"
+RUNS_DIR = Path(".lgwks") / "runs"
 
 # Every gate that must have clicked before the crawler may run (ADR-001 §5 + L9).
 GATES_REQUIRED = ("G1_intent", "G2_scope_lock", "G3_url_risk", "G4_auth", "G5_egress", "L9_conduct")
 
 
-class GateError(Exception):
-    """A required gate is missing or red. Fail-closed: the crawler does not run."""
+def compute_file_cid(path: Path) -> str:
+    """Compute Axiom CID of a file's content."""
+    return axiom_compute_cid(path.read_bytes())
+
+
+def write_universal_index(
+    root: Path,
+    run_id: str,
+    source: str,
+    artifacts: list[dict[str, Any]],
+    links: list[dict[str, str]] | None = None,
+    repo: Path | None = None
+) -> dict[str, Any]:
+    """Write or update a universal run index.
+    
+    Ensures artifact paths are relative and safe.
+    """
+    root.mkdir(parents=True, exist_ok=True)
+    index_path = root / "index.json"
+    
+    index = {
+        "schema": UNIVERSAL_SCHEMA,
+        "run_id": run_id,
+        "created_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
+        "repo": str(repo.resolve()) if repo else str(ROOT.resolve()),
+        "source": source,
+        "artifacts": artifacts,
+        "links": links or [],
+    }
+    
+    # Path safety check
+    for art in artifacts:
+        p = Path(art["path"])
+        if p.is_absolute() or ".." in p.parts:
+            raise ValueError(f"unsafe artifact path: {art['path']}")
+
+    index_path.write_text(json.dumps(index, indent=2, sort_keys=True), encoding="utf-8")
+    return index
+
+
+def adopt_axiom_run(axiom_run_dir: Path, repo: Path | None = None) -> dict[str, Any]:
+    """Link an Axiom run into the universal run spine."""
+    axiom_run_dir = axiom_run_dir.resolve()
+    if not axiom_run_dir.is_dir():
+        raise ValueError(f"not a directory: {axiom_run_dir}")
+    
+    repo = (repo or ROOT).resolve()
+    index_path = axiom_run_dir / "index.json"
+    if not index_path.exists():
+        raise ValueError(f"Axiom index.json not found in {axiom_run_dir}")
+    
+    axiom_index = json.loads(index_path.read_text(encoding="utf-8"))
+    axiom_id = axiom_index.get("run_id", axiom_run_dir.name)
+    run_id = f"run-{axiom_id.replace('axiom-', '')}"
+    
+    uni_root = repo / RUNS_DIR / run_id
+    
+    artifacts = []
+    # 1. Add the Axiom run index itself
+    if not index_path.is_relative_to(repo):
+        raise ValueError(f"Axiom run index is outside the repository boundary: {index_path}")
+        
+    rel_axiom_index = index_path.relative_to(repo)
+    artifacts.append({
+        "kind": "axiom_run_index",
+        "path": str(rel_axiom_index),
+        "schema": axiom_index.get("schema"),
+        "cid": compute_file_cid(index_path)
+    })
+    
+    # 2. Add other artifacts from Axiom index
+    for art in axiom_index.get("artifacts", []):
+        kind = art.get("kind")
+        p = Path(art.get("path", ""))
+        full_p = (axiom_run_dir / p).resolve()
+        
+        if not full_p.exists():
+            raise ValueError(f"artifact missing from Axiom run: {kind} at {p}")
+            
+        if not full_p.is_relative_to(repo):
+            raise ValueError(f"artifact is outside the repository boundary: {kind} at {full_p}")
+            
+        rel_p = full_p.relative_to(repo)
+        schema = art.get("schema")
+        cid = compute_file_cid(full_p)
+        
+        # HARDEN: Unknown kinds must have a schema and CID
+        known_axiom_kinds = {"capture", "emissions", "fabric_log", "narration", "narration_emissions", "narration_fabric_log"}
+        if kind not in known_axiom_kinds and not schema:
+            raise ValueError(f"unknown artifact kind {kind!r} missing schema in Axiom index")
+            
+        artifacts.append({
+            "kind": f"axiom_{kind}",
+            "path": str(rel_p),
+            "schema": schema,
+            "cid": cid
+        })
+    
+    links = [
+        {"from": f"axiom_{a['kind']}", "to": "axiom_run_index", "rel": "described_by"}
+        for a in axiom_index.get("artifacts", [])
+    ]
+    
+    return write_universal_index(uni_root, run_id, "axiom", artifacts, links, repo=repo)
+
+
+def index_command(args: argparse.Namespace) -> int:
+    path = Path(args.path)
+    if path.is_dir():
+        index_path = path / "index.json"
+    else:
+        index_path = path
+    
+    if not index_path.exists():
+        print(json.dumps({"ok": False, "error": f"not found: {index_path}"}), file=sys.stderr)
+        return 1
+        
+    try:
+        index = json.loads(index_path.read_text(encoding="utf-8"))
+        print(json.dumps(index, indent=2, sort_keys=True))
+        return 0
+    except Exception as exc:
+        print(json.dumps({"ok": False, "error": str(exc)}), file=sys.stderr)
+        return 1
+
+
+def adopt_axiom_command(args: argparse.Namespace) -> int:
+    try:
+        res = adopt_axiom_run(Path(args.run_dir), repo=Path(args.repo) if args.repo else None)
+        print(json.dumps(res, indent=2, sort_keys=True))
+        return 0
+    except Exception as exc:
+        print(json.dumps({"ok": False, "error": str(exc)}), file=sys.stderr)
+        return 1
+
+
+def add_parser(subparsers) -> None:
+    p = subparsers.add_parser("run", help="post-gate crawl execution spine and universal run management")
+    p.add_argument("--dry", action="store_true", help=argparse.SUPPRESS)
+    p.add_argument("--demo", action="store_true", help=argparse.SUPPRESS)
+    p.add_argument("--fail-gate", action="store_true", help=argparse.SUPPRESS)
+    p.set_defaults(func=_run_compat_dispatch)
+    sp = p.add_subparsers(dest="run_command")
+    
+    # post-gate crawl dispatch (legacy main logic)
+    crawl = sp.add_parser("crawl", help="execute a post-gate crawl plan")
+    crawl.add_argument("--dry", action="store_true", help="synthetic pages, no network (testable)")
+    crawl.add_argument("--demo", action="store_true", help="run the offline CRM demo")
+    crawl.add_argument("--fail-gate", action="store_true", help="demo with a RED gate (shows fail-closed)")
+    crawl.set_defaults(func=_crawl_dispatch)
+
+    idx = sp.add_parser("index", help="print a universal run index")
+    idx.add_argument("path", help="run directory or index.json path")
+    idx.add_argument("--json", action="store_true", help="structured output (default)")
+    idx.set_defaults(func=index_command)
+    
+    adopt = sp.add_parser("adopt-axiom", help="link an Axiom run into the universal run spine")
+    adopt.add_argument("run_dir", help="Axiom run directory")
+    adopt.add_argument("--repo", help="optional repo root")
+    adopt.add_argument("--json", action="store_true", help="structured output (default)")
+    adopt.set_defaults(func=adopt_axiom_command)
+
+
+def _run_compat_dispatch(args: argparse.Namespace) -> int:
+    if getattr(args, "demo", False) or getattr(args, "fail_gate", False):
+        return _crawl_dispatch(args)
+    print("Use `lgwks run crawl --demo`, `lgwks run index <path>`, or `lgwks run adopt-axiom <dir>`.", file=sys.stderr)
+    return 1
+
+
+def _crawl_dispatch(args: argparse.Namespace) -> int:
+    if not (args.demo or args.fail_gate):
+        print("Use --demo or --fail-gate for now; manual crawl plans are not yet CLI-exposed.", file=sys.stderr)
+        return 1
+    plan, synthetic = _demo_plan(all_pass=not args.fail_gate)
+    out = ROOT / "runs" / plan.run_id
+    try:
+        res = execute_plan(plan, dry=True, synthetic=synthetic, out_dir=out)
+    except GateError as exc:
+        print(f"  REFUSED (fail-closed): {exc}")
+        return 3
+    print(f"  run {res.run_id}: fetched={res.fetched} docs={res.documents} nodes={res.nodes} "
+          f"edges={res.edges} quarantined={res.quarantined}")
+    print(f"  embed={res.embed_provider}  coverage={res.coverage}  uncertainty={res.uncertainty}")
+    print(f"  run log chain intact: {res.runlog_intact}  integrity={res.integrity_mode}  "
+          f"gates_verified={res.gates_verified}")
+    if res.integrity_mode == "unanchored":
+        print("  note: unanchored signer — detects corruption only, NOT adversarial rewrite. "
+              "Provision a key: security add-generic-password -U -s lgwks:signing-key -w")
+    print(f"  pre-vector graph: {res.prevector_path}")
+    return 0
+
+
+def main(argv: list[str] | None = None) -> int:
+    parser = argparse.ArgumentParser(prog="lgwks_run")
+    raw = list(sys.argv[1:] if argv is None else argv)
+    if not raw or raw[0] != "run":
+        raw = ["run", *raw]
+    add_parser(parser.add_subparsers(dest="command", required=True))
+    args = parser.parse_args(raw)
+    return args.func(args)
 
 
 class ScopeError(Exception):
     """An attempt to touch a URL outside the frozen declared set (L6)."""
+
+
+class GateError(Exception):
+    """A required gate is missing or red. Fail-closed: the crawler does not run."""
 
 
 @dataclass(frozen=True)
@@ -457,33 +665,6 @@ def _demo_plan(all_pass: bool = True) -> tuple[RunPlan, dict[str, str]]:
                    frozen_scope=scope, keywords=("crm", "lambda", "cognito", "github", "jira", "cdp", "contact"),
                    max_pages=12, per_host_seconds=0.0, tier_floor="secondary", embed=True, verdicts=verdicts)
     return plan, synthetic
-
-
-def main(argv: list[str] | None = None) -> int:
-    p = argparse.ArgumentParser(prog="lgwks_run", description="post-gate crawl execution spine")
-    p.add_argument("--dry", action="store_true", help="synthetic pages, no network (testable)")
-    p.add_argument("--demo", action="store_true", help="run the offline CRM demo")
-    p.add_argument("--fail-gate", action="store_true", help="demo with a RED gate (shows fail-closed)")
-    args = p.parse_args(argv)
-    if not (args.demo or args.fail_gate):
-        p.print_help(); return 1
-    plan, synthetic = _demo_plan(all_pass=not args.fail_gate)
-    out = ROOT / "runs" / plan.run_id
-    try:
-        res = execute_plan(plan, dry=True, synthetic=synthetic, out_dir=out)
-    except GateError as exc:
-        print(f"  REFUSED (fail-closed): {exc}")
-        return 3
-    print(f"  run {res.run_id}: fetched={res.fetched} docs={res.documents} nodes={res.nodes} "
-          f"edges={res.edges} quarantined={res.quarantined}")
-    print(f"  embed={res.embed_provider}  coverage={res.coverage}  uncertainty={res.uncertainty}")
-    print(f"  run log chain intact: {res.runlog_intact}  integrity={res.integrity_mode}  "
-          f"gates_verified={res.gates_verified}")
-    if res.integrity_mode == "unanchored":
-        print("  note: unanchored signer — detects corruption only, NOT adversarial rewrite. "
-              "Provision a key: security add-generic-password -U -s lgwks:signing-key -w")
-    print(f"  pre-vector graph: {res.prevector_path}")
-    return 0
 
 
 if __name__ == "__main__":
