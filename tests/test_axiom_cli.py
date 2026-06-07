@@ -188,6 +188,26 @@ class TestAxiomHarness(unittest.TestCase):
         report = lgwks_axiom.independence_report(Path(__file__).resolve().parents[1])
         self.assertTrue(report["independent"], report["violations"])
 
+    def test_run_index_is_written_and_appended(self):
+        repo = _repo()
+        out = repo / "out"
+        lgwks_axiom.build_capture(repo, "capture", out_dir=out)
+        index_path = out / "index.json"
+        self.assertTrue(index_path.exists())
+        index = json.loads(index_path.read_text(encoding="utf-8"))
+        self.assertEqual(len(index["artifacts"]), 3)
+        kinds = {a["kind"] for a in index["artifacts"]}
+        self.assertIn("capture", kinds)
+        self.assertIn("emissions", kinds)
+        self.assertIn("fabric_log", kinds)
+
+        lgwks_axiom.build_narration_artifact("tests passed", run=out)
+        index = json.loads(index_path.read_text(encoding="utf-8"))
+        self.assertEqual(len(index["artifacts"]), 5)
+        kinds = {a["kind"] for a in index["artifacts"]}
+        self.assertIn("narration", kinds)
+        self.assertIn("narration_emissions", kinds)
+
 
 if __name__ == "__main__":
     unittest.main()

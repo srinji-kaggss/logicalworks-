@@ -52,6 +52,14 @@ classloader/harness equivalent: it observes the host world and turns facts into 
   - `.lgwks/axiom/runs/<run>/fabric-log.json`
   - `.lgwks/axiom/runs/<run>/packet.json`
 
+`lgwks axiom index`
+
+- Prints the unified run index linking capture, emissions, fabric logs, and narration.
+- Enables machine-first navigation of run artifacts without path inference.
+- Persists:
+  - `.lgwks/axiom/runs/<run>/index.json`
+
+
 `lgwks axiom check`
 
 - Compares a narration claim against captured emissions.

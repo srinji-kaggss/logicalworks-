@@ -504,6 +504,12 @@ _VERB_META: dict[str, dict] = {
         "output": "lgwks.axiom.doctor.v0 independence report",
         "tokens": "none",
     },
+    "axiom index": {
+        "intent": "print the unified run index JSON",
+        "args": {"run": "run directory", "--json": "structured output"},
+        "output": "lgwks.axiom.run_index.v0 JSON object",
+        "tokens": "none",
+    },
     "refactor add_types": {
         "intent": "annotate Python function arguments with type annotations",
         "args": {"--file": "target Python file", "--preview": "dry-run preview",

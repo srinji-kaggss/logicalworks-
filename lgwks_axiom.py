@@ -80,6 +80,36 @@ def _run_id(repo: Path, intent: str) -> str:
     return f"axiom-{_sha(seed, 20)}"
 
 
+def write_run_index(root: Path, run_id: str, artifacts: list[dict[str, str]]) -> dict[str, Any]:
+    index_path = root / "index.json"
+    if index_path.exists():
+        try:
+            index = json.loads(index_path.read_text(encoding="utf-8"))
+        except Exception:
+            index = {}
+    else:
+        index = {}
+
+    index.setdefault("schema", "lgwks.axiom.run_index.v0")
+    index.setdefault("run_id", run_id)
+    index.setdefault("root", str(root))
+    index.setdefault("created_at", _utc())
+    existing_artifacts = index.get("artifacts", [])
+    
+    # Merge artifacts by kind and path
+    artifact_map = {(a["kind"], a["path"]): a for a in existing_artifacts}
+    for a in artifacts:
+        artifact_map[(a["kind"], a["path"])] = a
+    
+    index["artifacts"] = sorted(
+        [v for v in artifact_map.values()],
+        key=lambda x: (x["kind"], x["path"])
+    )
+    
+    index_path.write_text(json.dumps(index, indent=2, sort_keys=True), encoding="utf-8")
+    return index
+
+
 def _git(repo: Path, *args: str, timeout: int = 15) -> tuple[int, str, str]:
     try:
         proc = subprocess.run(
@@ -355,6 +385,13 @@ def build_narration_artifact(claim_text: str = "", claims_file: Path | None = No
         "\n".join(json.dumps(e, sort_keys=True) for e in emissions) + "\n",
         encoding="utf-8",
     )
+    
+    # Update run index
+    write_run_index(root, f"narration-{_sha(json.dumps(narration, sort_keys=True), 20)}", [
+        {"kind": "narration", "path": "narration.json", "schema": NARRATION_SCHEMA},
+        {"kind": "narration_emissions", "path": "narration-emissions.jsonl"}
+    ])
+    
     return artifact
 
 
@@ -471,6 +508,14 @@ def build_capture(
     (root / "emissions.jsonl").write_text("\n".join(json.dumps(e, sort_keys=True) for e in emissions) + "\n", encoding="utf-8")
     (root / "fabric-log.json").write_text(json.dumps(packet["fabric"], indent=2, sort_keys=True), encoding="utf-8")
     (root / "packet.json").write_text(json.dumps(packet, indent=2, sort_keys=True), encoding="utf-8")
+    
+    # Update run index
+    write_run_index(root, run_id, [
+        {"kind": "capture", "path": "packet.json", "schema": SCHEMA},
+        {"kind": "emissions", "path": "emissions.jsonl"},
+        {"kind": "fabric_log", "path": "fabric-log.json"}
+    ])
+    
     return packet
 
 
@@ -694,6 +739,24 @@ def doctor_command(args: argparse.Namespace) -> int:
     return 0 if report["independent"] else 1
 
 
+def index_command(args: argparse.Namespace) -> int:
+    run_dir = Path(args.run)
+    if not run_dir.is_dir():
+        print(json.dumps({"ok": False, "error": f"not a directory: {run_dir}"}, indent=2), file=sys.stderr)
+        return 1
+    index_path = run_dir / "index.json"
+    if not index_path.exists():
+        print(json.dumps({"ok": False, "error": f"index.json not found in {run_dir}"}, indent=2), file=sys.stderr)
+        return 1
+    try:
+        index = json.loads(index_path.read_text(encoding="utf-8"))
+        print(json.dumps(index, indent=2, sort_keys=True))
+        return 0
+    except Exception as exc:
+        print(json.dumps({"ok": False, "error": str(exc)}, indent=2), file=sys.stderr)
+        return 1
+
+
 def add_parser(subparsers) -> None:
     p = subparsers.add_parser("axiom", help="Axiom harness: capture emissions, verify divergence, inspect layers")
     sp = p.add_subparsers(dest="axiom_command", required=True)
@@ -739,6 +802,11 @@ def add_parser(subparsers) -> None:
     doctor.add_argument("--repo", default=".", help="repo root")
     doctor.add_argument("--json", action="store_true", help="structured output (default; flag exists for caller intent)")
     doctor.set_defaults(func=doctor_command)
+
+    index = sp.add_parser("index", help="print the run index JSON")
+    index.add_argument("run", help="run directory")
+    index.add_argument("--json", action="store_true", help="structured output (default; flag exists for caller intent)")
+    index.set_defaults(func=index_command)
 
 
 if __name__ == "__main__":
