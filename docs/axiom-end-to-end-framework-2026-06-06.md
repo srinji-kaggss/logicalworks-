@@ -60,6 +60,13 @@ classloader/harness equivalent: it observes the host world and turns facts into 
   - "implemented/changed/modified" requires captured dirty status or diff files.
   - "clean worktree/no changes" requires captured dirty count 0.
 
+`lgwks axiom narrate`
+
+- Parses raw narration into typed `lgwks.axiom.narration.v0` claims.
+- Persists claims as Axiom evidence capsules.
+- Emits unsupported narration as Hole capsules, not guessed claims.
+- Allows `axiom check --claims narration.json` to evaluate Channel A as typed IR.
+
 `lgwks axiom replay`
 
 - Reloads persisted `emissions.jsonl` bytes into a fresh fabric.
@@ -98,5 +105,5 @@ classloader/harness equivalent: it observes the host world and turns facts into 
 1. Add `axiom` to the agent manifest with expected JSON schemas.
 2. Add a run index under `.lgwks/runs/` that links session/capture/portal/axiom packets by CID.
 3. Replace string narration matching with typed narration capsules.
-4. Replace string narration matching with typed narration capsules.
-5. Replace shell command strings with typed argv vectors for the test matrix.
+4. Replace shell command strings with typed argv vectors for the test matrix.
+5. Add a unified `.lgwks/runs/` index linking capture, matrix, narration, replay, and divergence artifacts.

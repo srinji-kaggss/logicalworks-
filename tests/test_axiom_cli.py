@@ -127,6 +127,43 @@ class TestAxiomHarness(unittest.TestCase):
         self.assertFalse(result["ok"])
         self.assertEqual(result["findings"][0]["level"], "mayday")
 
+    def test_parse_narration_known_claims(self):
+        parsed = lgwks_axiom.parse_narration("tests passed and implemented changes")
+        kinds = {c["kind"] for c in parsed["claims"]}
+        self.assertIn("tests_passed", kinds)
+        self.assertIn("work_implemented", kinds)
+        self.assertEqual(parsed["holes"], [])
+
+    def test_parse_narration_unknown_becomes_hole(self):
+        parsed = lgwks_axiom.parse_narration("the vibes are excellent")
+        self.assertEqual(parsed["claims"], [])
+        self.assertEqual(len(parsed["holes"]), 1)
+
+    def test_narration_artifact_persists_claim_capsules(self):
+        repo = _repo()
+        out = repo / "narration"
+        artifact = lgwks_axiom.build_narration_artifact("tests passed", run=out)
+        self.assertEqual(artifact["schema"], lgwks_axiom.NARRATION_SCHEMA)
+        self.assertEqual(artifact["claims"][0]["kind"], "tests_passed")
+        self.assertTrue((out / "narration.json").exists())
+        self.assertTrue((out / "narration-emissions.jsonl").exists())
+        self.assertTrue(artifact["fabric"]["chain_ok"])
+
+    def test_check_accepts_typed_claim_file_payload(self):
+        repo = _repo()
+        packet = lgwks_axiom.build_capture(repo, "test run", "python -c 'print(123)'")
+        claims = lgwks_axiom.parse_narration("tests passed")
+        result = lgwks_axiom.check_narration("", packet["emissions"], claims)
+        self.assertTrue(result["ok"])
+        self.assertEqual(result["typed_claims"][0]["kind"], "tests_passed")
+
+    def test_unknown_narration_hole_diverges(self):
+        repo = _repo()
+        packet = lgwks_axiom.build_capture(repo, "test run", "python -c 'print(123)'")
+        result = lgwks_axiom.check_narration("the vibes are excellent", packet["emissions"])
+        self.assertFalse(result["ok"])
+        self.assertEqual(result["findings"][0]["claim"], "unsupported narration")
+
     def test_axiom_layer_has_no_lgwks_imports(self):
         report = lgwks_axiom.independence_report(Path(__file__).resolve().parents[1])
         self.assertTrue(report["independent"], report["violations"])

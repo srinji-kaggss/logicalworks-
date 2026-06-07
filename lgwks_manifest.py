@@ -472,8 +472,16 @@ _VERB_META: dict[str, dict] = {
     },
     "axiom check": {
         "intent": "compare narration claims against captured Axiom emissions",
-        "args": {"run": "run directory or emissions.jsonl", "--claim": "narration claim", "--json": "structured output"},
+        "args": {"run": "run directory or emissions.jsonl", "--claim": "raw narration claim",
+                 "--claims": "typed lgwks.axiom.narration.v0 claims file", "--json": "structured output"},
         "output": "lgwks.axiom.divergence.v0 with PAN PAN/MAYDAY findings",
+        "tokens": "none",
+    },
+    "axiom narrate": {
+        "intent": "parse narration into typed claims or holes and persist as Axiom IR",
+        "args": {"--claim": "raw narration claim", "--claims": "existing typed narration JSON",
+                 "--run": "optional Axiom run directory", "--json": "structured output"},
+        "output": "lgwks.axiom.narration.v0 claims/holes plus narration emissions",
         "tokens": "none",
     },
     "axiom replay": {

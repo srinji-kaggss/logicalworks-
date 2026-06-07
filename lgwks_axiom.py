@@ -31,6 +31,7 @@ RUN_ROOT = Path(".lgwks") / "axiom" / "runs"
 HARNESS_KEY = b"lgwks-axiom-harness-v0"
 HARNESS_GRANTS = frozenset({"observe", "diff", "test", "narrate"})
 MATRIX_SCHEMA = "lgwks.axiom.test_matrix.v0"
+NARRATION_SCHEMA = "lgwks.axiom.narration.v0"
 MAX_TEST_TIMEOUT = 3600
 
 
@@ -46,6 +47,21 @@ class TestSpec:
     label: str
     command: str
     timeout: int
+
+
+@dataclass(frozen=True)
+class NarrationClaim:
+    kind: str
+    source: str
+    requires: tuple[str, ...]
+    confidence: float = 1.0
+
+
+@dataclass(frozen=True)
+class NarrationHole:
+    source: str
+    why_unmatched: str
+    nearest_known: tuple[str, ...]
 
 
 def _utc() -> str:
@@ -115,6 +131,28 @@ def _capsule_for_fact(fact: CapturedFact, genesis_cid: str) -> Capsule:
         on=(genesis_cid,),
         needs=frozenset({"observe"}),
         by="lgwks-harness",
+    )
+
+
+def _capsule_for_narration_claim(claim: NarrationClaim, genesis_cid: str) -> Capsule:
+    payload = json.dumps(asdict(claim), sort_keys=True, separators=(",", ":"))
+    return Capsule(
+        "evidence",
+        f"narration:{claim.kind}:{payload}",
+        on=(genesis_cid,),
+        needs=frozenset({"narrate"}),
+        by="lgwks-narration",
+    )
+
+
+def _capsule_for_narration_hole(hole: NarrationHole, genesis_cid: str) -> Capsule:
+    payload = json.dumps(asdict(hole), sort_keys=True, separators=(",", ":"))
+    return Capsule(
+        "constraint",
+        f"narration-hole:{payload}",
+        on=(genesis_cid,),
+        is_hole=True,
+        by="lgwks-narration",
     )
 
 
@@ -200,6 +238,96 @@ def load_test_matrix(path: Path, default_timeout: int = 120) -> list[TestSpec]:
         timeout = _normalize_timeout(item.get("timeout"), default_timeout)
         tests.append(TestSpec(label, command, timeout))
     return tests
+
+
+def parse_narration(text: str) -> dict[str, Any]:
+    raw = text.strip()
+    lower = raw.lower()
+    claims: list[NarrationClaim] = []
+    holes: list[NarrationHole] = []
+    known = ("tests_passed", "worktree_clean", "files_changed", "work_implemented")
+    if not raw:
+        holes.append(NarrationHole(raw, "empty narration", known))
+    else:
+        if "test" in lower and any(word in lower for word in ("pass", "passed", "green")):
+            claims.append(NarrationClaim("tests_passed", raw, ("test:returncode=0:all",)))
+        if any(phrase in lower for phrase in ("clean worktree", "worktree clean", "no changes", "nothing changed")):
+            claims.append(NarrationClaim("worktree_clean", raw, ("repo:status.dirty_count=0",)))
+        if any(word in lower for word in ("changed", "modified", "edited")):
+            claims.append(NarrationClaim("files_changed", raw, ("repo:diff.file_count>0|repo:status.dirty_count>0",)))
+        if any(word in lower for word in ("implemented", "built", "added")):
+            claims.append(NarrationClaim("work_implemented", raw, ("repo:diff.file_count>0|repo:status.dirty_count>0",)))
+        if not claims:
+            holes.append(NarrationHole(raw, "no supported narration claim matched", known))
+    return {
+        "schema": NARRATION_SCHEMA,
+        "source": raw,
+        "claims": [asdict(c) for c in claims],
+        "holes": [asdict(h) for h in holes],
+    }
+
+
+def load_narration(path: Path) -> dict[str, Any]:
+    payload = json.loads(path.read_text(encoding="utf-8"))
+    if not isinstance(payload, dict) or payload.get("schema") != NARRATION_SCHEMA:
+        raise ValueError(f"narration file must have schema {NARRATION_SCHEMA}")
+    payload.setdefault("claims", [])
+    payload.setdefault("holes", [])
+    if not isinstance(payload["claims"], list) or not isinstance(payload["holes"], list):
+        raise ValueError("narration claims/holes must be lists")
+    return payload
+
+
+def build_narration_artifact(claim_text: str = "", claims_file: Path | None = None, run: Path | None = None) -> dict[str, Any]:
+    narration = load_narration(claims_file) if claims_file else parse_narration(claim_text)
+    root = run.resolve() if run else (Path.cwd() / RUN_ROOT / f"narration-{_sha(json.dumps(narration, sort_keys=True), 20)}").resolve()
+    root.mkdir(parents=True, exist_ok=True)
+    fabric = Fabric(trusted_key=HARNESS_KEY)
+    genesis = _genesis()
+    genesis_record = _emit_capsule(fabric, genesis, "genesis")
+    genesis_cid = genesis_record["cid"]
+    emissions: list[dict[str, Any]] = [genesis_record]
+    for item in narration["claims"]:
+        claim = NarrationClaim(
+            kind=str(item["kind"]),
+            source=str(item.get("source", narration.get("source", ""))),
+            requires=tuple(str(x) for x in item.get("requires", [])),
+            confidence=float(item.get("confidence", 1.0)),
+        )
+        record = _emit_capsule(fabric, _capsule_for_narration_claim(claim, genesis_cid), "narration")
+        record["narration_claim"] = asdict(claim)
+        emissions.append(record)
+    for item in narration["holes"]:
+        hole = NarrationHole(
+            source=str(item.get("source", narration.get("source", ""))),
+            why_unmatched=str(item.get("why_unmatched", "unknown narration")),
+            nearest_known=tuple(str(x) for x in item.get("nearest_known", [])),
+        )
+        record = _emit_capsule(fabric, _capsule_for_narration_hole(hole, genesis_cid), "narration-hole")
+        record["narration_hole"] = asdict(hole)
+        emissions.append(record)
+    artifact = {
+        "schema": NARRATION_SCHEMA,
+        "run": str(root),
+        "paths": {
+            "narration": str(root / "narration.json"),
+            "emissions": str(root / "narration-emissions.jsonl"),
+        },
+        "source": narration.get("source", ""),
+        "claims": narration["claims"],
+        "holes": narration["holes"],
+        "emissions": emissions,
+        "fabric": {
+            "chain_ok": fabric.verify_chain(),
+            "log": [asdict(entry) for entry in fabric.log],
+        },
+    }
+    (root / "narration.json").write_text(json.dumps(artifact, indent=2, sort_keys=True), encoding="utf-8")
+    (root / "narration-emissions.jsonl").write_text(
+        "\n".join(json.dumps(e, sort_keys=True) for e in emissions) + "\n",
+        encoding="utf-8",
+    )
+    return artifact
 
 
 def _test_fact(command: str, repo: Path, timeout: int, label: str = "command") -> CapturedFact:
@@ -381,31 +509,44 @@ def replay_emissions(path: Path) -> dict[str, Any]:
     }
 
 
-def check_narration(claim: str, emissions: list[dict[str, Any]]) -> dict[str, Any]:
-    text = claim.lower()
+def _claims_from_input(claim: str = "", claims: dict[str, Any] | None = None) -> tuple[list[dict[str, Any]], list[dict[str, Any]], str]:
+    payload = claims if claims is not None else parse_narration(claim)
+    return list(payload.get("claims", [])), list(payload.get("holes", [])), str(payload.get("source", claim))
+
+
+def check_narration(claim: str, emissions: list[dict[str, Any]], claims: dict[str, Any] | None = None) -> dict[str, Any]:
+    typed_claims, holes, source = _claims_from_input(claim, claims)
     facts = [e.get("fact", {}) for e in emissions if isinstance(e.get("fact"), dict)]
     test_facts = [f for f in facts if f.get("kind") == "test"]
     status_facts = [f for f in facts if f.get("kind") == "repo" and f.get("label") == "status"]
     diff_facts = [f for f in facts if f.get("kind") == "repo" and f.get("label") == "diff"]
 
     findings: list[dict[str, str]] = []
-    if "test" in text and any(word in text for word in ("pass", "passed", "green")):
-        if not test_facts:
-            findings.append({"level": "pan_pan", "claim": "tests passed", "evidence": "no captured test command"})
-        elif not all(f.get("value", {}).get("returncode") == 0 for f in test_facts):
-            findings.append({"level": "mayday", "claim": "tests passed", "evidence": "one or more captured test commands did not pass"})
-    if any(word in text for word in ("changed", "modified", "implemented", "edited")):
-        dirty = sum(int(f.get("value", {}).get("dirty_count", 0)) for f in status_facts)
-        diff_files = sum(int(f.get("value", {}).get("file_count", 0)) for f in diff_facts)
-        if dirty == 0 and diff_files == 0:
-            findings.append({"level": "pan_pan", "claim": "work changed files", "evidence": "captured git status/diff is clean"})
-    if any(phrase in text for phrase in ("no changes", "clean worktree", "nothing changed")):
-        dirty = sum(int(f.get("value", {}).get("dirty_count", 0)) for f in status_facts)
-        if dirty > 0:
-            findings.append({"level": "pan_pan", "claim": "clean worktree", "evidence": f"captured dirty_count={dirty}"})
+    for hole in holes:
+        findings.append({"level": "pan_pan", "claim": "unsupported narration", "evidence": str(hole.get("why_unmatched", "unknown"))})
+    for typed in typed_claims:
+        kind = typed.get("kind")
+        if kind == "tests_passed":
+            if not test_facts:
+                findings.append({"level": "pan_pan", "claim": "tests_passed", "evidence": "no captured test command"})
+            elif not all(f.get("value", {}).get("returncode") == 0 for f in test_facts):
+                findings.append({"level": "mayday", "claim": "tests_passed", "evidence": "one or more captured test commands did not pass"})
+        elif kind in {"files_changed", "work_implemented"}:
+            dirty = sum(int(f.get("value", {}).get("dirty_count", 0)) for f in status_facts)
+            diff_files = sum(int(f.get("value", {}).get("file_count", 0)) for f in diff_facts)
+            if dirty == 0 and diff_files == 0:
+                findings.append({"level": "pan_pan", "claim": str(kind), "evidence": "captured git status/diff is clean"})
+        elif kind == "worktree_clean":
+            dirty = sum(int(f.get("value", {}).get("dirty_count", 0)) for f in status_facts)
+            if dirty > 0:
+                findings.append({"level": "pan_pan", "claim": "worktree_clean", "evidence": f"captured dirty_count={dirty}"})
+        else:
+            findings.append({"level": "pan_pan", "claim": str(kind), "evidence": "unsupported typed claim kind"})
     return {
         "schema": "lgwks.axiom.divergence.v0",
-        "claim": claim,
+        "claim": source,
+        "typed_claims": typed_claims,
+        "holes": holes,
         "ok": not findings,
         "findings": findings,
         "evidence_counts": {
@@ -472,8 +613,25 @@ def test_matrix_command(args: argparse.Namespace) -> int:
     return 0
 
 
+def narrate_command(args: argparse.Namespace) -> int:
+    if not args.claim and not args.claims:
+        print(json.dumps({"schema": NARRATION_SCHEMA, "ok": False, "error": "provide --claim or --claims"}, indent=2, sort_keys=True), file=sys.stderr)
+        return 1
+    try:
+        artifact = build_narration_artifact(args.claim, Path(args.claims) if args.claims else None, Path(args.run) if args.run else None)
+    except ValueError as exc:
+        print(json.dumps({"schema": NARRATION_SCHEMA, "ok": False, "error": str(exc)}, indent=2, sort_keys=True), file=sys.stderr)
+        return 1
+    print(json.dumps(artifact, indent=2, sort_keys=True))
+    return 0
+
+
 def check_command(args: argparse.Namespace) -> int:
-    result = check_narration(args.claim, _load_emissions(Path(args.run)))
+    claims = load_narration(Path(args.claims)) if getattr(args, "claims", "") else None
+    if claims is None and not args.claim:
+        print(json.dumps({"schema": "lgwks.axiom.divergence.v0", "ok": False, "error": "provide --claim or --claims"}, indent=2, sort_keys=True), file=sys.stderr)
+        return 1
+    result = check_narration(args.claim, _load_emissions(Path(args.run)), claims)
     print(json.dumps(result, indent=2, sort_keys=True))
     return 0 if result["ok"] else 2
 
@@ -505,7 +663,8 @@ def add_parser(subparsers) -> None:
 
     check = sp.add_parser("check", help="compare a narration claim against captured emissions")
     check.add_argument("run", help="run directory or emissions.jsonl path")
-    check.add_argument("--claim", required=True, help="narration claim to verify against captured facts")
+    check.add_argument("--claim", default="", help="raw narration claim to verify against captured facts")
+    check.add_argument("--claims", default="", help="typed lgwks.axiom.narration.v0 claims file")
     check.add_argument("--json", action="store_true", help="structured output (default; flag exists for caller intent)")
     check.set_defaults(func=check_command)
 
@@ -522,6 +681,13 @@ def add_parser(subparsers) -> None:
     matrix.add_argument("--out", default="", help="optional output directory; default .lgwks/axiom/runs/<id>")
     matrix.add_argument("--json", action="store_true", help="print full packet JSON")
     matrix.set_defaults(func=test_matrix_command)
+
+    narrate = sp.add_parser("narrate", help="parse narration into typed claims or holes and persist as Axiom IR")
+    narrate.add_argument("--claim", default="", help="raw narration claim")
+    narrate.add_argument("--claims", default="", help="existing lgwks.axiom.narration.v0 JSON file")
+    narrate.add_argument("--run", default="", help="optional run directory to store narration artifacts")
+    narrate.add_argument("--json", action="store_true", help="structured output (default; flag exists for caller intent)")
+    narrate.set_defaults(func=narrate_command)
 
     doctor = sp.add_parser("doctor", help="check Axiom byte-layer independence")
     doctor.add_argument("--repo", default=".", help="repo root")
