@@ -1,4 +1,4 @@
-# jarvis crawl → substrate bridge
+# jarvis crawl -> substrate bridge
 
 ## Summary
 
@@ -57,15 +57,17 @@ The legacy path output format is unchanged (human-readable, writes to runs/).
 | `--login-url` | `""` | Explicit login URL (defaults to target when auth is detected) |
 | `--auth-selector` | `None` | CSS selector for post-auth SPA success confirmation |
 | `--chromium` | `False` (WebKit) | Use Chromium instead of WebKit for browser sessions |
+| `--embed-provider` | `deterministic` | Embedding provider for URL crawls; use `auto` or `ollama` to opt into semantic local embeddings |
+| `--embed-model` | `""` | Optional explicit embedding model id |
 
 ---
 
 ## What remains on the legacy path
 
-- `--workers` (parallel fetch workers) — legacy only, ignored by substrate
-- `--include-external` (follow off-site links) — legacy only
-- `--search-expansion` (googler site: expansion) — legacy only
-- `--similarity-threshold`, `--compress-limit`, `--max-terms` — legacy only
+- `--workers` (parallel fetch workers) - legacy only, ignored by substrate
+- `--include-external` (follow off-site links) - legacy only
+- `--search-expansion` (googler site: expansion) - legacy only
+- `--similarity-threshold`, `--compress-limit`, `--max-terms` - legacy only
 
 These flags are still accepted by the parser so that callers do not break, but
 they are silently ignored when `--engine substrate` is active.
@@ -85,7 +87,9 @@ they are silently ignored when `--engine substrate` is active.
 | `--login-if-needed` | `login_if_needed` |
 | `--login-url` | `login_url` |
 | `--auth-selector` | `success_selector` |
-| `--chromium` → `"chromium"` / `"webkit"` | `browser_engine` |
+| `--chromium` -> `"chromium"` / `"webkit"` | `browser_engine` |
+| `--embed-provider` | `embed_provider` |
+| `--embed-model` | `embed_model` |
 
 ---
 
@@ -93,8 +97,8 @@ they are silently ignored when `--engine substrate` is active.
 
 | Phase | Status |
 |---|---|
-| URL crawls → substrate (default) | ✅ This PR |
-| Keyword-only → substrate (search expansion) | Future (needs substrate search-expansion seam) |
+| URL crawls -> substrate (default) | This PR |
+| Keyword-only -> substrate (search expansion) | Future (needs substrate search-expansion seam) |
 | Legacy path removal | Future (after all workflows migrated) |
 | Apple-local embedding provider seam (#35) | Future (separate PR) |
 | Fundserv authenticated baseline (#36) | Future (needs live auth) |

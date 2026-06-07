@@ -129,7 +129,7 @@ _VERB_META: dict[str, dict] = {
         "tokens": "none",
     },
     "jarvis crawl": {
-        "intent": "research-graph crawl of a site/keyword frontier — URL sources use substrate auth-aware runtime by default",
+        "intent": "research-graph crawl of a site/keyword frontier; URL sources use substrate auth-aware runtime by default",
         "args": {
             "source": "url or keyword seed",
             "--max-pages": "int", "--max-depth": "int", "--estimate-only": "plan only",
@@ -142,6 +142,8 @@ _VERB_META: dict[str, dict] = {
             "--login-url": "substrate: explicit login URL override",
             "--auth-selector": "substrate: CSS selector for post-auth SPA success detection",
             "--chromium": "substrate: use Chromium instead of WebKit for browser sessions",
+            "--embed-provider": "substrate: deterministic (default) | auto | ollama | openrouter-vl",
+            "--embed-model": "substrate: optional explicit embedding model id",
         },
         "output": (
             "URL crawls: schema=lgwks.jarvis.substrate_crawl.v0, engine=substrate, artifact paths. "

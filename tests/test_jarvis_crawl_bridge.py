@@ -1,5 +1,5 @@
 """
-Tests for issue #34: lgwks jarvis crawl → substrate bridge.
+Tests for issue #34: lgwks jarvis crawl -> substrate bridge.
 
 All network I/O and substrate file I/O are mocked.  No real URLs are fetched.
 """
@@ -46,7 +46,7 @@ def _fake_substrate_manifest(run_dir: Path, target: str = "https://example.com")
         "project": "example-com",
         "created_at": "2026-06-07T00:00:00Z",
         "embedding": {
-            "provider_requested": "auto",
+            "provider_requested": "deterministic",
             "model_requested": "",
             "providers_used": {"deterministic-feature-hash": 2},
             "semantic_vectors": 0,
@@ -120,6 +120,8 @@ def _make_jarvis_args(**overrides) -> argparse.Namespace:
         login_url="",
         auth_selector=None,
         chromium=False,
+        embed_provider="deterministic",
+        embed_model="",
     )
     defaults.update(overrides)
     return argparse.Namespace(**defaults)
@@ -407,6 +409,12 @@ class TestParserRegistration(unittest.TestCase):
     def test_chromium_flag_registered(self):
         self.assertIn("--chromium", self._get_crawl_block())
 
+    def test_embed_provider_flag_registered(self):
+        self.assertIn("--embed-provider", self._get_crawl_block())
+
+    def test_embed_model_flag_registered(self):
+        self.assertIn("--embed-model", self._get_crawl_block())
+
 
 # ---------------------------------------------------------------------------
 # 8. Manifest still lists jarvis crawl
@@ -467,6 +475,38 @@ class TestSubstrateBridgeArgMapping(unittest.TestCase):
         sub_args = fake_sub.build_run.call_args[0][0]
         self.assertEqual(sub_args.chunk_words, 200)
         self.assertEqual(sub_args.chunk_overlap, 30)
+
+    def test_default_embed_provider_is_deterministic(self):
+        with tempfile.TemporaryDirectory() as td:
+            run_dir = Path(td) / "run"
+            run_dir.mkdir()
+            fake_sub = mock.MagicMock()
+            fake_sub.build_run.return_value = _fake_substrate_manifest(run_dir)
+
+            args = _make_jarvis_args()
+            with mock.patch.object(_lgwks, "_import_substrate", return_value=fake_sub):
+                with contextlib.redirect_stdout(io.StringIO()):
+                    _lgwks.crawl_command(args)
+
+        sub_args = fake_sub.build_run.call_args[0][0]
+        self.assertEqual(sub_args.embed_provider, "deterministic")
+        self.assertEqual(sub_args.embed_model, "")
+
+    def test_embed_provider_and_model_propagated(self):
+        with tempfile.TemporaryDirectory() as td:
+            run_dir = Path(td) / "run"
+            run_dir.mkdir()
+            fake_sub = mock.MagicMock()
+            fake_sub.build_run.return_value = _fake_substrate_manifest(run_dir)
+
+            args = _make_jarvis_args(embed_provider="ollama", embed_model="qwen3-embedding:8b")
+            with mock.patch.object(_lgwks, "_import_substrate", return_value=fake_sub):
+                with contextlib.redirect_stdout(io.StringIO()):
+                    _lgwks.crawl_command(args)
+
+        sub_args = fake_sub.build_run.call_args[0][0]
+        self.assertEqual(sub_args.embed_provider, "ollama")
+        self.assertEqual(sub_args.embed_model, "qwen3-embedding:8b")
 
 
 if __name__ == "__main__":

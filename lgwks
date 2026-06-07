@@ -622,8 +622,8 @@ def _crawl_via_substrate(args: argparse.Namespace) -> dict:
         chunk_words=getattr(args, "chunk_words", 320),
         chunk_overlap=getattr(args, "chunk_overlap", 48),
         fact_threshold=0.6,
-        embed_provider="auto",
-        embed_model="",
+        embed_provider=getattr(args, "embed_provider", "deterministic"),
+        embed_model=getattr(args, "embed_model", ""),
         login_if_needed=getattr(args, "login_if_needed", True),
         login_url=getattr(args, "login_url", ""),
         success_selector=getattr(args, "auth_selector", None),
@@ -1228,6 +1228,21 @@ def build_parser() -> argparse.ArgumentParser:
     crawl.add_argument(
         "--chromium", dest="chromium", action="store_true", default=False,
         help="(substrate engine) use Chromium instead of WebKit for browser sessions",
+    )
+    crawl.add_argument(
+        "--embed-provider",
+        choices=["auto", "ollama", "openrouter-vl", "deterministic"],
+        default="deterministic",
+        help=(
+            "(substrate engine) embedding provider for URL crawls. Defaults to "
+            "deterministic to preserve Jarvis' local, machine-readable behavior; "
+            "use 'auto' or 'ollama' to opt into semantic local embeddings."
+        ),
+    )
+    crawl.add_argument(
+        "--embed-model",
+        default="",
+        help="(substrate engine) optional explicit embedding model id",
     )
     crawl.set_defaults(func=crawl_command)
     remap = jarvis_sub.add_parser("remap-db", help="upgrade an existing run database to the current Jarvis schema")
