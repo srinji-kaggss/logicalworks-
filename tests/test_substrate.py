@@ -235,5 +235,312 @@ class TestAuthHandoff(unittest.TestCase):
         self.assertTrue(captured["kwargs"]["manual"])
 
 
+class TestVectorSpaceIdentity(unittest.TestCase):
+    """Tests for issue #41: build/query vector-space identity enforcement."""
+
+    # ------------------------------------------------------------------
+    # helpers
+    # ------------------------------------------------------------------
+
+    def _make_run_dir(self, tmp: str, *, provider: str = "deterministic", dims: int = 4) -> Path:
+        """Write a minimal run directory (vectors.jsonl + manifest.json)."""
+        run_dir = Path(tmp) / "run"
+        run_dir.mkdir()
+        vec = [0.1, 0.2, 0.3, 0.4]
+        vector_rows = [{
+            "chunk_id": "chunk-aaa",
+            "document_id": "doc-bbb",
+            "provider": provider,
+            "is_semantic": provider != "deterministic",
+            "dims": dims,
+            "vector_text": "Transfer route TR01 requires form T2033.",
+            "vector": vec,
+            "fact_score": 0.7,
+            "chunk_kind": "stem_fact",
+            "vector_id": "vec-001",
+        }]
+        with (run_dir / "vectors.jsonl").open("w") as fh:
+            for row in vector_rows:
+                fh.write(json.dumps(row) + "\n")
+        manifest = {
+            "schema": "lgwks.substrate.run.v0",
+            "run_id": "test-run",
+            "vector_space": {
+                "provider_requested": provider,
+                "model_requested": "",
+                "providers_used": {provider: 1},
+                "canonical_provider": provider,
+                "canonical_model": "",
+                "dims": dims,
+                "semantic": provider != "deterministic",
+                "ambiguous": False,
+            },
+        }
+        (run_dir / "manifest.json").write_text(json.dumps(manifest), encoding="utf-8")
+        return run_dir
+
+    # ------------------------------------------------------------------
+    # 1. No provider specified → resolves from manifest
+    # ------------------------------------------------------------------
+
+    def test_no_provider_resolves_from_manifest(self):
+        """query with no provider specified must use the build-time provider from manifest."""
+        with tempfile.TemporaryDirectory() as td:
+            run_dir = self._make_run_dir(td, provider="deterministic")
+            with mock.patch.object(
+                substrate.lgwks_run,
+                "embed",
+                return_value=([0.1, 0.2, 0.3, 0.4], "deterministic", False),
+            ) as m_embed:
+                result = substrate._vector_search(run_dir, "test query", 10, "", "")
+
+        self.assertTrue(result.get("ok"), msg=result)
+        # embed() must have been called with provider="deterministic"
+        call_provider = m_embed.call_args.kwargs.get("provider") or m_embed.call_args[1].get("provider")
+        self.assertEqual(call_provider, "deterministic")
+        self.assertIn("stored_vector_space", result)
+        self.assertIn("query_vector_space", result)
+
+    # ------------------------------------------------------------------
+    # 2. Explicit provider mismatch → structured error, no rows
+    # ------------------------------------------------------------------
+
+    def test_explicit_provider_mismatch_fails_closed(self):
+        """Passing an explicit provider that differs from the stored space must return a structured error."""
+        with tempfile.TemporaryDirectory() as td:
+            run_dir = self._make_run_dir(td, provider="deterministic")
+            result = substrate._vector_search(run_dir, "test query", 10, "ollama", "")
+
+        self.assertFalse(result.get("ok"), msg=result)
+        self.assertEqual(result["error"], "embedding provider mismatch")
+        self.assertIn("stored_vector_space", result)
+        self.assertIn("requested_vector_space", result)
+        self.assertIn("hint", result)
+        self.assertEqual(result["rows"], [])
+
+    def test_explicit_deterministic_selector_matches_resolved_hash_provider(self):
+        """The CLI token 'deterministic' must match stored deterministic-feature-hash vectors."""
+        with tempfile.TemporaryDirectory() as td:
+            run_dir = self._make_run_dir(td, provider="deterministic-feature-hash")
+            with mock.patch.object(
+                substrate.lgwks_run,
+                "embed",
+                return_value=([0.1, 0.2, 0.3, 0.4], "deterministic-feature-hash", False),
+            ):
+                result = substrate._vector_search(run_dir, "test query", 10, "deterministic", "")
+
+        self.assertTrue(result.get("ok"), msg=result)
+        self.assertNotIn("cross_space_forced", result)
+
+    def test_explicit_ollama_selector_matches_resolved_ollama_model_provider(self):
+        """The CLI token 'ollama' must match stored ollama:<model> vectors."""
+        with tempfile.TemporaryDirectory() as td:
+            run_dir = self._make_run_dir(td, provider="ollama:qwen3-embedding:8b")
+            with mock.patch.object(
+                substrate.lgwks_run,
+                "embed",
+                return_value=([0.1, 0.2, 0.3, 0.4], "ollama:qwen3-embedding:8b", True),
+            ):
+                result = substrate._vector_search(run_dir, "test query", 10, "ollama", "")
+
+        self.assertTrue(result.get("ok"), msg=result)
+        self.assertNotIn("cross_space_forced", result)
+
+    def test_explicit_model_matches_model_qualified_provider_label(self):
+        """A model embedded in the provider label should satisfy explicit --embed-model."""
+        with tempfile.TemporaryDirectory() as td:
+            run_dir = self._make_run_dir(td, provider="ollama:qwen3-embedding:8b")
+            with mock.patch.object(
+                substrate.lgwks_run,
+                "embed",
+                return_value=([0.1, 0.2, 0.3, 0.4], "ollama:qwen3-embedding:8b", True),
+            ):
+                result = substrate._vector_search(
+                    run_dir, "test query", 10, "ollama", "qwen3-embedding:8b"
+                )
+
+        self.assertTrue(result.get("ok"), msg=result)
+        self.assertNotIn("cross_space_forced", result)
+
+    # ------------------------------------------------------------------
+    # 3. Mismatch + --force-cross-space → rows + warning
+    # ------------------------------------------------------------------
+
+    def test_mismatch_with_force_cross_space_succeeds_with_warning(self):
+        """With --force-cross-space, a mismatched provider must succeed but include a warning."""
+        with tempfile.TemporaryDirectory() as td:
+            run_dir = self._make_run_dir(td, provider="deterministic")
+            with mock.patch.object(
+                substrate.lgwks_run,
+                "embed",
+                return_value=([0.1, 0.2, 0.3, 0.4], "ollama:qwen3-embedding:8b", True),
+            ):
+                result = substrate._vector_search(
+                    run_dir, "test query", 10, "ollama", "", force_cross_space=True
+                )
+
+        self.assertTrue(result.get("ok"), msg=result)
+        self.assertTrue(result.get("cross_space_forced"))
+        self.assertIn("warning", result)
+        self.assertGreater(len(result["rows"]), 0)
+
+    # ------------------------------------------------------------------
+    # 4. Missing manifest → fallback from homogeneous vectors.jsonl
+    # ------------------------------------------------------------------
+
+    def test_missing_manifest_falls_back_to_homogeneous_jsonl(self):
+        """When manifest.json is absent, a homogeneous vectors.jsonl must resolve the space."""
+        with tempfile.TemporaryDirectory() as td:
+            run_dir = self._make_run_dir(td, provider="deterministic")
+            (run_dir / "manifest.json").unlink()  # remove manifest
+
+            with mock.patch.object(
+                substrate.lgwks_run,
+                "embed",
+                return_value=([0.1, 0.2, 0.3, 0.4], "deterministic", False),
+            ):
+                result = substrate._vector_search(run_dir, "test query", 10, "", "")
+
+        self.assertTrue(result.get("ok"), msg=result)
+        vs = result["stored_vector_space"]
+        self.assertEqual(vs["canonical_provider"], "deterministic")
+        self.assertIn("fallback", vs.get("source", ""))
+
+    # ------------------------------------------------------------------
+    # 5. Mixed-provider vectors.jsonl → fails closed unless forced
+    # ------------------------------------------------------------------
+
+    def test_mixed_provider_jsonl_fails_closed(self):
+        """Mixed providers in vectors.jsonl (no manifest) must be rejected unless forced."""
+        with tempfile.TemporaryDirectory() as td:
+            run_dir = Path(td) / "run"
+            run_dir.mkdir()
+            rows = [
+                {"chunk_id": "c1", "document_id": "d1", "provider": "deterministic",
+                 "is_semantic": False, "dims": 4, "vector": [0.1, 0.2, 0.3, 0.4],
+                 "vector_text": "T+1", "fact_score": 0.6, "chunk_kind": "stem_fact", "vector_id": "v1"},
+                {"chunk_id": "c2", "document_id": "d2", "provider": "ollama:qwen3-embedding:8b",
+                 "is_semantic": True, "dims": 8, "vector": [0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8],
+                 "vector_text": "RRSP", "fact_score": 0.5, "chunk_kind": "narrative_context", "vector_id": "v2"},
+            ]
+            with (run_dir / "vectors.jsonl").open("w") as fh:
+                for row in rows:
+                    fh.write(json.dumps(row) + "\n")
+            # No manifest.json
+
+            result = substrate._vector_search(run_dir, "test query", 10, "", "")
+
+        self.assertFalse(result.get("ok"), msg=result)
+        self.assertEqual(result["error"], "ambiguous stored vector space")
+        self.assertIn("stored_vector_space", result)
+        self.assertIn("hint", result)
+
+    # ------------------------------------------------------------------
+    # 6. Mixed-provider + --force-cross-space → proceeds
+    # ------------------------------------------------------------------
+
+    def test_mixed_provider_with_force_cross_space_proceeds(self):
+        """--force-cross-space must override the ambiguous-space hard error."""
+        with tempfile.TemporaryDirectory() as td:
+            run_dir = Path(td) / "run"
+            run_dir.mkdir()
+            rows = [
+                {"chunk_id": "c1", "document_id": "d1", "provider": "deterministic",
+                 "is_semantic": False, "dims": 4, "vector": [0.1, 0.2, 0.3, 0.4],
+                 "vector_text": "T+1", "fact_score": 0.6, "chunk_kind": "stem_fact", "vector_id": "v1"},
+                {"chunk_id": "c2", "document_id": "d2", "provider": "ollama:qwen3-embedding:8b",
+                 "is_semantic": True, "dims": 4, "vector": [0.2, 0.3, 0.4, 0.5],
+                 "vector_text": "RRSP", "fact_score": 0.5, "chunk_kind": "narrative_context", "vector_id": "v2"},
+            ]
+            with (run_dir / "vectors.jsonl").open("w") as fh:
+                for row in rows:
+                    fh.write(json.dumps(row) + "\n")
+
+            with mock.patch.object(
+                substrate.lgwks_run,
+                "embed",
+                return_value=([0.1, 0.2, 0.3, 0.4], "auto", False),
+            ):
+                result = substrate._vector_search(
+                    run_dir, "test query", 10, "", "", force_cross_space=True
+                )
+
+        self.assertTrue(result.get("ok"), msg=result)
+        self.assertTrue(result.get("cross_space_forced"))
+        self.assertIn("warning", result)
+
+    # ------------------------------------------------------------------
+    # 7. build_run: manifest now includes vector_space field
+    # ------------------------------------------------------------------
+
+    def test_build_run_manifest_includes_vector_space(self):
+        """build_run must write vector_space to manifest.json."""
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td) / "repo"
+            root.mkdir()
+            (root / "a.md").write_text(
+                "RRSP minimum amount is $5,000. Use form T2033.",
+                encoding="utf-8",
+            )
+            args = type("Args", (), {
+                "target": str(root),
+                "project": "vs-test",
+                "source_type": "folder",
+                "max_pages": 10,
+                "max_depth": 1,
+                "max_files": 10,
+                "max_chars": 10000,
+                "chunk_words": 80,
+                "chunk_overlap": 10,
+                "fact_threshold": 0.6,
+                "embed_provider": "deterministic",
+                "embed_model": "",
+                "login_if_needed": True,
+                "login_url": "",
+                "success_selector": None,
+                "max_auto_bypass_attempts": 3,
+                "max_auth_handoffs": 3,
+                "browser_engine": "chromium",
+            })()
+
+            with mock.patch.object(
+                substrate.lgwks_run, "embed",
+                return_value=([0.5, 0.6, 0.7], "deterministic", False)
+            ):
+                with mock.patch.object(substrate, "GLOBAL_FACT_DB", Path(td) / "gfv.db"):
+                    manifest = substrate.build_run(args)
+
+        self.assertIn("vector_space", manifest)
+        vs = manifest["vector_space"]
+        self.assertEqual(vs["canonical_provider"], "deterministic")
+        self.assertFalse(vs["ambiguous"])
+        # Verify it was written to disk too
+        run_dir = Path(manifest["artifacts"]["root"])
+        on_disk = json.loads((run_dir / "manifest.json").read_text())
+        self.assertIn("vector_space", on_disk)
+
+    # ------------------------------------------------------------------
+    # 8. _stored_vector_space helper: manifest takes priority over jsonl
+    # ------------------------------------------------------------------
+
+    def test_stored_vector_space_prefers_manifest(self):
+        """_stored_vector_space must prefer manifest.json over vectors.jsonl."""
+        with tempfile.TemporaryDirectory() as td:
+            run_dir = self._make_run_dir(td, provider="deterministic")
+            # Corrupt vectors.jsonl to contain a different provider
+            (run_dir / "vectors.jsonl").write_text(
+                json.dumps({
+                    "chunk_id": "c1", "document_id": "d1", "provider": "ollama:qwen3-embedding:8b",
+                    "is_semantic": True, "dims": 256, "vector": [0.1],
+                    "vector_text": "x", "fact_score": 0.5, "chunk_kind": "narrative_context", "vector_id": "v1",
+                }) + "\n",
+                encoding="utf-8",
+            )
+            vs = substrate._stored_vector_space(run_dir)
+
+        # Should still return deterministic from manifest, not ollama from jsonl
+        self.assertEqual(vs.get("canonical_provider"), "deterministic")
+
+
 if __name__ == "__main__":
     unittest.main()
