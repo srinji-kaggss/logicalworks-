@@ -41,7 +41,7 @@ Generated runs are gitignored. Schemas, seed packs, and command code are tracked
 
 The crawler and graph builder are deterministic. Ollama embeddings are used when available, with `qwen3-embedding:8b` as the default. If embedding fails, the pipeline falls back to deterministic feature-hash vectors so the DB and graph still build.
 
-`gemma4:31b` is recorded as the default reasoning/multimodal model, but the first pipeline does not require it. That keeps research ingestion independent from interpretation.
+Reasoning/advisory generation is optional and uses an OpenRouter model id when configured. Set `LGWKS_TONGUE_MODEL` or pass `--reasoning-model` / `--model`; use `none` to record no reasoning model. Research ingestion stays independent from interpretation.
 
 ## Why This Exists
 

@@ -25,7 +25,7 @@ The research bot is not one agent. It is a governed research system with separat
    - Similarity edges are candidate structure only.
 
 5. **Expert Advisory**
-   - Uses local reasoning models such as `gemma4:31b`.
+   - Optionally uses a user-selected OpenRouter reasoning model.
    - Follows a co-scientist loop: generate, critique, rank, evolve, ground, human-review.
    - Follows Constitutional AI discipline: state principle, critique, revise, log.
    - Follows tabula-rasa discipline: separate observations from interpretations and minimize assumptions.

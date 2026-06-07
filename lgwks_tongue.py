@@ -1,6 +1,6 @@
 """
-lgwks_tongue — the Tongue: gemma4 (Ollama) compiles hypotheses + the elimination question over the
-intent, Issue #7. Fails closed to the deterministic skeleton.
+lgwks_tongue — the Tongue: an optional OpenRouter LLM compiles hypotheses + the elimination
+question over the intent, Issue #7. Fails closed to the deterministic skeleton.
 
 Two corrections from the Director (2026-05-31):
 - **Hn is NOT a fixed set.** H0 is the mandatory null (skeptical default). H1..Hn are COMPILED
@@ -16,21 +16,17 @@ truth over interestingness. Anti-slop: forced format=json + strict schema; non-J
 
 from __future__ import annotations
 
-import lgwks_ollama
 import lgwks_openrouter
 
 
 def _generate(prompt: str, schema: str) -> dict | None:
-    """Provider seam for generation. Cloud Tongue (OpenRouter) FIRST — the local 31B loses the
-    interactive readiness race on 24GB and falls back every run. Local Ollama is the offline
-    fallback; None → caller uses the deterministic skeleton. Vendor-agnostic: both honour the
-    same (prompt, schema_hint) -> dict|None contract, so the Tongue never binds to one provider."""
+    """Provider seam for generation. OpenRouter is optional and user-selectable through
+    LGWKS_TONGUE_MODEL. If no key/model is configured or the model fails, callers use the
+    deterministic skeleton."""
     if lgwks_openrouter.is_configured():
         out = lgwks_openrouter.generate_json(prompt, schema)
         if out is not None:
-            return out                       # cloud answered; do not double-spend the local model
-    if lgwks_ollama.is_up():
-        return lgwks_ollama.generate_json(prompt, schema)
+            return out
     return None
 
 SYSTEM = (

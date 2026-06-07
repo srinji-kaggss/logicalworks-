@@ -1,16 +1,15 @@
 """
-lgwks_ollama — local Ollama provider for the Eye (embeddings) and Tongue (generation), Issue #7.
+lgwks_ollama — local Ollama provider for the Eye (embeddings), Issue #7.
 
 stdlib-only client (urllib) so the project keeps zero pip deps. Every call FAILS CLOSED to a
 fallback signal — if Ollama is down or the model is missing, the caller drops to the deterministic
 provider and the run never fails (FACTORY_SPEC: "missing provider must fall back to deterministic").
 
-Local roster (Director's machine, verified 2026-05-31):
+Local roster:
   Eye    = qwen3-embedding:8b   (4096-d; full vector — Ollama has no MRL dim param, slice client-side)
-  Tongue = gemma4:31b           (generation; forced JSON via Ollama format=json to kill output slop)
 
-Anti-slop contract: generation ALWAYS requests format=json and is given a strict schema in-prompt.
-A response that does not parse as JSON is a fallback, never trusted prose.
+Generation is routed through OpenRouter (`lgwks_openrouter`) or deterministic fallback, not through
+a local Ollama reasoning model.
 """
 
 from __future__ import annotations
@@ -22,7 +21,6 @@ import urllib.request
 
 HOST = "http://localhost:11434"
 EYE_MODEL = "qwen3-embedding:8b"
-TONGUE_MODEL = "gemma4:31b"
 
 
 def _post(path: str, payload: dict, timeout: int) -> dict | None:
@@ -97,18 +95,3 @@ def embed_one(text: str, model: str = EYE_MODEL, timeout: int = 60) -> list[floa
 def slice_mrl(vec: list[float], dims: int) -> list[float]:
     """Matryoshka client-side truncation (Ollama returns full 4096; we slice for the hot graph)."""
     return vec[:dims] if dims and dims < len(vec) else vec
-
-
-def generate_json(prompt: str, schema_hint: str, model: str = TONGUE_MODEL,
-                  timeout: int = 300) -> dict | None:
-    """Forced-JSON generation (the Tongue). Anti-slop: format=json + schema in-prompt. None = fallback."""
-    full = f"{prompt}\n\nReturn ONLY valid JSON matching: {schema_hint}\nNo prose, no markdown."
-    data = _post("/api/generate",
-                 {"model": model, "prompt": full, "format": "json", "stream": False,
-                  "options": {"temperature": 0.2}}, timeout)
-    if not data or "response" not in data:
-        return None
-    try:
-        return json.loads(data["response"])
-    except json.JSONDecodeError:
-        return None

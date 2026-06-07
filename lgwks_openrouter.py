@@ -1,14 +1,13 @@
 """
 lgwks_openrouter — cloud Tongue via OpenRouter (Issue #7).
 
-Why cloud for the Tongue: the local 31B (gemma4) cannot return JSON in interactive time on a 24GB
-box — it loses the readiness race and the spine falls back to the deterministic skeleton every run
-(verified 2026-05-31). OpenRouter is the vendor-AGNOSTIC seam: one endpoint, hundreds of models,
-swappable via LGWKS_TONGUE_MODEL — we are never locked to one provider. The Eye stays LOCAL
-(qwen3-embedding); only generation goes cloud.
+Why cloud for the Tongue: generation is intentionally not tied to a local Ollama model. OpenRouter
+is the vendor-AGNOSTIC seam: one endpoint, many models, swappable via LGWKS_TONGUE_MODEL or an
+explicit caller-supplied model. The Eye stays LOCAL (qwen3-embedding); only generation goes cloud
+when the user configures it.
 
 Trust: the API key is resolved just-in-time from lgwks_keyvault (Keychain), NEVER from source/logs.
-The key is scrubbed from every error string. Fails closed to None → caller drops to local Ollama →
+The key is scrubbed from every error string. Fails closed to None → caller drops to the
 deterministic skeleton. Anti-slop: response_format=json_object + strict schema in-prompt; a response
 that does not parse as JSON is a fallback, never trusted prose.
 
@@ -26,16 +25,18 @@ import urllib.request
 import lgwks_keyvault
 
 ENDPOINT = "https://openrouter.ai/api/v1/chat/completions"
-# Swappable. Default = preferred free model; override per-run with LGWKS_TONGUE_MODEL.
-DEFAULT_MODEL = os.environ.get("LGWKS_TONGUE_MODEL", "nvidia/nemotron-3-super-120b-a12b:free")
+# Swappable. Default = preferred free model; override per-run with LGWKS_TONGUE_MODEL or pass an
+# explicit model to generate_json(..., model=...). Explicit models are used alone.
+DEFAULT_MODEL = os.environ.get("LGWKS_TONGUE_MODEL", "nvidia/nemotron-3-ultra-550b-a55b:free")
 # Free models throttle independently and unpredictably (HTTP 429 upstream). The Tongue tries the
 # preferred model FIRST, then rotates through other free models on a retryable error — so a single
 # throttled provider degrades to another FREE model, not to the deterministic skeleton. All :free.
 FREE_FALLBACKS = [
+    "poolside/laguna-m.1:free",
+    "moonshotai/kimi-k2.6:free",
     "qwen/qwen3-next-80b-a3b-instruct:free",
     "openai/gpt-oss-120b:free",
     "meta-llama/llama-3.3-70b-instruct:free",
-    "google/gemma-4-31b-it:free",
 ]
 # App-attribution headers (OpenRouter rankings); declared as research, not commercial.
 _REFERER = "https://logicalworks.ca"
@@ -120,8 +121,7 @@ def take_usage() -> int:
 def generate_json(prompt: str, schema_hint: str, model: str | None = None,
                   timeout: int = 60) -> dict | None:
     """Forced-JSON cloud generation (the Tongue). Tries the preferred model then rotates through free
-    fallbacks on retryable errors. Returns parsed dict, or None to signal fallback to the local/
-    deterministic path. Same contract as lgwks_ollama.generate_json so the seam is provider-agnostic.
+    fallbacks on retryable errors. Returns parsed dict, or None to signal deterministic fallback.
     Never logs the error body (it may echo the key)."""
     if os.environ.get("LGWKS_NO_MODELS"):
         return None
