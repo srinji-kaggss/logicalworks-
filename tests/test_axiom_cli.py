@@ -204,10 +204,11 @@ class TestAxiomHarness(unittest.TestCase):
 
         lgwks_axiom.build_narration_artifact("tests passed", run=out)
         index = json.loads(index_path.read_text(encoding="utf-8"))
-        self.assertEqual(len(index["artifacts"]), 5)
+        self.assertEqual(len(index["artifacts"]), 6)
         kinds = {a["kind"] for a in index["artifacts"]}
         self.assertIn("narration", kinds)
         self.assertIn("narration_emissions", kinds)
+        self.assertIn("narration_fabric_log", kinds)
 
     def test_classify_argv_safe_commands(self):
         repo = Path("/tmp/repo")
@@ -245,6 +246,39 @@ class TestAxiomHarness(unittest.TestCase):
         repo = _repo()
         with self.assertRaises(lgwks_axiom.CommandPolicyError):
             lgwks_axiom.build_capture(repo, test_command="rm x", allow_risky=True)
+
+    def test_replay_all_covers_capture_and_narration(self):
+        repo = _repo()
+        out = repo / "out"
+        lgwks_axiom.build_capture(repo, "capture", ("python", "-c", "print(123)"), out_dir=out)
+        lgwks_axiom.build_narration_artifact("tests passed", run=out)
+
+        result = lgwks_axiom.replay_run(out)
+        self.assertEqual(result["schema"], "lgwks.axiom.replay_all.v0")
+        self.assertTrue(result["ok"])
+        self.assertEqual(len(result["artifacts"]), 2)
+        kinds = {a["kind"] for a in result["artifacts"]}
+        self.assertIn("capture", kinds)
+        self.assertIn("narration", kinds)
+
+    def test_replay_all_fails_on_tampered_narration(self):
+        repo = _repo()
+        out = repo / "out"
+        lgwks_axiom.build_capture(repo, "capture", out_dir=out)
+        lgwks_axiom.build_narration_artifact("tests passed", run=out)
+
+        # Tamper narration emissions
+        path = out / "narration-emissions.jsonl"
+        lines = path.read_text(encoding="utf-8").splitlines()
+        last = json.loads(lines[-1])
+        last["bytes_hex"] = last["bytes_hex"][:-2] + ("00" if last["bytes_hex"][-2:] != "00" else "ff")
+        lines[-1] = json.dumps(last, sort_keys=True)
+        path.write_text("\n".join(lines) + "\n", encoding="utf-8")
+
+        result = lgwks_axiom.replay_run(out)
+        self.assertFalse(result["ok"])
+        narration_res = [a for a in result["artifacts"] if a["kind"] == "narration"][0]
+        self.assertFalse(narration_res["ok"])
 
 
 if __name__ == "__main__":

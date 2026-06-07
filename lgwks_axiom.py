@@ -433,11 +433,16 @@ def build_narration_artifact(claim_text: str = "", claims_file: Path | None = No
         "\n".join(json.dumps(e, sort_keys=True) for e in emissions) + "\n",
         encoding="utf-8",
     )
+    (root / "narration-fabric-log.json").write_text(
+        json.dumps(artifact["fabric"], indent=2, sort_keys=True),
+        encoding="utf-8",
+    )
     
     # Update run index
     write_run_index(root, f"narration-{_sha(json.dumps(narration, sort_keys=True), 20)}", [
         {"kind": "narration", "path": "narration.json", "schema": NARRATION_SCHEMA},
-        {"kind": "narration_emissions", "path": "narration-emissions.jsonl"}
+        {"kind": "narration_emissions", "path": "narration-emissions.jsonl"},
+        {"kind": "narration_fabric_log", "path": "narration-fabric-log.json"}
     ])
     
     return artifact
@@ -639,7 +644,12 @@ def replay_emissions(path: Path) -> dict[str, Any]:
             continue
         replayed.append({"index": index, "cid": cid, "event": emission.get("event", ""), "ok": True})
 
-    expected_log_path = root / "fabric-log.json"
+    # Find expected log path based on emission file name
+    log_name = "fabric-log.json"
+    if path.name == "narration-emissions.jsonl":
+        log_name = "narration-fabric-log.json"
+    
+    expected_log_path = root / log_name
     expected_log: list[dict[str, Any]] | None = None
     log_matches = None
     if expected_log_path.exists():
@@ -668,6 +678,49 @@ def replay_emissions(path: Path) -> dict[str, Any]:
         "log_matches": log_matches,
         "failures": failures,
         "replayed": replayed,
+    }
+
+
+def replay_run(root: Path) -> dict[str, Any]:
+    """Replay all artifacts in a run directory."""
+    if not root.is_dir():
+        raise ValueError(f"not a directory: {root}")
+
+    index_path = root / "index.json"
+    emission_paths: list[tuple[str, Path]] = []
+
+    if index_path.exists():
+        try:
+            index = json.loads(index_path.read_text(encoding="utf-8"))
+            for art in index.get("artifacts", []):
+                if art["kind"] in ("emissions", "narration_emissions"):
+                    emission_paths.append((art["kind"], root / art["path"]))
+        except Exception:
+            pass
+    
+    if not emission_paths:
+        # Fallback detection
+        for p in (root / "emissions.jsonl", root / "narration-emissions.jsonl"):
+            if p.exists():
+                kind = "emissions" if p.name == "emissions.jsonl" else "narration"
+                emission_paths.append((kind, p))
+
+    results: list[dict[str, Any]] = []
+    overall_ok = True
+    for kind, path in emission_paths:
+        res = replay_emissions(path)
+        results.append({
+            "kind": "capture" if kind == "emissions" else "narration",
+            "ok": res["ok"],
+            "path": str(path.relative_to(root) if _is_relative_to(path, root) else path)
+        })
+        if not res["ok"]:
+            overall_ok = False
+
+    return {
+        "schema": "lgwks.axiom.replay_all.v0",
+        "ok": overall_ok and bool(results),
+        "artifacts": results
     }
 
 
@@ -819,7 +872,11 @@ def check_command(args: argparse.Namespace) -> int:
 
 
 def replay_command(args: argparse.Namespace) -> int:
-    result = replay_emissions(Path(args.run))
+    run_path = Path(args.run)
+    if getattr(args, "all", False):
+        result = replay_run(run_path)
+    else:
+        result = replay_emissions(run_path)
     print(json.dumps(result, indent=2, sort_keys=True))
     return 0 if result["ok"] else 1
 
@@ -871,6 +928,7 @@ def add_parser(subparsers) -> None:
 
     replay = sp.add_parser("replay", help="replay persisted emissions into a fresh verified fabric")
     replay.add_argument("run", help="run directory or emissions.jsonl path")
+    replay.add_argument("--all", action="store_true", help="replay all artifact types in the run")
     replay.add_argument("--json", action="store_true", help="structured output (default; flag exists for caller intent)")
     replay.set_defaults(func=replay_command)
 

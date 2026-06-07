@@ -487,8 +487,9 @@ _VERB_META: dict[str, dict] = {
     },
     "axiom replay": {
         "intent": "reload persisted Axiom emissions and reconstruct the verified fabric",
-        "args": {"run": "run directory or emissions.jsonl", "--json": "structured output"},
-        "output": "lgwks.axiom.replay.v0 with CID, chain, and fabric-log verification",
+        "args": {"run": "run directory or emissions.jsonl", "--all": "replay all artifacts in run",
+                 "--json": "structured output"},
+        "output": "lgwks.axiom.replay.v0 or lgwks.axiom.replay_all.v0 with verification",
         "tokens": "none",
     },
     "axiom test-matrix": {

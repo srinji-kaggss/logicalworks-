@@ -81,6 +81,8 @@ classloader/harness equivalent: it observes the host world and turns facts into 
 - Recomputes each capsule CID from canonical bytes.
 - Reconstructs the hash-chained fabric log.
 - Fails if emission bytes, CIDs, or `fabric-log.json` were tampered.
+- Supports `--all` flag to replay both capture and narration artifacts in a run.
+- Automatically detects artifacts using the unified run index or fallback filenames.
 
 `lgwks axiom test-matrix`
 
