@@ -34,6 +34,28 @@ class TestSubstrateScoring(unittest.TestCase):
             "https://portal.fundserv.com",
         ))
 
+    def test_canonicalize_crawl_url_normalizes_root_slash(self):
+        self.assertEqual(
+            substrate._canonicalize_crawl_url("https://portal.fundserv.com"),
+            "https://portal.fundserv.com/",
+        )
+        self.assertEqual(
+            substrate._canonicalize_crawl_url("https://portal.fundserv.com/#/"),
+            "https://portal.fundserv.com/",
+        )
+
+    def test_should_discover_clicks_only_when_href_frontier_is_thin(self):
+        self.assertTrue(substrate._should_discover_clicks("https://portal.example.com/", []))
+        self.assertTrue(substrate._should_discover_clicks("https://portal.example.com/", [
+            {"href": "https://portal.example.com/a"},
+            {"href": "https://portal.example.com/b"},
+        ]))
+        self.assertFalse(substrate._should_discover_clicks("https://portal.example.com/", [
+            {"href": "https://portal.example.com/a"},
+            {"href": "https://portal.example.com/b"},
+            {"href": "https://portal.example.com/c"},
+        ]))
+
 
 class TestSubstrateBuild(unittest.TestCase):
     def test_build_from_local_folder(self):
@@ -238,6 +260,45 @@ class TestClickDiscovery(unittest.TestCase):
         self.assertTrue(any(row["status"] == "click_no_access" for row in frontier))
         self.assertTrue(any(doc["source"] == "https://portal.example.com/standards" for doc in docs))
         self.assertTrue(any("T2033" in doc["text"] for doc in docs))
+
+    def test_click_same_url_same_content_is_deduped(self):
+        def fake_render(url, **_kwargs):
+            return {"ok": True, "html": "<html>Portal home</html>", "text": "Portal home"}
+
+        def fake_html_to_markdown(html, url):
+            return "Portal home", "Fundserv Connect", []
+
+        def fake_clicks(url, **_kwargs):
+            return [{
+                "ok": True,
+                "status": "ok",
+                "url": url,
+                "final_url": "https://portal.example.com/",
+                "html": "<html>Portal home</html>",
+                "html_len": 24,
+                "candidate": {"id": 0, "text": "Home"},
+            }]
+
+        with mock.patch.object(substrate.lgwks_browser, "_remote_allowed", return_value=True):
+            with mock.patch.object(substrate.lgwks_browser, "render", side_effect=fake_render):
+                with mock.patch.object(substrate.lgwks_browser, "discover_clicks", side_effect=fake_clicks):
+                    with mock.patch.object(substrate, "html_to_markdown", side_effect=fake_html_to_markdown):
+                        docs, _frontier = substrate._crawl_site(
+                            "https://portal.example.com",
+                            max_pages=5,
+                            max_depth=1,
+                            browser_engine="chromium",
+                            login_if_needed=False,
+                            login_url="",
+                            success_selector=None,
+                            max_auto_bypass_attempts=0,
+                            max_auth_handoffs=1,
+                            click_discovery=True,
+                            max_clicks_per_page=5,
+                        )
+
+        self.assertEqual(len(docs), 1)
+        self.assertEqual(docs[0]["source"], "https://portal.example.com/")
 
 
 class TestBuildIndexDb(unittest.TestCase):

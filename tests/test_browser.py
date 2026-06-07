@@ -216,5 +216,48 @@ class TestClickCandidateRanking(unittest.TestCase):
         self.assertGreater(browser._click_candidate_score(content_tile), browser._click_candidate_score(modal_button))
 
 
+class TestClickDiscoveryControls(unittest.TestCase):
+    def test_classify_click_outcome_detects_same_state(self):
+        outcome = browser._classify_click_outcome(
+            "https://portal.example.com/",
+            "Portal home",
+            {
+                "status": "ok",
+                "final_url": "https://portal.example.com/",
+                "text": "Portal home",
+            },
+        )
+        self.assertTrue(outcome["same_url"])
+        self.assertTrue(outcome["same_text"])
+        self.assertTrue(outcome["ok"])
+
+    def test_should_stop_click_discovery_on_timeout_cluster(self):
+        self.assertTrue(browser._should_stop_click_discovery({
+            "attempts": 4,
+            "ok": 0,
+            "novel": 0,
+            "same_state": 0,
+            "timeouts": 3,
+        }))
+
+    def test_should_stop_click_discovery_on_repeated_same_state(self):
+        self.assertTrue(browser._should_stop_click_discovery({
+            "attempts": 4,
+            "ok": 4,
+            "novel": 0,
+            "same_state": 4,
+            "timeouts": 0,
+        }))
+
+    def test_should_continue_click_discovery_when_novel_states_exist(self):
+        self.assertFalse(browser._should_stop_click_discovery({
+            "attempts": 5,
+            "ok": 2,
+            "novel": 2,
+            "same_state": 2,
+            "timeouts": 1,
+        }))
+
+
 if __name__ == "__main__":
     unittest.main()

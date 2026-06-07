@@ -251,6 +251,35 @@ def _looks_like_login_gate(title: str, text: str, url: str) -> bool:
     return len(weak_hits) >= 2 and bool(re.search(r"\b(username|user id|password|submit|remote logins?)\b", sample, re.I))
 
 
+def _canonicalize_crawl_url(url: str) -> str:
+    raw = urllib.parse.urldefrag((url or "").strip())[0]
+    if not raw:
+        return ""
+    parsed = urllib.parse.urlsplit(raw)
+    scheme = (parsed.scheme or "https").lower()
+    host = (parsed.hostname or "").lower()
+    if not host:
+        return raw
+    port = parsed.port
+    if (scheme == "https" and port == 443) or (scheme == "http" and port == 80):
+        port = None
+    netloc = host if port is None else f"{host}:{port}"
+    path = parsed.path or "/"
+    return urllib.parse.urlunsplit((scheme, netloc, path, parsed.query, ""))
+
+
+def _should_discover_clicks(page_url: str, links: list[dict[str, str]]) -> bool:
+    """Click discovery is the expensive frontier tool. Use it only when href extraction is weak."""
+    page_host = urllib.parse.urlparse(page_url).hostname or ""
+    same_host_links = {
+        _canonicalize_crawl_url(link.get("href", ""))
+        for link in links
+        if (urllib.parse.urlparse(link.get("href", "")).hostname or "") == page_host
+    }
+    same_host_links.discard(_canonicalize_crawl_url(page_url))
+    return len(same_host_links) <= 2
+
+
 def _crawl_site(
     base_url: str,
     *,
@@ -268,15 +297,33 @@ def _crawl_site(
     parsed = urllib.parse.urlparse(base_url)
     base_host = parsed.hostname or ""
     seen: set[str] = set()
-    queue: deque[tuple[str, int, str]] = deque([(base_url, 0, "seed")])
+    queue: deque[tuple[str, int, str]] = deque([(_canonicalize_crawl_url(base_url), 0, "seed")])
     docs: list[dict[str, Any]] = []
     frontier: list[dict[str, Any]] = []
+    doc_fingerprints: set[tuple[str, str]] = set()
     blocker_retries_used = 0
     url_attempts: Counter[str] = Counter()
     auth_handoffs = 0
+
+    def append_doc(*, source: str, title: str, text: str, html_len: int, depth: int, discovered_by: str) -> bool:
+        clean_source = _canonicalize_crawl_url(source) or source
+        fingerprint = (clean_source, _sha(text or ""))
+        if fingerprint in doc_fingerprints:
+            return False
+        doc_fingerprints.add(fingerprint)
+        docs.append({
+            "source": clean_source,
+            "title": title or clean_source,
+            "text": text,
+            "html_len": html_len,
+            "depth": depth,
+            "discovered_by": discovered_by,
+        })
+        return True
+
     while queue and len(docs) < max_pages:
         url, depth, discovered_by = queue.popleft()
-        clean = urllib.parse.urldefrag(url)[0]
+        clean = _canonicalize_crawl_url(url)
         if not clean or clean in seen:
             continue
         seen.add(clean)
@@ -392,21 +439,31 @@ def _crawl_site(
                 "discovered_by": discovered_by,
             })
             continue
-        docs.append({
-            "source": clean,
-            "title": title or clean,
-            "text": markdown or rendered.get("text", ""),
-            "html_len": len(rendered["html"]),
-            "depth": depth,
-            "discovered_by": discovered_by,
-        })
+        append_doc(
+            source=clean,
+            title=title or clean,
+            text=markdown or rendered.get("text", ""),
+            html_len=len(rendered["html"]),
+            depth=depth,
+            discovered_by=discovered_by,
+        )
         frontier.append({
             "url": clean, "depth": depth, "status": "ok", "links_found": len(links),
             "discovered_by": discovered_by,
         })
         if depth >= max_depth:
             continue
-        if click_discovery:
+        click_allowed = click_discovery and _should_discover_clicks(clean, links)
+        if click_discovery and not click_allowed:
+            frontier.append({
+                "url": clean,
+                "depth": depth,
+                "status": "click_skipped",
+                "reason": f"href frontier already productive ({len(links)} extracted links)",
+                "discovered_by": clean,
+                "links_found": len(links),
+            })
+        if click_allowed:
             click_rows = lgwks_browser.discover_clicks(
                 clean,
                 max_clicks=max_clicks_per_page,
@@ -416,7 +473,7 @@ def _crawl_site(
             for row in click_rows:
                 cand = row.get("candidate", {})
                 label = cand.get("text") or cand.get("href") or "click"
-                final_url = urllib.parse.urldefrag(row.get("final_url") or clean)[0]
+                final_url = _canonicalize_crawl_url(row.get("final_url") or clean)
                 status = row.get("status", "error")
                 frontier.append({
                     "url": final_url or clean,
@@ -439,21 +496,21 @@ def _crawl_site(
                         "links_found": len(c_links),
                     })
                     continue
-                docs.append({
-                    "source": final_url or f"{clean}#click-{cand.get('id', '')}",
-                    "title": c_title or label,
-                    "text": c_md or row.get("text", ""),
-                    "html_len": row.get("html_len", 0),
-                    "depth": depth + 1,
-                    "discovered_by": clean,
-                })
+                append_doc(
+                    source=final_url or clean,
+                    title=c_title or label,
+                    text=c_md or row.get("text", ""),
+                    html_len=row.get("html_len", 0),
+                    depth=depth + 1,
+                    discovered_by=clean,
+                )
                 final_host = urllib.parse.urlparse(final_url).hostname or ""
                 if final_url and final_host == base_host and final_url not in seen:
                     queue.append((final_url, depth + 1, clean))
                 if len(docs) >= max_pages:
                     break
         for link in links:
-            href = urllib.parse.urldefrag(link.get("href", ""))[0]
+            href = _canonicalize_crawl_url(link.get("href", ""))
             host = urllib.parse.urlparse(href).hostname or ""
             if href and host == base_host and href not in seen:
                 queue.append((href, depth + 1, clean))

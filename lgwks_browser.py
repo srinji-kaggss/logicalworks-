@@ -55,6 +55,8 @@ def _click_candidate_score(candidate: dict) -> int:
 
     if candidate.get("tag") == "button" or candidate.get("role") in {"button", "link"}:
         score += 20
+    if candidate.get("cursor") == "pointer":
+        score += 25
     if candidate.get("href"):
         score += 3
 
@@ -74,6 +76,32 @@ def _click_candidate_score(candidate: dict) -> int:
     if not str(candidate.get("text") or "").strip() and not str(candidate.get("href") or "").strip():
         score -= 100
     return score
+
+
+def _classify_click_outcome(seed_url: str, seed_text: str, row: dict) -> dict[str, bool]:
+    final_url = str(row.get("final_url") or seed_url)
+    text = str(row.get("text") or "")
+    status = str(row.get("status") or "error")
+    return {
+        "timeout": "TimeoutError" in str(row.get("reason") or ""),
+        "same_url": final_url == seed_url,
+        "same_text": bool(seed_text) and text == seed_text,
+        "no_access": status == "no_access",
+        "ok": status == "ok",
+    }
+
+
+def _should_stop_click_discovery(metrics: dict[str, int]) -> bool:
+    attempts = int(metrics.get("attempts", 0))
+    if attempts < 4:
+        return False
+    if int(metrics.get("timeouts", 0)) >= 3 and int(metrics.get("ok", 0)) == 0:
+        return True
+    if int(metrics.get("same_state", 0)) >= 4 and int(metrics.get("novel", 0)) == 0:
+        return True
+    if attempts >= 6 and (int(metrics.get("timeouts", 0)) + int(metrics.get("same_state", 0))) >= 5 and int(metrics.get("novel", 0)) == 0:
+        return True
+    return False
 
 
 def _browser_path(engine: str) -> Path | None:
@@ -233,7 +261,7 @@ def _click_candidates_js() -> str:
     return """
     () => {
       const nodes = Array.from(document.querySelectorAll(
-        "a[href], button, [role='button'], [role='link'], [onclick], [data-url], [data-href], [aria-label]"
+        "a[href], button, [role='button'], [role='link'], [onclick], [data-url], [data-href], [aria-label], [tabindex], [class*='card' i], [class*='tile' i], [class*='app' i], [class*='service' i], [class*='item' i]"
       ));
       const chromeSelector = "header, footer, nav, aside, [role='navigation'], [role='banner'], [role='contentinfo'], [class*='nav' i], [class*='menu' i], [class*='footer' i], [class*='header' i]";
       const mainSelector = "main, [role='main'], article, section, [class*='content' i], [class*='card' i], [class*='tile' i], [class*='app' i]";
@@ -251,6 +279,8 @@ def _click_candidates_js() -> str:
         const text = (el.innerText || el.textContent || el.getAttribute("aria-label") || el.getAttribute("title") || "").trim().replace(/\\s+/g, " ");
         const href = el.href || el.getAttribute("href") || el.getAttribute("data-url") || el.getAttribute("data-href") || "";
         if (!text && !href) continue;
+        if (!href && text.length > 180) continue;
+        if (rect.width > window.innerWidth * 0.95 && rect.height > window.innerHeight * 0.45) continue;
         const key = `${text}|${href}|${el.tagName}|${el.getAttribute("role") || ""}`;
         if (seen.has(key)) continue;
         seen.add(key);
@@ -270,7 +300,8 @@ def _click_candidates_js() -> str:
           in_main: Boolean(el.closest(mainSelector)),
           in_article: Boolean(el.closest("article")),
           in_chrome: Boolean(el.closest(chromeSelector)),
-          in_dialog: Boolean(el.closest("dialog, [role='dialog'], [aria-modal='true'], [class*='modal' i]"))
+          in_dialog: Boolean(el.closest("dialog, [role='dialog'], [aria-modal='true'], [class*='modal' i]")),
+          cursor: style.cursor || ""
         });
       }
       return out;
@@ -324,12 +355,18 @@ def discover_clicks(
             seed = ctx.new_page()
             seed.goto(url, wait_until="domcontentloaded", timeout=30000)
             seed.wait_for_timeout(wait_ms)
-            candidates = sorted(
-                seed.evaluate(_click_candidates_js()),
-                key=_click_candidate_score,
-                reverse=True,
-            )[:max_clicks]
+            seed_text = _text_from(seed.content(), 120_000)
+            scored_candidates = [
+                (cand, _click_candidate_score(cand))
+                for cand in seed.evaluate(_click_candidates_js())
+            ]
+            candidates = [
+                cand
+                for cand, score in sorted(scored_candidates, key=lambda item: item[1], reverse=True)
+                if score > 0
+            ][:max_clicks]
             seed.close()
+            metrics = {"attempts": 0, "ok": 0, "novel": 0, "same_state": 0, "timeouts": 0}
 
             for cand in candidates:
                 page = ctx.new_page()
@@ -367,6 +404,16 @@ def discover_clicks(
                         "html_len": len(html),
                         "candidate": cand,
                     })
+                    metrics["attempts"] += 1
+                    outcome = _classify_click_outcome(url, seed_text, rows[-1])
+                    if outcome["ok"]:
+                        metrics["ok"] += 1
+                    if outcome["timeout"]:
+                        metrics["timeouts"] += 1
+                    if outcome["same_url"] and outcome["same_text"]:
+                        metrics["same_state"] += 1
+                    else:
+                        metrics["novel"] += 1
                     if target_page is not page:
                         target_page.close()
                 except Exception as exc:
@@ -378,8 +425,14 @@ def discover_clicks(
                         "reason": f"click failed: {type(exc).__name__}",
                         "candidate": cand,
                     })
+                    metrics["attempts"] += 1
+                    outcome = _classify_click_outcome(url, seed_text, rows[-1])
+                    if outcome["timeout"]:
+                        metrics["timeouts"] += 1
                 finally:
                     page.close()
+                if _should_stop_click_discovery(metrics):
+                    break
             browser.close()
     except Exception as exc:
         return [{"ok": False, "status": "error", "url": url, "reason": f"click discovery failed: {type(exc).__name__}"}]
