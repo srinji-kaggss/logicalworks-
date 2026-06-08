@@ -42,9 +42,10 @@ class TestIdiomGate(unittest.TestCase):
             self.assertIsNotNone(verdict.score)
             self.assertGreaterEqual(verdict.score, 0.0)
             self.assertLessEqual(verdict.score, 1.0)
-            self.assertTrue(any("score" in e for e in verdict.evidence or []))
-            self.assertTrue(any("exemplars" in e for e in verdict.evidence or []))
-            self.assertTrue(any("deviations" in e for e in verdict.evidence or []))
+            urls = [e.source_url or "" for e in verdict.provenance]
+            self.assertTrue(any("score" in u for u in urls))
+            self.assertTrue(any("exemplars" in u for u in urls))
+            self.assertTrue(any("deviations" in u for u in urls))
 
     def test_embedder_failure_cannot_decide(self):
         """On embedder failure returns ADVISORY+CANNOT_DECIDE — NOT a 0 score."""
@@ -73,7 +74,8 @@ class TestIdiomGate(unittest.TestCase):
             v = IdiomVerifier(corpus_dir=corpus, max_files=10)
             verdict = v.check("def world(): pass\n", {})
             self.assertEqual(verdict.outcome, Outcome.PASS)
-            self.assertTrue(any("duplicate" in e.lower() for e in verdict.evidence or []))
+            urls = [e.source_url or "" for e in verdict.provenance]
+            self.assertTrue(any("duplicate" in u.lower() for u in urls))
 
     def test_similarity_failure_cannot_decide(self):
         with tempfile.TemporaryDirectory() as tmp:

@@ -13,7 +13,7 @@ import sys
 from pathlib import Path
 from typing import Any
 
-from lgwks_verify import Klass, Outcome, Verdict
+from lgwks_verify import Evidence, Klass, OriginType, Outcome, Verdict
 
 
 class IdiomVerifier:
@@ -140,8 +140,9 @@ class IdiomVerifier:
             klass=self.klass,
             score=score,
             evidence=[
-                f"idiom score = {score}",
-                f"nearest exemplars: {exemplars}",
-                f"deviations: {deviations}",
-            ] + notes,
+                Evidence(source_url=f"idiom score = {score}", tier="primary", origin_type=OriginType.INFERRED),
+                Evidence(source_url=f"nearest exemplars: {exemplars}", tier="primary", origin_type=OriginType.INFERRED),
+                Evidence(source_url=f"deviations: {deviations}", tier="primary", origin_type=OriginType.INFERRED),
+                *[Evidence(source_url=n, tier="secondary", origin_type=OriginType.INFERRED) for n in notes],
+            ],
         )

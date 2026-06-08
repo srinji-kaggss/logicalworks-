@@ -23,10 +23,12 @@ from typing import Any
 import lgwks_sign
 
 try:
+    from cryptography.exceptions import InvalidTag
     from cryptography.hazmat.primitives.ciphers.aead import AESGCM
     _HAVE_AESGCM = True
 except Exception:  # pragma: no cover
     _HAVE_AESGCM = False
+    InvalidTag = Exception
 
 # Argon2id via argon2-cffi (preferred) or argon2 pure-python fallback
 try:
@@ -268,8 +270,8 @@ def get_entry(key: str):
             detail=f"mode={mode} format=aes256gcm",
         ))
         return json.loads(plaintext.decode("utf-8"))
-    except ValueError:
-        pass  # not new format — try legacy
+    except (ValueError, InvalidTag):
+        pass  # not new format or wrong key — try legacy
 
     # Try legacy Fernet format (backward compat)
     try:
