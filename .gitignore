@@ -19,7 +19,9 @@ store/
 target/
 axiom/rust/target/
 
-# hermetic test / CI: force deterministic fallbacks (no Ollama)
+# Governance runtime append-only logs (refusals, audits) — generated at runtime
+governance/*.jsonl
+governance/*.db
 # LGWKS_NO_MODELS=1
 
 # Claude Code local settings + worktrees — never source of truth
