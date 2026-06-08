@@ -32,6 +32,14 @@ _MODEL_CATALOG: dict[str, dict[str, Any]] = {
         "repo": "prajjwal1/bert-tiny",
         "license": "Apache-2.0",
     },
+    "neobert": {
+        "repo": "chandar-lab/NeoBERT",
+        "license": "MIT",
+    },
+    "codebert-base": {
+        "repo": "microsoft/codebert-base",
+        "license": "MIT",
+    },
 }
 
 
@@ -116,7 +124,9 @@ def scrub(name: str) -> dict[str, Any]:
             "config.json",
             "tokenizer_config.json",
             "vocab.txt",
+            "vocab.json",
             "tokenizer.json",
+            "merges.txt",
             "special_tokens_map.json",
         ):
             kept.append(str(item.relative_to(model_dir)))

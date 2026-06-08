@@ -34,7 +34,8 @@ _MODEL_CATALOG: dict[str, dict[str, Any]] = {
         "size_mb": 66,
         "layers": 6,
         "hidden": 768,
-        "desc": "6-layer DistilBERT — fast, accurate enough for classification",
+        "arch": "distilbert",
+        "desc": "6-layer DistilBERT — fast STEM gate for crawl ingest",
     },
     "tiny-bert": {
         "repo": "prajjwal1/bert-tiny",
@@ -42,7 +43,26 @@ _MODEL_CATALOG: dict[str, dict[str, Any]] = {
         "size_mb": 16,
         "layers": 2,
         "hidden": 128,
-        "desc": "2-layer BERT — smallest viable encoder for intent classification",
+        "arch": "bert",
+        "desc": "2-layer BERT — smallest viable encoder for edge intent classification",
+    },
+    "neobert": {
+        "repo": "chandar-lab/NeoBERT",
+        "license": "MIT",
+        "size_mb": 1200,
+        "layers": 28,
+        "hidden": 768,
+        "arch": "bert",
+        "desc": "28-layer next-gen BERT — research engine, 4K context, drop-in replacement",
+    },
+    "codebert-base": {
+        "repo": "microsoft/codebert-base",
+        "license": "MIT",
+        "size_mb": 500,
+        "layers": 12,
+        "hidden": 768,
+        "arch": "roberta",
+        "desc": "12-layer RoBERTa trained on code — code review engine, AST-aware",
     },
 }
 
@@ -294,12 +314,12 @@ def convert_to_coreml(
 
     try:
         import torch  # type: ignore[import]
-        from transformers import AutoModel, BertTokenizer  # type: ignore[import]
+        from transformers import AutoModel, AutoTokenizer  # type: ignore[import]
     except ImportError:
         return {"ok": False, "path": "", "reason": "transformers + torch required for conversion"}
 
     try:
-        tokenizer = BertTokenizer.from_pretrained(str(model_dir))
+        tokenizer = AutoTokenizer.from_pretrained(str(model_dir))
         model = AutoModel.from_pretrained(str(model_dir))
         model.eval()
 
@@ -363,7 +383,7 @@ def train_text_classifier(
         import torch  # type: ignore[import]
         from torch.utils.data import Dataset  # type: ignore[import]
         from transformers import (
-            BertTokenizer,
+            AutoTokenizer,
             AutoModelForSequenceClassification,
             TrainingArguments,
             Trainer,
@@ -372,7 +392,7 @@ def train_text_classifier(
         return {"ok": False, "path": "", "reason": f"missing dependency: {exc}"}
 
     try:
-        tokenizer = BertTokenizer.from_pretrained(str(model_dir))
+        tokenizer = AutoTokenizer.from_pretrained(str(model_dir))
         unique_labels = sorted(set(labels))
         label2id = {l: i for i, l in enumerate(unique_labels)}
         id2label = {i: l for l, i in label2id.items()}

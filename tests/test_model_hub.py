@@ -33,7 +33,7 @@ class TestModelHub(unittest.TestCase):
             with mock.patch.dict(os.environ, {"LGWKS_MODELS_DIR": td}, clear=False):
                 report = mh.doctor()
         self.assertEqual(report["schema"], "lgwks.model_hub.doctor.v1")
-        self.assertGreaterEqual(report["summary"]["catalog_models"], 2)
+        self.assertGreaterEqual(report["summary"]["catalog_models"], 4)
         self.assertEqual(report["summary"]["present_models"], 1)
         names = [row["name"] for row in report["catalog"]]
         self.assertIn("tiny-bert", names)
