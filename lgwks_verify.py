@@ -1,9 +1,15 @@
 """
-lgwks_verify — the Verifier oracle (spec-01).
+lgwks_verify — the Verifier oracle (spec-01), hardened with provenance tracking.
 
 One typed interface every gate implements, with an honest CANNOT_DECIDE third verdict.
 The #29 fix encoded in the type system: a model's failure can never be laundered
 into a verdict against the human.
+
+HARDENING (Issue #52):
+  * Evidence is now structured (source_url, tier, origin_type, transform_hash).
+  * LCalculator consumes a pipeline of Verdict objects and returns L = invented / total.
+  * Evidence strings passed to Verdict are auto-coerced with conservative origin_type=INVENTED
+    so that legacy callers do not silently produce zero-L pipelines.
 """
 
 from __future__ import annotations
@@ -26,13 +32,46 @@ class Klass(Enum):
     ADVISORY = "advisory"
 
 
+class OriginType(Enum):
+    """Provenance classification per ARCHITECTURE.md provenance contract."""
+    GROUNDED = "grounded"     # deterministic source: bot, repo, crawl, human_input
+    INFERRED = "inferred"     # fixed-weight small model (post-training, deterministic)
+    INVENTED = "invented"     # LLM generation — the only origin that contributes to L
+
+
+@dataclass(frozen=True)
+class Evidence:
+    """A structured, auditable evidence item attached to a Verdict."""
+    source_url: str | None = None
+    tier: str = "unverified"                # primary | secondary | unverified
+    origin_type: OriginType = OriginType.INVENTED
+    transform_hash: str | None = None         # hash of the transform log producing this evidence
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "source_url": self.source_url,
+            "tier": self.tier,
+            "origin_type": self.origin_type.value,
+            "transform_hash": self.transform_hash,
+        }
+
+    @classmethod
+    def from_dict(cls, d: dict[str, Any]) -> "Evidence":
+        return cls(
+            source_url=d.get("source_url"),
+            tier=d.get("tier", "unverified"),
+            origin_type=OriginType(d.get("origin_type", "invented")),
+            transform_hash=d.get("transform_hash"),
+        )
+
+
 @dataclass(frozen=True)
 class Verdict:
     gate_id: str
     outcome: Outcome
     klass: Klass
     score: float | None = None           # ADVISORY: calibrated 0..1; HARD: None
-    evidence: list[str] = field(default_factory=list)   # cited, append-only-loggable
+    evidence: list[Evidence | str] = field(default_factory=list)
     diagnosis: str | None = None         # on CANNOT_DECIDE/FAIL: what is missing / why
 
     def __post_init__(self) -> None:
@@ -40,6 +79,17 @@ class Verdict:
         # //why: an advisory FAIL is unrepresentable; advisory CANNOT_DECIDE is excluded from score aggregation
         if self.klass is Klass.ADVISORY and self.outcome is Outcome.FAIL:
             raise ValueError("ADVISORY verdict cannot have outcome FAIL")
+        # Coerce legacy string evidence to structured Evidence with conservative origin_type=INVENTED.
+        # This prevents older gates from accidentally claiming zero-L by not providing provenance.
+        object.__setattr__(self, "evidence", [
+            e if isinstance(e, Evidence) else Evidence(origin_type=OriginType.INVENTED, tier="legacy_string")
+            for e in self.evidence
+        ])
+
+    @property
+    def provenance(self) -> list[Evidence]:
+        """All evidence as structured Evidence (coercion already applied in __post_init__)."""
+        return [e for e in self.evidence if isinstance(e, Evidence)]
 
     def to_dict(self) -> dict[str, Any]:
         """JSON-serialisable representation for the cognition-log."""
@@ -48,18 +98,25 @@ class Verdict:
             "outcome": self.outcome.value,
             "klass": self.klass.value,
             "score": self.score,
-            "evidence": self.evidence,
+            "evidence": [e.to_dict() if isinstance(e, Evidence) else str(e) for e in self.evidence],
             "diagnosis": self.diagnosis,
         }
 
     @classmethod
     def from_dict(cls, d: dict[str, Any]) -> "Verdict":
+        raw_ev = d.get("evidence", [])
+        evidence: list[Evidence | str] = []
+        for e in raw_ev:
+            if isinstance(e, dict):
+                evidence.append(Evidence.from_dict(e))
+            else:
+                evidence.append(str(e))
         return cls(
             gate_id=d["gate_id"],
             outcome=Outcome(d["outcome"]),
             klass=Klass(d["klass"]),
             score=d.get("score"),
-            evidence=list(d.get("evidence", [])),
+            evidence=evidence,
             diagnosis=d.get("diagnosis"),
         )
 
@@ -109,3 +166,87 @@ def run_pipeline(subject: object, context: object, reg: GateRegistry) -> tuple[b
             )
         verdicts.append(v)
     return (True, verdicts)
+
+
+# ---------------------------------------------------------------------------
+# L-Score calculator (Issue #52)
+# ---------------------------------------------------------------------------
+@dataclass(frozen=True)
+class LScore:
+    """Pipeline-level provenance audit metric.
+
+    L = invented_claims / total_claims_in_output
+    Low L  → system did the work; LLM executed a pre-solved problem. Auditable.
+    High L → LLM invented the answer. No trail. Auditor red flag.
+    """
+    total_claims: int
+    invented_claims: int
+    inferred_claims: int
+    grounded_claims: int
+    L: float
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "total_claims": self.total_claims,
+            "invented_claims": self.invented_claims,
+            "inferred_claims": self.inferred_claims,
+            "grounded_claims": self.grounded_claims,
+            "L": round(self.L, 6),
+        }
+
+
+class LCalculator:
+    """Compute L from a pipeline of Verdict objects, weighted by evidence provenance.
+
+    Each Verdict is treated as a claim with its evidence list representing sub-claims.
+    If a Verdict has no evidence items, the verdict itself is counted as one claim of its
+    implicit origin (INVENTED for LLM gates, GROUNDED for bot gates — but since legacy
+    evidence defaults to INVENTED, older gates that pass strings will be counted honestly).
+    """
+
+    @classmethod
+    def from_verdicts(cls, verdicts: list[Verdict]) -> LScore:
+        total = 0
+        invented = 0
+        inferred = 0
+        grounded = 0
+
+        for v in verdicts:
+            prov = v.provenance
+            if not prov:
+                # No provenance attached — count the verdict itself as one claim.
+                # Default to INVENTED to avoid false-confidence on legacy pipelines.
+                total += 1
+                invented += 1
+                continue
+            for e in prov:
+                total += 1
+                if e.origin_type is OriginType.INVENTED:
+                    invented += 1
+                elif e.origin_type is OriginType.INFERRED:
+                    inferred += 1
+                elif e.origin_type is OriginType.GROUNDED:
+                    grounded += 1
+                else:
+                    invented += 1  # conservative catch-all
+
+        L = invented / total if total > 0 else 0.0
+        return LScore(total_claims=total, invented_claims=invented,
+                      inferred_claims=inferred, grounded_claims=grounded, L=L)
+
+    @classmethod
+    def to_report(cls, score: LScore) -> str:
+        return (
+            f"L={score.L:.4f}  ({score.invented_claims}/{score.total_claims} invented)  "
+            f"grounded={score.grounded_claims}  inferred={score.inferred_claims}"
+        )
+
+
+def check_gate_evidence_completeness(verdicts: list[Verdict]) -> tuple[bool, list[str]]:
+    """Return (complete, missing_reasons). A gate with FAIL or CANNOT_DECIDE that has zero
+    evidence/provenance is flagged as incomplete."""
+    reasons: list[str] = []
+    for v in verdicts:
+        if v.outcome in (Outcome.FAIL, Outcome.CANNOT_DECIDE) and not v.provenance:
+            reasons.append(f"{v.gate_id}: {v.outcome.value} with no evidence/provenance")
+    return (len(reasons) == 0, reasons)

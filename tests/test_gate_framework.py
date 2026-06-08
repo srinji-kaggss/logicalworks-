@@ -17,7 +17,10 @@ from pathlib import Path
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from lgwks_gate_framework import G3Verifier
-from lgwks_verify import Outcome
+from lgwks_verify import Outcome, Evidence, OriginType
+
+# Dummy rustdoc path for mocks that monkeypatch _installed_symbols
+_RUSTDOC = Path("/dev/null/rustdoc.json")
 
 
 class TestG3Gate(unittest.TestCase):
@@ -45,31 +48,35 @@ class TestG3Gate(unittest.TestCase):
         """Candidate using only real symbols → PASS."""
         v = G3Verifier(crate_dir=self.fixture_dir)
         # monkeypatch installed symbols to a known set
-        v._installed_symbols = lambda: ({"fixture_crate::hello", "fixture_crate::Widget"}, [])
+        v._installed_symbols = lambda: ({"fixture_crate::hello", "fixture_crate::Widget"}, [], _RUSTDOC)
         verdict = v.check("use fixture_crate::hello;\nfn main() { hello(); }", {})
         self.assertEqual(verdict.outcome, Outcome.PASS)
         self.assertTrue(len(verdict.evidence or []) > 0)
+        # Verify structured evidence
+        ev = verdict.provenance[0]
+        self.assertEqual(ev.origin_type, OriginType.GROUNDED)
 
     def test_hallucinated_symbol_fails(self):
         """Candidate referencing a symbol that does not exist in installed surface → FAIL."""
         v = G3Verifier(crate_dir=self.fixture_dir)
-        v._installed_symbols = lambda: ({"fixture_crate::hello", "fixture_crate::Widget"}, [])
+        v._installed_symbols = lambda: ({"fixture_crate::hello", "fixture_crate::Widget"}, [], _RUSTDOC)
         verdict = v.check("use fixture_crate::nonexistent;\nfn main() { nonexistent(); }", {})
         self.assertEqual(verdict.outcome, Outcome.FAIL)
         self.assertIn("version-skew", verdict.diagnosis or "")
         self.assertIn("nonexistent", verdict.diagnosis or "")
 
     def test_grounding_context_emitted(self):
-        """Pre-generation: PASS includes the installed symbol surface as evidence."""
+        """Pre-generation: PASS includes structured evidence with grounded provenance."""
         v = G3Verifier(crate_dir=self.fixture_dir)
-        v._installed_symbols = lambda: ({"fixture_crate::hello", "fixture_crate::Widget"}, [])
+        v._installed_symbols = lambda: ({"fixture_crate::hello", "fixture_crate::Widget"}, [], _RUSTDOC)
         verdict = v.check("use fixture_crate::hello;", {})
         self.assertEqual(verdict.outcome, Outcome.PASS)
-        self.assertTrue("fixture_crate::hello" in (verdict.evidence or []))
+        self.assertTrue(len(verdict.provenance) > 0)
+        self.assertEqual(verdict.provenance[0].origin_type, OriginType.GROUNDED)
 
     def test_token_based_layer_catches_macro_paths(self):
         v = G3Verifier(crate_dir=self.fixture_dir)
-        v._installed_symbols = lambda: ({"fixture_crate::hello", "fixture_crate::Widget"}, [])
+        v._installed_symbols = lambda: ({"fixture_crate::hello", "fixture_crate::Widget"}, [], _RUSTDOC)
         refs = v._extract_references("macro_call! { fixture_crate :: hello }")
         self.assertIn("fixture_crate::hello", refs)
 

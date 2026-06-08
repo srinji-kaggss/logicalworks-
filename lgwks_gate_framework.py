@@ -17,7 +17,7 @@ import subprocess
 from pathlib import Path
 from typing import Any
 
-from lgwks_verify import Klass, Outcome, Verdict
+from lgwks_verify import Evidence, Klass, OriginType, Outcome, Verdict
 
 # false-PASS surface: regex-based Rust path extraction misses macro-generated paths,
 # dynamically constructed strings used as paths, and type-inference-driven resolution.
@@ -97,7 +97,7 @@ class G3Verifier:
             pass
         return None
 
-    def _installed_symbols(self) -> tuple[set[str], list[str]] | None:
+    def _installed_symbols(self) -> tuple[set[str], list[str], Path | None] | None:
         """
         Build the installed-symbol set from rustdoc JSON.
         Returns (symbols, dependencies) or None if rustdoc JSON is unavailable.
@@ -123,7 +123,7 @@ class G3Verifier:
                 symbols.add(full_path)
                 symbols.add(f"{full_path}::{name}")
                 symbols.add(name)
-        return symbols, []
+        return symbols, [], rustdoc
 
     def _extract_references(self, code: str) -> set[str]:
         """
@@ -207,7 +207,7 @@ class G3Verifier:
                 diagnosis="rustdoc JSON not available; install nightly toolchain or run `cargo rustdoc -- -Zunstable-options --output-format json`",
             )
 
-        symbols, _deps = result
+        symbols, _deps, rustdoc = result
         refs = self._extract_references(code)
         # Filter to external references (first segment is not std/core/crate)
         # Heuristic: if the first segment matches a known dependency or is not 'std'/'core'/'alloc'
@@ -232,12 +232,23 @@ class G3Verifier:
                 gate_id=self.gate_id,
                 outcome=Outcome.FAIL,
                 klass=self.klass,
-                diagnosis=f"version-skew: referenced symbols not in installed surface: {missing}. false-PASS surface: {_FALSE_PASS_SURFACE}",
+                evidence=[Evidence(
+                    tier="primary",
+                    origin_type=OriginType.INVENTED,
+                    transform_hash="g3-found-missing",
+                )],
+                diagnosis=(f"version-skew: referenced symbols not in installed surface: {missing}. "
+                           f"false-PASS surface: {_FALSE_PASS_SURFACE}"),
             )
 
         return Verdict(
             gate_id=self.gate_id,
             outcome=Outcome.PASS,
             klass=self.klass,
-            evidence=self._grounding_context(symbols),
+            evidence=[Evidence(
+                source_url=str(rustdoc) if isinstance(rustdoc, Path) else None,
+                tier="primary",
+                origin_type=OriginType.GROUNDED,
+                transform_hash="g3-symbol-extraction",
+            )],
         )

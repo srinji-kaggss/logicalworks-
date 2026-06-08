@@ -17,6 +17,13 @@ L = invented_claims / total_claims_in_output
 Low L  → system did the work; LLM executed a pre-solved problem. Auditable.
 High L → LLM invented the answer. No trail. Auditor red flag.
 
+**Implementation:** `lgwks_verify.LCalculator` computes L from a pipeline of `Verdict`
+objects. `Verdict.evidence` is a list of structured `Evidence` dataclass instances,
+each carrying `origin_type ∈ {grounded, inferred, invented}`. Legacy string evidence
+is auto-coerced to `origin_type=invented` (conservative) so old gates cannot
+accidentally claim zero-L without provenance. L is computable from the transform log.
+Any output with no log is untrusted.
+
 ## Provenance contract (bytecode level)
 
 Every claim in the system carries three tags:
