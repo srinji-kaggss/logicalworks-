@@ -1426,6 +1426,10 @@ def build_parser() -> argparse.ArgumentParser:
     import lgwks_substrate
     lgwks_substrate.add_parser(sub)
 
+    # pipeline — unified ingestion+ranking spine (crawl→qualify→embed→rank→pack)
+    import lgwks_pipeline
+    lgwks_pipeline.add_parser(sub)
+
     # refactor — deterministic AST-based code refactoring
     import lgwks_refactor
     lgwks_refactor.add_parser(sub)
