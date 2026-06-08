@@ -309,6 +309,8 @@ BOT_REGISTRY_DEFAULT = {
     "intent_classifier",
     "scope_creep_guard",
     "review",
+    "slop_math",
+    "stress",
 }
 
 

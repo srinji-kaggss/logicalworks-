@@ -765,3 +765,33 @@ class TestConcurrentWrites(unittest.TestCase):
         reg = hooks._load_registry(cwd=tmp)
         names = {hook["name"] for hook in reg["hooks"]}
         self.assertEqual(names, {f"h{i}" for i in range(5)})
+
+
+class TestCliInstall(unittest.TestCase):
+    def test_install_creates_hook(self):
+        from tempfile import TemporaryDirectory
+        with TemporaryDirectory() as d:
+            tmp = Path(d)
+            (tmp / ".git").mkdir()
+            
+            args = argparse.Namespace(repo=str(tmp))
+            rc = hooks._cmd_install(args)
+            self.assertEqual(rc, 0)
+            
+            post_commit_path = tmp / ".git" / "hooks" / "post-commit"
+            self.assertTrue(post_commit_path.exists())
+            content = post_commit_path.read_text()
+            self.assertIn("lgwks review --changed", content)
+            
+    def test_install_not_git_repo_fails(self):
+        import io
+        from unittest.mock import patch
+        from tempfile import TemporaryDirectory
+        with TemporaryDirectory() as d:
+            tmp = Path(d)
+            args = argparse.Namespace(repo=str(tmp))
+            
+            err = io.StringIO()
+            with patch("sys.stderr", err):
+                rc = hooks._cmd_install(args)
+            self.assertEqual(rc, 1)

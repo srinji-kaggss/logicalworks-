@@ -813,6 +813,37 @@ def _cmd_verify(args) -> int:
     return 0 if result["ok"] else 1
 
 
+def _cmd_install(args) -> int:
+    import textwrap
+    repo = Path(getattr(args, "repo", None) or Path.cwd()).resolve()
+    git_dir = repo / ".git"
+    if not git_dir.is_dir():
+        print(f"error: {repo} is not a git repository", file=sys.stderr)
+        return 1
+    
+    hooks_dir = git_dir / "hooks"
+    hooks_dir.mkdir(exist_ok=True)
+    
+    post_commit_path = hooks_dir / "post-commit"
+    script_content = textwrap.dedent("""\
+        #!/bin/sh
+        # lgwks git post-commit hook for asynchronous code review
+        CHANGED=$(git diff-tree --no-commit-id -r --name-only HEAD | grep '\\.py$' | tr '\\n' ',')
+        if [ -n "$CHANGED" ]; then
+          lgwks review --changed "$CHANGED" --out findings/ &
+        fi
+    """)
+    post_commit_path.write_text(script_content, encoding="utf-8")
+    
+    try:
+        post_commit_path.chmod(0o755)
+    except Exception as exc:
+        print(f"warning: could not make hook executable: {exc}", file=sys.stderr)
+        
+    print(f"Installed git post-commit hook to {post_commit_path}")
+    return 0
+
+
 # ── argparse wiring ───────────────────────────────────────────────────────────
 
 def add_parser(sub: argparse._SubParsersAction) -> None:  # type: ignore[name-defined]
@@ -859,3 +890,6 @@ def add_parser(sub: argparse._SubParsersAction) -> None:  # type: ignore[name-de
 
     verify = hsub.add_parser("verify", help="verify SHA-256 hash chain integrity of audit log")
     verify.set_defaults(func=_cmd_verify)
+
+    install = hsub.add_parser("install", help="install git post-commit hook")
+    install.set_defaults(func=_cmd_install)
