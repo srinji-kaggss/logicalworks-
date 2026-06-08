@@ -67,10 +67,10 @@ DISAMBIGUATION_MAX_VARIANTS: int = int(                                  # [ADR 
     os.environ.get("LGWKS_DISAMBIG_MAX_VARIANTS", "4"))
 
 NOISE_SCORE_THRESHOLD: float = float(                                    # [ADR §4.1]
-    os.environ.get("LGWKS_NOISE_THRESHOLD", "0.72"))
+    os.environ.get("LGWKS_NOISE_THRESHOLD", "0.90"))     # //why raised 0.72→0.90: deep-research needs full corpus; only truly broken HTML noise filtered
 DIVERSITY_PENALTY_WEIGHT: float = float(                                 # [ADR §4.2]
     os.environ.get("LGWKS_DIVERSITY_PENALTY", "0.30"))
-SAME_SOURCE_CAP: int = int(os.environ.get("LGWKS_SAME_SOURCE_CAP", "5"))# [ADR §4.3]
+SAME_SOURCE_CAP: int = int(os.environ.get("LGWKS_SAME_SOURCE_CAP", "50"))# [ADR §4.3] //why 5→50: source-cap drops legitimate content for focused corpora
 
 MAX_LLM_INVOLVEMENT_RATIO: float = float(                                # [ADR §5.1]
     os.environ.get("LGWKS_MAX_LLM_RATIO", "0.20"))
@@ -358,16 +358,33 @@ def _resolve_text_provider() -> str:
     return "deterministic"
 
 
-def embed_text(text: str, provider: str | None = None) -> tuple[list[float], str, bool]:
-    """Fully delegates to lgwks_run.embed() — the canonical provider chain."""
+def embed_text(text: str, provider: str | None = None,
+               dims: int | None = None) -> tuple[list[float], str, bool]:
+    """Fully delegates to lgwks_run.embed() — the canonical provider chain.
+    dims=None → DIMS=256 (default CLI space). dims=0 → full corpus space (4096 for qwen3)."""
     import lgwks_run
     p = provider or _resolve_text_provider()
-    vec, prov_label, is_sem = lgwks_run.embed(text, embed_on=True, provider=p)
+    vec, prov_label, is_sem = lgwks_run.embed(text, embed_on=True, provider=p, dims=dims)
     if vec is None:
         vec = lgwks_run._deterministic_embed(text)
         prov_label = "deterministic-feature-hash"
         is_sem = False
     return vec, prov_label, is_sem
+
+
+def _read_substrate_dims(target: str) -> int | None:
+    """Read vector_space.dims from substrate manifest.json; returns None if not a substrate dir."""
+    p = Path(target)
+    if not p.is_dir():
+        return None
+    manifest_path = p / "manifest.json"
+    if not manifest_path.exists():
+        return None
+    try:
+        m = json.loads(manifest_path.read_text(encoding="utf-8"))
+        return int(m.get("vector_space", {}).get("dims", 0)) or None
+    except Exception:
+        return None
 
 
 def _mm_key() -> str | None:
@@ -727,6 +744,7 @@ def disambiguate_chunk(
     chunk: PipelineChunk,
     classifier_confidence: float,
     text_provider: str,
+    dims: int | None = None,
 ) -> EmbedResult:
     """Gemma paraphrase → weighted centroid, or direct embed if confidence is high."""
     needs = classifier_confidence < DISAMBIGUATION_CONF_THRESHOLD
@@ -734,7 +752,7 @@ def disambiguate_chunk(
 
     if variants:
         all_texts = [chunk.text] + variants
-        results = [embed_text(t, text_provider) for t in all_texts]
+        results = [embed_text(t, text_provider, dims=dims) for t in all_texts]
         vecs = [v for v, _, _ in results]
         weights = [2.0] + [1.0] * len(variants)
         agg = _weighted_centroid(vecs, weights)
@@ -749,7 +767,7 @@ def disambiguate_chunk(
     vec, prov, sem = (
         embed_multimodal(chunk.text, chunk.image_b64, chunk.image_mime)
         if chunk.image_b64
-        else embed_text(chunk.text, text_provider)
+        else embed_text(chunk.text, text_provider, dims=dims)
     )
     return EmbedResult(
         chunk_id=chunk.chunk_id, vector=vec, dims=len(vec),
@@ -810,7 +828,7 @@ def fast_rank_stage(
             chunk=chunk, embed=er,
             fast_rank_score=round(score, 6),
             noise_score=ns,
-            signal_path="math",
+            signal_path=er.signal_path,  # //why: propagate provenance from embed; "math" hardcode lost it
         ))
     results.sort(key=lambda r: -r.fast_rank_score)
     return results[:k]
@@ -828,7 +846,7 @@ def heavy_rank_stage(
     Signal path: ml (or math if classifier unavailable)."""
     try:
         from lgwks_intent_classifier import IntentClassifier
-        clf = IntentClassifier()
+        clf = IntentClassifier.load()
         has_clf = True
     except Exception:
         has_clf = False
@@ -891,7 +909,7 @@ def rerank_stage(
             max_sim = max(_cosine(rc.embed.vector, sv) for sv in selected_vecs)
             diversity_penalty = DIVERSITY_PENALTY_WEIGHT * max_sim
 
-        rc.final_score = round(rc.heavy_rank_score - diversity_penalty, 6)
+        rc.final_score = round(max(0.0, rc.heavy_rank_score - diversity_penalty), 6)
         source_counts[src] = source_counts.get(src, 0) + 1
         if rc.embed.vector:
             selected_vecs.append(rc.embed.vector)
@@ -997,6 +1015,74 @@ def pack_stage(
 
 
 # ══════════════════════════════════════════════════════════════════════════════
+# STAGE 11: RESEARCH — autonomous deep-research loop (optional, --research flag)
+# ══════════════════════════════════════════════════════════════════════════════
+
+def _get_research_start(args: argparse.Namespace, ranked: list[RankedChunk]) -> str:
+    """Extract the best start URL for the research loop from the pipeline target."""
+    if args.target.startswith(("http://", "https://")):
+        return args.target
+    sources_file = Path(args.target) / "sources.jsonl"
+    if sources_file.exists():
+        try:
+            first_line = sources_file.read_text(encoding="utf-8").split("\n")[0].strip()
+            if first_line:
+                src = json.loads(first_line).get("source", "")
+                if src.startswith("http"):
+                    return src
+        except Exception:
+            pass
+    if ranked:
+        src = ranked[0].chunk.source_id
+        if src.startswith("http"):
+            return src
+    return args.target
+
+
+def research_stage(
+    ranked: list[RankedChunk],
+    query_text: str,
+    args: argparse.Namespace,
+) -> dict[str, Any] | None:
+    """Autonomous deep-research loop over the ranked pack. Returns AutoResult dict or None.
+    //why called after ranking: ranked pack becomes guide_text so the research loop has
+    grounded context instead of starting blind — avoids redundant crawl of already-ingested pages."""
+    try:
+        from lgwks_research import AutoConfig, run_auto  # type: ignore
+    except ImportError:
+        print("[stage 11] lgwks_research not importable — skipping", file=sys.stderr)
+        return None
+
+    guide_parts = [rc.chunk.text[:800] for rc in ranked[:20]]
+    guide = "\n\n---\n\n".join(guide_parts)
+    start = _get_research_start(args, ranked)
+    max_rounds = int(getattr(args, "research_rounds", 4))
+
+    print(f"[stage 11] research start={start!r} rounds={max_rounds}", file=sys.stderr)
+    cfg = AutoConfig(
+        objective=query_text,
+        purpose="deep research",
+        start=start,
+        guide_text=guide,
+        max_rounds=max_rounds,
+        crawl_mode="live",
+    )
+    try:
+        result = run_auto(cfg)
+        return {
+            "run_id": result.run_id,
+            "rounds": result.rounds,
+            "stop_reason": result.stop_reason,
+            "surviving_count": len(result.surviving),
+            "out_dir": result.out_dir,
+            "ledger_intact": result.ledger_intact,
+        }
+    except Exception as exc:
+        print(f"[stage 11] research loop error: {exc}", file=sys.stderr)
+        return {"error": str(exc)}
+
+
+# ══════════════════════════════════════════════════════════════════════════════
 # STAGE 10: CLEANUP — Qwen coherence gate using lgwks_run.embed()
 # ══════════════════════════════════════════════════════════════════════════════
 
@@ -1004,13 +1090,15 @@ def cleanup_stage(
     pack: dict[str, Any],
     query_vec: list[float],
     text_provider: str,
+    dims: int | None = None,
 ) -> tuple[dict[str, Any], float, list[str]]:
     """Semantic coherence gate.  Reads pack summary only — no raw text.
     Signal path: ml (embedding only, no generation)."""
     warnings: list[str] = []
     summary_parts = [r["text"][:400] for r in pack.get("ranked_chunks", [])[:5]]
     summary_text = " ".join(summary_parts)
-    pack_vec, _, _ = embed_text(summary_text, text_provider)
+    # //why same dims as query: _cosine() len-guards and returns 0.0 on mismatch.
+    pack_vec, _, _ = embed_text(summary_text, text_provider, dims=dims)
     coherence = round(_cosine(query_vec, pack_vec), 4) if query_vec else 1.0
     if coherence < COHERENCE_THRESHOLD:
         warnings.append(
@@ -1065,9 +1153,13 @@ def run_pipeline(args: argparse.Namespace) -> dict[str, Any]:
 
     # ── Stage 0: Bootstrap ────────────────────────────────────────────────────
     text_provider = _resolve_text_provider()
-    print(f"[stage 0] text_provider={text_provider}", file=sys.stderr)
+    # //why read corpus dims here: substrate stores full 4096-d vectors (dims=0 path).
+    # Query must be in the same space or _cos() returns 0.0 for every chunk (len guard).
+    corpus_dims: int | None = _read_substrate_dims(args.target)
+    embed_dims: int | None = 0 if (corpus_dims and corpus_dims > 256) else None
+    print(f"[stage 0] text_provider={text_provider} corpus_dims={corpus_dims} embed_dims={embed_dims}", file=sys.stderr)
     query_text = getattr(args, "query", "") or args.target
-    query_vec, _, _ = embed_text(query_text, text_provider)
+    query_vec, _, _ = embed_text(query_text, text_provider, dims=embed_dims)
     query_tokens = _tokenize(query_text)
     query_entities = extract_chunk_entities(query_text)
 
@@ -1125,7 +1217,7 @@ def run_pipeline(args: argparse.Namespace) -> dict[str, Any]:
                 provider=prov, is_semantic=sem,
                 signal_path="mm" if sem else "math",
             )
-        vec, prov, sem = embed_text(chunk.text, text_provider)
+        vec, prov, sem = embed_text(chunk.text, text_provider, dims=embed_dims)
         return EmbedResult(
             chunk_id=chunk.chunk_id, vector=vec, dims=len(vec),
             provider=prov, is_semantic=sem,
@@ -1149,7 +1241,7 @@ def run_pipeline(args: argparse.Namespace) -> dict[str, Any]:
 
     try:
         from lgwks_intent_classifier import IntentClassifier
-        clf = IntentClassifier()
+        clf = IntentClassifier.load()
         has_clf = True
     except Exception:
         has_clf = False
@@ -1169,7 +1261,7 @@ def run_pipeline(args: argparse.Namespace) -> dict[str, Any]:
             except Exception:
                 pass
         if confidence < DISAMBIGUATION_CONF_THRESHOLD and llm_used < llm_budget:
-            new_er = disambiguate_chunk(chunk, confidence, text_provider)
+            new_er = disambiguate_chunk(chunk, confidence, text_provider, dims=embed_dims)
             embeds[chunk.chunk_id] = new_er
             if new_er.signal_path == "llm":
                 llm_used += 1
@@ -1209,9 +1301,17 @@ def run_pipeline(args: argparse.Namespace) -> dict[str, Any]:
 
     # ── Stage 10: Cleanup ─────────────────────────────────────────────────────
     print(f"[stage 10] coherence gate ...", file=sys.stderr)
-    pack, coherence, cleanup_warnings = cleanup_stage(pack, query_vec, text_provider)
+    pack, coherence, cleanup_warnings = cleanup_stage(pack, query_vec, text_provider, dims=embed_dims)
     warnings.extend(cleanup_warnings)
     print(f"[stage 10] coherence={coherence:.3f}", file=sys.stderr)
+
+    # ── Stage 11: Research (opt-in via --research) ───────────────────────────
+    research_summary: dict[str, Any] | None = None
+    if getattr(args, "research", False):
+        print(f"[stage 11] starting research loop ...", file=sys.stderr)
+        research_summary = research_stage(ranked, query_text, args)
+        if research_summary:
+            print(f"[stage 11] research done: {research_summary}", file=sys.stderr)
 
     # ── Write artifacts ───────────────────────────────────────────────────────
     (out_dir / "pack.json").write_text(
@@ -1244,6 +1344,8 @@ def run_pipeline(args: argparse.Namespace) -> dict[str, Any]:
         },
         "warnings": warnings,
     }
+    if research_summary is not None:
+        manifest["research"] = research_summary
 
     (out_dir / "manifest.json").write_text(
         json.dumps(manifest, indent=2, ensure_ascii=False), encoding="utf-8"
@@ -1309,6 +1411,10 @@ def add_parser(subparsers: Any) -> None:
         help=f"fast-rank candidates [ADR §2.2, default={FAST_RANK_K}]")
     run_p.add_argument("--heavy-rank-k", type=int, default=HEAVY_RANK_K, dest="heavy_rank_k",
         help=f"heavy-rank candidates [ADR §2.3, default={HEAVY_RANK_K}]")
+    run_p.add_argument("--research", action="store_true",
+        help="after ranking, run autonomous deep-research loop (lgwks_research.run_auto) on the packed context")
+    run_p.add_argument("--research-rounds", type=int, default=4, dest="research_rounds",
+        help="max rounds for the deep-research loop (default=4)")
     run_p.set_defaults(func=_run_command)
 
     params_p = sp.add_parser("params", help="print all parameters and their ADR sections")

@@ -143,7 +143,9 @@ For broad web crawls: 3–5. For single-document deep-dive: 20–50 (or disable)
 When ingesting a single large dataset, set this to a high value (e.g. 500) to
 avoid capping a legitimately dense source.
 
-**Status:** ☐ Not yet confirmed
+**Status:** ⚠ Adjusted — default=5 is too aggressive for focused regulatory corpora.
+Fundserv run (2026-06-08): 20/21 quarantines were source_cap with 10-source corpus.
+Recommended: raise to 10 for regulatory/portal corpora. Use `LGWKS_SAME_SOURCE_CAP=10` until default is tuned.
 
 ---
 
@@ -271,7 +273,10 @@ Target: 3 production runs on distinct corpus types before marking parameters as 
 
 Corpus types needed:
 1. ☐ Web crawl (support.walkme.com — 100 pages)
-2. ☐ Regulatory document dataset (Fundserv/Quadrus corpus)
+2. ✓ Regulatory document dataset (Fundserv portal corpus, 2026-06-08)
+   Run: pipeline-96b888e6c8178d30-20260608-104613, target=fundserv-portal-test-20260607-120840
+   coherence=0.688, ingested=58, final_ranked=29, quarantined=21 (20 by source_cap, 1 by noise)
+   Note: source_cap=5 too aggressive for focused 10-source corpus — raise to 10 for regulatory corpora
 3. ☐ Mixed image + text dataset
 
 ---
