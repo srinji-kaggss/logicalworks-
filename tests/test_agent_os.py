@@ -42,6 +42,32 @@ class TestAgentOs(unittest.TestCase):
         agents_dir.mkdir(parents=True)
         for role in agent_os.ROLE_SUBAGENTS:
             (agents_dir / f"{role}.md").write_text(f"{role}\n", encoding="utf-8")
+        # fleet orchestrator sandbox
+        self.git_repo = self.tmp / "repo"
+        self.git_repo.mkdir(parents=True)
+        self.fleet_dir = self.tmp / "fleet"
+        self.agents_dir = self.tmp / "parsed_agents"
+        self.agents_dir.mkdir(parents=True)
+        self.audit_log = self.tmp / "fleet-audit.jsonl"
+
+    def _git(self, repo, *args):
+        import subprocess
+        p = subprocess.run(["git", "-C", str(repo), *args], capture_output=True, text=True, check=False)
+        return p.returncode, p.stdout.strip()
+
+    def _init_git_repo(self, repo):
+        self._git(repo, "init")
+        self._git(repo, "config", "user.email", "test@logical.works")
+        self._git(repo, "config", "user.name", "Test")
+        (repo / "root.txt").write_text("root\n", encoding="utf-8")
+        self._git(repo, "add", ".")
+        self._git(repo, "commit", "-m", "init")
+
+    def _write_agent(self, name, branch="main"):
+        (self.agents_dir / f"{name}.md").write_text(
+            f"# {name}\n## Home + isolation\nWork in `~/works/{name}` (branch `{name}/{branch}`).\n",
+            encoding="utf-8",
+        )
 
     def test_bootstrap_context_writes_links_and_cards(self):
         with patch.object(agent_os, "PROMPTS_ROOT", self.prompts), \
@@ -71,3 +97,99 @@ class TestAgentOs(unittest.TestCase):
             self.assertTrue(status["ok"])
             self.assertTrue(all(status["startup_files"].values()))
             self.assertTrue(all(status["role_subagents"].values()))
+
+    # ------------------------------------------------------------------
+    # Fleet orchestrator tests
+    # ------------------------------------------------------------------
+    def _mk_orch(self, with_agents: tuple[str, ...] = ("claude", "coder")):
+        self._init_git_repo(self.git_repo)
+        for a in with_agents:
+            self._write_agent(a)
+        return agent_os.FleetOrchestrator(
+            repo_root=self.git_repo,
+            agents_dir=self.agents_dir,
+            fleet_dir=self.fleet_dir,
+            audit_log=self.audit_log,
+        )
+
+    def test_orchestrator_scans_agent_manifests(self):
+        orch = self._mk_orch(("claude", "coder", "hacker"))
+        agents = orch.scan_agents()
+        self.assertIsInstance(agents, dict)
+        self.assertEqual(set(agents.keys()), {"claude", "coder", "hacker"})
+
+    def test_orchestrator_spawn_creates_worktree_with_inputs(self):
+        orch = self._mk_orch(("coder",))
+        record = orch.spawn("coder", "# implement foo", {"issue": 57})
+        self.assertEqual(record.agent_id, "coder")
+        self.assertTrue(record.worktree_path.exists())
+        self.assertTrue((record.worktree_path / "prompt.md").exists())
+        self.assertTrue((record.worktree_path / ".fleet" / "context.json").exists())
+        self.assertTrue((record.worktree_path / ".fleet" / "spawn.json").exists())
+        ctx = json.loads((record.worktree_path / ".fleet" / "context.json").read_text(encoding="utf-8"))
+        self.assertEqual(ctx["issue"], 57)
+        # Audit written with fsync
+        self.assertTrue(self.audit_log.exists())
+        lines = [json.loads(line) for line in self.audit_log.read_text(encoding="utf-8").splitlines() if line.strip()]
+        self.assertEqual(len(lines), 1)
+        self.assertEqual(lines[0]["event"], "spawn")
+        self.assertEqual(lines[0]["agent_id"], "coder")
+        self.assertEqual(lines[0]["status"], "queued")
+
+    def test_orchestrator_collect_reads_output(self):
+        orch = self._mk_orch(("coder",))
+        record = orch.spawn("coder", "# fix bug", {})
+        out = {"result": "done"}
+        (record.worktree_path / ".fleet" / "output.json").write_text(json.dumps(out), encoding="utf-8")
+        result = orch.collect(record)
+        self.assertEqual(result["status"], "collected")
+        self.assertEqual(result["output"]["result"], "done")
+
+    def test_orchestrator_collect_reports_pending_when_no_output(self):
+        orch = self._mk_orch(("coder",))
+        record = orch.spawn("coder", "# fix bug", {})
+        result = orch.collect(record)
+        self.assertEqual(result["status"], "pending")
+
+    def test_orchestrator_spawn_two_agents_no_collision(self):
+        orch = self._mk_orch(("coder", "hacker"))
+        r1 = orch.spawn("coder", "# task a", {"id": 1})
+        r2 = orch.spawn("hacker", "# task b", {"id": 2})
+        self.assertNotEqual(r1.worktree_path, r2.worktree_path)
+        self.assertNotEqual(r1.branch, r2.branch)
+        # Ensure filesystem isolation
+        self.assertTrue(r1.worktree_path.exists())
+        self.assertTrue(r2.worktree_path.exists())
+        # Verify no prompt bleed
+        self.assertEqual((r1.worktree_path / "prompt.md").read_text(encoding="utf-8"), "# task a")
+        self.assertEqual((r2.worktree_path / "prompt.md").read_text(encoding="utf-8"), "# task b")
+        # Audit has two spawns
+        lines = [json.loads(line) for line in self.audit_log.read_text(encoding="utf-8").splitlines() if line.strip()]
+        self.assertEqual(len(lines), 2)
+
+    def test_orchestrator_close_removes_worktree(self):
+        orch = self._mk_orch(("coder",))
+        record = orch.spawn("coder", "# task", {})
+        self.assertTrue(record.worktree_path.exists())
+        orch.close(record)
+        self.assertFalse(record.worktree_path.exists())
+        lines = [json.loads(line) for line in self.audit_log.read_text(encoding="utf-8").splitlines() if line.strip()]
+        self.assertTrue(any(line["event"] == "close" for line in lines))
+
+    def test_orchestrator_spawn_unknown_agent_raises(self):
+        orch = self._mk_orch(("coder",))
+        with self.assertRaises(ValueError) as exc:
+            orch.spawn("architect", "# task", {})
+        self.assertIn("unknown agent_id", str(exc.exception))
+
+    def test_orchestrator_spawn_git_fail_audit_and_raise(self):
+        orch = self._mk_orch(("coder",))
+        # break repo so worktree add fails
+        import shutil
+        shutil.rmtree(self.git_repo / ".git")
+        with self.assertRaises(RuntimeError) as exc:
+            orch.spawn("coder", "# task", {})
+        self.assertIn("worktree creation failed", str(exc.exception))
+        lines = [json.loads(line) for line in self.audit_log.read_text(encoding="utf-8").splitlines() if line.strip()]
+        self.assertEqual(len(lines), 1)
+        self.assertEqual(lines[0]["status"], "failed")

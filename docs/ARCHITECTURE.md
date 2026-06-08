@@ -127,3 +127,19 @@ where every construct has a proof of provenance and L is a first-class observabl
 Bots fire automatically. CLI is the manual override.
 Triggers: git post-commit hook, file-watch, seed ingest event.
 The human should never have to invoke the bot fabric manually during normal work.
+
+## Fleet orchestration (Issue #57)
+
+The Logical Works fleet is documented in `_doctrine.md`, `AGENTS.md`, and `vision/prompts/agents/*.md`, but documentation alone does not make the system self-running. `lgwks_agent_os.py` now implements `FleetOrchestrator` as the execution layer.
+
+### Single-node prototype
+
+`FleetOrchestrator` (current) provides:
+
+1. **Agent manifest parsing** — reads `vision/prompts/agents/*.md` and extracts `home_template`, `branch_template`, and capabilities via regex.
+2. **Git worktree spawning** — `spawn(agent_id, prompt, context)` creates a unique worktree (`fleet/worktrees/{agent_id}-{uid}`) and a dedicated branch (`fleet/{agent_id}/{uid}`), then stages `prompt.md`, `.fleet/context.json`, and `.fleet/spawn.json`.
+3. **Structured output collection** — `collect(record)` reads `.fleet/output.json` when the agent finishes.
+4. **Append-only audit** — every spawn, collect, and close writes to `.lgwks/fleet-audit.jsonl` with `os.fsync()` per line and `0o600` permissions.
+5. **Cleanup** — `close(record)` removes the worktree and prunes the branch.
+
+This is a single-node, local-git prototype. It satisfies the acceptance criteria for Issue #57 with one intentional limitation: agents in this prototype must still be executed by the same machine (no remote agent execution).
