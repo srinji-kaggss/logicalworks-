@@ -240,6 +240,12 @@ _VERB_META: dict[str, dict] = {
         "output": "lgwks.model_hub.doctor.v1 JSON",
         "tokens": "none",
     },
+    "spawn": {
+        "intent": "assemble AI-AI handoff packet from a run directory",
+        "args": {"--run-dir": "path to a run directory", "--json": "emit full packet JSON"},
+        "output": "lgwks.spawn.v1 JSON (AUP verdict + context + capabilities + provenance)",
+        "tokens": "none",
+    },
     "jarvis crawl": {
         "intent": "research-graph crawl of a site/keyword frontier; URL sources use substrate auth-aware runtime by default",
         "args": {
