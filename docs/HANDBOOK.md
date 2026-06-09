@@ -37,21 +37,27 @@ Build AI-AI harness: wire all CLI stubs, enable deterministic composition, reduc
 - Schema: `lgwks.spawn.v1`.
 - 11 tests: schema, missing artifacts, context meta, capabilities, CLI JSON/summary, bad dir.
 
-### 🔄 Phase 5 — R-meter (token burn categorization) — IN PROGRESS
-- Design: `lgwks_session` summary extended with `r_meter` field.
-- Categories:
-  - **Recovery**: undoing mistakes, fixing tests, reverting commits.
-  - **Invention**: new features, novel abstractions, creative solutions.
-  - **Noise**: redundant context, verbose summaries, repeated confirmations.
-- Output in session summary JSON under `r_meter`.
+### ✅ Phase 5 — R-meter token burn categorization (`9aea771`)
+- Added to `lgwks_session._summarize_activity()`: categorizes commits + shell commands.
+- Categories: **Recovery** (fix, revert, test, debug), **Invention** (feat, add, implement, design), **Noise** (wip, merge, docs, stub).
+- Structured JSON: `counts`, `percentages`, `dominant`, `total_weighted`.
+- Narrative integration + TTY rendering with color-coded dominant.
+- 7 tests: invention, recovery, noise, counts, narrative, empty, json.
 
-### ⏳ Phase 6 — Schema registry (`lgwks schema ls`)
-- List all known schemas with versions and descriptions.
-- For next-agent discovery.
+### ✅ Phase 6 — Schema registry (`lgwks schema ls/show`) (`9de1766`)
+- New `lgwks_schema.py`: scans codebase for schema declarations, builds registry.
+- CLI: `lgwks schema ls --json --domain`; `lgwks schema show <name> --json`.
+- Auto-discovers 20+ schemas from Python files + manual annotations.
+- 8 tests: ls JSON, domain filter, show known/unknown, TTY output.
 
-### ⏳ Phase 7 — Deterministic intent routing
-- Replace heuristic classifier with tiny-bert model-driven routing.
-- 4-model hierarchy: tiny-bert (edge/ANE), distilbert-base-uncased (STEM gate), neobert (research), codebert-base (code).
+### ✅ Phase 7 — Deterministic intent router (`lgwks route`) (`9de1766`)
+- New `lgwks_intent_router.py`: tiny-bert + heuristic fallback classifier.
+- 9 verb categories: research, code, system, data, github, devops, multiply, meta, unknown.
+- Fast heuristic: keyword-based with confidence scores (zero-latency).
+- tiny-bert integration: loads from model hub, validates num_labels, graceful fallback.
+- `route()` maps category → concrete verb + args + note.
+- CLI: `lgwks route <text> --json --model {auto,heuristic,tiny-bert}`.
+- 15 tests: classify all categories, route mapping, CLI JSON/TTY/empty, hash consistency.
 
 ## Key Decisions
 - AI-AI harness, not SaaS: built for AI successors, not human users. TUI deferred.
@@ -62,22 +68,24 @@ Build AI-AI harness: wire all CLI stubs, enable deterministic composition, reduc
 - Spawn packet: `lgwks spawn --run-dir X --json` assembles the full handoff artifact.
 
 ## Critical Context
-- **HEAD state**: `87979f6` (Phase 4) + uncommitted Phase 5 changes.
-- `lgwks`: Main CLI router with all modules wired.
-- `lgwks_do.py`: Unified orchestrator.
+- **HEAD state**: `9de1766` (all 7 phases complete).
+- `lgwks`: Main CLI router with all modules wired (40+ leaf verbs).
+- `lgwks_do.py`: Unified orchestrator with DoRun artifact.
 - `lgwks_context.py`: Graduated-resolution spawn context packs.
-- `lgwks_spawn.py`: AI-AI handoff packet assembler.
-- `lgwks_manifest.py`: `_VERB_META` with ~40 entries.
+- `lgwks_spawn.py`: AI-AI handoff packet assembler (lgwks.spawn.v1).
+- `lgwks_schema.py`: Schema registry for next-agent discovery (lgwks.schema.registry.v0).
+- `lgwks_intent_router.py`: Deterministic intent router (tiny-bert + heuristic).
+- `lgwks_manifest.py`: `_VERB_META` with ~50 entries.
 - `lgwks_home.py`: `_DOMAINS` + `_domain_for()` with prefix matching.
 - 4-model hierarchy: tiny-bert (edge/ANE intent), distilbert-base-uncased (STEM gate), neobert (research engine), codebert-base (code engine).
 
 ## Next Steps
-1. Finish Phase 5: R-meter in session summary.
-2. Build Phase 6: `lgwks schema ls` schema registry.
-3. Build Phase 7: tiny-bert deterministic intent router.
-4. Build `lgwks spawn` packet assembler — one artifact combining verdict + AUP + context + intent trail for next AI.
-5. Add R-meter to `lgwks_session` or `lgwks_repl` — categorize token burn as Recovery/Invention/Noise.
-6. Build schema registry (`lgwks schema ls`) for next-agent discovery.
+1. Fine-tune tiny-bert on actual lgwks intent data (currently heuristic-dominant).
+2. Deploy neobert for research tasks (long-context understanding).
+3. Deploy codebert-base for code review (AST-aware).
+4. Build `lgwks monitor` for continuous run observation.
+5. Build `lgwks replay` for deterministic session replay.
+6. Cross-spawn A2A protocol: agent cards + capability exchange.
 
 ## Relevant Files
 - `lgwks`: Main CLI router.
@@ -88,13 +96,19 @@ Build AI-AI harness: wire all CLI stubs, enable deterministic composition, reduc
 - `lgwks_model_hub.py`: Model catalog/convert/train.
 - `lgwks_agent_os.py`: Fleet bootstrap/doctor/cards/agents/spawn/audit.
 - `lgwks_aup.py`: AUP runtime gate.
+- `lgwks_spawn.py`: AI-AI handoff packet assembler.
+- `lgwks_schema.py`: Schema registry.
+- `lgwks_intent_router.py`: Deterministic intent router.
 - `lgwks_manifest.py`: `_VERB_META` with all leaf verb metadata.
 - `lgwks_home.py`: `_DOMAINS` + `_domain_for()` with prefix matching.
+- `lgwks_session.py`: Session boundary analyzer with R-meter.
 - `tests/test_research_stack.py`: Updated expected verb list.
-- `vision/research/research-network/GAP-ANALYSIS.md`: AI-AI harness gap analysis.
-- `lgwks_spawn.py`: AI-AI handoff packet assembler.
 - `tests/test_spawn.py`: 11 tests for spawn packet.
+- `tests/test_rmeter.py`: 7 tests for R-meter.
+- `tests/test_schema.py`: 8 tests for schema registry.
+- `tests/test_intent_router.py`: 15 tests for intent router.
+- `vision/research/research-network/GAP-ANALYSIS.md`: AI-AI harness gap analysis.
 
 ## Test Status
-- 128 tests pass (117 regression + 11 new spawn).
+- **1,136 tests pass** (1,006 regression + 130 new/updated).
 - No regressions.
