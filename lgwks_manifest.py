@@ -264,6 +264,24 @@ _VERB_META: dict[str, dict] = {
         "output": "routing JSON with category, confidence, method, latency_ms, verb, args, note",
         "tokens": "none (heuristic) / tiny-bert local inference",
     },
+    "codebase index": {
+        "intent": "(re)build the semantic codebase index: entities, relations, embeddings",
+        "args": {"--json": "structured output"},
+        "output": "lgwks.codebase.v0 JSON with entity_count, relation_count, file_count, git_sha",
+        "tokens": "none (local deterministic hashing)",
+    },
+    "codebase search": {
+        "intent": "semantic search over the codebase for entities, docs, or configs",
+        "args": {"query": "search query", "--top-k": "number of results", "--kind": "filter by entity kind", "--json": "structured output"},
+        "output": "search results JSON with score, name, file, line, signature, docstring",
+        "tokens": "none (local deterministic hashing)",
+    },
+    "codebase status": {
+        "intent": "show codebase index status",
+        "args": {"--json": "structured output"},
+        "output": "index status JSON",
+        "tokens": "none",
+    },
     "jarvis crawl": {
         "intent": "research-graph crawl of a site/keyword frontier; URL sources use substrate auth-aware runtime by default",
         "args": {
