@@ -19,7 +19,11 @@ from __future__ import annotations
 import json
 import re
 import subprocess
+from pathlib import Path
 from typing import Any
+
+_REPO = Path(__file__).resolve().parent   # so the hook can run from any cwd
+_LGWKS = _REPO / "lgwks"
 
 _TOKEN = re.compile(r"[a-z0-9]+")
 # Generic words that add no discriminative signal when matching an intent to a verb.
@@ -34,7 +38,8 @@ def _tokens(text: str) -> set[str]:
 def _load_verbs() -> list[dict[str, Any]]:
     """The capability-map seed: the lgwks manifest's verb list (the stable contract).
     Subprocess the CLI rather than import internals — decouples from build wiring."""
-    out = subprocess.run(["./lgwks", "manifest"], capture_output=True, text=True, timeout=30)
+    out = subprocess.run([str(_LGWKS), "manifest"], capture_output=True, text=True,
+                         timeout=30, cwd=str(_REPO))
     if out.returncode != 0:
         raise RuntimeError(f"lgwks manifest failed: {out.stderr[:200]}")
     return json.loads(out.stdout).get("verbs", [])
