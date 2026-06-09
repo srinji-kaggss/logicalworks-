@@ -26,3 +26,6 @@ governance/*.db
 
 # Claude Code local settings + worktrees — never source of truth
 .claude/
+
+# local model runtime venv (3.11 — torch/transformers for T-TORCH)
+.venv-models/

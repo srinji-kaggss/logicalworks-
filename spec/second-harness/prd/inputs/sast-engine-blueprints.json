@@ -1,0 +1,484 @@
+{
+  "sast_engine_blueprints": [
+    {
+      "pattern_id": "TAINT-001-SQL-INJECTION",
+      "pattern_id_citation": "https://semgrep.dev/docs/writing-rules/data-flow/taint-mode/overview",
+      "structural_flaw_taxonomy": "SQL Injection vulnerability arising from untrusted user input flowing directly into database query execution without proper sanitization or parameterization. Characterized by data flow from HTTP request parameters (GET/POST) to database execution sinks (cursor.execute, MySQLdb.execute, connection.query) without intervening sanitization through escape_string or prepared statements.",
+      "structural_flaw_taxonomy_citation": "https://github.blog/developer-skills/github/codeql-zero-to-hero-part-1-the-fundamentals-of-static-analysis-for-vulnerability-research/",
+      "ast_specification": {
+        "node_types": [
+          {
+            "value": "CallExpression",
+            "value_citation": "https://dl.acm.org/doi/fullHtml/10.1145/3644523.3644630"
+          },
+          {
+            "value": "MemberAccess",
+            "value_citation": "https://dl.acm.org/doi/fullHtml/10.1145/3644523.3644630"
+          },
+          {
+            "value": "AssignmentStatement",
+            "value_citation": "https://yuleisui.github.io/publications/icse23.pdf"
+          },
+          {
+            "value": "ReturnStatement",
+            "value_citation": "https://yuleisui.github.io/publications/icse23.pdf"
+          },
+          {
+            "value": "InvokeStatement",
+            "value_citation": "https://yuleisui.github.io/publications/icse23.pdf"
+          },
+          {
+            "value": "ParameterNode",
+            "value_citation": "https://mlsec.tu-berlin.de/docs/2015-ieeesp.pdf"
+          }
+        ],
+        "transformation_rules": "Lexical analysis transforms source code from character stream into token stream (e.g., TokenInfo(type=1 (NAME), string='from')). Parsing converts tokens into AST where each node represents code semantics. AST nodes are abstracted using tag rules: _VARn_ for user-defined variable names, _FUNCTIONn_ for user-defined function names, _VALUEn_ for variable values in assignments, _PARAn_ for function parameters. Multi-bit binary principle applied: high bits for large categories, low bits for small classes, last two bits for risk level (00 Low, 01 Medium, 10 High, 11 Super).",
+        "transformation_rules_citation": "https://github.blog/developer-skills/github/codeql-zero-to-hero-part-1-the-fundamentals-of-static-analysis-for-vulnerability-research/"
+      },
+      "cfg_execution_pathway": {
+        "traversal_algorithm": "Interprocedural Dataflow Analysis using IFDS (Interprocedural Finite Distributive Subset) framework. Top-down, flow-sensitive, context-sensitive analysis starting from call graph roots with depth-first search (DFS) traversal down the CFG. Worklist algorithm maintains list of program points needing processing, applying transfer functions to update data flow facts and propagating changes to successors until fixed point reached.",
+        "traversal_algorithm_citation": "https://web.stanford.edu/~engler/racerx-sosp03.pdf",
+        "taint_propagation_logic": "Taint tracking marks sources as 'tainted' and propagates through transformations where value changes (string concatenation, interpolation). Propagation rules: (1) Tp = {<pi, f> | pi in P, f in F, pi -> f} where pi is i-th parameter tainted by method m, f is class field potentially tainted. (2) For assignments v <- v', taint propagates from right operands to left operands. (3) In function call $a=f(func($b)), right hand operands are $b, return values of func(), return values of f(); left hand operands are parameter of func(), parameter of f(), and $a. (4) Taint tags cleaned if operand is sanitized. (5) Array element tainting: arr['a'][$var] tainted if item of another tainted array element arr['a']. Field-based algorithm queries taint propagation facts on generated taint value-flow graph.",
+        "taint_propagation_logic_citation": "https://www.cse.cuhk.edu.hk/~wei/papers/ccs22_tchecker.pdf",
+        "edge_evaluation_criteria": "Path-sensitive tracking determines if tainted input reaches sink along feasible execution paths. Branch-sensitive analysis tracks different outcomes of conditional branches (IF, ELSE) separately. Gen/Kill sets compute in/out sets of each block: assignment generates new definition and invalidates previous ones. Back edge recognition identifies edges pointing to previously visited blocks for loop detection. Dominator analysis identifies nodes that must execute before others.",
+        "edge_evaluation_criteria_citation": "https://www.in-com.com/blog/how-data-and-control-flow-analysis-powers-smarter-static-code-analysis/"
+      },
+      "detection_logic_declarative": "mode: taint\npattern-sources:\n  - pattern: request.GET.get($VAR)\n  - pattern: request.POST[$KEY]\n  - pattern: get_user_input()\npattern-propagators:\n  - pattern: $DST = $SRC\n    from: $SRC\n    to: $DST\n  - pattern: f'SELECT * FROM users WHERE username={$VAR}'\n    from: $VAR\n    to: metavariable\npattern-sanitizers:\n  - pattern: MySQLdb.escape_string($VAR)\n  - pattern: sanitize_input($VAR)\npattern-sinks:\n  - pattern: cursor.execute($SQL)\n  - pattern: MySQLCursor.execute($SQL)\n  - pattern: connection.query($SQL)\nwhere: flowPath(source, sink)",
+      "detection_logic_declarative_citation": "https://semgrep.dev/docs/writing-rules/data-flow/taint-mode/overview",
+      "noise_mitigation_heuristics": [
+        {
+          "value": "Sanitizers with exact matching: pattern-sanitizers define expressions where data is cleansed. exact: true option prevents Semgrep from considering subexpressions as tainted/sanitized/sinks. In source(sink(x)), x not automatically treated as source.",
+          "value_citation": "https://semgrep.dev/docs/writing-rules/data-flow/taint-mode/overview"
+        },
+        {
+          "value": "Deduplication: Report only one taint trace even if multiple paths (via different variables) reach same sink. Prevents duplicate alerts for same vulnerability.",
+          "value_citation": "https://semgrep.dev/docs/writing-rules/data-flow/taint-mode/overview"
+        },
+        {
+          "value": "Syntactic filtering via AST querying: Query AST for method calls that do not take string literal as argument to exclude safe, hardcoded strings. Ignore innocuous function names and comments through lexical analysis.",
+          "value_citation": "https://github.blog/developer-skills/github/codeql-zero-to-hero-part-1-the-fundamentals-of-static-analysis-for-vulnerability-research/"
+        },
+        {
+          "value": "Cross-function and cross-file analysis: Identify sanitation of user inputs across function boundaries and files to detect weaknesses with precision. Achieves >94% false positive reduction (2.1% FP rate) via high-resolution source-to-sink tracing.",
+          "value_citation": "https://cycode.com/blog/next-generation-sast/"
+        }
+      ],
+      "framework_implementation_vectors": [
+        {
+          "framework_context": "Django web framework with MySQLdb database driver. Django provides request.GET and request.POST for HTTP parameter access. Database operations performed via cursor objects with execute() method.",
+          "framework_context_citation": "https://github.blog/developer-skills/github/codeql-zero-to-hero-part-1-the-fundamentals-of-static-analysis-for-vulnerability-research/",
+          "vulnerability_signature": "Pattern: username = request.GET.get('username') followed by sql = f'SELECT * FROM users WHERE username={username}' then cursor.execute(sql). Characterized by string interpolation (f-string or % formatting) directly incorporating user input into SQL without parameterization.",
+          "vulnerability_signature_citation": "https://github.blog/developer-skills/github/codeql-zero-to-hero-part-1-the-fundamentals-of-static-analysis-for-vulnerability-research/",
+          "remediation_logic": "Replace string interpolation with parameterized queries: cursor.execute('SELECT * FROM users WHERE username = %s', [username]). Alternatively, apply MySQLdb.escape_string() to user input before incorporation: safe_username = MySQLdb.escape_string(username).",
+          "remediation_logic_citation": "https://github.blog/developer-skills/github/codeql-zero-to-hero-part-1-the-fundamentals-of-static-analysis-for-vulnerability-research/"
+        },
+        {
+          "framework_context": "Express.js (Node.js web framework) with query parameter parsing. Express parses query strings: ?foo=bar -> 'bar' (string), ?foo=bar&foo=baz -> ['bar', 'baz'] (array), ?foo[bar][baz]=bar -> nested object tree.",
+          "framework_context_citation": "https://cheatsheetseries.owasp.org/cheatsheets/Nodejs_Security_Cheat_Sheet.html",
+          "vulnerability_signature": "User-controlled input from req.query or req.body flowing into database operations like connection.query() without parameterization or sanitization. Example: connection.query('SELECT * FROM users WHERE id = ' + req.query.id).",
+          "vulnerability_signature_citation": "https://www.usenix.org/system/files/sec22-li-song.pdf",
+          "remediation_logic": "Use parameterized queries with placeholders: connection.query('SELECT * FROM users WHERE id = ?', [req.query.id]). Validate and sanitize inputs using validation libraries before database operations.",
+          "remediation_logic_citation": "https://cheatsheetseries.owasp.org/cheatsheets/Nodejs_Security_Cheat_Sheet.html"
+        }
+      ]
+    },
+    {
+      "pattern_id": "MEM-002-USE-AFTER-FREE",
+      "pattern_id_citation": "https://www.amossys.fr/insights/blog-technique/intro-to-use-after-free-detection/",
+      "structural_flaw_taxonomy": "Use-After-Free vulnerability characterized by accessing memory through a pointer after the memory area has been freed. Three-step pattern: (1) Memory area allocated and pointer points to it, (2) Memory area freed but pointer still available (dangling pointer creation), (3) Pointer used to access previously freed memory. Can lead to memory corruption, DoS, or arbitrary code execution if freed area reallocated.",
+      "structural_flaw_taxonomy_citation": "https://www.amossys.fr/insights/blog-technique/intro-to-use-after-free-detection/",
+      "ast_specification": {
+        "node_types": [
+          {
+            "value": "LocalVariableDeclaration",
+            "value_citation": "https://mlsec.tu-berlin.de/docs/2015-ieeesp.pdf"
+          },
+          {
+            "value": "CallExpression",
+            "value_citation": "https://mlsec.tu-berlin.de/docs/2015-ieeesp.pdf"
+          },
+          {
+            "value": "Identifier",
+            "value_citation": "https://mlsec.tu-berlin.de/docs/2015-ieeesp.pdf"
+          },
+          {
+            "value": "UnaryExpression",
+            "value_citation": "https://mlsec.tu-berlin.de/docs/2015-ieeesp.pdf"
+          },
+          {
+            "value": "Assignment",
+            "value_citation": "https://mlsec.tu-berlin.de/docs/2015-ieeysp.pdf"
+          }
+        ],
+        "transformation_rules": "Source code converted to Intermediate Representation (IR) such as Reverse Engineering Intermediate Language (REIL) containing only 17 different instructions. CFG nodes represent instructions where each node is a statement. AST abstracted to identify allocation primitives (malloc, new), deallocation primitives (free, delete), and pointer dereference operations.",
+        "transformation_rules_citation": "https://www.amossys.fr/insights/blog-technique/intro-to-use-after-free-detection/"
+      },
+      "cfg_execution_pathway": {
+        "traversal_algorithm": "Intraprocedural and interprocedural analysis using state-machine pattern tracking pointer states: Allocated -> Freed -> UseAfterFree or End. Graph theory logic checks if statement using pointer comes after basic block which freed memory. Two methods for interprocedural: (1) Function behavior summaries - each function call replaced by results of previous intraprocedural analysis, (2) Inlining callee functions into caller. Loop unrolling keeps only first iteration to avoid halting problem.",
+        "traversal_algorithm_citation": "https://www.amossys.fr/insights/blog-technique/intro-to-use-after-free-detection/",
+        "taint_propagation_logic": "Maintain set of freed memory heap areas. At each pointer use, check if it points to one of these freed areas. Pointer aliases tracked through assignments and parameter passing. State transitions: pointer moves from 'Allocated' to 'Freed' upon free() call, then to 'UseAfterFree' if used, or 'End' if pointer and aliases are deleted/overwritten. Abstract interpretation describes instruction impact on variables without tracking exact values.",
+        "taint_propagation_logic_citation": "https://www.amossys.fr/insights/blog-technique/intro-to-use-after-free-detection/",
+        "edge_evaluation_criteria": "Path sensitivity through symbolic execution: symbols for expressions and variables build arithmetic expressions with symbols representing each value to check conditional branches. Value Set Analysis (VSA) tracks values through value intervals on memory locations (globals, heap, stack). Extract subgraph leading to UAF containing elements for manual verification.",
+        "edge_evaluation_criteria_citation": "https://www.amossys.fr/insights/blog-technique/intro-to-use-after-free-detection/"
+      },
+      "detection_logic_declarative": "DECLARE freed_pointers AS SET<Pointer>\nDECLARE pointer_aliases AS MAP<Pointer, SET<Pointer>>\n\nON free($ptr):\n  ADD $ptr TO freed_pointers\n  FOR EACH alias IN pointer_aliases[$ptr]:\n    ADD alias TO freed_pointers\n\nON dereference($ptr):\n  IF $ptr IN freed_pointers:\n    REPORT UseAfterFree($ptr)\n\nON assignment($dest = $src):\n  IF $src IS Pointer:\n    ADD $dest TO pointer_aliases[$src]\n    IF $src IN freed_pointers:\n      ADD $dest TO freed_pointers",
+      "detection_logic_declarative_citation": "https://www.amossys.fr/insights/blog-technique/intro-to-use-after-free-detection/",
+      "noise_mitigation_heuristics": [
+        {
+          "value": "Subgraph extraction for UAF characterization: Extract subgraph leading to detected UAF containing elements for manual verification to distinguish true positives from false alarms.",
+          "value_citation": "https://www.amossys.fr/insights/blog-technique/intro-to-use-after-free-detection/"
+        },
+        {
+          "value": "Alias analysis precision: Track pointer aliases through assignments, function calls with pointer parameters, and returns. Merging aliases reduces false negatives but requires careful handling to avoid false positives from unrelated pointers.",
+          "value_citation": "https://www.amossys.fr/insights/blog-technique/intro-to-use-after-free-detection/"
+        }
+      ],
+      "framework_implementation_vectors": [
+        {
+          "framework_context": "C/C++ manual memory management with malloc/free and new/delete. Common in systems programming, embedded systems, and performance-critical applications where automatic garbage collection is not used.",
+          "framework_context_citation": "https://www.amossys.fr/insights/blog-technique/intro-to-use-after-free-detection/",
+          "vulnerability_signature": "Pattern: ptr = malloc(size); ... free(ptr); ... *ptr = value; or ptr->field. Dangling pointer created by free() without setting ptr = NULL, followed by dereference through pointer or member access.",
+          "vulnerability_signature_citation": "https://www.amossys.fr/insights/blog-technique/intro-to-use-after-free-detection/",
+          "remediation_logic": "Set pointer to NULL immediately after free: free(ptr); ptr = NULL; Add NULL checks before dereferences: if (ptr != NULL) { *ptr = value; }. Use smart pointers (C++ unique_ptr, shared_ptr) for automatic memory management.",
+          "remediation_logic_citation": "https://www.amossys.fr/insights/blog-technique/intro-to-use-after-free-detection/"
+        }
+      ]
+    },
+    {
+      "pattern_id": "CONC-003-RACE-CONDITION",
+      "pattern_id_citation": "https://web.stanford.edu/~engler/racerx-sosp03.pdf",
+      "structural_flaw_taxonomy": "Race condition vulnerability where multiple threads access shared state without proper synchronization, leading to non-deterministic behavior. Characterized by unprotected shared variable accesses and non-atomic modifications such as bit fields or 64-bit variables on 32-bit machines accessed without locks. Timing-dependent exploitation allows attackers to manipulate security checks and subsequent actions.",
+      "structural_flaw_taxonomy_citation": "https://web.stanford.edu/~engler/racerx-sosp03.pdf",
+      "ast_specification": {
+        "node_types": [
+          {
+            "value": "GlobalVariableReference",
+            "value_citation": "https://web.stanford.edu/~engler/racerx-sosp03.pdf"
+          },
+          {
+            "value": "ParameterPointerVariable",
+            "value_citation": "https://web.stanford.edu/~engler/racerx-sosp03.pdf"
+          },
+          {
+            "value": "LockAcquisition",
+            "value_citation": "https://web.stanford.edu/~engler/racerx-sosp03.pdf"
+          },
+          {
+            "value": "LockRelease",
+            "value_citation": "https://web.stanford.edu/~engler/racerx-sosp03.pdf"
+          },
+          {
+            "value": "FunctionCall",
+            "value_citation": "https://web.stanford.edu/~engler/racerx-sosp03.pdf"
+          }
+        ],
+        "transformation_rules": "CFG annotated with all function calls, uses of global variables, uses of parameter pointer variables, and optionally uses of all local variables. Each concurrency operation (lock, unlock, interrupt disable/enable) annotated. Resolved function calls, exit statements, and successors explicitly marked.",
+        "transformation_rules_citation": "https://web.stanford.edu/~engler/racerx-sosp03.pdf"
+      },
+      "cfg_execution_pathway": {
+        "traversal_algorithm": "Flow-sensitive, interprocedural lockset analysis. Algorithm: (1) traverse_cfg iterates over all flow graph roots and calls traverse_fn. (2) traverse_fn checks if lockset is in function's summary cache, applies lockset to function body. Result added to fn's summary cache. (3) traverse_stmt applies lockset ls to statement s, if reached exit statement returns current lockset. Top-down, context-sensitive analysis starts from call graph root with DFS traversal down CFG.",
+        "traversal_algorithm_citation": "https://web.stanford.edu/~engler/racerx-sosp03.pdf",
+        "taint_propagation_logic": "Lockset tracking: intersection of all locks held when accessing shared state. At each shared variable access, record lockset. Unlockset analysis: at program statement s, remove lock l from lockset if no successor statement s' reachable from s contains unlock of l. Track lock acquisitions and releases through function summaries for interprocedural analysis.",
+        "taint_propagation_logic_citation": "https://web.stanford.edu/~engler/racerx-sosp03.pdf",
+        "edge_evaluation_criteria": "Statistical race detection using z-test: z = (s/n - p0) / sqrt(p0 * (1 - p0)) where s is protected accesses, n is total accesses, p0 is expected coincidental protection. Heuristic scoring: +2 if always visited with empty lockset, +2 if written in interrupt handler, +2 if count modifications on different roots > 2, +4 if variable is only object in critical section > 1 times. Release-on-block (ROB) semantics: do not generate constraints between ROB locks and lock acquisitions that block.",
+        "edge_evaluation_criteria_citation": "https://web.stanford.edu/~engler/racerx-sosp03.pdf"
+      },
+      "detection_logic_declarative": "DECLARE locksets AS MAP<Statement, SET<Lock>>\nDECLARE shared_accesses AS MAP<Variable, LIST<Access>>\n\nON lock_acquire(lock):\n  ADD lock TO current_lockset\n\nON lock_release(lock):\n  REMOVE lock FROM current_lockset\n  APPLY unlockset_analysis(lock)\n\nON shared_variable_access(var):\n  RECORD (var, current_lockset, statement)\n  shared_accesses[var].APPEND({lockset: current_lockset, stmt: statement})\n\nFOR EACH var IN shared_accesses:\n  lockset_intersection = INTERSECT(all locksets for var)\n  IF lockset_intersection IS EMPTY:\n    z_score = CALCULATE_Z_TEST(var)\n    heuristic_score = CALCULATE_HEURISTICS(var)\n    IF z_score > THRESHOLD OR heuristic_score > THRESHOLD:\n      REPORT RaceCondition(var)",
+      "detection_logic_declarative_citation": "https://web.stanford.edu/~engler/racerx-sosp03.pdf",
+      "noise_mitigation_heuristics": [
+        {
+          "value": "Belief analysis for semaphores: Distinguish mutual exclusion from scheduling dependencies using statistical classification: p = p1 * p2 where p1 and p2 are p-values derived from expected ratio of releases to acquisitions and ratio of unlock errors to unlock callsites.",
+          "value_citation": "https://web.stanford.edu/~engler/racerx-sosp03.pdf"
+        },
+        {
+          "value": "Private thread data filtering: Strip references to newly allocated data to remove thread-private data from race detection, reducing false positives from thread-local variables.",
+          "value_citation": "https://web.stanford.edu/~engler/racerx-sosp03.pdf"
+        },
+        {
+          "value": "Heuristic scoring system: Multi-factor scoring combines static analysis metrics (empty lockset visits, interrupt handler writes, modification patterns, critical section analysis) to rank race condition likelihood and prioritize high-confidence findings.",
+          "value_citation": "https://web.stanford.edu/~engler/racerx-sosp03.pdf"
+        }
+      ],
+      "framework_implementation_vectors": [
+        {
+          "framework_context": "Linux kernel and FreeBSD with pthread mutexes and spinlocks. Kernel modules use spinlocks for interrupt-safe synchronization. User-space applications use pthread_mutex for thread synchronization.",
+          "framework_context_citation": "https://web.stanford.edu/~engler/racerx-sosp03.pdf",
+          "vulnerability_signature": "Unprotected global variable access: global counter modified without lock protection across multiple threads. Pattern: counter++ in multiple functions without surrounding pthread_mutex_lock/unlock. Interrupt handler accessing shared data without disabling interrupts.",
+          "vulnerability_signature_citation": "https://web.stanford.edu/~engler/racerx-sosp03.pdf",
+          "remediation_logic": "Wrap shared variable access in critical sections: pthread_mutex_lock(&mutex); counter++; pthread_mutex_unlock(&mutex). For interrupt handlers: disable interrupts during shared data access or use spinlocks. For kernel: spin_lock_irqsave(&lock, flags); data_access; spin_unlock_irqrestore(&lock, flags).",
+          "remediation_logic_citation": "https://web.stanford.edu/~engler/racerx-sosp03.pdf"
+        },
+        {
+          "framework_context": "Node.js asynchronous callback architecture. Event loop processes callbacks from queue one by one. Race conditions arise when code outside callback relies on code within callback to run first.",
+          "framework_context_citation": "https://cheatsheetseries.owasp.org/cheatsheets/Nodejs_Security_Cheat_Sheet.html",
+          "vulnerability_signature": "Pattern: fs.readFile('/file.txt', (err, data) => { perform_actions_on_data(data); }); fs.unlinkSync('/file.txt'); The unlinkSync may run before callback, deleting file before desired actions completed.",
+          "vulnerability_signature_citation": "https://cheatsheetseries.owasp.org/cheatsheets/Nodejs_Security_Cheat_Sheet.html",
+          "remediation_logic": "Write all operations that rely on each other in single non-blocking function: fs.readFile('/file.txt', (err, data) => { perform_actions_on_data(data); fs.unlink('/file.txt', callback); }). Nest dependent operations within callbacks or use async/await for sequential execution.",
+          "remediation_logic_citation": "https://cheatsheetseries.owasp.org/cheatsheets/Nodejs_Security_Cheat_Sheet.html"
+        }
+      ]
+    },
+    {
+      "pattern_id": "FW-004-SPRING-SECURITY-MISCONFIG",
+      "pattern_id_citation": "https://yaogroup.cs.vt.edu/spring-security-sec-dev-2020-camera-ready.pdf",
+      "structural_flaw_taxonomy": "Spring Security framework misconfiguration vulnerabilities encompassing authentication, session management, and cryptographic weaknesses. Categories include: lifelong access tokens (arbitrary token validity 10-20 days), missing state parameter in OAuth redirect URLs enabling CSRF/forced login, fixed JWT signing secrets, plaintext secrets in configuration files, disabled CSRF protection, missing TLS for HTTP, weak BCrypt parameters (default strength 10), MD5-based remember-me cookies, lack of request throttling per API key, and absent Content Security Policy headers.",
+      "structural_flaw_taxonomy_citation": "https://yaogroup.cs.vt.edu/spring-security-sec-dev-2020-camera-ready.pdf",
+      "ast_specification": {
+        "node_types": [
+          {
+            "value": "MethodInvocation",
+            "value_citation": "https://yaogroup.cs.vt.edu/spring-security-sec-dev-2020-camera-ready.pdf"
+          },
+          {
+            "value": "ConfigurationAnnotation",
+            "value_citation": "https://yaogroup.cs.vt.edu/spring-security-sec-dev-2020-camera-ready.pdf"
+          },
+          {
+            "value": "StringLiteral",
+            "value_citation": "https://yaogroup.cs.vt.edu/spring-security-sec-dev-2020-camera-ready.pdf"
+          },
+          {
+            "value": "NumericLiteral",
+            "value_citation": "https://yaogroup.cs.vt.edu/spring-security-sec-dev-2020-camera-ready.pdf"
+          }
+        ],
+        "transformation_rules": "Parse Java source code to identify Spring Security configuration methods. Extract method calls on HttpSecurity objects, token service configurations, password encoder instantiations, and YAML/properties file content. Match configurations against knowledge base of CWE, OpenStack security anti-patterns, Spring Security official reference, Apigee Edge anti-patterns, Snyk vulnerability database, RFC documents.",
+        "transformation_rules_citation": "https://yaogroup.cs.vt.edu/spring-security-sec-dev-2020-camera-ready.pdf"
+      },
+      "cfg_execution_pathway": {
+        "traversal_algorithm": "Static code analysis traversing Spring configuration classes annotated with @Configuration or @EnableWebSecurity. Analyze method bodies of configure(HttpSecurity hs) overrides. Extract bean definitions for TokenServices, PasswordEncoder, and related security components.",
+        "traversal_algorithm_citation": "https://yaogroup.cs.vt.edu/spring-security-sec-dev-2020-camera-ready.pdf",
+        "taint_propagation_logic": "Not applicable for configuration analysis. Detection based on pattern matching against secure configuration baselines rather than data flow analysis.",
+        "edge_evaluation_criteria": "Configuration values compared against secure thresholds: token validity < 86400 seconds (1 day), BCrypt strength >= 12, presence of state parameter in OAuth configs, CSRF protection enabled, HTTPS enforcement, absence of hardcoded secrets in source.",
+        "edge_evaluation_criteria_citation": "https://yaogroup.cs.vt.edu/spring-security-sec-dev-2020-camera-ready.pdf"
+      },
+      "detection_logic_declarative": "# Pattern 1: Lifelong Access Token\npattern: tokenServices.setAccessTokenValiditySeconds($SECONDS)\nwhere: $SECONDS > 86400\nreport: \"Access token lifetime exceeds 24 hours: {$SECONDS} seconds\"\n\n# Pattern 2: Missing State Parameter\npattern-missing: params.add(\"state\", $VALUE)\ncontext: OAuth2 redirect URL configuration\nreport: \"Missing state parameter in OAuth redirect URL - CSRF vulnerable\"\n\n# Pattern 3: CSRF Disabled\npattern: hs.csrf().disable()\nreport: \"CSRF protection explicitly disabled\"\n\n# Pattern 4: Weak BCrypt\npattern: new BCryptPasswordEncoder()\nwhere: default_strength == 10\nreport: \"BCrypt using default strength 10, recommend >= 12\"\n\n# Pattern 5: Hardcoded Secret\npattern-in-file: application.yml\npattern: password: $PLAINTEXT\nreport: \"Hardcoded secret in configuration file\"",
+      "detection_logic_declarative_citation": "https://yaogroup.cs.vt.edu/spring-security-sec-dev-2020-camera-ready.pdf",
+      "noise_mitigation_heuristics": [
+        {
+          "value": "Knowledge base matching: Match configuration against multiple authoritative sources (CWE, Spring Security official docs, RFC standards) to confirm vulnerabilities before reporting. Cross-reference with known vulnerability databases reduces false positives from non-standard but secure configurations.",
+          "value_citation": "https://yaogroup.cs.vt.edu/spring-security-sec-dev-2020-camera-ready.pdf"
+        },
+        {
+          "value": "Context-aware analysis: Distinguish development vs production configurations by analyzing profiles and environment variables. Skip certain checks for test configurations to reduce noise."
+        }
+      ],
+      "framework_implementation_vectors": [
+        {
+          "framework_context": "Spring Boot applications using Spring Security for authentication and authorization. Configuration typically in Java @Configuration classes or application.yml files. OAuth2 integration for third-party authentication.",
+          "framework_context_citation": "https://yaogroup.cs.vt.edu/spring-security-sec-dev-2020-camera-ready.pdf",
+          "vulnerability_signature": "tokenServices.setAccessTokenValiditySeconds(1555200000); // 18 days validity. Pattern shows excessive token lifetime enabling prolonged unauthorized access if token compromised.",
+          "vulnerability_signature_citation": "https://yaogroup.cs.vt.edu/spring-security-sec-dev-2020-camera-ready.pdf",
+          "remediation_logic": "Reduce token validity to reasonable timeframe: tokenServices.setAccessTokenValiditySeconds(3600); // 1 hour. Implement refresh token mechanism for extended sessions. Use short-lived access tokens with longer-lived refresh tokens.",
+          "remediation_logic_citation": "https://yaogroup.cs.vt.edu/spring-security-sec-dev-2020-camera-ready.pdf"
+        },
+        {
+          "framework_context": "Spring Security CSRF protection for state-changing operations. Default enabled but developers may disable for API endpoints incorrectly.",
+          "framework_context_citation": "https://yaogroup.cs.vt.edu/spring-security-sec-dev-2020-camera-ready.pdf",
+          "vulnerability_signature": "@Override protected void configure(HttpSecurity hs) throws Exception { hs.csrf().disable(); } Pattern completely disables CSRF protection application-wide.",
+          "vulnerability_signature_citation": "https://yaogroup.cs.vt.edu/spring-security-sec-dev-2020-camera-ready.pdf",
+          "remediation_logic": "Enable CSRF with cookie-based tokens: hs.csrf(c -> c.csrfTokenRepository(CookieCsrfTokenRepository.withHttpOnlyFalse())). For stateless APIs, use custom token validation or disable only for specific endpoints, not globally.",
+          "remediation_logic_citation": "https://yaogroup.cs.vt.edu/spring-security-sec-dev-2020-camera-ready.pdf"
+        },
+        {
+          "framework_context": "Spring Security remember-me functionality for persistent authentication. Default implementation uses MD5 hash vulnerable to collision attacks.",
+          "framework_context_citation": "https://yaogroup.cs.vt.edu/spring-security-sec-dev-2020-camera-ready.pdf",
+          "vulnerability_signature": "Remember-me cookie constructed as: base64(username + ':' + expirationTime + ':' + md5Hex(username + ':' + expirationTime + ':' + password + ':' + key)). MD5 hash vulnerable to preimage and collision attacks.",
+          "vulnerability_signature_citation": "https://yaogroup.cs.vt.edu/spring-security-sec-dev-2020-camera-ready.pdf",
+          "remediation_logic": "Use persistent token approach with database-backed tokens: configure().rememberMe().tokenRepository(persistentTokenRepository()). Alternatively, use stronger hash like SHA-256 or implement custom RememberMeServices with secure token generation.",
+          "remediation_logic_citation": "https://yaogroup.cs.vt.edu/spring-security-sec-dev-2020-camera-ready.pdf"
+        }
+      ]
+    },
+    {
+      "pattern_id": "JS-005-PROTOTYPE-POLLUTION",
+      "pattern_id_citation": "https://www.usenix.org/system/files/sec22-li-song.pdf",
+      "structural_flaw_taxonomy": "Prototype Pollution vulnerability in JavaScript where attacker controls property assignment to object prototypes (__proto__ or constructor.prototype), enabling tampering with Object.prototype affecting all objects in application. Leads to DoS when critical properties (toString, valueOf) polluted, property injection enabling authentication bypass, and internal property tampering affecting application logic. Particularly severe in Node.js server contexts where prototype pollution persists across requests.",
+      "structural_flaw_taxonomy_citation": "https://www.usenix.org/system/files/sec22-li-song.pdf",
+      "ast_specification": {
+        "node_types": [
+          {
+            "value": "ObjectNode",
+            "value_citation": "https://www.usenix.org/system/files/sec22-li-song.pdf"
+          },
+          {
+            "value": "ScopeNode",
+            "value_citation": "https://www.usenix.org/system/files/sec22-li-song.pdf"
+          },
+          {
+            "value": "VariableNode",
+            "value_citation": "https://www.usenix.org/system/files/sec22-li-song.pdf"
+          },
+          {
+            "value": "ASTNode",
+            "value_citation": "https://www.usenix.org/system/files/sec22-li-song.pdf"
+          },
+          {
+            "value": "AssignmentExpression",
+            "value_citation": "https://www.usenix.org/system/files/sec22-li-song.pdf"
+          },
+          {
+            "value": "MemberExpression",
+            "value_citation": "https://www.usenix.org/system/files/sec22-li-song.pdf"
+          }
+        ],
+        "transformation_rules": "Object Dependence Graph (ODG) construction: Node types are Object node (o in No), Scope node (s in Ns), Variable node (v in Nv), AST node (a in Na). Operations: Child_{parentNode}^{EdgeType} gets child node of parentNode with EdgeType; LkupVar_{Br}^s(n) looks up variable node under scope(s) with branch tags (Br) and name n; LkupObj_{Br}^s(n) looks up object nodes {Child_{LkupVar_{Br}^s(n)}^{v -> o}}. State tuple: rho = (N, E, s, Br) where N is all ODG nodes, E is all ODG edges, s is current scope node, Br is set of branch tags.",
+        "transformation_rules_citation": "https://www.usenix.org/system/files/sec22-li-song.pdf"
+      },
+      "cfg_execution_pathway": {
+        "traversal_algorithm": "Flow- and context-sensitive static analysis with hybrid branch-sensitivity and points-to information generating Object Dependence Graph (ODG) using abstract interpretation. ODGEN starts from entry points and follows AST node sequence to define and lookup objects, generates CFG if object lookup related to functions. Hybrid branch-sensitivity heuristic: default interprets all branches in parallel, but switches to sequential branch interpretation if object nodes explode (> 10k). Loop heuristic: interprets loop extensively until no new objects outside loop are looked up, with minimum 3 and maximum 10 iterations.",
+        "traversal_algorithm_citation": "https://www.usenix.org/system/files/sec22-li-song.pdf",
+        "taint_propagation_logic": "ODG tracks object dependencies through UNSANITIZED edges (user-controllable objects), VULASGMT edges (vulnerable assignments), and DEF edges (object definitions). Prototype pollution pattern: VULASGMT_{o1=o4[o5]} o DEF_{o1} o (UNSANITIZED_{o3} AND VULASGMT_{o1[o2]=o3}) where o1 is object with controllable property o2 assigned controllable value o3. Prototype-related property lookup: (a0=x) -> o0 -> {(vk=proto) -> ok} k>0, Br_{k+1} subset Br_k -> (v=y) -> ok+1.",
+        "taint_propagation_logic_citation": "https://www.usenix.org/system/files/sec22-li-song.pdf",
+        "edge_evaluation_criteria": "Traversal checks for vulnerable assignment statement via property lookup followed by another property lookup statement where both lookup and assigned values in first statement are adversary-controllable. Internal Property Tampering (IPT) identified when object assignment via property lookup affects subsequent property lookup statements.",
+        "edge_evaluation_criteria_citation": "https://www.usenix.org/system/files/sec22-li-song.pdf"
+      },
+      "detection_logic_declarative": "# Prototype Pollution (__proto__)\npattern: UNSANITIZED o ARG1 o VULASGMT_{o1=o4[o5]} o DEF_{o1} o (UNSANITIZED_{o3} AND VULASGMT_{o1[o2]=o3})\nwhere:\n  o2 IN {'__proto__', 'constructor', 'prototype'}\n  o3 is UNSANITIZED\nreport: \"Prototype Pollution: user-controlled assignment to {o2}\"\n\n# Internal Property Tampering\npattern: VULASGMT_{o1[o2]=o3} -> LOOKUP_{o4[o5]}\nwhere:\n  o2 is UNSANITIZED\n  o3 is UNSANITIZED\n  o5 depends on o2\nreport: \"Internal Property Tampering: controllable property affects lookup\"\n\n# Express toString pollution\npattern: obj['toString'] = adversary_value\ncontext: Express framework request handling\neffect: DoS for all legitimate requests\nreport: \"Critical: Object.prototype.toString pollution breaks Express\"",
+      "detection_logic_declarative_citation": "https://www.usenix.org/system/files/sec22-li-song.pdf",
+      "noise_mitigation_heuristics": [
+        {
+          "value": "Hybrid branch-sensitivity: Default abstracts all branches in parallel but switches to sequential interpretation when object nodes explode (>10k) to manage state explosion while maintaining precision for typical cases.",
+          "value_citation": "https://www.usenix.org/system/files/sec22-li-song.pdf"
+        },
+        {
+          "value": "Loop iteration bounds: Minimum 3 and maximum 10 loop iterations with extensive interpretation until no new objects outside loop are looked up. Balances completeness with performance.",
+          "value_citation": "https://www.usenix.org/system/files/sec22-li-song.pdf"
+        },
+        {
+          "value": "Asynchronous callback modeling: Queue structure stores asynchronous callbacks during registration and invokes them sequentially, accurately modeling Node.js event loop behavior to reduce false positives from callback ordering issues.",
+          "value_citation": "https://www.usenix.org/system/files/sec22-li-song.pdf"
+        }
+      ],
+      "framework_implementation_vectors": [
+        {
+          "framework_context": "Express.js web framework for Node.js. Express functionality depends on Object.prototype methods like toString(). Query string parsing creates nested objects from parameters like ?foo[bar][baz]=value.",
+          "framework_context_citation": "https://www.usenix.org/system/files/sec22-li-song.pdf",
+          "vulnerability_signature": "Pollution of Object.prototype.toString leads to Denial-of-Service for all legitimate requests. Pattern: Attacker sends ?__proto__[toString]=polluted or similar payload causing Express to fail on toString() calls. Express query parsing: ?foo[toString]=bar creates object where calling toString() will fail.",
+          "vulnerability_signature_citation": "https://www.usenix.org/system/files/sec22-li-song.pdf",
+          "remediation_logic": "Use HTTP Parameter Pollution (HPP) protection middleware: app.use(hpp()) which ignores all values for parameter except last one. Validate and sanitize object keys before assignment. Use Object.create(null) for dictionaries to avoid prototype chain. Implement schema validation rejecting __proto__, constructor, prototype as keys.",
+          "remediation_logic_citation": "https://cheatsheetseries.owasp.org/cheatsheets/Nodejs_Security_Cheat_Sheet.html"
+        },
+        {
+          "framework_context": "General Node.js applications with deep merge utilities, JSON parsing, or property copying functions that recursively assign properties without prototype checks.",
+          "framework_context_citation": "https://www.usenix.org/system/files/sec22-li-song.pdf",
+          "vulnerability_signature": "Deep merge pattern: function merge(target, source) { for (let key in source) { if (typeof source[key] === 'object') { merge(target[key], source[key]); } else { target[key] = source[key]; } } }. Attacker provides source with __proto__ key polluting Object.prototype.",
+          "vulnerability_signature_citation": "https://www.usenix.org/system/files/sec22-li-song.pdf",
+          "remediation_logic": "Add prototype key filtering: const BANNED_KEYS = ['__proto__', 'constructor', 'prototype']; if (BANNED_KEYS.includes(key)) continue; Use Object.hasOwnProperty check: if (!source.hasOwnProperty(key)) continue; Prefer Object.assign with null prototype targets or use libraries with built-in pollution protection.",
+          "remediation_logic_citation": "https://www.usenix.org/system/files/sec22-li-song.pdf"
+        }
+      ]
+    },
+    {
+      "pattern_id": "ARITH-006-INTEGER-OVERFLOW",
+      "pattern_id_citation": "https://cwe.mitre.org/data/definitions/190.html",
+      "structural_flaw_taxonomy": "Integer Overflow vulnerability where arithmetic operation produces result exceeding maximum value that can be stored in integer type, causing wraparound to minimum value or truncation. Leads to buffer overflows when overflow result used for memory allocation size, authentication bypass when overflow affects security checks, resource exhaustion when allocation sizes corrupted. Type confusion involves mismatched type assumptions causing incorrect size calculations or pointer arithmetic.",
+      "structural_flaw_taxonomy_citation": "https://cwe.mitre.org/data/definitions/190.html",
+      "ast_specification": {
+        "node_types": [
+          {
+            "value": "BinaryOperation",
+            "value_citation": "https://mlsec.tu-berlin.de/docs/2015-ieeesp.pdf"
+          },
+          {
+            "value": "Multiplication",
+            "value_citation": "https://mlsec.tu-berlin.de/docs/2015-ieeesp.pdf"
+          },
+          {
+            "value": "Assignment",
+            "value_citation": "https://mlsec.tu-berlin.de/docs/2015-ieeesp.pdf"
+          },
+          {
+            "value": "CallExpression",
+            "value_citation": "https://mlsec.tu-berlin.de/docs/2015-ieeesp.pdf"
+          },
+          {
+            "value": "CastExpression"
+          }
+        ],
+        "transformation_rules": "AST nodes for arithmetic operations (BinaryOp) extracted with operand types and result type. Integer type metadata (signed/unsigned, bit width) tracked through assignments and casts. Transformation identifies operations where result type cannot represent all possible values from operands (e.g., multiplying two 32-bit integers storing in 32-bit result)."
+      },
+      "cfg_execution_pathway": {
+        "traversal_algorithm": "Intraprocedural value range analysis tracking min/max possible values for integer variables through assignments and operations. Interval arithmetic: if a in [a_min, a_max] and b in [b_min, b_max], then a+b in [a_min+b_min, a_max+b_max]. Check if result interval exceeds type bounds.",
+        "taint_propagation_logic": "Track integer values derived from attacker-controlled sources (network input, file data, user parameters). Overflow is security-critical when: (1) overflow value used as allocation size, (2) overflow value used in security check (if size < MAX_SIZE), (3) overflow value used as array index or loop bound. Propagate 'tainted integer' property through arithmetic operations.",
+        "edge_evaluation_criteria": "For each arithmetic operation, check: (1) Can operands' ranges produce result exceeding type bounds? (2) Is result used in security-sensitive context (allocation, bounds check, array index)? (3) Are operands derived from untrusted input? Flag high-severity if all three conditions true."
+      },
+      "detection_logic_declarative": "DECLARE value_ranges AS MAP<Variable, (min, max)>\n\nON binary_operation(op, left, right, result):\n  left_range = value_ranges[left]\n  right_range = value_ranges[right]\n  \n  IF op == MULTIPLY:\n    result_range = (\n      min(left_range.min * right_range.min, left_range.min * right_range.max,\n          left_range.max * right_range.min, left_range.max * right_range.max),\n      max(...same combinations...)\n    )\n  ELSE IF op == ADD:\n    result_range = (left_range.min + right_range.min, left_range.max + right_range.max)\n  \n  result_type_max = GET_TYPE_MAX(result)\n  result_type_min = GET_TYPE_MIN(result)\n  \n  IF result_range.max > result_type_max OR result_range.min < result_type_min:\n    IF is_tainted(left) OR is_tainted(right):\n      IF is_sensitive_use(result): # allocation, bounds check, array index\n        REPORT IntegerOverflow(result)",
+      "noise_mitigation_heuristics": [
+        {
+          "value": "Contextualized severity: Only report overflow as high-severity if tainted integer is used in security-sensitive context (memory allocation, array indexing, bounds checking). Overflows in non-sensitive contexts reported as low-priority or informational."
+        },
+        {
+          "value": "Range refinement through conditionals: When integer appears in conditional (if x < 100), refine value range in then-branch (x in [MIN, 99]) and else-branch (x in [100, MAX]) to reduce false positives from guarded code."
+        }
+      ],
+      "framework_implementation_vectors": [
+        {
+          "framework_context": "C/C++ memory allocation functions (malloc, calloc, new) where allocation size computed from untrusted input. Common in image processing, network protocol parsing, and file format handlers.",
+          "vulnerability_signature": "Pattern: size = width * height * bytes_per_pixel; buffer = malloc(size). If width and height are attacker-controlled 32-bit integers, multiplication can overflow causing small allocation while subsequent operations assume large buffer, leading to heap overflow.",
+          "remediation_logic": "Check for overflow before allocation: if (width > 0 && height > UINT_MAX / width) { handle_error(); }. Use safe arithmetic functions: size_t size; if (!__builtin_mul_overflow(width, height, &size)) { buffer = malloc(size); }. Switch to 64-bit arithmetic for intermediate calculations: uint64_t size = (uint64_t)width * height * bytes_per_pixel; if (size > SIZE_MAX) { handle_error(); }."
+        }
+      ]
+    },
+    {
+      "pattern_id": "XSS-007-REACT-DANGEROUS-HTML",
+      "pattern_id_citation": "https://pragmaticwebsecurity.com/articles/spasecurity/react-xss-part1.html",
+      "structural_flaw_taxonomy": "Cross-Site Scripting vulnerability in React applications where untrusted data rendered as raw HTML bypassing React's automatic escaping. React's default JSX data binding ({variable}) automatically escapes HTML, but dangerouslySetInnerHTML, href attributes with javascript: protocol, and direct DOM manipulation (ref.current.innerHTML) can introduce XSS. URLs in href and src attributes without protocol validation enable javascript: and data: protocol injection.",
+      "structural_flaw_taxonomy_citation": "https://pragmaticwebsecurity.com/articles/spasecurity/react-xss-part1.html",
+      "ast_specification": {
+        "node_types": [
+          {
+            "value": "JSXAttribute"
+          },
+          {
+            "value": "JSXElement"
+          },
+          {
+            "value": "MemberExpression"
+          },
+          {
+            "value": "AssignmentExpression"
+          },
+          {
+            "value": "ObjectExpression"
+          }
+        ],
+        "transformation_rules": "Parse JSX syntax into AST representing component structure. Identify JSXAttribute nodes with specific attribute names (dangerouslySetInnerHTML, href, src). Extract object expressions passed to dangerouslySetInnerHTML with __html property. Track ref usage followed by innerHTML/outerHTML assignments."
+      },
+      "cfg_execution_pathway": {
+        "traversal_algorithm": "Component-level taint analysis tracking data flow from props and state to render output. Follow data through React lifecycle methods (componentDidMount, useEffect) and event handlers. Interprocedural analysis traces data through component composition (parent to child props).",
+        "taint_propagation_logic": "Sources: props values, state variables, URL parameters (location.search, useParams), localStorage, API responses. Sinks: dangerouslySetInnerHTML __html property, href/src attributes without sanitization, ref.current.innerHTML assignments. Sanitizers: DOMPurify.sanitize(), encodeURIComponent() for URLs, validated protocol checks (startsWith('http:') || startsWith('https:')).",
+        "edge_evaluation_criteria": "For dangerouslySetInnerHTML: Check if __html value derived from tainted source without HTML sanitization. For href/src: Check if URL derived from tainted source without protocol validation. For ref.innerHTML: Check if assigned value is tainted without HTML escaping."
+      },
+      "detection_logic_declarative": "# Dangerous HTML injection\npattern: <$EL dangerouslySetInnerHTML={{ __html: $HTML }} />\nwhere:\n  is_tainted($HTML)\n  NOT sanitized_with($HTML, ['DOMPurify.sanitize'])\nreport: \"XSS via dangerouslySetInnerHTML with unsanitized data\"\n\n# JavaScript protocol in href\npattern: <a href={$URL}>\nwhere:\n  is_tainted($URL)\n  NOT validated_protocol($URL, ['http', 'https', 'mailto', 'tel'])\nreport: \"XSS via javascript: protocol in href attribute\"\n\n# Direct DOM manipulation\npattern: $REF.current.innerHTML = $HTML\nwhere:\n  is_tainted($HTML)\n  NOT escaped($HTML)\nreport: \"XSS via direct innerHTML manipulation\"\n\n# Data URI in image source\npattern: <img src={$SRC} />\nwhere:\n  is_tainted($SRC)\n  NOT validated_protocol($SRC, ['http', 'https', 'data'])\n  starts_with($SRC, 'data:text/html')\nreport: \"Potential XSS via data: URI in image source\"",
+      "noise_mitigation_heuristics": [
+        {
+          "value": "Sanitizer recognition: Recognize common sanitization libraries (DOMPurify, sanitize-html) and consider data sanitized if passed through these. Track sanitizer effectiveness - DOMPurify.sanitize() with default config is sufficient, but custom configs may be insufficient."
+        },
+        {
+          "value": "Protocol whitelist validation: For href/src attributes, accept http:, https:, mailto:, tel: as safe protocols. Reject javascript:, data:, vbscript:, file:. Consider relative URLs (starting with / or no protocol) as safe if not attacker-controllable path segments."
+        },
+        {
+          "value": "Component-level escaping detection: React components that explicitly escape output (using lodash.escape, he.encode, or similar) before dangerouslySetInnerHTML considered safe. Track escaping through component boundaries."
+        }
+      ],
+      "framework_implementation_vectors": [
+        {
+          "framework_context": "React web applications using JSX for component rendering. React automatically escapes data in JSX expressions {} but developers may use dangerouslySetInnerHTML for rich text rendering (markdown, WYSIWYG editors, CMS content).",
+          "framework_context_citation": "https://pragmaticwebsecurity.com/articles/spasecurity/react-xss-part1.html",
+          "vulnerability_signature": "<div dangerouslySetInnerHTML={{ __html: userContent }} /> where userContent is derived from user input (props, API response, URL parameter) without HTML sanitization. Attacker provides <img src=x onerror=alert(1)> executing arbitrary JavaScript.",
+          "vulnerability_signature_citation": "https://pragmaticwebsecurity.com/articles/spasecurity/react-xss-part1.html",
+          "remediation_logic": "Sanitize HTML content before rendering: import DOMPurify from 'dompurify'; const clean = DOMPurify.sanitize(userContent); <div dangerouslySetInnerHTML={{ __html: clean }} />. Alternatively, use safe rendering libraries (react-markdown, react-quill) that handle escaping internally.",
+          "remediation_logic_citation": "https://pragmaticwebsecurity.com/articles/spasecurity/react-xss-part1.html"
+        },
+        {
+          "framework_context": "React Router or custom URL handling where href attributes derived from URL parameters or user input. Common in redirect functionality, dynamic navigation menus, and user-generated link collections.",
+          "framework_context_citation": "https://pragmaticwebsecurity.com/articles/spasecurity/react-xss-part1.html",
+          "vulnerability_signature": "const url = new URLSearchParams(window.location.search).get('redirect'); <a href={url}>Click here</a>. Attacker provides ?redirect=javascript:alert(1) enabling script execution on click.",
+          "vulnerability_signature_citation": "https://pragmaticwebsecurity.com/articles/spasecurity/react-xss-part1.html",
+          "remediation_logic": "Validate URL protocol: const isSafeUrl = (url) => { try { const parsed = new URL(url, window.location.origin); return ['http:', 'https:'].includes(parsed.protocol); } catch { return false; } }; if (!isSafeUrl(url)) { url = '/'; } <a href={url}>Click here</a>.",
+          "remediation_logic_citation": "https://pragmaticwebsecurity.com/articles/spasecurity/react-xss-part1.html"
+        }
+      ]
+    }
+  ]
+}

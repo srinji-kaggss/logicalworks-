@@ -1,0 +1,68 @@
+$schema: "https://json-schema.org/draft/2020-12/schema"
+title: "AdvancedAICodebaseIntelligenceSystem"
+description: "Production-grade architectural specification for dynamic Code Graph RAG and real-time AST/Context streaming platforms."
+type: "object"
+required:
+  - ingestion_and_ast_streaming_pipeline
+  - unified_knowledge_graph_and_vector_matrix
+  - context_stream_synthesis_engine
+  - determinism_and_nitpick_attenuation_subsystem
+
+properties:
+
+  ingestion_and_ast_streaming_pipeline:
+    type: "object"
+    description: "Ingests raw code mutations via event streams and extracts low-level semantic tokens."
+    properties:
+      event_broker:
+        type: "string"
+        enum: [ "Kafka", "AWS Kinesis" ]
+        description: "Buffers real-time webhook payloads (GitHub/GitLab App actions) to manage concurrency during large pull requests."
+      incremental_parser_engine:
+        type: "object"
+        description: "Abstract Syntax Tree (AST) generation layer leveraging tree-sitter or native Language Server Protocol (LSP) indexing."
+        properties:
+          parsing_strategy: "Incremental parsing (re-parses only mutated subtrees rather than whole files)."
+          extracted_primitives: [ "Scope Boundaries", "Variable Declarations", "Type Signatures", "Cross-file Import/Export Edges" ]
+
+  unified_knowledge_graph_and_vector_matrix:
+    type: "object"
+    description: "The dual-storage abstraction that represents the codebase both semantically and structurally."
+    properties:
+      vector_space:
+        type: "object"
+        properties:
+          embedding_model: "Code-specific models (e.g., text-embedding-3, voyager-code) optimizing for syntactic similarity."
+          chunking_strategy: "AST-guided chunking. Code is divided strictly by structural boundaries (e.g., function bodies or class structures) rather than arbitrary token counts."
+      graph_database:
+        type: "object"
+        properties:
+          node_types: [ "File", "Directory", "Class", "Interface", "Function", "Commit", "Contributor" ]
+          edge_types: [ "CALLS", "INHERITS", "IMPLEMENTS", "IMPORTS", "DEFINES_VARIABLE" ]
+          engine_type: "Graph databases or specialized in-memory graph indexers optimizing for multi-hop neighborhood traversal."
+
+  context_stream_synthesis_engine:
+    type: "object"
+    description: "The runtime execution core that dynamically generates prompt context for downstream Large Language Models."
+    properties:
+      hybrid_retrieval_router:
+        type: "string"
+        description: "Executes dense vector search for conceptual inquiries and combines it with structural graph-walking to locate up-stream dependencies and down-stream consumers."
+      context_stream_pruning:
+        type: "object"
+        description: "Algorithms responsible for optimizing context token utilization."
+        properties:
+          ranking_algorithm: "Modified PageRank combined with Reciprocal Rank Fusion (RRF) over vector and graph scores."
+          token_budgeting: "Dynamically drops low-priority node definitions to ensure foundational interfaces remain in the immediate context window."
+
+  determinism_and_nitpick_attenuation_subsystem:
+    type: "object"
+    description: "The strict guardrails used during pull request execution to suppress low-value AI noise ('nitpicks')."
+    properties:
+      linters_integration:
+        type: "array"
+        items: { type: "string" }
+        description: "Executes standard tools (ESLint, Ruff, SonarQube) natively. If a problem can be flagged by a linter, it is routing-suppressed from the LLM prompt to eliminate trivial stylistic remarks."
+      few_shot_grounding:
+        type: "string"
+        description: "Injects recent codebase commit histories to learn implicit team patterns (e.g., 'We prefer using early returns over nested if-statements in this repository')."
