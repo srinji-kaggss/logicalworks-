@@ -49,12 +49,23 @@ L5 industry parallel: Apple's on-device intent classification (SiriKit),
 
 from __future__ import annotations
 
+import hashlib
 import json
 import math
 import time
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Optional
+
+# //why a persisted centroid cache: building centroids embeds all ~175 verb
+# intents through the Qwen Eye (qwen3-embedding:8b) one HTTP call at a time —
+# measured at 201s per process start. For a membrane that gates EVERY prompt
+# that is unusable. The centroids are a pure function of (verb signal set,
+# embedder identity), so they are cached on disk and rebuilt only when the
+# manifest verb set or the embedder space changes. Eye-built and hash-built
+# centroids are keyed separately so a stale-space cache can never be reused.
+_CENTROID_CACHE_DIR = Path(__file__).resolve().parent / "store" / "intent"
+_CENTROID_CACHE_SCHEMA = "lgwks.intent.centroids.v1"
 
 # ---------------------------------------------------------------------------
 # Result type
@@ -93,6 +104,18 @@ SEMANTIC_METHODS = frozenset({"coreml", "eye"})
 # any path where a rounded lexical score ties the authority bar.
 LEXICAL_CONFIDENCE_CEILING = 0.74
 
+# //why a margin gate, not just an absolute-confidence floor: measured live, the
+# Qwen Eye compresses ALL cosines into a narrow 0.68–0.83 band, so the absolute
+# score barely separates a clear intent (manifest 0.72) from gibberish (0.68) —
+# the 0.55 floor never fires and authority is mis-gated. The top1−top2 MARGIN
+# separates them cleanly: measured gibberish margin 0.0025 vs real intents
+# 0.030–0.074 (4-sample probe, this session). So an ambiguous query is one where
+# the top two classes nearly tie, regardless of absolute score. This is the
+# consultant "abstain if posterior margin < delta" rule made concrete.
+# HEURISTIC, pending a labeled calibration corpus (see SCIENCE.md §7): 0.02 sits
+# above the gibberish tie and below every measured real margin. Harden with data.
+MARGIN_MIN = 0.02
+
 
 @dataclass
 class ClassifyResult:
@@ -101,12 +124,19 @@ class ClassifyResult:
     top_k: list[tuple[str, float]] = field(default_factory=list)
     inference_ms: float = 0.0
     method: str = "cosine"  # "eye" | "coreml" | "cosine" | "keyword" | "empty" | "error"
+    margin: float = 0.0     # top1 − top2 separation; the ambiguity signal
 
     @property
     def plan_only(self) -> bool:
-        # //why: below the confidence bar OR no usable label → Claude must plan,
-        # not execute. A blank label can never gate authority.
-        return (not self.label) or self.confidence < CONFIDENCE_THRESHOLD
+        # //why three gates: no label, OR weak absolute score, OR the top two
+        # classes nearly tie (low margin = ambiguous, the gibberish signature).
+        # Any one trips PLAN_ONLY — Claude plans, does not execute. The margin gate
+        # is the load-bearing one for the Eye space (see MARGIN_MIN).
+        return (
+            (not self.label)
+            or self.confidence < CONFIDENCE_THRESHOLD
+            or self.margin < MARGIN_MIN
+        )
 
     @property
     def grants_full_authority(self) -> bool:
@@ -185,7 +215,9 @@ class IntentClassifier:
         # its verb id + intent string, so classify() has a real lexical signal
         # instead of collapsing to the keyword-overlap floor (the old bug: load()
         # left centroids=None, so every call fell through to _classify_keyword).
-        centroids, semantic = _build_centroids(verbs)
+        # Cache-first: a 201s rebuild only happens on a verb-set or embedder-space
+        # change; otherwise centroids load from disk in milliseconds.
+        centroids, semantic = _load_or_build_centroids(verbs)
 
         coreml_model = None
         if model_path is None:
@@ -227,6 +259,14 @@ class IntentClassifier:
         # method cannot reach the full-authority bar) is enforced here for every
         # result that leaves classify().
         result.confidence = _clamp_for_method(result.confidence, result.method)
+        # //why compute margin at the single exit: top_k is populated by every
+        # inference path, so the ambiguity signal is uniform regardless of method.
+        # A 0-or-1-candidate result has no runner-up → margin = top1 (treated as
+        # maximally separated, the empty/keyword degenerate cases self-gate elsewhere).
+        if len(result.top_k) >= 2:
+            result.margin = round(result.top_k[0][1] - result.top_k[1][1], 6)
+        elif result.top_k:
+            result.margin = round(result.top_k[0][1], 6)
         result.inference_ms = (time.perf_counter() - t0) * 1000
         return result
 
@@ -341,6 +381,68 @@ def _cosine(a: list[float], b: list[float]) -> float:
     return dot / (na * nb)
 
 
+def _verb_signature(verbs: list[dict]) -> str:
+    # //why hash the (verb, intent) pairs in order: the centroids are a pure
+    # function of exactly this signal set. Any verb added/removed/reworded changes
+    # the hash and forces a rebuild; nothing else does. Sorted-key json so the
+    # signature is stable across dict ordering.
+    payload = json.dumps(
+        [[v.get("verb", ""), v.get("intent", "")] for v in verbs],
+        sort_keys=True, separators=(",", ":"),
+    )
+    return hashlib.sha256(payload.encode("utf-8")).hexdigest()[:16]
+
+
+def _probe_embedder_tag() -> str:
+    # //why probe once, not 175 times: the cache key must encode WHICH space the
+    # centroids live in (Eye vs deterministic hash) so the two never get mixed.
+    # One probe embed reveals is_semantic without paying the full build cost.
+    try:
+        _vec, semantic = _embed("manifest")
+        return "eye" if semantic else "hash"
+    except Exception:
+        return "hash"
+
+
+def _centroid_cache_path(verbs: list[dict], embedder_tag: str) -> Path:
+    return _CENTROID_CACHE_DIR / f"centroids-{embedder_tag}-{_verb_signature(verbs)}.json"
+
+
+def _load_or_build_centroids(verbs: list[dict]) -> tuple[list[list[float]], bool]:
+    """Load cached centroids when the verb set + embedder space match; else build
+    (the slow 175-embed path) and persist. The cache is the difference between a
+    201s load and a millisecond load."""
+    if not verbs:
+        return [], False
+    embedder_tag = _probe_embedder_tag()
+    cache_path = _centroid_cache_path(verbs, embedder_tag)
+    if cache_path.exists():
+        try:
+            data = json.loads(cache_path.read_text(encoding="utf-8"))
+            if (data.get("schema") == _CENTROID_CACHE_SCHEMA
+                    and len(data.get("centroids", [])) == len(verbs)):
+                # //why trust the cache: the filename hash already pins it to this
+                # exact verb set + embedder space; a length match is the final guard.
+                return data["centroids"], bool(data.get("semantic", False))
+        except Exception:
+            pass  # //why swallow: a corrupt cache must never block; rebuild instead.
+    centroids, semantic = _build_centroids(verbs)
+    # //why only cache the Eye space: a hash-built centroid set is cheap to rebuild
+    # and we never want a degraded (Eye-was-down) build to masquerade as semantic on
+    # a later run. Persist either way, keyed by tag, so both spaces stay separated.
+    try:
+        _CENTROID_CACHE_DIR.mkdir(parents=True, exist_ok=True)
+        cache_path.write_text(json.dumps({
+            "schema": _CENTROID_CACHE_SCHEMA,
+            "embedder_tag": embedder_tag,
+            "semantic": semantic,
+            "centroids": centroids,
+        }, separators=(",", ":")), encoding="utf-8")
+    except Exception:
+        pass  # //why swallow: failure to cache must not fail the load.
+    return centroids, semantic
+
+
 def _build_centroids(verbs: list[dict]) -> tuple[list[list[float]], bool]:
     # //why verb id + intent as the class signal: the manifest IS the class
     # schema. A new verb adds a class automatically on the next load. Aligned
@@ -376,6 +478,7 @@ def classify_command(args) -> int:
         "plan_only": result.plan_only,
         "grants_full_authority": result.grants_full_authority,
         "method": result.method,
+        "margin": round(result.margin, 4),
         "inference_ms": round(result.inference_ms, 3),
         "top_k": result.top_k[:3],
     }, indent=2))

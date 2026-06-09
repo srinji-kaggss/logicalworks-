@@ -112,6 +112,17 @@ Tiny-BERT/DistilBERT should answer: "which known command/schema is this?" They
 should not be the main retrieval embedding for site knowledge unless explicitly
 trained and evaluated for that retrieval task.
 
+**Live status (2026-06-09).** The L1 intent membrane (`lgwks_intent_classifier`) is
+functional: it routes through the Qwen Eye (semantic, method `eye`) with a deterministic
+fallback, and its 175-verb centroids are cached (`store/intent/`, 201s→0.09s load).
+Calibration is margin-based — the top1−top2 separation, not the absolute cosine, gates
+abstention (gibberish → `plan_only`). On top of L1, the **Human Assumption Decoder**
+(`lgwks_had`) turns an utterance into a typed intent + a scored assumption ledger that
+abstains to human review on low confidence or risky verbs. Two more owned organs landed
+alongside: `lgwks_algorithms` (L4 narrow-ML: spike/trend/logistic, deferral registry) and
+`lgwks_sast` (a real CFG + flow-sensitive taint static-review engine, 6 CWE classes live).
+See `spec/second-harness/BUILDLOG-model-stack.md` for the build log + deferral ledger.
+
 ### 7. JEPA
 
 The current `lgwks jepa` is a runtime package surface, not a trained JEPA model.

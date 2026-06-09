@@ -279,7 +279,13 @@ def _make(
     evidence: list[dict],
     tags: list[str],
     symbol: Optional[str] = None,
+    created_at: Optional[str] = None,
 ) -> dict:
+    # //why created_at is injected, not stamped here: a per-finding datetime.now()
+    # made two identical scans of identical code produce non-equal records, which
+    # breaks replay/determinism (doctrine T4) and diffing. The finding fingerprint
+    # already excludes the timestamp; now the timestamp itself is stamped ONCE per
+    # run() and threaded down, so a run over unchanged code is byte-reproducible.
     return {
         "schema": artifacts.BOT_RECORD_SCHEMA,
         "run_id": run_id,
@@ -293,11 +299,12 @@ def _make(
         "evidence": evidence,
         "links": {"repo": repo, "file": file, "symbol": symbol},
         "tags": tags,
-        "created_at": _ts(),
+        "created_at": created_at or _ts(),
     }
 
 
-def _failure_record(run_id: str, repo: str, file: str, reason: str) -> dict:
+def _failure_record(run_id: str, repo: str, file: str, reason: str,
+                    created_at: Optional[str] = None) -> dict:
     return _make(
         run_id=run_id, repo=repo, file=file,
         kind="analyzer_failure",
@@ -306,6 +313,7 @@ def _failure_record(run_id: str, repo: str, file: str, reason: str) -> dict:
         confidence=1.0,
         evidence=[{"type": "trace", "name": "error", "value": reason[:300]}],
         tags=["analyzer", "parse-error"],
+        created_at=created_at,
     )
 
 
@@ -322,11 +330,13 @@ class _Visitor(ast.NodeVisitor):
     This version uses TaintTracker for structured source→sink flow
     reporting, which gives fraud-engine-quality explainability."""
 
-    def __init__(self, rel: str, run_id: str, repo: str, baseline: Baseline | None = None) -> None:
+    def __init__(self, rel: str, run_id: str, repo: str, baseline: Baseline | None = None,
+                 created_at: Optional[str] = None) -> None:
         self.rel = rel
         self.run_id = run_id
         self.repo = repo
         self.baseline = baseline
+        self.created_at = created_at  # //why: one run timestamp, threaded for replay determinism
         self.findings: list[dict] = []
         self.taint = TaintTracker()
         self._net_safe = _is_net_safe(rel)
@@ -343,6 +353,7 @@ class _Visitor(ast.NodeVisitor):
                 run_id=self.run_id, repo=self.repo, file=self.rel,
                 kind=kind, summary=summary, severity=severity,
                 confidence=confidence, evidence=evidence, tags=tags, symbol=symbol,
+                created_at=self.created_at,
             )
             fp = _finding_fingerprint(rec)
             if self.baseline.is_suppressed(fp):
@@ -355,6 +366,7 @@ class _Visitor(ast.NodeVisitor):
             run_id=self.run_id, repo=self.repo, file=self.rel,
             kind=kind, summary=summary, severity=risk.severity(),
             confidence=risk.final, evidence=evidence, tags=tags, symbol=symbol,
+            created_at=self.created_at,
         ))
 
     # ── H1: dangerous shell execution ────────────────────────────────────────
@@ -494,15 +506,16 @@ class _Visitor(ast.NodeVisitor):
 
 # ── File scanner ────────────────────────────────────────────────────────────
 
-def _scan_file(path: Path, rel: str, run_id: str, repo: str, baseline: Baseline | None) -> list[dict]:
+def _scan_file(path: Path, rel: str, run_id: str, repo: str, baseline: Baseline | None,
+               created_at: Optional[str] = None) -> list[dict]:
     try:
         source = path.read_text(encoding="utf-8", errors="replace")
         tree = ast.parse(source, filename=str(path))
     except SyntaxError as exc:
-        return [_failure_record(run_id, repo, rel, str(exc))]
+        return [_failure_record(run_id, repo, rel, str(exc), created_at=created_at)]
     except Exception as exc:
-        return [_failure_record(run_id, repo, rel, str(exc))]
-    v = _Visitor(rel, run_id, repo, baseline=baseline)
+        return [_failure_record(run_id, repo, rel, str(exc), created_at=created_at)]
+    v = _Visitor(rel, run_id, repo, baseline=baseline, created_at=created_at)
     v.visit(tree)
     return v.findings
 
@@ -516,6 +529,7 @@ def run(
     run_id: Optional[str] = None,
     baseline_path: Optional[Path] = None,
     emit_sarif: bool = False,
+    created_at: Optional[str] = None,
 ) -> list[dict]:
     """
     Scan *repo* for H1–H4 findings with enterprise fraud-engine quality.
@@ -535,6 +549,11 @@ def run(
     repo_str = str(repo)
     if run_id is None:
         run_id = "code-hacker:" + _run_seed(repo_str)
+    # //why one timestamp for the whole run: stamped here and threaded into every
+    # finding so a re-scan of unchanged code is byte-identical (T4 determinism).
+    # Callers may pin it explicitly (tests, replay) for full reproducibility.
+    if created_at is None:
+        created_at = _ts()
 
     baseline = Baseline(baseline_path)
 
@@ -555,7 +574,7 @@ def run(
         p = Path(path)
         if not p.is_file():
             continue
-        findings.extend(_scan_file(p, rel, run_id, repo_str, baseline))
+        findings.extend(_scan_file(p, rel, run_id, repo_str, baseline, created_at=created_at))
 
     # Persist new baseline
     if baseline_path:
