@@ -141,6 +141,27 @@ class TestGateBehavior(_Hermetic):
         self.assertTrue(r.plan_only)
         self.assertFalse(r.grants_full_authority)
 
+    def test_low_margin_forces_plan_only(self):
+        # //why: the Eye compresses cosines into a narrow band, so a near-tie at
+        # the top (low top1−top2 margin) is the real ambiguity signal — measured
+        # gibberish margin ~0.0025 vs real intents 0.030+. A high absolute score
+        # with a near-tie must still abstain.
+        ambiguous = ic.ClassifyResult(
+            label="manifest", confidence=0.72, method="eye",
+            top_k=[("manifest", 0.701), ("agent-os bootstrap", 0.700)],
+            margin=0.001,
+        )
+        self.assertLess(ambiguous.margin, ic.MARGIN_MIN)
+        self.assertTrue(ambiguous.plan_only)
+
+    def test_clear_margin_allows_execution(self):
+        clear = ic.ClassifyResult(
+            label="manifest", confidence=0.72, method="eye",
+            top_k=[("manifest", 0.72), ("other", 0.62)], margin=0.10,
+        )
+        self.assertGreaterEqual(clear.margin, ic.MARGIN_MIN)
+        self.assertFalse(clear.plan_only)
+
     def test_classify_is_deterministic(self):
         clf = _classifier()
         a = clf.classify("list the manifest verbs and tool surface")
