@@ -292,6 +292,31 @@ def build_run(args: argparse.Namespace) -> dict[str, Any]:
                     "chunk_kind": chunk_kind,
                 })
 
+    # ── Concept extraction (what things mean, not just what was said) ────────────
+    cg = None
+    if chunk_rows:
+        import lgwks_concept as concept_mod
+        cg = concept_mod.extract_from_chunks(chunk_rows, domain_hints=getattr(args, "concept_hints", None))
+        cg.export_json(run_dir / "concepts.json")
+        concept_vector_rows = [
+            {
+                "concept_id": c.concept_id,
+                "concept_slug": c.slug,
+                "label": c.label,
+                "type": c.concept_type,
+                "definition": c.definition,
+                "aliases": c.aliases,
+                "attributes": c.attributes,
+                "occurrences": c.occurrences,
+                "confidence": c.confidence,
+                "source_chunks": c.source_chunks,
+            }
+            for c in cg._by_slug.values()
+        ]
+        io._emit_jsonl(run_dir / "concepts.jsonl", concept_vector_rows)
+    else:
+        io._emit_jsonl(run_dir / "concepts.jsonl", [])
+
     io._emit_jsonl(run_dir / "sources.jsonl", source_rows)
     io._emit_jsonl(run_dir / "documents.jsonl", doc_rows)
     io._emit_jsonl(run_dir / "chunks.jsonl", chunk_rows)
