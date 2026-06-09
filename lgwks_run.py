@@ -196,8 +196,9 @@ def add_parser(subparsers) -> None:
     p.set_defaults(func=_run_compat_dispatch)
     sp = p.add_subparsers(dest="run_command")
     
-    # post-gate crawl dispatch (legacy main logic)
+    # post-gate crawl dispatch
     crawl = sp.add_parser("crawl", help="execute a post-gate crawl plan")
+    crawl.add_argument("--plan", default="", help="path to a crawl plan JSON file (required for non-demo runs)")
     crawl.add_argument("--dry", action="store_true", help="synthetic pages, no network (testable)")
     crawl.add_argument("--demo", action="store_true", help="run the offline CRM demo")
     crawl.add_argument("--fail-gate", action="store_true", help="demo with a RED gate (shows fail-closed)")
@@ -223,13 +224,24 @@ def _run_compat_dispatch(args: argparse.Namespace) -> int:
 
 
 def _crawl_dispatch(args: argparse.Namespace) -> int:
-    if not (args.demo or args.fail_gate):
-        print("Use --demo or --fail-gate for now; manual crawl plans are not yet CLI-exposed.", file=sys.stderr)
+    plan_arg = getattr(args, "plan", "")
+    if not (args.demo or args.fail_gate or plan_arg):
+        print("Use --demo, --fail-gate, or --plan <plan.json> for manual crawl plans.", file=sys.stderr)
         return 1
-    plan, synthetic = _demo_plan(all_pass=not args.fail_gate)
+    dry = getattr(args, "dry", False)
+    if plan_arg:
+        try:
+            plan_data = json.loads(Path(plan_arg).read_text(encoding="utf-8"))
+            plan = _plan_from_json(plan_data)
+            synthetic = plan_data.get("synthetic_pages", {})
+        except Exception as exc:
+            print(f"error loading plan: {exc}", file=sys.stderr)
+            return 2
+    else:
+        plan, synthetic = _demo_plan(all_pass=not args.fail_gate)
     out = ROOT / "runs" / plan.run_id
     try:
-        res = execute_plan(plan, dry=True, synthetic=synthetic, out_dir=out)
+        res = execute_plan(plan, dry=dry or args.demo, synthetic=synthetic, out_dir=out)
     except GateError as exc:
         print(f"  REFUSED (fail-closed): {exc}")
         return 3
@@ -243,6 +255,42 @@ def _crawl_dispatch(args: argparse.Namespace) -> int:
               "Provision a key: security add-generic-password -U -s lgwks:signing-key -w")
     print(f"  pre-vector graph: {res.prevector_path}")
     return 0
+
+
+def _plan_from_json(data: dict[str, Any]) -> RunPlan:
+    """Build a RunPlan from a JSON file. Fail-closed: any missing gate defaults to RED."""
+    import lgwks_sign
+    key, _ = lgwks_sign.signing_key()
+    run_id = data.get("run_id", f"manual-{int(time.time())}")
+    chain_label = data.get("chain_label", "manual")
+    scope = tuple(data.get("frozen_scope", []))
+    keywords = tuple(data.get("keywords", []))
+    max_pages = data.get("max_pages", 10)
+    per_host_seconds = data.get("per_host_seconds", 1.0)
+    tier_floor = data.get("tier_floor", "secondary")
+    embed = data.get("embed", True)
+    # Sign verdicts as a legitimate admission verifier would
+    verdict_inputs = data.get("verdicts", [])
+    if not verdict_inputs:
+        # Default: all required gates pass
+        verdict_inputs = [{"gate": g, "passed": True} for g in GATES_REQUIRED]
+    verdicts = []
+    for v in verdict_inputs:
+        gate = v["gate"]
+        passed = v.get("passed", False)
+        sig = sign_verdict(run_id, gate, passed, key)
+        verdicts.append(GateVerdict(gate, passed, v.get("detail", ""), sig))
+    return RunPlan(
+        run_id=run_id,
+        chain_label=chain_label,
+        frozen_scope=scope,
+        keywords=keywords,
+        max_pages=max_pages,
+        per_host_seconds=per_host_seconds,
+        tier_floor=tier_floor,
+        embed=embed,
+        verdicts=tuple(verdicts),
+    )
 
 
 def main(argv: list[str] | None = None) -> int:

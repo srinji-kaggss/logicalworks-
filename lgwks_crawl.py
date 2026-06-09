@@ -20,7 +20,7 @@ from pathlib import Path
 from typing import Any
 
 import lgwks_ui as ui
-from lgwks_browser import _remote_allowed, available as _browser_available
+from lgwks_browser import _remote_allowed, _session_for_url, _headers, _route_handler, available as _browser_available
 from lgwks_html import html_to_markdown
 
 
@@ -101,8 +101,13 @@ def crawl_page(
     scroll: bool = True,
     timeout: int = 30000,
     browser_engine: str = "chromium",
+    *,
+    use_session: bool = False,
 ) -> CrawlResult:
-    """Crawl a single page with stealth browser."""
+    """Crawl a single page with stealth browser.
+
+    use_session loads the saved session for this host from ~/.config/lgwks/sessions/.
+    """
     if not _remote_allowed(url):
         return CrawlResult(url=url, ok=False, reason="blocked URL")
     ok, why = _browser_available()
@@ -127,6 +132,11 @@ def crawl_page(
                     "--disable-features=IsolateOrigins,site-per-process",
                 ]
             browser = engine.launch(**launch_kwargs)
+            # Session-aware context: load saved session if present, inject auth headers
+            session_path = _session_for_url(url)
+            storage = str(session_path) if (use_session or session_path) and session_path else None
+            lock_host = urllib.parse.urlparse(url).hostname or ""
+            auth_headers = _headers(url)
             ctx = browser.new_context(
                 user_agent=fp["user_agent"],
                 viewport=fp["viewport"],
@@ -134,7 +144,10 @@ def crawl_page(
                 timezone_id=fp["timezone"],
                 color_scheme=fp["color_scheme"],
                 reduced_motion=fp["reduced_motion"],
+                storage_state=storage,
             )
+            if auth_headers:
+                ctx.route("**/*", _route_handler(lock_host, auth_headers))
             page = ctx.new_page()
             _inject_stealth(page)
 

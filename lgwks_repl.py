@@ -34,7 +34,7 @@ HISTORY_PATH.parent.mkdir(parents=True, exist_ok=True)
 _DOMAINS: dict[str, list[str]] = {
     "Research":  ["jarvis", "fetch", "refine", "preview", "extract", "convert",
                   "x", "manifest", "login", "cohere", "comprehend", "geo", "public",
-                  "akinator", "run", "context", "model-hub"],
+                  "akinator", "run", "context", "model-hub", "workflow"],
     "GitHub":    ["gh"],
     "DevOps":    ["repo", "review", "session", "project", "batch", "refactor", "hooks", "agent-os"],
     "System":    ["solve", "debug", "doctor", "intent", "entity-graph", "graph",

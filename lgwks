@@ -1451,6 +1451,10 @@ def build_parser() -> argparse.ArgumentParser:
     import lgwks_aup
     lgwks_aup.add_parser(sub)
 
+    # workflow — unified AI workflow harness
+    import lgwks_workflows
+    lgwks_workflows.add_parser(sub)
+
     # do — unified orchestrator: code, research, govern, cleanup, ship
     import lgwks_do
     lgwks_do.add_parser(sub)
