@@ -94,7 +94,13 @@ class TestSubstrateBuild(unittest.TestCase):
                 "max_clicks_per_page": 20,
             })()
 
-            with mock.patch.object(substrate.lgwks_run, "embed", return_value=([0.1, 0.2, 0.3], "ollama:qwen3-embedding:8b", True)):
+            with mock.patch.object(
+                substrate.lgwks_run, "embed_dual",
+                return_value={
+                    "det": {"vector": [0.1, 0.2, 0.3], "provider": "deterministic-feature-hash", "dims": 3},
+                    "sem": {"vector": [0.1, 0.2, 0.3], "provider": "ollama:qwen3-embedding:8b", "dims": 3},
+                }
+            ):
                 with mock.patch.object(substrate, "GLOBAL_FACT_DB", Path(td) / "global-facts.db"):
                     manifest = substrate.build_run(args)
 
@@ -103,8 +109,12 @@ class TestSubstrateBuild(unittest.TestCase):
             facts = [json.loads(line) for line in (run_dir / "facts.jsonl").read_text(encoding="utf-8").splitlines()]
             self.assertTrue(any("T2033" in row["fact_text"] for row in facts))
             vectors = [json.loads(line) for line in (run_dir / "vectors.jsonl").read_text(encoding="utf-8").splitlines()]
-            self.assertTrue(all(row["provider"] == "ollama:qwen3-embedding:8b" for row in vectors))
-            self.assertGreaterEqual(manifest["embedding"]["semantic_vectors"], len(vectors))
+            sem_count = sum(1 for row in vectors if row["is_semantic"])
+            det_count = len(vectors) - sem_count
+            self.assertTrue(sem_count > 0, "at least one semantic vector must exist")
+            self.assertTrue(det_count > 0, "at least one deterministic vector must exist")
+            # manifest.semantic_vectors counts ALL semantic vectors (chunk + fact)
+            self.assertGreaterEqual(manifest["embedding"]["semantic_vectors"], sem_count)
             self.assertGreater(manifest["embedding"]["global_fact_vectors_written"], 0)
             self.assertTrue(Path(manifest["global_artifacts"]["fact_vector_db"]).exists())
 
@@ -744,15 +754,18 @@ class TestVectorSpaceIdentity(unittest.TestCase):
             })()
 
             with mock.patch.object(
-                substrate.lgwks_run, "embed",
-                return_value=([0.5, 0.6, 0.7], "deterministic", False)
+                substrate.lgwks_run, "embed_dual",
+                return_value={
+                    "det": {"vector": [0.5, 0.6, 0.7], "provider": "deterministic-feature-hash", "dims": 3},
+                    "sem": {"vector": [0.5, 0.6, 0.7], "provider": "ollama:qwen3-embedding:8b", "dims": 3},
+                }
             ):
                 with mock.patch.object(substrate, "GLOBAL_FACT_DB", Path(td) / "gfv.db"):
                     manifest = substrate.build_run(args)
 
         self.assertIn("vector_space", manifest)
         vs = manifest["vector_space"]
-        self.assertEqual(vs["canonical_provider"], "deterministic")
+        self.assertEqual(vs["canonical_provider"], "ollama:qwen3-embedding:8b")
         self.assertFalse(vs["ambiguous"])
         # Verify it was written to disk too
         run_dir = Path(manifest["artifacts"]["root"])

@@ -410,7 +410,8 @@ def _repo_for_command(verb: str, repo: Path | None) -> list[str]:
 _DOMAINS: dict[str, list[str]] = {
     "Research":  ["jarvis", "fetch", "refine", "preview", "extract", "convert",
                   "x", "manifest", "login", "cohere", "comprehend", "geo", "public",
-                  "akinator", "run", "context", "model-hub", "capture", "jepa"],
+                  "akinator", "run", "context", "model-hub", "capture", "jepa",
+                  "workflow"],
     "GitHub":    ["gh"],
     "DevOps":    ["repo", "review", "session", "project", "batch", "refactor", "hooks", "agent-os", "portal", "do"],
     "System":    ["solve", "debug", "doctor", "intent", "entity-graph", "graph",

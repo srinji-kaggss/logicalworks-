@@ -325,13 +325,22 @@ def build_run(args: argparse.Namespace) -> dict[str, Any]:
 
     _unique_providers = dict(provider_counts)
     _unique_dims: set[int] = {row["dims"] for row in vector_rows if row.get("dims")}
-    _ambiguous_vs = len(_unique_providers) > 1 or len(_unique_dims) > 1
+    # Dual-vector runs (det 256-d + sem 4096-d) are intentionally bilingual, not ambiguous.
+    # Ambiguity means >1 semantic provider flapping OR >2 dims (model switching mid-run).
+    _ambiguous_vs = len(_unique_providers) > 2 or len(_unique_dims) > 2
     if _ambiguous_vs:
         _canonical_provider = ""
         _canonical_dims = 0
     else:
-        _canonical_provider = next(iter(_unique_providers), "")
-        _canonical_dims = next(iter(_unique_dims), 0)
+        # Prefer semantic provider as canonical (not deterministic fallback)
+        _canonical_provider = next(
+            (p for p in _unique_providers if "deterministic" not in p),
+            next(iter(_unique_providers), "")
+        )
+        _canonical_dims = next(
+            (row["dims"] for row in vector_rows if row.get("dims") and "deterministic" not in row.get("provider", "")),
+            next(iter(_unique_dims), 0)
+        )
     _canonical_model = args.embed_model or ""
     _is_semantic = semantic_vectors > 0
 

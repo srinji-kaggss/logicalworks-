@@ -356,7 +356,12 @@ class TestBuildManifestRecordsAppleLocal(unittest.TestCase):
                         "depth": 0,
                     }
                 ], [])
-                manifest = lgwks_substrate.build_run(args)
+                # embed_dual returns {"det": {...}, "sem": {...}}
+                def _fake_embed_dual(text, embed_on, provider="auto", **kw):
+                    return {"det": {"vector": fake_vec, "provider": "deterministic-feature-hash", "dims": len(fake_vec)},
+                            "sem": {"vector": fake_vec, "provider": apple_label, "dims": len(fake_vec)}}
+                with mock.patch("lgwks_run.embed_dual", side_effect=_fake_embed_dual):
+                    manifest = lgwks_substrate.build_run(args)
 
         return manifest
 
