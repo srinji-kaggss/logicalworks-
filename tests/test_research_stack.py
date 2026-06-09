@@ -255,7 +255,7 @@ class TestManifest(unittest.TestCase):
         live = man._collect_verbs()
         for expected in ("manifest", "extract", "convert", "solve", "x", "refine", "store",
                          "jarvis crawl", "memory init", "project plan", "geo compile",
-                         "agent-os", "auth", "akinator", "run", "context", "foundation",
+                         "agent-os bootstrap", "auth", "akinator", "run", "context", "foundation",
                          "portal build", "capture build",
                          "keyvault", "model-hub"):
             self.assertIn(expected, live, f"{expected!r} must appear in the live verb surface")

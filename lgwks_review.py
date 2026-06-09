@@ -447,6 +447,10 @@ def review_command(args: argparse.Namespace) -> int:
     elif getattr(args, "ref", "") != "HEAD":
         files, _ = _git_diff(repo, args.ref)
         changed_files = files
+    elif getattr(args, "bots", "") not in ("", "all"):
+        # Auto-detect changed files for bounded bot runs with no explicit scope
+        files, _ = _git_diff(repo, "HEAD")
+        changed_files = files
 
     # 1. Load or refresh graph
     try:
@@ -499,13 +503,7 @@ def review_command(args: argparse.Namespace) -> int:
         elif bot_name == "slop_math":
             import lgwks_bot_slop_math as slop
             try:
-                slop_findings = slop.run_all(repo, graph=graph, run_id=run_id)
-                if changed_files:
-                    changed_set = set(changed_files)
-                    slop_findings = [
-                        f for f in slop_findings
-                        if (f["links"].get("file") in changed_set) or (f["target"]["id"] in changed_set)
-                    ]
+                slop_findings = slop.run_all(repo, graph=graph, run_id=run_id, changed_files=changed_files)
                 all_findings.extend(slop_findings)
             except Exception as exc:
                 print(f"warning: slop_math bot failed: {exc}", file=sys.stderr)

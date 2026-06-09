@@ -461,9 +461,78 @@ def doctor() -> dict:
     }
 
 
+# ---------------------------------------------------------------------------
+# CLI wiring — add_parser() for the lgwks shell + internal main()
+# ---------------------------------------------------------------------------
+
+def _agent_os_command(args: argparse.Namespace) -> int:
+    """Dispatch agent-os subcommands. Called from lgwks shell or main()."""
+    cmd = getattr(args, "agent_os_command", "")
+    if cmd == "bootstrap":
+        write_agent_cards()
+        print(json.dumps({"results": bootstrap_context()}, indent=2))
+        return 0
+    if cmd == "cards":
+        out = write_agent_cards()
+        print(str(out))
+        return 0
+    if cmd == "fleet":
+        orch = FleetOrchestrator()
+        fleet_cmd = getattr(args, "fleet_command", "")
+        if fleet_cmd == "agents":
+            agents = orch.scan_agents()
+            print(json.dumps({"agents": [{"id": a.id, "name": a.name, "branch": a.branch_template} for a in agents.values()]}, indent=2))
+            return 0
+        if fleet_cmd == "spawn":
+            prompt = Path(args.prompt).read_text(encoding="utf-8")
+            ctx = {}
+            if getattr(args, "context", None):
+                ctx = json.loads(Path(args.context).read_text(encoding="utf-8"))
+            record = orch.spawn(args.agent, prompt, ctx)
+            print(json.dumps({
+                "agent_id": record.agent_id,
+                "branch": record.branch,
+                "worktree": str(record.worktree_path),
+                "status": record.status,
+            }, indent=2))
+            return 0
+        if fleet_cmd == "audit":
+            log = _AUDIT_LOG
+            lines: list[dict] = []
+            if log.exists():
+                lines = [json.loads(line) for line in log.read_text(encoding="utf-8").splitlines() if line.strip()]
+            print(json.dumps({"count": len(lines), "last": lines[-10:]}, indent=2))
+            return 0
+    # Default: doctor (also handles the "doctor" subcommand)
+    result = doctor()
+    print(json.dumps(result, indent=2))
+    return 0 if result["ok"] else 1
+
+
+def add_parser(sub) -> None:
+    """Register agent-os subcommands into the lgwks shell parser."""
+    p = sub.add_parser("agent-os", help="fleet startup/bootstrap helpers")
+    ps = p.add_subparsers(dest="agent_os_command", required=True)
+
+    ps.add_parser("bootstrap", help="create/refresh prompts/context symlinks from the manifest")
+    ps.add_parser("doctor", help="verify startup prompt bundle, context links, and role subagents")
+    ps.add_parser("cards", help="write role agent cards")
+
+    fleet_parser = ps.add_parser("fleet", help="fleet orchestrator commands")
+    fleet_sub = fleet_parser.add_subparsers(dest="fleet_command", required=True)
+    fleet_sub.add_parser("agents", help="list parsed agent manifests")
+    spawn_p = fleet_sub.add_parser("spawn", help="spawn an agent in a git worktree")
+    spawn_p.add_argument("--agent", required=True, help="agent id to spawn")
+    spawn_p.add_argument("--prompt", required=True, help="path to prompt markdown file")
+    spawn_p.add_argument("--context", help="path to context JSON file")
+    fleet_sub.add_parser("audit", help="show last fleet-audit.jsonl entries")
+
+    p.set_defaults(func=_agent_os_command)
+
+
 def main(argv: list[str] | None = None) -> int:
     p = argparse.ArgumentParser(prog="lgwks_agent_os", description="fleet startup/bootstrap helpers")
-    sub = p.add_subparsers(dest="command", required=True)
+    sub = p.add_subparsers(dest="agent_os_command", required=True)
     sub.add_parser("bootstrap", help="create/refresh prompts/context symlinks from the manifest")
     sub.add_parser("doctor", help="verify startup prompt bundle, context links, and role subagents")
     sub.add_parser("cards", help="write role agent cards")
@@ -477,42 +546,7 @@ def main(argv: list[str] | None = None) -> int:
     spawn_p.add_argument("--context", help="path to context JSON file")
     fleet_sub.add_parser("audit", help="show last fleet-audit.jsonl entries")
     args = p.parse_args(argv)
-    if args.command == "bootstrap":
-        write_agent_cards()
-        print(json.dumps({"results": bootstrap_context()}, indent=2))
-        return 0
-    if args.command == "cards":
-        out = write_agent_cards()
-        print(str(out))
-        return 0
-    if args.command == "fleet":
-        orch = FleetOrchestrator()
-        if args.fleet_command == "agents":
-            agents = orch.scan_agents()
-            print(json.dumps({"agents": [{"id": a.id, "name": a.name, "branch": a.branch_template} for a in agents.values()]}, indent=2))
-            return 0
-        if args.fleet_command == "spawn":
-            prompt = Path(args.prompt).read_text(encoding="utf-8")
-            ctx = {}
-            if args.context:
-                ctx = json.loads(Path(args.context).read_text(encoding="utf-8"))
-            record = orch.spawn(args.agent, prompt, ctx)
-            print(json.dumps({
-                "agent_id": record.agent_id,
-                "branch": record.branch,
-                "worktree": str(record.worktree_path),
-                "status": record.status,
-            }, indent=2))
-            return 0
-        if args.fleet_command == "audit":
-            log = _AUDIT_LOG
-            lines = []
-            if log.exists():
-                lines = [json.loads(line) for line in log.read_text(encoding="utf-8").splitlines() if line.strip()]
-            print(json.dumps({"count": len(lines), "last": lines[-10:]}, indent=2))
-            return 0
-    print(json.dumps(doctor(), indent=2))
-    return 0 if doctor()["ok"] else 1
+    return _agent_os_command(args)
 
 
 if __name__ == "__main__":

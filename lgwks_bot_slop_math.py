@@ -415,8 +415,15 @@ def run_s4_proof_gap(repo: Path | str, run_id: Optional[str] = None) -> list[dic
 
 # ── S5 — Dead abstraction bot ─────────────────────────────────────────────────
 
-def run_s5_dead_abstraction(repo: Path | str, run_id: Optional[str] = None) -> list[dict]:
-    """Detect definitions that are never referenced outside their own file."""
+def run_s5_dead_abstraction(
+    repo: Path | str,
+    run_id: Optional[str] = None,
+    changed_files: Optional[list[str]] = None,
+) -> list[dict]:
+    """Detect definitions that are never referenced outside their own file.
+
+    O(n) algorithm: single-pass global reference index, not per-definition file reads.
+    """
     repo = Path(repo).resolve()
     repo_str = str(repo)
     if run_id is None:
@@ -424,9 +431,32 @@ def run_s5_dead_abstraction(repo: Path | str, run_id: Optional[str] = None) -> l
     bot = f"{_BOT_PREFIX}.dead_abstraction"
     findings: list[dict] = []
 
-    # pass 1: collect all defined public names per file
-    defined: dict[str, list[tuple[str, int]]] = {}  # rel_path -> [(name, lineno)]
-    for path in _py_files(repo):
+    py_paths = _py_files(repo)
+    if changed_files:
+        changed_set = set(changed_files)
+        py_paths = [p for p in py_paths if _rel(p, repo) in changed_set]
+        if not py_paths:
+            return findings
+
+    # pass 1: build global reference index (single scan of all files)
+    global_ref_count: dict[str, int] = defaultdict(int)
+    global_ref_files: dict[str, set[str]] = defaultdict(set)
+
+    all_py = _py_files(repo)
+    for path in all_py:
+        rel = _rel(path, repo)
+        try:
+            source = path.read_text(encoding="utf-8", errors="replace")
+        except Exception:
+            continue
+        tokens = set(re.findall(r"\b([A-Za-z_][A-Za-z0-9_]+)\b", source))
+        for tok in tokens:
+            global_ref_count[tok] += source.count(tok)
+            global_ref_files[tok].add(rel)
+
+    # pass 2: collect definitions (scoped to changed_files if provided)
+    defined: dict[str, list[tuple[str, int]]] = {}
+    for path in py_paths:
         rel = _rel(path, repo)
         try:
             tree = ast.parse(path.read_text(encoding="utf-8", errors="replace"))
@@ -439,33 +469,21 @@ def run_s5_dead_abstraction(repo: Path | str, run_id: Optional[str] = None) -> l
                     names.append((node.name, node.lineno))
         defined[rel] = names
 
-    # pass 2: collect all name references across the repo
-    all_refs: set[str] = set()
-    for path in _py_files(repo):
-        try:
-            source = path.read_text(encoding="utf-8", errors="replace")
-        except Exception:
-            continue
-        # fast grep: any identifier token usage
-        all_refs.update(re.findall(r"\b([A-Za-z_][A-Za-z0-9_]+)\b", source))
-
+    # pass 3: check each defined name against global index
     for rel, names in defined.items():
-        src_rel = rel
         for name, lineno in names:
-            # skip: if the only reference is the definition itself, it's a candidate
-            # //why: we count refs across ALL files; a name seen only once (the def) is unused
-            count = sum(1 for path in _py_files(repo)
-                        if name in path.read_text(encoding="utf-8", errors="replace"))
-            if count <= 1:  # defined but not used elsewhere
+            other_refs = global_ref_files.get(name, set()) - {rel}
+            if not other_refs:
                 findings.append(_make(
                     run_id=run_id, bot=bot, repo=repo_str,
                     kind="dead_abstraction",
-                    summary=f"'{name}' in {src_rel} appears unreferenced across the repo",
+                    summary=f"'{name}' in {rel} appears unreferenced across the repo",
                     severity="info", confidence=0.6,
                     evidence=[{"type": "file_excerpt", "name": "lineno", "value": lineno},
-                              {"type": "metric", "name": "reference_count", "value": count}],
+                              {"type": "metric", "name": "reference_count",
+                               "value": global_ref_count.get(name, 0)}],
                     tags=["abstraction", "dead-code", "s5"],
-                    file=src_rel, symbol=name,
+                    file=rel, symbol=name,
                 ))
 
     return findings
@@ -473,7 +491,11 @@ def run_s5_dead_abstraction(repo: Path | str, run_id: Optional[str] = None) -> l
 
 # ── S6 — Contradiction bot ────────────────────────────────────────────────────
 
-def run_s6_contradiction(repo: Path | str, run_id: Optional[str] = None) -> list[dict]:
+def run_s6_contradiction(
+    repo: Path | str,
+    run_id: Optional[str] = None,
+    changed_files: Optional[list[str]] = None,
+) -> list[dict]:
     """Detect conflicting constants and stale assumptions across files."""
     repo = Path(repo).resolve()
     repo_str = str(repo)
@@ -482,16 +504,22 @@ def run_s6_contradiction(repo: Path | str, run_id: Optional[str] = None) -> list
     bot = f"{_BOT_PREFIX}.contradiction"
     findings: list[dict] = []
 
-    # collect module-level constant assignments: name -> {value -> [file]}
+    py_paths = _py_files(repo)
+    if changed_files:
+        changed_set = set(changed_files)
+        py_paths = [p for p in py_paths if _rel(p, repo) in changed_set]
+        if not py_paths:
+            return findings
+
     constant_map: dict[str, dict[str, list[str]]] = defaultdict(lambda: defaultdict(list))
 
-    for path in _py_files(repo):
+    for path in py_paths:
         rel = _rel(path, repo)
         try:
             tree = ast.parse(path.read_text(encoding="utf-8", errors="replace"))
         except Exception:
             continue
-        for node in ast.iter_child_nodes(tree):  # module-level only
+        for node in ast.iter_child_nodes(tree):
             if isinstance(node, ast.Assign):
                 for tgt in node.targets:
                     if isinstance(tgt, ast.Name) and tgt.id.isupper() and len(tgt.id) >= 3:
@@ -549,8 +577,13 @@ def run_all(
     repo: Path | str,
     graph: Optional[Any] = None,
     run_id: Optional[str] = None,
+    changed_files: Optional[list[str]] = None,
 ) -> list[dict]:
-    """Run S1–S6; S1 skipped when graph is None."""
+    """Run S1–S6; S1 skipped when graph is None.
+
+    When *changed_files* is provided, S5 and S6 restrict scope to those files
+    for O(n) bounded performance on large repos.
+    """
     repo = Path(repo).resolve()
     repo_str = str(repo)
     if run_id is None:
@@ -562,6 +595,6 @@ def run_all(
     findings.extend(run_s2_naming_bot(repo, run_id=run_id))
     findings.extend(run_s3_spec_drift(repo, run_id=run_id))
     findings.extend(run_s4_proof_gap(repo, run_id=run_id))
-    findings.extend(run_s5_dead_abstraction(repo, run_id=run_id))
-    findings.extend(run_s6_contradiction(repo, run_id=run_id))
+    findings.extend(run_s5_dead_abstraction(repo, run_id=run_id, changed_files=changed_files))
+    findings.extend(run_s6_contradiction(repo, run_id=run_id, changed_files=changed_files))
     return findings

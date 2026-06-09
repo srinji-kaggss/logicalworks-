@@ -79,11 +79,41 @@ _VERB_META: dict[str, dict] = {
         "output": "per-store size/path/integrity or JSON when --json",
         "tokens": "none",
     },
-    "agent-os": {
-        "intent": "bootstrap and verify the fleet startup-prompt bundle",
-        "args": {"bootstrap|doctor|cards": "subcommand forwarded to the agent-os tool"},
-        "output": "bootstrap results, doctor status JSON, or agent-card path",
-        "tokens": "none",
+    "agent-os bootstrap": {
+        "intent": "create/refresh prompts/context symlinks from the manifest",
+        "args": {}, "output": "bootstrap results JSON", "tokens": "none",
+    },
+    "agent-os doctor": {
+        "intent": "verify startup prompt bundle, context links, and role subagents",
+        "args": {}, "output": "doctor status JSON", "tokens": "none",
+    },
+    "agent-os cards": {
+        "intent": "write role agent cards",
+        "args": {}, "output": "agent-card path list", "tokens": "none",
+    },
+    "agent-os fleet agents": {
+        "intent": "list parsed agent manifests",
+        "args": {}, "output": "agent list JSON", "tokens": "none",
+    },
+    "agent-os fleet spawn": {
+        "intent": "spawn an agent in a git worktree",
+        "args": {"--agent": "agent id", "--prompt": "prompt markdown path", "--context": "context JSON path"},
+        "output": "spawn record JSON", "tokens": "none",
+    },
+    "agent-os fleet audit": {
+        "intent": "show last fleet-audit.jsonl entries",
+        "args": {}, "output": "audit JSON", "tokens": "none",
+    },
+    "aup check": {
+        "intent": "check text or request against AUP rules",
+        "args": {"--text": "text to evaluate", "--request-file": "JSON request file",
+                 "--customer-id": "customer id", "--request-type": "request type", "--json": "structured output"},
+        "output": "AUPCheck result JSON", "tokens": "none",
+    },
+    "aup audit": {
+        "intent": "show AUP refusal log summary",
+        "args": {"--json": "structured output"},
+        "output": "audit summary JSON", "tokens": "none",
     },
     "auth": {
         "intent": "manage auth locks and Keychain-backed capability refs for crawler access",

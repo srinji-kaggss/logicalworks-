@@ -611,3 +611,99 @@ class AUPGate:
     def export_rules_json(self) -> list[dict[str, Any]]:
         """Export canonical rules as JSON for external governance tools."""
         return [r.to_dict() for r in self.rules]
+
+
+# ---------------------------------------------------------------------------
+# CLI
+# ---------------------------------------------------------------------------
+
+def _aup_check_command(args: argparse.Namespace) -> int:
+    gate = AUPGate.load()
+    content = ""
+    if getattr(args, "text", None):
+        content = args.text
+    elif getattr(args, "request_file", None):
+        content = Path(args.request_file).read_text(encoding="utf-8")
+    else:
+        if sys.stdin.isatty():
+            print("error: provide --text, --request-file, or pipe stdin", file=sys.stderr)
+            return 2
+        content = sys.stdin.read()
+
+    customer_id = getattr(args, "customer_id", "cli-unknown")
+    request_type = getattr(args, "request_type", "intent")
+
+    request = {
+        "customer_id": customer_id,
+        "request_type": request_type,
+        "content_preview": content[:32000],
+    }
+    result = gate.check(request)
+    out = result.to_dict()
+    if getattr(args, "json", False):
+        print(json.dumps(out, indent=2))
+    else:
+        verdict = out["verdict"].upper()
+        print(f"verdict: {verdict}")
+        print(f"confidence: {out['confidence']}")
+        print(f"diagnosis: {out['diagnosis']}")
+        if out["matched_rule"]:
+            print(f"rule: {out['matched_rule']['section']} {out['matched_rule']['category']}")
+    return 0 if result.verdict in (Verdict.ALLOW, Verdict.REVIEW) else 1
+
+
+def _aup_audit_command(args: argparse.Namespace) -> int:
+    gate = AUPGate.load()
+    out = gate.export_audit()
+    if getattr(args, "json", False):
+        print(json.dumps(out, indent=2))
+    else:
+        print(f"refusals: {out['refusal_count']}")
+        print(f"telemetry: {out['telemetry_count']}")
+        print(f"log: {out['log_path']}")
+        print(f"threshold: {out['semantic_threshold']}")
+    return 0
+
+
+def add_parser(sub) -> None:
+    """Register aup subcommands into the lgwks shell parser."""
+    p = sub.add_parser("aup", help="acceptable use policy runtime gate")
+    ps = p.add_subparsers(dest="aup_command", required=True)
+
+    check = ps.add_parser("check", help="check text or request against AUP rules")
+    check.add_argument("--text", default=None, help="text to evaluate")
+    check.add_argument("--request-file", default=None, help="path to JSON request file")
+    check.add_argument("--customer-id", default="cli-unknown", help="customer id for request")
+    check.add_argument("--request-type", default="intent", help="request type")
+    check.add_argument("--json", action="store_true", help="structured JSON output")
+    check.set_defaults(func=_aup_check_command)
+
+    audit = ps.add_parser("audit", help="show AUP refusal log summary")
+    audit.add_argument("--json", action="store_true", help="structured JSON output")
+    audit.set_defaults(func=_aup_audit_command)
+
+    p.set_defaults(func=lambda args: _aup_check_command(args))  # default to check
+
+
+def main(argv: list[str] | None = None) -> int:
+    p = argparse.ArgumentParser(prog="lgwks_aup", description="acceptable use policy runtime gate")
+    sub = p.add_subparsers(dest="aup_command", required=True)
+
+    check = sub.add_parser("check", help="check text or request against AUP rules")
+    check.add_argument("--text", default=None, help="text to evaluate")
+    check.add_argument("--request-file", default=None, help="path to JSON request file")
+    check.add_argument("--customer-id", default="cli-unknown", help="customer id for request")
+    check.add_argument("--request-type", default="intent", help="request type")
+    check.add_argument("--json", action="store_true", help="structured JSON output")
+    check.set_defaults(func=_aup_check_command)
+
+    audit = sub.add_parser("audit", help="show AUP refusal log summary")
+    audit.add_argument("--json", action="store_true", help="structured JSON output")
+    audit.set_defaults(func=_aup_audit_command)
+
+    args = p.parse_args(argv)
+    return args.func(args)
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

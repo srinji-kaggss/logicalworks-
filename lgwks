@@ -1444,8 +1444,12 @@ def build_parser() -> argparse.ArgumentParser:
     lgwks_hooks.add_parser(sub)
 
     # agent-os — fleet startup/bootstrap/doctor surface (Issue #1)
-    agent_os = sub.add_parser("agent-os", help="fleet startup/bootstrap helpers")
-    agent_os.set_defaults(func=_agent_os_dispatch, _passthrough=True)
+    import lgwks_agent_os
+    lgwks_agent_os.add_parser(sub)
+
+    # aup — acceptable use policy runtime gate (Issue #56)
+    import lgwks_aup
+    lgwks_aup.add_parser(sub)
 
     # auth — auth-vault CLI (Issue #7)
     auth = sub.add_parser("auth", help="capability vault (refs only; secrets stay in Keychain)")
@@ -1822,10 +1826,6 @@ def _script_main_dispatch(script_path: Path, module_name: str, argv: list[str]) 
 def _module_main_dispatch(module_name: str, argv: list[str]) -> int:
     mod = __import__(module_name)
     return mod.main(argv)
-
-
-def _agent_os_dispatch(args) -> int:
-    return _module_main_dispatch("lgwks_agent_os", _forward_argv(args))
 
 
 def _auth_dispatch(args) -> int:

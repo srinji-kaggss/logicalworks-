@@ -414,7 +414,8 @@ _DOMAINS: dict[str, list[str]] = {
     "GitHub":    ["gh"],
     "DevOps":    ["repo", "review", "session", "project", "batch", "refactor", "hooks", "agent-os", "portal"],
     "System":    ["solve", "debug", "doctor", "intent", "entity-graph", "graph",
-                  "substrate", "repl", "initialize", "auth", "keyvault", "foundation"],
+                  "substrate", "repl", "initialize", "auth", "keyvault", "foundation",
+                  "aup"],
     "Data":      ["store", "memory", "embed", "axiom", "pipeline"],
 }
 
