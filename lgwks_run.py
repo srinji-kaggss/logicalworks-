@@ -609,34 +609,26 @@ def embed_dual(
     det_vec = _deterministic_embed(text, dims=DIMS)
     det = {"vector": det_vec, "provider": "deterministic-feature-hash", "dims": DIMS}
 
-    # ── semantic (ALWAYS attempted — this is the primary vector for downstream ML) ──
+    # ── semantic: TEXT embeds locally via ollama qwen3-embedding:8b (4096-d) ──
+    # //why: Director routing (2026-06-09) — text uses the free local Eye; only
+    # image/video go to the paid media endpoint (lgwks_multimodal.embed_media).
+    # `model` is ignored for text (it selected the now-retired openrouter/apple
+    # fallbacks); kept in the signature for caller back-compat.
     sem = None
-    # Try Ollama qwen3-embedding:8b first (local, 4096-d); fast-fail if down
     import lgwks_ollama
     if lgwks_ollama.ensure_eye_model():
         full = lgwks_ollama.embed_one(text)
         if full is not None:
             sem = {"vector": full, "provider": f"ollama:{lgwks_ollama.EYE_MODEL}", "dims": len(full)}
 
-    if sem is None:
-        import lgwks_openrouter_embed
-        chosen = model or lgwks_openrouter_embed.DEFAULT_MODEL
-        full = lgwks_openrouter_embed.embed_one(text, model=chosen)
-        if full is not None:
-            sem = {"vector": full, "provider": f"openrouter:{chosen}", "dims": len(full)}
-
-    if sem is None:
-        import lgwks_apple
-        chosen_model = model or lgwks_apple.DEFAULT_MODEL
-        chosen_dims = lgwks_apple.DEFAULT_DIMS
-        full = lgwks_apple.embed_one(text, model_id=chosen_model, dims=chosen_dims)
-        if full is not None:
-            sem = {"vector": full, "provider": lgwks_apple.provider_label(chosen_model), "dims": len(full)}
-
-        raise EmbeddingProviderUnavailable(
-            f"apple-local provider unavailable for model {model or 'default'}"
-        )
-
+    # never-block: if ollama is down (or LGWKS_NO_MODELS in CI), sem stays None and
+    # the deterministic 256-d vector is the audit fallback — always present, zero
+    # infra dependency (see docstring). Every caller guards `if dual["sem"]` before
+    # writing semantic rows (lgwks_substrate_run.py:246,278). The prior code raised
+    # EmbeddingProviderUnavailable here — a crash bug two ways over: it fired
+    # unconditionally even when a provider had just set sem, and it raised
+    # lgwks_run's class, which lgwks_substrate_run does NOT catch (that one is
+    # lgwks_substrate_config's), so it propagated raw and killed build_run().
     return {"det": det, "sem": sem}
 
 

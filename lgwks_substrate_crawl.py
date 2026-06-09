@@ -92,6 +92,7 @@ def _crawl_site(
     click_discovery: bool,
     max_clicks_per_page: int,
     crawl_mode: str = "link-then-click",
+    embed_screenshots: bool = False,
 ) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
     """Breadth-first crawl with auth-gate detection, click discovery, and frontier logging."""
     parsed = urllib.parse.urlparse(base_url)
@@ -106,7 +107,8 @@ def _crawl_site(
     url_attempts: Counter[str] = Counter()
     auth_handoffs = 0
 
-    def append_doc(*, source: str, title: str, text: str, html_len: int, depth: int, discovered_by: str) -> bool:
+    def append_doc(*, source: str, title: str, text: str, html_len: int, depth: int,
+                   discovered_by: str, screenshot_b64: str = "", screenshot_mime: str = "image/png") -> bool:
         clean_source = _canonicalize_crawl_url(source) or source
         fingerprint = (clean_source, _sha(text or ""))
         if fingerprint in doc_fingerprints:
@@ -119,6 +121,11 @@ def _crawl_site(
             "html_len": html_len,
             "depth": depth,
             "discovered_by": discovered_by,
+            # Screenshot rides the doc only when embed_screenshots is on; build_run
+            # turns it into an image chunk embedded via the paid media seam. Empty
+            # string otherwise (no capture, no cost). //why orphaned-pipe fix.
+            "screenshot_b64": screenshot_b64 or "",
+            "screenshot_mime": screenshot_mime or "image/png",
         })
         return True
 
@@ -139,6 +146,7 @@ def _crawl_site(
             use_session=True,
             wait_ms=min(9000, 2500 + ((attempt - 1) * 2500)),
             with_html=True,
+            with_screenshot=embed_screenshots,
             browser_engine=browser_engine,
         )
         if not rendered.get("ok") or not rendered.get("html"):
@@ -208,6 +216,7 @@ def _crawl_site(
                 use_session=True,
                 wait_ms=5000,
                 with_html=True,
+                with_screenshot=embed_screenshots,
                 browser_engine=browser_engine,
             )
             if verify.get("ok") and verify.get("html"):
@@ -242,6 +251,8 @@ def _crawl_site(
             html_len=len(rendered["html"]),
             depth=depth,
             discovered_by=discovered_by,
+            screenshot_b64=rendered.get("screenshot_b64") or "",
+            screenshot_mime=rendered.get("screenshot_mime") or "image/png",
         )
         frontier.append({
             "url": clean, "depth": depth, "status": "ok", "links_found": len(links),

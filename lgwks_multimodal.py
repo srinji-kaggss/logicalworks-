@@ -29,12 +29,19 @@ from typing import Any
 
 import lgwks_keyvault
 
-# OpenRouter multimodal embedding config
-_MM_MODEL = os.environ.get(
-    "LGWKS_MM_MODEL",
-    "google/gemini-embedding-exp-03-07",  # latest gemini embedding with image support
-)
-_MM_ENDPOINT = "https://openrouter.ai/api/v1/embeddings"
+# ── Swappable media-embedding endpoint ────────────────────────────────────────
+# Image + video embed into ONE shared space here; text embeds locally via ollama
+# (lgwks_ollama, qwen3-embedding:8b). Default endpoint is google/gemini-embedding-2
+# over OpenRouter. To swap to a self-hosted Qwen3-VL endpoint later, set the three
+# env vars below — callers never change.
+# //why: cost routing (Director, 2026-06-09). Text is free on local ollama; only
+# the paid multimodal model ever sees image/video. The endpoint is a config seam,
+# not a code dependency, so make→buy→self-host is one env change, not a refactor.
+# NOTE: text (ollama, 4096-d) and media (gemini, 3072-d) are DIFFERENT vector
+# spaces — cross-modal cosine retrieval is not valid until both share one model.
+_MM_MODEL = os.environ.get("LGWKS_EMBED_MEDIA_MODEL", "google/gemini-embedding-2")
+_MM_ENDPOINT = os.environ.get("LGWKS_EMBED_MEDIA_ENDPOINT", "https://openrouter.ai/api/v1/embeddings")
+_MM_KEY_NAME = os.environ.get("LGWKS_EMBED_MEDIA_KEY", "openrouter")
 _MM_TIMEOUT = int(os.environ.get("LGWKS_MM_TIMEOUT", "60"))
 
 # Maximum image dimension for resize-before-encode (to keep base64 small)
@@ -147,37 +154,53 @@ def _perceptual_fingerprint(raw: bytes, dims: int = 256) -> list[float]:
 # ── Multimodal embedding via OpenRouter ───────────────────────────────────────
 
 def _mm_key() -> str | None:
-    key, _ = lgwks_keyvault.get_secret("openrouter")
+    key, _ = lgwks_keyvault.get_secret(_MM_KEY_NAME)
     return key
 
 
-def embed_multimodal(
-    text: str,
+def embed_media(
     image_b64: str = "",
     image_mime: str = "image/png",
     *,
+    caption: str = "",
+    video_b64: str = "",
+    video_mime: str = "video/mp4",
     model: str = _MM_MODEL,
     timeout: int = _MM_TIMEOUT,
 ) -> dict[str, Any]:
-    """Embed text + optional image via google/gemini-embedding-2 on OpenRouter.
-    Always returns BOTH deterministic and semantic vectors.
+    """Embed an image and/or a video into the shared media space via the swappable
+    endpoint (default google/gemini-embedding-2 over OpenRouter).
+
+    Media-only by design: text is embedded locally via ollama (lgwks_ollama) and is
+    NOT sent here — only `caption` (alt/surrounding context, kept tiny) rides along
+    to ground the media vector. //why: cost — the paid model only ever sees media.
+
+    Always returns BOTH a deterministic perceptual fingerprint (always present, the
+    never-block audit vector) and, when the endpoint answers, the semantic vector.
 
     Returns:
         {
-            "ok": bool,
-            "det": {"vector": [...256], "provider": "perceptual-fingerprint", "dims": 256},
-            "sem": {"vector": [...4096], "provider": "openrouter:...", "dims": 4096} | None,
-            "error": str | None,
+          "ok": bool,
+          "det": {"vector": [...256], "provider": "perceptual-fingerprint", "dims": 256},
+          "sem": {"vector": [...], "provider": "<endpoint>:<model>", "dims": N} | None,
+          "error": str | None,
         }
     """
-    # Deterministic fingerprint: if image present, hash image; else hash text
-    det_text = text if text else ""
-    det_raw = det_text.encode("utf-8")
+    # Deterministic fingerprint over the primary media bytes (image preferred,
+    # else video, else the caption). Always present — the never-block fallback.
+    det_raw = b""
     if image_b64:
         try:
             det_raw = base64.b64decode(image_b64)
         except Exception:
-            pass
+            det_raw = image_b64.encode("utf-8")
+    elif video_b64:
+        try:
+            det_raw = base64.b64decode(video_b64)
+        except Exception:
+            det_raw = video_b64.encode("utf-8")
+    else:
+        det_raw = caption.encode("utf-8")
     det_vec = _perceptual_fingerprint(det_raw)
     out: dict[str, Any] = {
         "ok": True,
@@ -186,18 +209,23 @@ def embed_multimodal(
         "error": None,
     }
 
-    # Semantic: only if OpenRouter key available
-    key = _mm_key()
-    if not key:
-        out["error"] = "openrouter key unavailable"
+    if not image_b64 and not video_b64:
+        out["error"] = "no media to embed"
         return out
 
-    # Build multimodal input
+    # Hermetic kill-switch (CI/tests) and unconfigured-key both degrade to det only.
+    if os.environ.get("LGWKS_NO_MODELS"):
+        out["error"] = "LGWKS_NO_MODELS set — deterministic fingerprint only"
+        return out
+    key = _mm_key()
+    if not key:
+        out["error"] = f"media-embed key {_MM_KEY_NAME!r} unavailable"
+        return out
+
     parts: list[dict[str, Any]] = []
-    if text.strip():
-        parts.append({"type": "text", "text": text[:8000]})
+    if caption.strip():
+        parts.append({"type": "text", "text": caption[:2000]})
     if image_b64:
-        # Check size cap
         if _b64size(image_b64) > _MAX_IMG_BYTES:
             out["error"] = f"image too large: {_b64size(image_b64)} bytes base64 > {_MAX_IMG_BYTES}"
             return out
@@ -205,10 +233,14 @@ def embed_multimodal(
             "type": "image_url",
             "image_url": {"url": f"data:{image_mime};base64,{image_b64}"},
         })
-
-    if not parts:
-        out["error"] = "no content to embed"
-        return out
+    if video_b64:
+        # NOTE: video-through-OpenRouter embeddings is not yet verified end-to-end;
+        # no video extractor feeds this path today (screenshots are images). Wired
+        # ahead of need so the swap to a video-capable endpoint is config-only.
+        parts.append({
+            "type": "video_url",
+            "video_url": {"url": f"data:{video_mime};base64,{video_b64}"},
+        })
 
     body = json.dumps({
         "model": model,
@@ -223,7 +255,7 @@ def embed_multimodal(
             "Content-Type": "application/json",
             "Authorization": f"Bearer {key}",
             "HTTP-Referer": "https://logicalworks.ca",
-            "X-OpenRouter-Title": "Logical Works - lgwks multimodal eye",
+            "X-OpenRouter-Title": "Logical Works - lgwks media eye",
         },
     )
 
@@ -231,12 +263,32 @@ def embed_multimodal(
         with urllib.request.urlopen(req, timeout=timeout) as resp:
             data = json.loads(resp.read().decode("utf-8"))
         vec = [float(x) for x in data["data"][0]["embedding"]]
-        out["sem"] = {"vector": vec, "provider": f"openrouter:{model}", "dims": len(vec)}
+        out["sem"] = {"vector": vec, "provider": f"media:{model}", "dims": len(vec)}
     except (urllib.error.HTTPError, urllib.error.URLError, TimeoutError, OSError, json.JSONDecodeError, KeyError, IndexError, TypeError, ValueError) as exc:
-        out["error"] = f"openrouter multimodal error: {type(exc).__name__}: {exc}"
+        out["error"] = f"media-embed error: {type(exc).__name__}: {exc}"
         out["ok"] = False
 
     return out
+
+
+def embed_multimodal(
+    text: str,
+    image_b64: str = "",
+    image_mime: str = "image/png",
+    *,
+    model: str = _MM_MODEL,
+    timeout: int = _MM_TIMEOUT,
+) -> dict[str, Any]:
+    """Back-compat shim → embed_media(). The `text` arg is treated as the caption
+    (grounding context), NOT sent as a billable text embedding. //why: callers
+    predating the text=ollama / media=gemini split still pass (text, image)."""
+    return embed_media(
+        image_b64=image_b64,
+        image_mime=image_mime,
+        caption=text,
+        model=model,
+        timeout=timeout,
+    )
 
 
 # ── Image extraction helpers ─────────────────────────────────────────────────

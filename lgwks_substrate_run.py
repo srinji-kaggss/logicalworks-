@@ -160,6 +160,7 @@ def build_run(args: argparse.Namespace) -> dict[str, Any]:
             click_discovery=bool(getattr(args, "click_discovery", False)),
             max_clicks_per_page=int(getattr(args, "max_clicks_per_page", 20)),
             crawl_mode=getattr(args, "crawl_mode", "link-then-click"),
+            embed_screenshots=bool(getattr(args, "embed_screenshots", False)),
         )
     else:
         docs = _build_from_local(Path(args.target).resolve(), source_kind, args.max_files, args.max_chars)
@@ -290,6 +291,67 @@ def build_run(args: argparse.Namespace) -> dict[str, Any]:
                     "vector": csem["vector"],
                     "fact_score": fact_score,
                     "chunk_kind": chunk_kind,
+                })
+
+        # ── Screenshot → image chunk (opt-in) ───────────────────────────────────
+        # //why orphaned-pipe fix: the screenshot is only on the doc when
+        # --embed-screenshots captured it, so presence == opt-in. Text embeds via
+        # ollama (above); the image goes to the paid media seam (gemini-embedding-2).
+        # det perceptual fingerprint is always present (never-block); sem only when
+        # the media endpoint answers. Image chunks are retrieval artifacts, not
+        # entity-graph text, so they are intentionally NOT added to graph_input_rows.
+        screenshot_b64 = doc.get("screenshot_b64") or ""
+        if screenshot_b64:
+            import lgwks_multimodal
+            img_caption = doc["title"]
+            img_label = f"[screenshot] {img_caption}"
+            img_chunk_id = f"chunk-{io._sha(doc_id + 'screenshot')[:16]}"
+            chunk_rows.append({
+                "chunk_id": img_chunk_id,
+                "document_id": doc_id,
+                "source": doc["source"],
+                "url": doc["source"] if source_kind == "url" else "",
+                "text": img_label,
+                "stem_text": "",
+                "hash": io._sha(screenshot_b64),
+                "fact_score": 0.0,
+                "chunk_kind": "image",
+                "position": -1,
+            })
+            mm = lgwks_multimodal.embed_media(
+                image_b64=screenshot_b64,
+                image_mime=doc.get("screenshot_mime") or "image/png",
+                caption=img_caption,
+            )
+            idet = mm["det"]
+            provider_counts[idet["provider"]] += 1
+            vector_rows.append({
+                "vector_id": f"vec-{io._sha(img_chunk_id + idet['provider'])[:16]}",
+                "chunk_id": img_chunk_id,
+                "document_id": doc_id,
+                "provider": idet["provider"],
+                "is_semantic": False,
+                "dims": idet["dims"],
+                "vector_text": img_label[:2000],
+                "vector": idet["vector"],
+                "fact_score": 0.0,
+                "chunk_kind": "image",
+            })
+            if mm.get("sem"):
+                isem = mm["sem"]
+                provider_counts[isem["provider"]] += 1
+                semantic_vectors += 1
+                vector_rows.append({
+                    "vector_id": f"vec-{io._sha(img_chunk_id + isem['provider'])[:16]}",
+                    "chunk_id": img_chunk_id,
+                    "document_id": doc_id,
+                    "provider": isem["provider"],
+                    "is_semantic": True,
+                    "dims": isem["dims"],
+                    "vector_text": img_label[:2000],
+                    "vector": isem["vector"],
+                    "fact_score": 0.0,
+                    "chunk_kind": "image",
                 })
 
     # ── Concept extraction (what things mean, not just what was said) ────────────
@@ -612,6 +674,10 @@ def add_parser(sub) -> None:
                          help="max visible controls to click per rendered page when --click-discovery is enabled")
         cmd.add_argument("--crawl-mode", choices=["link-only", "link-then-click", "click-heavy"], default="link-then-click",
                          help="crawl mode: link-only (no clicks), link-then-click (click only when href extraction is weak), click-heavy (always click visible controls)")
+        cmd.add_argument("--embed-screenshots", action="store_true", default=False,
+                         help="capture one screenshot per page and embed it via the paid media endpoint "
+                              "(google/gemini-embedding-2, ~1290 tok/image). OFF by default — every page "
+                              "is a billable image embed; text always embeds free via local ollama")
         cmd.add_argument("--json", action="store_true", help="structured JSON output (always on for substrate; flag for compatibility)")
 
     build = ps.add_parser("build", help="build a substrate run from a url, file, folder, or repo")
