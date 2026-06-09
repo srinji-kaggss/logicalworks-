@@ -199,6 +199,55 @@ def _summarize_activity(repo: Path, activity: dict[str, Any], history: list[str]
     tool_cmds = [ln for ln in history if re.search(r"\b(lgwks|git|cargo|npm|python3?|pytest|make)\b", ln)]
     summary["shell_tool_commands"] = tool_cmds[-10:]  # last 10 only
 
+    # R-meter: categorize token burn as Recovery / Invention / Noise
+    recovery_signals = {"fix", "revert", "undo", "repair", "restore", "rebuild",
+                       "test", "debug", "patch", "correct", "resolve", "close",
+                       "regression", "broken", "fail", "error", "bug", "issue"}
+    invention_signals = {"feat", "feature", "add", "new", "create", "build",
+                        "implement", "design", "architect", "introduce", "innovate",
+                        "optimize", "improve", "refactor", "upgrade", "enhance"}
+    noise_signals = {"wip", "temp", "draft", "placeholder", "todo", "hack",
+                      "workaround", "stub", "mock", "skip", "ignore",
+                      "merge", "bump", "update deps", "changelog", "docs"}
+
+    def _categorize_token(verb: str, subject: str) -> str:
+        text = f"{verb} {subject}".lower()
+        if any(s in text for s in recovery_signals):
+            return "recovery"
+        if any(s in text for s in invention_signals):
+            return "invention"
+        if any(s in text for s in noise_signals):
+            return "noise"
+        return "invention"  # default: assume productive work
+
+    r_counts = {"recovery": 0, "invention": 0, "noise": 0, "uncategorized": 0}
+    for c in activity["commits"]:
+        subject = c["subject"]
+        m = re.match(r"^(\w+)", subject)
+        verb = m.group(1) if m else "other"
+        cat = _categorize_token(verb, subject)
+        r_counts[cat] += 1
+
+    # Also categorize shell commands
+    for cmd in tool_cmds:
+        cmd_lower = cmd.lower()
+        if any(s in cmd_lower for s in {"revert", "restore", "reset", "checkout", "clean"}):
+            r_counts["recovery"] += 0.3  # partial weight for shell recovery
+        elif any(s in cmd_lower for s in {"test", "pytest", "debug", "fix"}):
+            r_counts["recovery"] += 0.3
+        elif any(s in cmd_lower for s in {"build", "run", "deploy", "ship"}):
+            r_counts["invention"] += 0.3
+        elif any(s in cmd_lower for s in {"status", "log", "diff", "show", "ls", "help"}):
+            r_counts["noise"] += 0.3
+
+    total = sum(r_counts.values())
+    summary["r_meter"] = {
+        "counts": {k: round(v, 1) for k, v in r_counts.items()},
+        "percentages": {k: round(v / total * 100, 1) if total else 0 for k, v in r_counts.items()},
+        "dominant": max(r_counts, key=r_counts.get) if total else "unknown",
+        "total_weighted": round(total, 1),
+    }
+
     # Narrative (one paragraph)
     parts: list[str] = []
     if summary["commits"]["count"]:
@@ -209,6 +258,10 @@ def _summarize_activity(repo: Path, activity: dict[str, Any], history: list[str]
         parts.append(f"Branches created {summary['branches']['created']}, deleted {summary['branches']['deleted']}.")
     if summary["dirty"]["uncommitted"] or summary["dirty"]["stashes"]:
         parts.append(f"Dirty: {summary['dirty']['uncommitted']} uncommitted, {summary['dirty']['stashes']} stash(es).")
+    # Add R-meter to narrative only if there was activity
+    rm = summary.get("r_meter", {})
+    if parts and rm.get("dominant") and rm.get("total_weighted", 0) > 0:
+        parts.append(f"Token burn: {rm['dominant']} dominant ({rm['percentages'].get(rm['dominant'], 0)}%).")
     summary["narrative"] = " ".join(parts) if parts else "No activity detected since last marker."
 
     return summary
@@ -277,6 +330,15 @@ def _render_summary(summary: dict[str, Any]) -> list[str]:
         out.append(ui.spine(ui.fg("recent commands", ui.CREAM_DIM, on=on), on=on))
         for cmd in shell[-5:]:
             out.append(ui.twig(cmd, 1, "cmd", on=on))
+
+    # R-meter
+    rm = summary.get("r_meter", {})
+    if rm:
+        out.append(ui.spine(ui.fg("R-meter (token burn)", ui.CREAM_DIM, on=on), on=on))
+        dominant = rm.get("dominant", "unknown")
+        pct = rm.get("percentages", {})
+        detail = " · ".join(f"{k}:{v}%" for k, v in list(pct.items())[:3])
+        out.append(ui.twig(f"dominant: {dominant} ({pct.get(dominant, 0)}%) — {detail}", 1, "info", on=on))
 
     out.append(""); out.append("  " + ui.footer("lgwks · session", on=on)); out.append("")
     return out
