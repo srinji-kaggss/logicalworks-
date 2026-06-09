@@ -48,6 +48,22 @@ Gemini model identity (verified below; not to be changed).
 - Re-rank: LightGBM/IsolationForest/HDBSCAN/LOF/LambdaMART now have a live home to slot into once
   their dep lands (venv). contextual_bandit needs a feedback loop (later).
 
+### W3 — SAST: determinism fix + comprehensive CFG taint engine  [DONE]
+- **Determinism** (`lgwks_bot_code_hacker.py`): one run timestamp threaded through
+  _make/_failure_record/_Visitor/_scan_file/run; two pinned runs byte-identical. 28 tests pass.
+- **CFG engine** (new `lgwks_sast.py`): a REAL control-flow graph (basic blocks + branch/loop/try
+  edges) per function + flow-sensitive worklist-to-fixpoint taint (gen/kill reaching-taint) — the
+  blueprint `cfg_execution_pathway` for Python. Comprehensive across 6 CWE classes from one engine:
+  CWE-89 SQLi · CWE-78 command-inj · CWE-94 code-inj · CWE-22 path-traversal · CWE-502 deser · CWE-918 SSRF.
+  - Precision: first-arg focus → parameterized queries (the remediation) do NOT flag; sanitizers
+    (int/escape/quote/basename) kill taint; literal-only sinks silent. 14 tests incl. no-FP cases.
+  - `PATTERN_CATALOG`: all 7 cited blueprints registered. 6 live (python), 6 deferred entries
+    (C UAF, race, Java Spring, JS proto-pollution, int-overflow, React XSS) with citation + landing.
+  - //why honest scope: intra-procedural, Python only. Cross-language (tree-sitter) + interprocedural
+    (call graph, IFDS/ODG) deferred — faking paper-grade cross-language = the oversimplification sin.
+- Re-rank: TAINT-001 now LIVE for Python (was P2). Cross-language patterns stay P2/P3 pending
+  tree-sitter (also needed by PRD-02 code graph) — shared dependency, do once.
+
 ## DEFERRAL LEDGER (continuously re-ranked: P1 = do next, P3 = later)
 Each entry: what · why deferred · where it must land · current rank.
 
