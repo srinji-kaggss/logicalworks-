@@ -228,8 +228,14 @@ def _summarize_activity(repo: Path, activity: dict[str, Any], history: list[str]
         cat = _categorize_token(verb, subject)
         r_counts[cat] += 1
 
-    # Also categorize shell commands
-    for cmd in tool_cmds:
+    # //why R-meter measures *committed* token burn. tool_cmds derive from the
+    # developer's ambient global shell history (~/.zsh_history), not this session,
+    # so they must only COLOR an already-active session — never manufacture a
+    # dominant out of nothing. Without this guard an empty repo gets crowned
+    # "noise" from unrelated `git status`/`log` lines (env-dependent + wrong).
+    commit_signal = sum(r_counts.values())
+    # Also categorize shell commands (supplementary; only when commits exist)
+    for cmd in (tool_cmds if commit_signal else []):
         cmd_lower = cmd.lower()
         if any(s in cmd_lower for s in {"revert", "restore", "reset", "checkout", "clean"}):
             r_counts["recovery"] += 0.3  # partial weight for shell recovery
