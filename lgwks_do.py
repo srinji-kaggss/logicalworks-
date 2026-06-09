@@ -17,6 +17,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import re
 import sys
 import time
 from dataclasses import dataclass, field
@@ -25,6 +26,10 @@ from typing import Any
 
 import lgwks_ui as ui
 from lgwks_repo import _is_repo
+
+
+def _slugify(text: str) -> str:
+    return re.sub(r"[^\w-]+", "-", text.lower()).strip("-").replace("--", "-")[:64]
 
 
 # ---------------------------------------------------------------------------
@@ -227,8 +232,52 @@ def _do_research(args: argparse.Namespace) -> int:
             run.finished_at = _now()
             return _emit(run, json_out)
 
-    # Phase 2: research execution (akinator is a separate binary)
-    p2 = PhaseResult(name="research", ok=False, exit_code=2, message="akinator research requires the lgwks-akinator binary")
+    # Phase 2: research execution via substrate if URL, else akinator stub
+    is_url = bool(re.search(r"^https?://", query.strip()))
+    if is_url:
+        import lgwks_substrate
+        sub_args = argparse.Namespace(
+            target=query,
+            project=slugify(query),
+            source_type="auto",
+            max_pages=12,
+            max_depth=getattr(args, "depth", 1),
+            max_files=250,
+            max_chars=120_000,
+            chunk_words=450,
+            chunk_overlap=70,
+            fact_threshold=0.6,
+            embed_provider="deterministic",
+            embed_model="",
+            login_if_needed=True,
+            login_url="",
+            success_selector=None,
+            max_auto_bypass_attempts=3,
+            max_auth_handoffs=3,
+            browser_engine="chromium",
+            click_discovery=False,
+            max_clicks_per_page=20,
+            crawl_mode="link-then-click",
+        )
+        try:
+            manifest = lgwks_substrate.build_run(sub_args)
+            root = manifest.get("artifacts", {}).get("root", "")
+            p2 = PhaseResult(
+                name="substrate:research",
+                ok=manifest.get("counts", {}).get("documents", 0) > 0,
+                exit_code=0,
+                message=f"{manifest.get('counts',{}).get('documents',0)} docs, {manifest.get('counts',{}).get('chunks',0)} chunks",
+                artifact={
+                    "run_id": manifest.get("run_id", ""),
+                    "run_dir": root,
+                    "manifest": str(Path(root) / "manifest.json") if root else "",
+                    "counts": manifest.get("counts", {}),
+                },
+            )
+        except Exception as exc:
+            p2 = PhaseResult(name="substrate:research", ok=False, exit_code=2, message=str(exc))
+    else:
+        p2 = PhaseResult(name="research", ok=False, exit_code=2, message="akinator research requires the lgwks-akinator binary")
     run.phases.append(p2)
 
     run.exit_code = max(p.exit_code for p in run.phases)

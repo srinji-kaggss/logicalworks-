@@ -631,20 +631,56 @@ def _do_quick_scan(args: argparse.Namespace) -> int:
         run.duration_sec = time.time() - t0; run.finished_at = _now()
         return _emit(run, json_out)
 
-    # Single-page fetch
+    # Single-page fetch — route through substrate for consistency
     is_url = bool(re.search(r"^https?://", query.strip()))
     if is_url:
-        p2 = _run_phase(
-            "extract:page",
-            lambda: lgwks_crawl.crawl_page(
-                url=query, max_chars=max_chars, wait_ms=1000,
-                with_links=False, browser_engine=engine, use_session=use_session,
-            ).ok,
+        import lgwks_substrate
+        sub_args = argparse.Namespace(
+            target=query,
+            project=slugify(query),
+            source_type="auto",
+            max_pages=1,
+            max_depth=0,
+            max_files=250,
+            max_chars=max_chars,
+            chunk_words=450,
+            chunk_overlap=70,
+            fact_threshold=0.6,
+            embed_provider="deterministic",
+            embed_model="",
+            login_if_needed=True,
+            login_url="",
+            success_selector=None,
+            max_auto_bypass_attempts=3,
+            max_auth_handoffs=3,
+            browser_engine=engine,
+            click_discovery=False,
+            max_clicks_per_page=20,
+            crawl_mode="link-then-click",
         )
-        p2.artifact = {"type": "quick_extract", "engine": engine}
-        run.phases.append(p2)
+        try:
+            manifest = lgwks_substrate.build_run(sub_args)
+            docs = manifest.get("counts", {}).get("documents", 0)
+            chunks = manifest.get("counts", {}).get("chunks", 0)
+            root = manifest.get("artifacts", {}).get("root", "")
+            p2 = PhaseResult(
+                name="substrate:quick-scan",
+                ok=docs > 0,
+                exit_code=0,
+                message=f"{docs} docs, {chunks} chunks",
+                artifact={
+                    "run_id": manifest.get("run_id", ""),
+                    "run_dir": root,
+                    "manifest": str(Path(root) / "manifest.json") if root else "",
+                    "counts": manifest.get("counts", {}),
+                },
+            )
+            run.phases.append(p2)
+        except Exception as exc:
+            p2 = PhaseResult(name="substrate:quick-scan", ok=False, exit_code=2, message=str(exc))
+            run.phases.append(p2)
     else:
-        run.phases.append(PhaseResult(name="extract:page", ok=False, exit_code=2, message="quick-scan needs a URL"))
+        run.phases.append(PhaseResult(name="substrate:quick-scan", ok=False, exit_code=2, message="quick-scan needs a URL"))
 
     run.exit_code = max(p.exit_code for p in run.phases)
     run.verdict = _verdict_from_phases(run.phases)
