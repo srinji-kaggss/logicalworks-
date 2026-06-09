@@ -99,3 +99,48 @@ Convergence (later, U4+): fold this into the BERT-backed check that supersedes t
 static verify-before-assert floor.
 
 Next (sequential, per Director): U2 Actor contract → U3 → U4 …
+
+---
+
+## 2026-06-09 · U2 Actor contract — SPEC
+
+### Goal (verifiable)
+ONE thin protocol every capability conforms to: `input_schema → run(input) → standardized
+envelope`. Composable (actor calls actor). `map` + `ingest` (+ a composing actor) conform.
+
+### Think-first: don't invent a framework (Karpathy #1/#2)
+The shapes already exist — `lgwks_ingest.ingest` returns a manifest dict, `lgwks_map.map_intent`
+returns a result dict, `lgwks_workflows.WorkflowRun` already has schema/args/exit_code. U2 is a
+**thin wrapper protocol** over existing functions, NOT a new engine. No async, no remote, no
+plugin machinery — none was asked for.
+
+### Contract
+- `ActorSpec{ name, summary, input_schema, run(input)->dict, composes:[names] }`.
+- `input_schema`: `{field: {type, required, default, help}}` — drives validation + CLI + the
+  capability map. Typed validation (no silent failure): missing required / wrong type → `ActorError`.
+- `run_actor(name, input) -> envelope`:
+  `{schema:"lgwks.actor.v1", actor, ok, input, output, manifest:{duration_sec, composes}}`.
+- Composition: an actor's `run` calls `run_actor(other, …)` — same interface, nestable.
+
+### First actors
+1. `map`  → wraps `lgwks_map.map_intent`  (input: intent:str req, top:int=8)
+2. `ingest` → wraps `lgwks_ingest.ingest` (input: url:str req, max_resources:int=40, embed_media:bool=true)
+3. `scout` (composing) → calls `map`; if input looks like a URL, also calls `ingest` → proves actor-calls-actor.
+
+### Success criteria (loop until pass)
+1. `run_actor("map", {"intent":"crawl a site"})` → valid `lgwks.actor.v1` envelope, output has matches.
+2. `run_actor("map", {})` → `ActorError` (missing required `intent`) — typed, not silent.
+3. `run_actor("scout", {"intent":"review code"})` → envelope whose manifest shows it composed `map`
+   (no network; proves actor-calls-actor).
+4. `ingest` registered + wrapped (structural; live crawl already proven in b3fc551 — not re-run).
+5. Standalone CLI: `python3 lgwks_actor.py map '{"intent":"…"}'`. (`lgwks run` verb deferred, like ingest.)
+
+### U2 RESULTS (done — `lgwks_actor.py`)
+Thin protocol: `ActorSpec{name,summary,input_schema,run,composes}` + `run_actor(name,input)`
+→ `lgwks.actor.v1` envelope; typed `ActorError` (codes: missing_input/bad_input/unknown_actor);
+schema-driven validation (required/coerce/default). Actors: `map`, `ingest` (wrap existing
+fns), `scout` (composing).
+All criteria pass: (1) envelope ✓ 0.21s; (2) missing required → ActorError code=missing_input ✓;
+(3) scout→map at runtime, ingested=None for non-URL ✓ (actor-calls-actor); (4) ingest registered+
+required url ✓; (5) CLI ✓, bad input → typed error + exit 1 ✓. `lgwks run` verb deferred.
+Next: U3 World-Graph query.
