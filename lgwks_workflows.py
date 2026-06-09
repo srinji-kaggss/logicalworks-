@@ -384,21 +384,22 @@ def _do_research_inline(args: argparse.Namespace) -> int:
     run = WorkflowRun(workflow="research", args={"query": query, "depth": depth, "engine": engine}, started_at=_now())
     t0 = time.time()
 
-    # Phase 1: AUP gate
+    # Phase 1: AUP gate — call directly; _run_phase expects int exit codes
     if query:
         try:
-            p1 = _run_phase(
-                "aup:check",
-                lambda: lgwks_aup.AUPGate.load().check({
-                    "customer_id": "lgwks-workflow",
-                    "request_type": "intent",
-                    "content_preview": query[:32000],
-                }).verdict.value,
+            check = lgwks_aup.AUPGate.load().check({
+                "customer_id": "lgwks-workflow",
+                "request_type": "intent",
+                "content_preview": query[:32000],
+            })
+            verdict_ok = check.verdict in (lgwks_aup.Verdict.ALLOW, lgwks_aup.Verdict.REVIEW)
+            p1 = PhaseResult(
+                name="aup:check",
+                ok=verdict_ok,
+                exit_code=0 if verdict_ok else 3,
+                message="pass" if verdict_ok else "deny",
+                artifact={"duration_sec": round(time.time() - t0, 3), "diagnosis": check.diagnosis},
             )
-            verdict_ok = p1.message in ("allow", "review")
-            p1.ok = verdict_ok
-            p1.exit_code = 0 if verdict_ok else 3
-            p1.message = "pass" if verdict_ok else "deny"
             run.phases.append(p1)
         except Exception as exc:
             run.phases.append(PhaseResult(name="aup:check", ok=False, exit_code=3, message=f"AUP gate error: {exc}"))
@@ -514,13 +515,21 @@ def _do_deep_research(args: argparse.Namespace) -> int:
     run = WorkflowRun(workflow="deep-research", args={"query": query, "sources": n_sources}, started_at=_now())
     t0 = time.time()
 
-    # Phase 1: AUP gate
-    p1 = _run_phase("aup:check", lambda: lgwks_aup.AUPGate.load().check({
-        "customer_id": "lgwks-workflow", "request_type": "intent",
-        "content_preview": query[:32000],
-    }).verdict.value)
-    verdict_ok = p1.message in ("allow", "review")
-    p1.ok = verdict_ok; p1.exit_code = 0 if verdict_ok else 3; p1.message = "pass" if verdict_ok else "deny"
+    # Phase 1: AUP gate — call directly
+    try:
+        check = lgwks_aup.AUPGate.load().check({
+            "customer_id": "lgwks-workflow", "request_type": "intent",
+            "content_preview": query[:32000],
+        })
+        verdict_ok = check.verdict in (lgwks_aup.Verdict.ALLOW, lgwks_aup.Verdict.REVIEW)
+        p1 = PhaseResult(
+            name="aup:check", ok=verdict_ok,
+            exit_code=0 if verdict_ok else 3,
+            message="pass" if verdict_ok else "deny",
+            artifact={"diagnosis": check.diagnosis},
+        )
+    except Exception as exc:
+        p1 = PhaseResult(name="aup:check", ok=False, exit_code=3, message=str(exc))
     run.phases.append(p1)
     if not verdict_ok:
         run.exit_code = 3; run.verdict = "deny"
@@ -619,12 +628,20 @@ def _do_quick_scan(args: argparse.Namespace) -> int:
     run = WorkflowRun(workflow="quick-scan", args={"query": query}, started_at=_now())
     t0 = time.time()
 
-    # AUP gate (lightweight)
-    p1 = _run_phase("aup:check", lambda: lgwks_aup.AUPGate.load().check({
-        "customer_id": "lgwks-workflow", "request_type": "intent", "content_preview": query[:32000],
-    }).verdict.value)
-    verdict_ok = p1.message in ("allow", "review")
-    p1.ok = verdict_ok; p1.exit_code = 0 if verdict_ok else 3; p1.message = "pass" if verdict_ok else "deny"
+    # AUP gate (lightweight) — call directly
+    try:
+        check = lgwks_aup.AUPGate.load().check({
+            "customer_id": "lgwks-workflow", "request_type": "intent", "content_preview": query[:32000],
+        })
+        verdict_ok = check.verdict in (lgwks_aup.Verdict.ALLOW, lgwks_aup.Verdict.REVIEW)
+        p1 = PhaseResult(
+            name="aup:check", ok=verdict_ok,
+            exit_code=0 if verdict_ok else 3,
+            message="pass" if verdict_ok else "deny",
+            artifact={"diagnosis": check.diagnosis},
+        )
+    except Exception as exc:
+        p1 = PhaseResult(name="aup:check", ok=False, exit_code=3, message=str(exc))
     run.phases.append(p1)
     if not verdict_ok:
         run.exit_code = 3; run.verdict = "deny"
