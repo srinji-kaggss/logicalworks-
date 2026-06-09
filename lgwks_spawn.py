@@ -83,6 +83,22 @@ def _load_context_meta(run_dir: Path) -> dict[str, Any]:
     return meta
 
 
+def _load_concept_graph(run_dir: Path) -> dict[str, Any] | None:
+    """Load concept graph from substrate run if present."""
+    p = run_dir / "concepts.json"
+    if not p.exists():
+        return None
+    data = json.loads(p.read_text())
+    return {
+        "schema": "lgwks.concept.graph.v0",
+        "concepts_count": len(data.get("concepts", [])),
+        "relations_count": len(data.get("relations", [])),
+        "activation_map_size": len(data.get("activation", {})),
+        "path": str(p),
+    }
+
+
+
 def _load_capabilities() -> dict[str, Any]:
     """Pull live capability matrix from the manifest."""
     import lgwks_manifest
@@ -101,6 +117,7 @@ def assemble_packet(run_dir: Path) -> dict[str, Any]:
     aup = _load_aup_verdict(run_dir)
     do_run = _load_do_run(run_dir)
     ctx_meta = _load_context_meta(run_dir)
+    concept_graph = _load_concept_graph(run_dir)
     caps = _load_capabilities()
 
     packet = {
@@ -110,6 +127,7 @@ def assemble_packet(run_dir: Path) -> dict[str, Any]:
         "aup": aup or {"verdict": "unknown", "note": "no aup.verdict.json found"},
         "do_run": do_run or {"note": "no do.run.json found"},
         "context": ctx_meta,
+        "concept_graph": concept_graph or {"note": "no concepts.json found"},
         "capabilities": caps,
         "provenance": {
             "git_sha": _git_sha(run_dir),
@@ -159,11 +177,15 @@ def _spawn_command(args: argparse.Namespace) -> int:
     else:
         packet = assemble_packet(run_dir)
         print(f"  spawn packet: {out}")
-        print(f"    schema:     {packet['schema']}")
-        print(f"    aup:        {packet['aup'].get('verdict', 'unknown')}")
-        print(f"    context:    {packet['context'].get('has_context_md', False)}")
-        print(f"    do_run:     {bool(packet['do_run'].get('phases'))}")
-        print(f"    verbs:      {packet['capabilities']['verb_count']}")
+        print(f"    schema:        {packet['schema']}")
+        print(f"    aup:           {packet['aup'].get('verdict', 'unknown')}")
+        print(f"    context:       {packet['context'].get('has_context_md', False)}")
+        print(f"    do_run:        {bool(packet['do_run'].get('phases'))}")
+        cg = packet.get('concept_graph', {})
+        print(f"    concepts:      {cg.get('concepts_count', 'N/A')}")
+        print(f"    relations:     {cg.get('relations_count', 'N/A')}")
+        print(f"    activation:    {cg.get('activation_map_size', 'N/A')}")
+        print(f"    verbs:         {packet['capabilities']['verb_count']}")
     return 0
 
 
