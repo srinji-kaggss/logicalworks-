@@ -64,6 +64,22 @@ Gemini model identity (verified below; not to be changed).
 - Re-rank: TAINT-001 now LIVE for Python (was P2). Cross-language patterns stay P2/P3 pending
   tree-sitter (also needed by PRD-02 code graph) — shared dependency, do once.
 
+### W4 — Intent math: Human Assumption Decoder (HAD)  [DONE]
+- New `lgwks_had.py`: utterance → `TypedIntentIR` + `AssumptionLedger` (consultant
+  03/05 schemas). RSA/Bayesian posterior approximated by L1's top-k softmax (L1 similarity =
+  the pragmatic-listener signal); counter-hypotheses = runner-up verbs; risk from a verb
+  lexicon (irreversibility is a property of the verb, no inference needed).
+- Abstention ladder (consultant D5): no-op/plan_only/low-margin → human_review; confident +
+  low-risk → accepted_for_low_risk_execution; **confident + risky → human_review** (T0: high
+  confidence in a destructive act is MORE reason to confirm). `routing.execute` reflects it.
+- //why this is the operating-loop cure made structural: every inferred assumption is an
+  explicit scored falsifiable record; it cannot silently assume-then-act.
+- Tests: `tests/test_had.py` 7 pass (accept / risky→review / ambiguous→review / schema / determinism).
+- Thresholds heuristic pending labeled calibration (SCIENCE §7).
+
+### Combined verification
+- 77 tests pass across intent_classifier + algorithms + sast + had + bot_code_hacker (LGWKS_NO_MODELS=1).
+
 ## DEFERRAL LEDGER (continuously re-ranked: P1 = do next, P3 = later)
 Each entry: what · why deferred · where it must land · current rank.
 
