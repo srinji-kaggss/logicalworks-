@@ -207,7 +207,7 @@ def _session_for_url(url: str) -> Path | None:
 
 
 def render(url: str, max_chars: int = 8000, *, use_session: bool = False,
-           wait_ms: int = 1500, with_html: bool = False,
+           wait_ms: int = 1500, with_html: bool = False, with_screenshot: bool = False,
            browser_engine: str = "webkit") -> dict:
     """Fetch a JS-rendered page with a real browser.
 
@@ -215,7 +215,9 @@ def render(url: str, max_chars: int = 8000, *, use_session: bool = False,
     or "chromium" (use for Chrome-cookie compatibility or --disable-blink-features
     anti-detection on heavily bot-walled sites).
     use_session loads the saved session for this host from ~/.config/lgwks/sessions/.
-    with_html also returns the rendered DOM. Returns {ok, text, reason[, html]}.
+    with_html also returns the rendered DOM.
+    with_screenshot returns a base64 PNG screenshot for multimodal embedding.
+    Returns {ok, text, reason[, html, screenshot_b64, screenshot_mime]}.
     """
     if not _remote_allowed(url):
         return {"ok": False, "text": "", "reason": "blocked URL"}
@@ -248,10 +250,21 @@ def render(url: str, max_chars: int = 8000, *, use_session: bool = False,
             page.goto(url, wait_until="domcontentloaded", timeout=30000)
             page.wait_for_timeout(wait_ms)                   # let client JS render
             html = page.content()
-            browser.close()
             out = {"ok": True, "text": _text_from(html, max_chars), "reason": f"rendered:{browser_engine}"}
             if with_html:
                 out["html"] = html                           # the DOM the browser saw — parse links here
+            if with_screenshot:
+                try:
+                    raw = page.screenshot(type="png", full_page=False)
+                    if raw:
+                        import lgwks_multimodal as mm
+                        b64, mime = mm._resize_and_encode(raw, max_dim=mm._MAX_IMG_DIM, fmt="PNG")
+                        out["screenshot_b64"] = b64
+                        out["screenshot_mime"] = mime
+                except Exception:
+                    out["screenshot_b64"] = None
+                    out["screenshot_mime"] = None
+            browser.close()
             return out
     except Exception as e:
         return {"ok": False, "text": "", "reason": f"render failed: {type(e).__name__}"}
