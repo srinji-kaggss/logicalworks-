@@ -412,7 +412,7 @@ _DOMAINS: dict[str, list[str]] = {
                   "x", "manifest", "login", "cohere", "comprehend", "geo", "public",
                   "akinator", "run", "context", "model-hub", "capture", "jepa"],
     "GitHub":    ["gh"],
-    "DevOps":    ["repo", "review", "session", "project", "batch", "refactor", "hooks", "agent-os", "portal"],
+    "DevOps":    ["repo", "review", "session", "project", "batch", "refactor", "hooks", "agent-os", "portal", "do"],
     "System":    ["solve", "debug", "doctor", "intent", "entity-graph", "graph",
                   "substrate", "repl", "initialize", "auth", "keyvault", "foundation",
                   "aup"],
