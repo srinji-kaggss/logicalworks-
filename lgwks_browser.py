@@ -208,7 +208,8 @@ def _session_for_url(url: str) -> Path | None:
 
 def render(url: str, max_chars: int = 8000, *, use_session: bool = False,
            wait_ms: int = 1500, with_html: bool = False, with_screenshot: bool = False,
-           browser_engine: str = "webkit") -> dict:
+           browser_engine: str = "webkit",
+           user_agent: str | None = None, extra_headers: dict | None = None) -> dict:
     """Fetch a JS-rendered page with a real browser.
 
     browser_engine: "webkit" (default, Safari engine — best for macOS Safari sessions)
@@ -217,6 +218,8 @@ def render(url: str, max_chars: int = 8000, *, use_session: bool = False,
     use_session loads the saved session for this host from ~/.config/lgwks/sessions/.
     with_html also returns the rendered DOM.
     with_screenshot returns a base64 PNG screenshot for multimodal embedding.
+    user_agent overrides the default UA (e.g. Googlebot for paywall bypass).
+    extra_headers are merged onto every request (e.g. {"Referer": "https://www.google.com"}).
     Returns {ok, text, reason[, html, screenshot_b64, screenshot_mime]}.
     """
     if not _remote_allowed(url):
@@ -239,11 +242,15 @@ def render(url: str, max_chars: int = 8000, *, use_session: bool = False,
             if browser_engine == "chromium":
                 launch_kwargs["args"] = ["--disable-blink-features=AutomationControlled"]
             browser = engine.launch(**launch_kwargs)
-            ctx = browser.new_context(
-                user_agent=_UA, locale="en-CA", timezone_id="America/Toronto",
-                viewport={"width": 1366, "height": 900},
-                storage_state=storage,                       # the user's session, iff present
-            )
+            ctx_kwargs: dict = {
+                "user_agent": user_agent or _UA, "locale": "en-CA",
+                "timezone_id": "America/Toronto",
+                "viewport": {"width": 1366, "height": 900},
+                "storage_state": storage,                    # the user's session, iff present
+            }
+            if extra_headers:
+                ctx_kwargs["extra_http_headers"] = extra_headers
+            ctx = browser.new_context(**ctx_kwargs)
             if auth_headers:
                 ctx.route("**/*", _route_handler(lock_host, auth_headers))
             page = ctx.new_page()
