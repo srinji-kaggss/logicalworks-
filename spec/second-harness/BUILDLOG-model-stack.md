@@ -37,6 +37,17 @@ Gemini model identity (verified below; not to be changed).
 - Tests: 19 pass (added `test_low_margin_forces_plan_only`, `test_clear_margin_allows_execution`).
 - Commit: feat(L1) on `feat/model-stack-l1-algorithms`.
 
+### W2 — L4 narrow-ML algorithm catalog  [DONE]
+- New `lgwks_algorithms.py`: pure-stdlib, deterministic, no numpy/sklearn/network — runs in 3.14.
+  - LIVE: `rolling_z_score` (robust median+MAD spike), `ewma` + `ewma_deviation` (trend/drift),
+    `fit_logistic` (interpretable GD baseline classifier — risk/router/fraud baseline).
+  - `CATALOG` + `catalog_status()`: auditable live-vs-deferred registry mirroring the consultant
+    `04_algorithm_catalog.yaml`. 4 live, 6 deferred (each names its dep).
+- Tests: `tests/test_algorithms.py`, 9 pass.
+- //why deterministic L=0: these score and flag, never decide authority — evidence for a gate.
+- Re-rank: LightGBM/IsolationForest/HDBSCAN/LOF/LambdaMART now have a live home to slot into once
+  their dep lands (venv). contextual_bandit needs a feedback loop (later).
+
 ## DEFERRAL LEDGER (continuously re-ranked: P1 = do next, P3 = later)
 Each entry: what · why deferred · where it must land · current rank.
 
