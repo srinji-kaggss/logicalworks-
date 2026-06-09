@@ -1,0 +1,52 @@
+{
+  "schema": "lgwks.spawn.v1",
+  "timestamp": 1750035847.0,
+  "run_dir": "",
+  "aup": {
+    "verdict": "allow",
+    "note": "Handoff artifact for next session"
+  },
+  "do_run": {
+    "note": "Handoff session; no do.run.json"
+  },
+  "context": {
+    "exists": false
+  },
+  "capabilities": {
+    "verb_count": 53,
+    "domains": [
+      "Research"
+    ],
+    "note": "See lgwks_home.py for full domain list + workflow verbs"
+  },
+  "concept_graph": {
+    "concepts_count": 22,
+    "relations_count": 35,
+    "activation_map_size": 18,
+    "path": "docs/handoff/2026-06-09.md"
+  },
+  "provenance": {
+    "git_sha": "553ebe0",
+    "hostname": "srinji-macbook",
+    "version": "lgwks.spawn.v1"
+  },
+  "handoff": {
+    "file": "docs/handoff/2026-06-09.md",
+    "commits_today": [
+      "683a757",
+      "6bf5dc5",
+      "c400c5b",
+      "553ebe0"
+    ],
+    "active_gaps": 6,
+    "next_action": {
+      "priority": "high",
+      "task": "Wire multimodal into substrate pipeline",
+      "subtasks": [
+        "Add with_screenshot=True to _crawl_site() render calls",
+        "Create image chunk rows with chunk_kind=\"image\"",
+        "Call embed_multimodal() for image chunks in build_run()"
+      ]
+    }
+  }
+}
