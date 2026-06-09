@@ -246,6 +246,24 @@ _VERB_META: dict[str, dict] = {
         "output": "lgwks.spawn.v1 JSON (AUP verdict + context + capabilities + provenance)",
         "tokens": "none",
     },
+    "schema ls": {
+        "intent": "list all known schemas in the registry",
+        "args": {"--json": "structured output", "--domain": "filter by domain prefix"},
+        "output": "schema registry JSON (lgwks.schema.registry.v0)",
+        "tokens": "none",
+    },
+    "schema show": {
+        "intent": "show details for a specific schema",
+        "args": {"name": "schema name (e.g. lgwks.spawn.v1)", "--json": "structured output"},
+        "output": "schema detail JSON",
+        "tokens": "none",
+    },
+    "route": {
+        "intent": "deterministic intent router — classify text into verb category (tiny-bert + heuristic fallback)",
+        "args": {"text": "intent text to classify", "--json": "structured output", "--model": "auto | heuristic | tiny-bert"},
+        "output": "routing JSON with category, confidence, method, latency_ms, verb, args, note",
+        "tokens": "none (heuristic) / tiny-bert local inference",
+    },
     "jarvis crawl": {
         "intent": "research-graph crawl of a site/keyword frontier; URL sources use substrate auth-aware runtime by default",
         "args": {

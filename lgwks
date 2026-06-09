@@ -1459,6 +1459,14 @@ def build_parser() -> argparse.ArgumentParser:
     import lgwks_spawn
     lgwks_spawn.add_parser(sub)
 
+    # schema — schema registry for next-agent discovery
+    import lgwks_schema
+    lgwks_schema.add_parser(sub)
+
+    # route — deterministic intent router (tiny-bert + heuristic fallback)
+    import lgwks_intent_router
+    lgwks_intent_router.add_parser(sub)
+
     # auth — auth-vault CLI (Issue #7)
     auth = sub.add_parser("auth", help="capability vault (refs only; secrets stay in Keychain)")
     auth.set_defaults(func=_auth_dispatch, _passthrough=True)
