@@ -371,6 +371,8 @@ def _browser_engine_from_args(args: argparse.Namespace) -> str:
 
 def _do_research_inline(args: argparse.Namespace) -> int:
     import lgwks_aup
+    import lgwks_substrate
+    import lgwks_spawn
 
     query = getattr(args, "query", "")
     json_out = getattr(args, "json", False)
@@ -407,11 +409,11 @@ def _do_research_inline(args: argparse.Namespace) -> int:
             run.finished_at = _now()
             return _emit(run, json_out)
 
-    # Phase 2: crawl
+    # Phase 2: substrate crawl (maps URL or file → full artifact tree)
+    source = query
     if plan_file and Path(plan_file).exists():
-        plan_path = Path(plan_file)
         try:
-            plan_data = json.loads(plan_path.read_text(encoding="utf-8"))
+            plan_data = json.loads(Path(plan_file).read_text(encoding="utf-8"))
             source = plan_data.get("source", query)
         except Exception as exc:
             run.phases.append(PhaseResult(name="plan:load", ok=False, exit_code=2, message=str(exc)))
@@ -420,30 +422,51 @@ def _do_research_inline(args: argparse.Namespace) -> int:
             run.duration_sec = time.time() - t0
             run.finished_at = _now()
             return _emit(run, json_out)
-    else:
-        source = query
 
-    is_url = bool(re.search(r"^https?://", source.strip()))
+    is_url = bool(re.search(r"^https?://", str(source).strip()))
 
-    if is_url:
-        import lgwks_crawl
-        p2 = _run_phase(
-            "crawl:page",
-            lambda: lgwks_crawl.crawl_page(
-                url=source,
-                max_chars=8000,
-                wait_ms=2000,
-                with_links=True,
-                browser_engine=engine,
-                use_session=use_session,
-            ).ok,
+    sub_args = argparse.Namespace(
+        target=source or ".",
+        project=slugify(str(source or "research")),
+        source_type="auto",
+        max_pages=12,
+        max_depth=depth,
+        max_files=250,
+        max_chars=120_000,
+        chunk_words=450,
+        chunk_overlap=70,
+        fact_threshold=0.6,
+        embed_provider="deterministic",
+        embed_model="",
+        login_if_needed=True,
+        login_url="",
+        success_selector=None,
+        max_auto_bypass_attempts=3,
+        max_auth_handoffs=3,
+        browser_engine=engine,
+        click_discovery=False,
+        max_clicks_per_page=20,
+        crawl_mode="link-then-click",
+    )
+    try:
+        manifest = lgwks_substrate.build_run(sub_args)
+        root = manifest.get("artifacts", {}).get("root", "")
+        p2 = PhaseResult(
+            name="substrate:crawl",
+            ok=manifest.get("counts", {}).get("documents", 0) > 0,
+            exit_code=0,
+            message=f"{manifest.get('counts', {}).get('documents', 0)} docs, {manifest.get('counts', {}).get('chunks', 0)} chunks",
+            artifact={
+                "run_id": manifest.get("run_id", ""),
+                "run_dir": root,
+                "manifest": str(Path(root) / "manifest.json") if root else "",
+                "counts": manifest.get("counts", {}),
+            },
         )
-        p2.artifact = {"source": source, "type": "browser_crawl", "engine": engine, "session": use_session}
         run.phases.append(p2)
-    elif getattr(args, "dry_run", False):
-        run.phases.append(PhaseResult(name="crawl:page", ok=True, exit_code=0, message="dry-run: no network", artifact={"type": "synthetic"}))
-    else:
-        run.phases.append(PhaseResult(name="crawl:page", ok=False, exit_code=2, message="no URL-like source for crawl; provide a URL or use --plan with a crawl plan"))
+        run_dir = Path(root) if root else Path(".")
+    except Exception as exc:
+        run.phases.append(PhaseResult(name="substrate:crawl", ok=False, exit_code=2, message=str(exc)))
         run.exit_code = 2
         run.verdict = "degraded"
         run.duration_sec = time.time() - t0
@@ -452,12 +475,18 @@ def _do_research_inline(args: argparse.Namespace) -> int:
 
     # Phase 3: synthesize
     if run.phases[-1].ok:
-        import lgwks_spawn
-        p3 = _run_phase(
-            "synthesize:spawn",
-            lambda: lgwks_spawn.assemble_packet(run_dir=Path("."), json_out=json_out),
-        )
-        run.phases.append(p3)
+        try:
+            packet = lgwks_spawn.assemble_packet(run_dir=run_dir)
+            p3 = PhaseResult(
+                name="synthesize:spawn",
+                ok=True,
+                exit_code=0,
+                message=f"{packet.get('schema', 'spawn')} packet assembled",
+                artifact={"spawn_path": str(run_dir / "spawn.json")},
+            )
+            run.phases.append(p3)
+        except Exception as exc:
+            run.phases.append(PhaseResult(name="synthesize:spawn", ok=False, exit_code=2, message=str(exc)))
 
     run.exit_code = max(p.exit_code for p in run.phases)
     run.verdict = _verdict_from_phases(run.phases)
@@ -466,9 +495,14 @@ def _do_research_inline(args: argparse.Namespace) -> int:
     return _emit(run, json_out)
 
 
+def slugify(text: str) -> str:
+    import re
+    return re.sub(r"[^\w-]+", "-", text.lower()).strip("-").replace("--", "-")[:64]
+
+
 def _do_deep_research(args: argparse.Namespace) -> int:
     """Multi-source synthesis with cross-reference verification."""
-    import lgwks_aup, lgwks_crawl, lgwks_spawn
+    import lgwks_aup, lgwks_substrate, lgwks_spawn
 
     query = getattr(args, "query", "")
     json_out = getattr(args, "json", False)
@@ -476,7 +510,6 @@ def _do_deep_research(args: argparse.Namespace) -> int:
     depth = getattr(args, "depth", 1)
     engine = _browser_engine_from_args(args)
     verify = getattr(args, "verify", True)
-    use_session = getattr(args, "no_session", False) is not True
 
     run = WorkflowRun(workflow="deep-research", args={"query": query, "sources": n_sources}, started_at=_now())
     t0 = time.time()
@@ -494,29 +527,74 @@ def _do_deep_research(args: argparse.Namespace) -> int:
         run.duration_sec = time.time() - t0; run.finished_at = _now()
         return _emit(run, json_out)
 
-    # Phase 2: crawl N sources (simplified: same URL repeated with variations)
+    # Phase 2: substrate crawl (deep multi-page crawl with embeddings + graph)
     is_url = bool(re.search(r"^https?://", query.strip()))
     if is_url:
-        for i in range(n_sources):
-            p = _run_phase(
-                f"crawl:source{i+1}",
-                lambda u=query: lgwks_crawl.crawl_page(
-                    url=u, max_chars=8000, wait_ms=2000, with_links=True,
-                    browser_engine=engine, use_session=use_session,
-                ).ok,
+        try:
+            sub_args = argparse.Namespace(
+                target=query,
+                project=slugify(query),
+                source_type="auto",
+                max_pages=n_sources,
+                max_depth=depth,
+                max_files=250,
+                max_chars=120_000,
+                chunk_words=450,
+                chunk_overlap=70,
+                fact_threshold=0.6,
+                embed_provider="deterministic",
+                embed_model="",
+                login_if_needed=True,
+                login_url="",
+                success_selector=None,
+                max_auto_bypass_attempts=3,
+                max_auth_handoffs=3,
+                browser_engine=engine,
+                click_discovery=False,
+                max_clicks_per_page=20,
+                crawl_mode="link-then-click",
             )
-            p.artifact = {"source": query, "engine": engine, "index": i+1}
-            run.phases.append(p)
+            manifest = lgwks_substrate.build_run(sub_args)
+            root = manifest.get("artifacts", {}).get("root", "")
+            p2 = PhaseResult(
+                name="substrate:crawl",
+                ok=manifest.get("counts", {}).get("documents", 0) > 0,
+                exit_code=0,
+                message=f"{manifest.get('counts', {}).get('documents', 0)} docs, {manifest.get('counts', {}).get('chunks', 0)} chunks",
+                artifact={
+                    "run_id": manifest.get("run_id", ""),
+                    "run_dir": root,
+                    "manifest": str(Path(root) / "manifest.json") if root else "",
+                    "counts": manifest.get("counts", {}),
+                },
+            )
+            run.phases.append(p2)
+            run_dir = Path(root) if root else Path(".")
+        except Exception as exc:
+            run.phases.append(PhaseResult(name="substrate:crawl", ok=False, exit_code=2, message=str(exc)))
+            run.exit_code = 2; run.verdict = "degraded"
+            run.duration_sec = time.time() - t0; run.finished_at = _now()
+            return _emit(run, json_out)
     else:
-        run.phases.append(PhaseResult(name="crawl:sources", ok=False, exit_code=2, message="deep-research needs a URL to crawl multiple sources; use 'research <URL>'"))
+        run.phases.append(PhaseResult(name="substrate:crawl", ok=False, exit_code=2, message="deep-research needs a URL to crawl; use 'research <URL>'"))
 
     # Phase 3: synthesize
-    if any(p.ok for p in run.phases if p.name.startswith("crawl:")):
-        p3 = _run_phase("synthesize:spawn", lambda: lgwks_spawn.assemble_packet(run_dir=Path("."), json_out=json_out))
-        run.phases.append(p3)
+    if run.phases[-1].ok:
+        try:
+            packet = lgwks_spawn.assemble_packet(run_dir=run_dir)
+            p3 = PhaseResult(
+                name="synthesize:spawn",
+                ok=True,
+                exit_code=0,
+                message=f"{packet.get('schema', 'spawn')} packet assembled",
+                artifact={"spawn_path": str(run_dir / "spawn.json")},
+            )
+            run.phases.append(p3)
+        except Exception as exc:
+            run.phases.append(PhaseResult(name="synthesize:spawn", ok=False, exit_code=2, message=str(exc)))
 
-    # Phase 4: verify claims (optional)
-    if verify:
+    # Phase 4: verify claims (optional, requires solve module)
+    if verify and run.phases[-2].ok if len(run.phases) >= 2 else False:
         import lgwks_solve
         p4 = _run_phase("verify:claims", lambda: lgwks_solve.solve_command(argparse.Namespace(
             target="web", repo=".", thought=query, json=json_out)))
@@ -1003,16 +1081,7 @@ def add_parser(sub) -> None:
     list_.add_argument("--json", action="store_true", help="structured output")
     list_.set_defaults(func=lambda args: list_workflows(getattr(args, "json", False)))
 
-    # === natural language alias: `lgwks do <intent>` ===
-    do_p = sub.add_parser("do", help="natural language workflow: 'do <intent in plain English>'")
-    do_p.add_argument("intent_words", nargs="*", help="your intent, e.g. 'crawl example.com' 'code review my PR'")
-    do_p.add_argument("--url", help="explicit URL (auto-detected from intent if omitted)")
-    do_p.add_argument("--repo", default=".", help="path to repo")
-    do_p.add_argument("--json", action="store_true", help="structured output")
-    do_p.add_argument("--no-cache", action="store_true", help="skip prompt cache")
-    do_p.add_argument("--engine", choices=["chromium", "webkit"], default=DEFAULT_ENGINE)
-    do_p.add_argument("--no-session", action="store_true", help="do not load saved browser sessions")
-    do_p.set_defaults(func=do_natural_command)
+    # NOTE: `lgwks do` is provided by lgwks_do.py — do NOT register here.
 
 
 def main(argv: list[str] | None = None) -> int:

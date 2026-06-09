@@ -1,12 +1,7 @@
-"""lgwks_crawl — bot-resilient, JS-rendered page extraction with stealth.
+"""lgwks_crawl — single-page fetch shim: delegates to lgwks_substrate.build_run(max_pages=1).
 
-Inspired by Firecrawl and Crawl4AI: uses Playwright with stealth plugins, realistic
-browser fingerprinting, and smart waiting to evade basic bot checks (Cloudflare,
-DataDome, basic JS challenges). Extracts clean markdown, links, and structured data.
-
-//why: `lgwks_browser.render` is honest but naive — a single UA and no stealth. Modern
-sites gate content behind bot detection. We need the same ethical posture (authorized
-research only, rate limits, no CAPTCHA solving) but with better technical resilience.
+Legacy `crawl_page` and `CrawlResult` remain importable for backward compatibility but
+delegate to `lgwks_browser.render` directly.
 """
 
 from __future__ import annotations
@@ -14,15 +9,13 @@ from __future__ import annotations
 import argparse
 import json
 import re
-import time
-from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
 import lgwks_ui as ui
-from lgwks_browser import _remote_allowed, _session_for_url, _headers, _route_handler, available as _browser_available
-from lgwks_html import html_to_markdown
 
+
+# ── backward compatibility ────────────────────────────────────────────────────
 
 _UA_POOL = [
     "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36",
@@ -58,205 +51,153 @@ def _pick_fingerprint(seed: int = 0) -> dict[str, Any]:
 
 def _text_from_html(html: str, max_chars: int = 8000, base_url: str = "") -> str:
     """Extract readable text from rendered HTML."""
+    from lgwks_html import html_to_markdown
     text, _, _ = html_to_markdown(html, base_url)
     return text[:max_chars]
 
 
 def _extract_links(html: str, base: str) -> list[dict[str, str]]:
     """Extract anchor links from rendered HTML."""
+    from lgwks_html import html_to_markdown
     _, _, links = html_to_markdown(html, base)
-    return links
+    seen: set[str] = set()
+    out: list[dict[str, str]] = []
+    for ln in links:
+        href = ln.get("href", "")
+        if href.startswith("javascript:"):
+            continue
+        key = f"{ln.get('text', '')}|{href}"
+        if key not in seen:
+            seen.add(key)
+            out.append(ln)
+    return out
 
 
-def _inject_stealth(page: Any) -> None:
-    """Inject stealth scripts to mask Playwright fingerprints."""
-    # navigator.webdriver evasion
-    page.add_init_script("""
-        Object.defineProperty(navigator, 'webdriver', {get: () => undefined});
-        Object.defineProperty(navigator, 'plugins', {get: () => [1, 2, 3, 4, 5]});
-        Object.defineProperty(navigator, 'languages', {get: () => ['en-US', 'en']});
-        window.chrome = { runtime: {} };
-    """)
-
-
-@dataclass
 class CrawlResult:
-    url: str
-    ok: bool
-    title: str = ""
-    text: str = ""
-    html: str = ""
-    links: list[dict[str, str]] = field(default_factory=list)
-    reason: str = ""
-    metadata: dict[str, Any] = field(default_factory=dict)
+    """Compatibility shim wrapping the dict returned by lgwks_browser.render."""
+    def __init__(self, url: str = "", ok: bool = False, **kwargs: Any):
+        self.url = url
+        self.ok = ok
+        for k, v in kwargs.items():
+            setattr(self, k, v)
 
 
-def crawl_page(
-    url: str,
-    max_chars: int = 8000,
-    wait_ms: int = 2000,
-    with_html: bool = False,
-    with_links: bool = True,
-    seed: int = 0,
-    scroll: bool = True,
-    timeout: int = 30000,
-    browser_engine: str = "chromium",
-    *,
-    use_session: bool = False,
-) -> CrawlResult:
-    """Crawl a single page with stealth browser.
+def crawl_page(url: str, **kwargs: Any) -> CrawlResult:
+    """Delegate to lgwks_browser.render and return a CrawlResult for backward compat."""
+    import lgwks_browser
+    res = lgwks_browser.render(url, **kwargs)
+    return CrawlResult(
+        url=url,
+        ok=res.get("ok", False),
+        title=res.get("title", ""),
+        text=res.get("text", ""),
+        html=res.get("html", ""),
+        links=res.get("links", []),
+        reason=res.get("reason", ""),
+        metadata=res.get("metadata", {}),
+    )
 
-    use_session loads the saved session for this host from ~/.config/lgwks/sessions/.
-    """
-    if not _remote_allowed(url):
-        return CrawlResult(url=url, ok=False, reason="blocked URL")
-    ok, why = _browser_available()
-    if not ok:
-        return CrawlResult(url=url, ok=False, reason=why)
 
-    fp = _pick_fingerprint(seed)
-    try:
-        from playwright.sync_api import sync_playwright
-    except Exception as e:
-        return CrawlResult(url=url, ok=False, reason=f"playwright import failed: {e}")
+# ── helpers ───────────────────────────────────────────────────────────────────
 
-    try:
-        with sync_playwright() as p:
-            # //why: webkit doesn't accept chromium blink flags; keep args engine-specific
-            engine = p.webkit if browser_engine == "webkit" else p.chromium
-            launch_kwargs: dict[str, Any] = {"headless": True}
-            if browser_engine == "chromium":
-                launch_kwargs["args"] = [
-                    "--disable-blink-features=AutomationControlled",
-                    "--disable-web-security",
-                    "--disable-features=IsolateOrigins,site-per-process",
-                ]
-            browser = engine.launch(**launch_kwargs)
-            # Session-aware context: load saved session if present, inject auth headers
-            session_path = _session_for_url(url)
-            storage = str(session_path) if (use_session or session_path) and session_path else None
-            lock_host = urllib.parse.urlparse(url).hostname or ""
-            auth_headers = _headers(url)
-            ctx = browser.new_context(
-                user_agent=fp["user_agent"],
-                viewport=fp["viewport"],
-                locale=fp["locale"],
-                timezone_id=fp["timezone"],
-                color_scheme=fp["color_scheme"],
-                reduced_motion=fp["reduced_motion"],
-                storage_state=storage,
-            )
-            if auth_headers:
-                ctx.route("**/*", _route_handler(lock_host, auth_headers))
-            page = ctx.new_page()
-            _inject_stealth(page)
+def _slug(text: str) -> str:
+    return re.sub(r"[^\w-]+", "-", text.lower()).strip("-").replace("--", "-")[:64]
 
-            # Human-like navigation
-            page.goto(url, wait_until="domcontentloaded", timeout=timeout)
-            page.wait_for_timeout(500)  # initial settle
 
-            # Wait for common anti-bot challenges to resolve
-            for _ in range(3):
-                if page.locator("body").count() == 0:
-                    page.wait_for_timeout(1000)
-                else:
-                    break
-
-            # Scroll to bottom to trigger lazy load (like a human)
-            if scroll:
-                page.evaluate("window.scrollTo(0, document.body.scrollHeight)")
-                page.wait_for_timeout(800)
-
-            # Final wait for JS rendering
-            page.wait_for_timeout(wait_ms)
-
-            html = page.content()
-            title = page.title()
-            browser.close()
-
-            text = _text_from_html(html, max_chars, base_url=url)
-            links = _extract_links(html, url) if with_links else []
-
-            return CrawlResult(
-                url=url,
-                ok=True,
-                title=title,
-                text=text,
-                html=html if with_html else "",
-                links=links,
-                metadata={
-                    "fingerprint": fp,
-                    "chars_extracted": len(text),
-                    "links_found": len(links),
-                },
-            )
-    except Exception as e:
-        return CrawlResult(url=url, ok=False, reason=f"crawl failed: {type(e).__name__}: {e}")
-
+# ── CLI ───────────────────────────────────────────────────────────────────────
 
 def crawl_command(args: argparse.Namespace) -> int:
+    """Fetch a single page via substrate.build_run(max_pages=1, max_depth=0)."""
     url = args.url
-    result = crawl_page(
-        url,
+    json_out = getattr(args, "json", False)
+    machine = bool(getattr(args, "machine", False) or json_out)
+
+    import lgwks_substrate as sub
+
+    sub_args = argparse.Namespace(
+        target=url,
+        project=f"fetch-{_slug(url)[:48]}",
+        source_type="auto",
+        max_pages=1,
+        max_depth=0,
+        max_files=0,
         max_chars=getattr(args, "max_chars", 8000),
-        wait_ms=getattr(args, "wait", 2000),
-        with_html=getattr(args, "html", False),
-        with_links=getattr(args, "links", True),
-        seed=getattr(args, "seed", 0),
-        scroll=getattr(args, "scroll", True),
+        chunk_words=450,
+        chunk_overlap=70,
+        fact_threshold=0.6,
+        embed_provider="deterministic",
+        embed_model="",
+        login_if_needed=True,
+        login_url="",
+        success_selector=None,
+        max_auto_bypass_attempts=3,
+        max_auth_handoffs=3,
         browser_engine=getattr(args, "browser_engine", "chromium"),
+        click_discovery=False,
+        max_clicks_per_page=20,
+        crawl_mode="link-only",
     )
-    if getattr(args, "json", False):
-        print(json.dumps({
-            "schema": "lgwks.crawl.v0",
-            "url": result.url,
-            "ok": result.ok,
-            "title": result.title,
-            "text": result.text,
-            "html": result.html,
-            "links": result.links,
-            "reason": result.reason,
-            "metadata": result.metadata,
-        }, indent=2, ensure_ascii=False))
-        return 0 if result.ok else 1
+
+    try:
+        manifest = sub.build_run(sub_args)
+    except Exception as exc:
+        if machine:
+            print(json.dumps({
+                "schema": "lgwks.crawl.v0",
+                "ok": False,
+                "url": url,
+                "reason": str(exc),
+            }, indent=2, ensure_ascii=False))
+            return 1
+        on = ui.color_on()
+        print("\n".join(ui.band("lgwks · fetch", f"{url} — FAILED", on=on)))
+        print(ui.spine(ui.fg(f"✗ {exc}", ui.RUST, on=on), on=on))
+        print("", ui.footer("lgwks · fetch", on=on), "")
+        return 1
+
+    run_dir = Path(manifest["artifacts"]["root"])
+    counts = manifest.get("counts", {})
+    docs = counts.get("documents", 0)
+    chunks = counts.get("chunks", 0)
+
+    if machine:
+        print(json.dumps(manifest, indent=2, ensure_ascii=False))
+        return 0
 
     on = ui.color_on()
     out: list[str] = [""]
-    if result.ok:
-        out += ui.band("lgwks · fetch", f"{result.url} — {result.title}", on=on)
+    if docs > 0:
+        out += ui.band("lgwks · fetch", f"{url} — substrate fetch", on=on)
         out.append(ui.spine(on=on))
-        out.append(ui.spine(ui.fg(f"✓ {result.metadata['chars_extracted']} chars · {result.metadata['links_found']} links", ui.EMERALD, on=on), on=on))
-        if result.links:
-            out.append(ui.spine(ui.fg("links", ui.CREAM_DIM, on=on), on=on))
-            for ln in result.links[:5]:
-                out.append(ui.twig(f"{ln['text'] or '(no text)'} → {ln['href'][:60]}", 1, "link", on=on))
-            if len(result.links) > 5:
-                out.append(ui.twig(f"… and {len(result.links)-5} more", 1, "link", on=on))
-        out.append("")
-        out.append(result.text[:2000])
+        out.append(ui.spine(ui.fg(f"✓ {docs} doc  · {chunks} chunks", ui.EMERALD, on=on), on=on))
     else:
-        out += ui.band("lgwks · fetch", f"{result.url} — FAILED", on=on)
-        out.append(ui.spine(ui.fg(f"✗ {result.reason}", ui.RUST, on=on), on=on))
-    out.append(""); out.append("  " + ui.footer("lgwks · fetch", on=on)); out.append("")
+        out += ui.band("lgwks · fetch", f"{url} — no content", on=on)
+    out.append("")
+    out.append(f"  manifest: {run_dir / 'manifest.json'}")
+    out.append(f"  run_dir:  {run_dir}")
+    out.append("", ui.footer("lgwks · fetch", on=on), "")
     print("\n".join(out))
-    return 0 if result.ok else 1
+    return 0
 
 
 def add_parser(sub) -> None:
     p = sub.add_parser(
         "fetch",
         aliases=["crawl"],
-        help="single-page browser fetch/extract (`crawl` is a compatibility alias; use `jarvis crawl` for crawling)",
+        help="single-page browser fetch/extract — routes through substrate.build_run(max_pages=1)",
     )
     p.add_argument("url", help="target URL")
     p.add_argument("--max-chars", type=int, default=8000, help="max text chars to extract")
-    p.add_argument("--wait", type=int, default=2000, help="ms to wait after load")
-    p.add_argument("--html", action="store_true", help="include full rendered HTML")
-    p.add_argument("--links", action="store_true", default=True, help="extract links")
-    p.add_argument("--no-links", dest="links", action="store_false", help="skip link extraction")
-    p.add_argument("--seed", type=int, default=0, help="fingerprint seed (deterministic)")
-    p.add_argument("--no-scroll", dest="scroll", action="store_false", help="skip scroll trigger")
-    p.add_argument("--webkit", dest="browser_engine", action="store_const", const="webkit",
-                   default="chromium", help="use WebKit (Safari) engine — required for sites captured via lgwks login with the Safari extension")
-    p.add_argument("--json", action="store_true", help="structured output")
+    p.add_argument("--wait", type=int, default=2000, help="ms to wait after load (ignored; substrate manages)")
+    p.add_argument("--html", action="store_true", help="ignored; substrate manages")
+    p.add_argument("--links", action="store_true", default=True, help="ignored; extraction is automatic")
+    p.add_argument("--no-links", dest="links", action="store_false", help="ignored")
+    p.add_argument("--seed", type=int, default=0, help="ignored; substrate deterministic")
+    p.add_argument("--no-scroll", dest="scroll", action="store_false", help="ignored")
+    p.add_argument(
+        "--webkit", dest="browser_engine", action="store_const", const="webkit",
+        default="chromium",
+        help="use WebKit engine instead of Chromium",
+    )
+    p.add_argument("--json", action="store_true", help="emit full substrate manifest JSON")
     p.set_defaults(func=crawl_command)

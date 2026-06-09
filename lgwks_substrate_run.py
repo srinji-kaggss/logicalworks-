@@ -566,6 +566,7 @@ def add_parser(sub) -> None:
                          help="max visible controls to click per rendered page when --click-discovery is enabled")
         cmd.add_argument("--crawl-mode", choices=["link-only", "link-then-click", "click-heavy"], default="link-then-click",
                          help="crawl mode: link-only (no clicks), link-then-click (click only when href extraction is weak), click-heavy (always click visible controls)")
+        cmd.add_argument("--json", action="store_true", help="structured JSON output (always on for substrate; flag for compatibility)")
 
     build = ps.add_parser("build", help="build a substrate run from a url, file, folder, or repo")
     _add_build_args(build)
