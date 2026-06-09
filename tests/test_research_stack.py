@@ -255,9 +255,9 @@ class TestManifest(unittest.TestCase):
         live = man._collect_verbs()
         for expected in ("manifest", "extract", "convert", "solve", "x", "refine", "store",
                          "jarvis crawl", "memory init", "project plan", "geo compile",
-                         "agent-os bootstrap", "auth", "akinator", "run", "context", "foundation",
+                         "agent-os bootstrap", "auth", "akinator", "run crawl", "context", "foundation",
                          "portal build", "capture build",
-                         "keyvault", "model-hub"):
+                         "keyvault check", "model-hub list"):
             self.assertIn(expected, live, f"{expected!r} must appear in the live verb surface")
         m = man.build_manifest()
         manifest_names = {v["verb"] for v in m["verbs"]}
@@ -1184,9 +1184,9 @@ class TestUnifiedCliPackaging(unittest.TestCase):
             seen["argv"] = mod._forward_argv(args)
             return 0
 
-        mod._run_dispatch = fake_dispatch
-        self.assertEqual(mod.main(["run", "--demo"]), 0)
-        self.assertEqual(seen["argv"], ["--demo"])
+        mod._akinator_dispatch = fake_dispatch
+        self.assertEqual(mod.main(["akinator", "--auto", "--purpose", "test"]), 0)
+        self.assertEqual(seen["argv"], ["--auto", "--purpose", "test"])
 
     def test_akinator_wrapper_forwards_mixed_flag_arguments(self):
         mod = self._load_cli()

@@ -1464,24 +1464,24 @@ def build_parser() -> argparse.ArgumentParser:
     akinator.set_defaults(func=_akinator_dispatch, _passthrough=True)
 
     # run — post-gate execution spine and universal run management
-    run = sub.add_parser("run", help="post-gate crawl execution spine and universal run management")
-    run.set_defaults(func=_run_dispatch, _passthrough=True)
+    import lgwks_run
+    lgwks_run.add_parser(sub)
 
     # context — spawn context pack assembler for autonomous runs
-    context = sub.add_parser("context", help="build a graduated-resolution spawn context pack")
-    context.set_defaults(func=_context_dispatch, _passthrough=True)
+    import lgwks_context
+    lgwks_context.add_parser(sub)
 
     # foundation — on-device Foundation/NaturalLanguage extraction surface
-    foundation = sub.add_parser("foundation", help="on-device structured extraction backends")
-    foundation.set_defaults(func=_foundation_dispatch, _passthrough=True)
+    import lgwks_foundation
+    lgwks_foundation.add_parser(sub)
 
     # keyvault — runtime API-key resolution/store seam
-    keyvault = sub.add_parser("keyvault", help="Keychain-backed runtime secret resolver")
-    keyvault.set_defaults(func=_keyvault_dispatch, _passthrough=True)
+    import lgwks_keyvault
+    lgwks_keyvault.add_parser(sub)
 
     # model-hub — repo-resident model catalog/convert/train entrypoint
-    model_hub = sub.add_parser("model-hub", help="repo-resident model loader")
-    model_hub.set_defaults(func=_model_hub_dispatch, _passthrough=True)
+    import lgwks_model_hub
+    lgwks_model_hub.add_parser(sub)
 
     # doctor — self-test: verify environment, deps, models, and PATH
     doctor = sub.add_parser("doctor", help="self-test: verify install health")
@@ -1841,23 +1841,43 @@ def _akinator_dispatch(args) -> int:
 
 
 def _run_dispatch(args) -> int:
-    return _module_main_dispatch("lgwks_run", _forward_argv(args))
+    # Delegates to lgwks_run module; kept here for test monkey-patch compatibility.
+    import lgwks_run
+    return lgwks_run._run_compat_dispatch(args)
 
 
 def _context_dispatch(args) -> int:
-    return _module_main_dispatch("lgwks_context", _forward_argv(args))
+    import lgwks_context
+    return lgwks_context._context_command(args)
 
 
 def _foundation_dispatch(args) -> int:
-    return _module_main_dispatch("lgwks_foundation", _forward_argv(args))
+    import lgwks_foundation
+    return lgwks_foundation._foundation_command(args)
 
 
 def _keyvault_dispatch(args) -> int:
-    return _module_main_dispatch("lgwks_keyvault", _forward_argv(args))
+    import lgwks_keyvault
+    cmd = getattr(args, "keyvault_command", "")
+    if cmd == "set":
+        return lgwks_keyvault._keyvault_set_command(args)
+    return lgwks_keyvault._keyvault_check_command(args)
 
 
 def _model_hub_dispatch(args) -> int:
-    return _module_main_dispatch("lgwks_model_hub", _forward_argv(args))
+    import lgwks_model_hub
+    cmd = getattr(args, "model_hub_command", "")
+    if cmd == "list":
+        return lgwks_model_hub._model_hub_list_command(args)
+    if cmd == "load":
+        return lgwks_model_hub._model_hub_load_command(args)
+    if cmd == "convert":
+        return lgwks_model_hub._model_hub_convert_command(args)
+    if cmd == "train":
+        return lgwks_model_hub._model_hub_train_command(args)
+    if cmd == "doctor":
+        return lgwks_model_hub._model_hub_doctor_command(args)
+    return lgwks_model_hub._model_hub_list_command(args)
 
 
 def main(argv: list[str] | None = None) -> int:

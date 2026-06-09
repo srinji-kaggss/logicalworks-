@@ -21,6 +21,7 @@ Provision a key with no echo and no argv leak:
 
 from __future__ import annotations
 
+import argparse
 import subprocess
 import sys
 
@@ -80,6 +81,36 @@ def set_secret(name: str) -> int:
         return 0
     print(f"  failed to store '{name}' (security exit {proc.returncode})", file=sys.stderr)
     return 1
+
+
+def add_parser(sub) -> None:
+    p = sub.add_parser("keyvault", help="Keychain-backed runtime secret resolver")
+    sp = p.add_subparsers(dest="keyvault_command", required=True)
+
+    set_cmd = sp.add_parser("set", help="store/update a secret via interactive Keychain prompt")
+    set_cmd.add_argument("name", choices=list(SECRETS), help="secret name")
+    set_cmd.set_defaults(func=_keyvault_set_command)
+
+    check_cmd = sp.add_parser("check", help="report whether a secret is configured")
+    check_cmd.add_argument("name", choices=list(SECRETS), help="secret name")
+    check_cmd.add_argument("--json", action="store_true", help="structured output")
+    check_cmd.set_defaults(func=_keyvault_check_command)
+
+    p.set_defaults(func=lambda args: _keyvault_check_command(args))
+
+
+def _keyvault_set_command(args: argparse.Namespace) -> int:
+    return set_secret(args.name)
+
+
+def _keyvault_check_command(args: argparse.Namespace) -> int:
+    import json as _json
+    secret, source = get_secret(args.name)
+    if getattr(args, "json", False):
+        print(_json.dumps({"name": args.name, "configured": bool(secret), "source": source}, indent=2))
+    else:
+        print(f"  {args.name}: {'configured' if secret else 'NOT configured'} (source: {source})")
+    return 0 if secret else 1
 
 
 def main(argv: list[str] | None = None) -> int:

@@ -494,8 +494,13 @@ def _build_command_tree() -> dict[str, dict[str, Any]]:
 
 def _domain_for(verb: str) -> str:
     for domain, verbs in _DOMAINS.items():
+        # exact match first
         if verb in verbs:
             return domain
+        # prefix match for nested verbs (e.g. "agent-os bootstrap" → "agent-os")
+        for v in verbs:
+            if verb.startswith(v + " "):
+                return domain
     return "Other"
 
 

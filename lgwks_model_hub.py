@@ -454,6 +454,77 @@ def train_text_classifier(
         return {"ok": False, "path": "", "reason": f"training failed: {type(exc).__name__}: {exc}"}
 
 
+def add_parser(sub) -> None:
+    p = sub.add_parser("model-hub", help="repo-resident model loader")
+    sp = p.add_subparsers(dest="model_hub_command", required=True)
+
+    ls = sp.add_parser("list", help="list catalog models")
+    ls.add_argument("--json", action="store_true", help="structured output")
+    ls.set_defaults(func=_model_hub_list_command)
+
+    load = sp.add_parser("load", help="verify a model is present and loadable")
+    load.add_argument("--model", default="tiny-bert", help="model name from catalog")
+    load.add_argument("--json", action="store_true", help="structured output")
+    load.set_defaults(func=_model_hub_load_command)
+
+    convert = sp.add_parser("convert", help="convert a model to CoreML .mlpackage")
+    convert.add_argument("--model", default="tiny-bert", help="model name from catalog")
+    convert.add_argument("--json", action="store_true", help="structured output")
+    convert.set_defaults(func=_model_hub_convert_command)
+
+    train = sp.add_parser("train", help="fine-tune a text classifier and export to CoreML")
+    train.add_argument("--model", default="tiny-bert", help="base model name")
+    train.add_argument("--texts", required=True, help="JSON file with list of strings")
+    train.add_argument("--labels", required=True, help="JSON file with list of labels")
+    train.add_argument("--output", default="text_classifier", help="output model name")
+    train.add_argument("--json", action="store_true", help="structured output")
+    train.set_defaults(func=_model_hub_train_command)
+
+    doc = sp.add_parser("doctor", help="machine-readable health report for the local ML stack")
+    doc.add_argument("--json", action="store_true", help="structured output")
+    doc.set_defaults(func=_model_hub_doctor_command)
+
+    p.set_defaults(func=lambda args: _model_hub_list_command(args))
+
+
+def _model_hub_list_command(args: argparse.Namespace) -> int:
+    if getattr(args, "json", False):
+        print(json.dumps({"models": list_models()}, indent=2))
+    else:
+        for m in list_models():
+            print(f"{m['name']}: {m['desc']} ({m['size_mb']}MB, {m['license']})")
+    return 0
+
+
+def _model_hub_load_command(args: argparse.Namespace) -> int:
+    r = load_model(args.model)
+    print(json.dumps(r, indent=2))
+    return 0 if r["ok"] else 1
+
+
+def _model_hub_convert_command(args: argparse.Namespace) -> int:
+    r = load_model(args.model)
+    if not r["ok"]:
+        print(json.dumps(r, indent=2))
+        return 1
+    r = convert_to_coreml(Path(r["path"]))
+    print(json.dumps(r, indent=2))
+    return 0 if r["ok"] else 1
+
+
+def _model_hub_train_command(args: argparse.Namespace) -> int:
+    texts = json.loads(Path(args.texts).read_text())
+    labels = json.loads(Path(args.labels).read_text())
+    r = train_text_classifier(texts, labels, model_name=args.model, output_name=args.output)
+    print(json.dumps(r, indent=2))
+    return 0 if r["ok"] else 1
+
+
+def _model_hub_doctor_command(args: argparse.Namespace) -> int:
+    print(json.dumps(doctor(), indent=2))
+    return 0
+
+
 def main(argv: list[str] | None = None) -> int:
     import argparse
 

@@ -18,6 +18,7 @@ reads as state and a human audits as a grid. Source of truth = the hash-chained 
 
 from __future__ import annotations
 
+import argparse
 import json
 import os
 import sys
@@ -141,6 +142,31 @@ def write_pack(run_dir: Path) -> Path | None:
     out = cdir / "CONTEXT.md"
     out.write_text(assemble(run_dir))
     return out
+
+
+def add_parser(sub) -> None:
+    p = sub.add_parser("context", help="build a graduated-resolution spawn context pack")
+    p.add_argument("--run-dir", required=True, help="path to a run directory with rounds.ledger.jsonl")
+    p.add_argument("--json", action="store_true", help="structured output")
+    p.set_defaults(func=_context_command)
+
+
+def _context_command(args: argparse.Namespace) -> int:
+    import json as _json
+    run_dir = Path(args.run_dir)
+    out = write_pack(run_dir)
+    if not out:
+        msg = "no rounds found (no rounds.ledger.jsonl)"
+        if getattr(args, "json", False):
+            print(_json.dumps({"ok": False, "error": msg}, indent=2))
+        else:
+            print(f"error: {msg}", file=sys.stderr)
+        return 1
+    if getattr(args, "json", False):
+        print(_json.dumps({"ok": True, "path": str(out)}, indent=2))
+    else:
+        print(f"  context pack: {out}")
+    return 0
 
 
 def main(argv: list[str] | None = None) -> int:

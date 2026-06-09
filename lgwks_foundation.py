@@ -12,6 +12,7 @@ verb in a complex sentence). Foundation Models provide this without cloud depend
 
 from __future__ import annotations
 
+import argparse
 import json
 import logging
 import sys
@@ -142,8 +143,33 @@ def extract_entities(
     return ExtractionResult("unavailable", [], {"reason": "no on-device ML backend available"})
 
 
+def add_parser(sub) -> None:
+    p = sub.add_parser("foundation", help="on-device structured extraction backends")
+    p.add_argument("text", nargs="?", help="text to extract from (omit to list backends)")
+    p.add_argument("--types", help="comma-separated entity types")
+    p.add_argument("--json", action="store_true", help="structured output")
+    p.set_defaults(func=_foundation_command)
+
+
+def _foundation_command(args: argparse.Namespace) -> int:
+    if not args.text:
+        print(json.dumps(available(), indent=2))
+        return 0
+    types = [t.strip() for t in args.types.split(",")] if args.types else []
+    result = extract_entities(args.text, entity_types=types)
+    out = {
+        "status": result.status,
+        "entities": [
+            {"text": e.text, "type": e.type, "confidence": e.confidence, "start": e.start, "end": e.end}
+            for e in result.entities
+        ],
+        "meta": result.raw,
+    }
+    print(json.dumps(out, indent=2))
+    return 0
+
+
 def main(argv: list[str] | None = None) -> int:
-    import argparse
     p = argparse.ArgumentParser(prog="lgwks_foundation", description="T3 on-device entity extraction")
     p.add_argument("text", nargs="?", help="text to extract from")
     p.add_argument("--types", help="comma-separated entity types")
