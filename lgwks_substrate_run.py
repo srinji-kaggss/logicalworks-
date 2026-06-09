@@ -229,56 +229,68 @@ def build_run(args: argparse.Namespace) -> dict[str, Any]:
                     "chunk_kind": chunk_kind,
                 })
                 for sentence in text._fact_sentences(stem, args.fact_threshold):
-                    fact_vec, fact_provider, fact_semantic = lgwks_run.embed(
-                        sentence,
-                        embed_on=True,
-                        provider=args.embed_provider,
-                        model=(args.embed_model or None),
-                        dims=0,
-                    )
-                    if fact_vec is None and args.embed_provider == "apple-local":
-                        raise EmbeddingProviderUnavailable(
-                            f"apple-local provider unavailable for model {args.embed_model or 'default'}"
-                        )
-                    provider_counts[fact_provider] += 1
-                    if fact_semantic:
-                        semantic_vectors += 1
+                    dual = lgwks_run.embed_dual(sentence, embed_on=True)
+                    # deterministic fact vector (always present; audit trail)
+                    fdet = dual["det"]
+                    provider_counts[fdet["provider"]] += 1
                     fact_vector_rows.append({
                         "fact_hash": io._sha(sentence),
                         "fact_text": sentence,
-                        "provider": fact_provider,
-                        "dims": len(fact_vec or []),
-                        "vector": fact_vec,
+                        "provider": fdet["provider"],
+                        "dims": fdet["dims"],
+                        "vector": fdet["vector"],
                         "fact_score": text._fact_score(sentence),
                         "chunk_kind": chunk_kind,
                     })
+                    # semantic fact vector (primary; feeds NeoBERT / downstream ML)
+                    if dual["sem"]:
+                        fsem = dual["sem"]
+                        provider_counts[fsem["provider"]] += 1
+                        semantic_vectors += 1
+                        fact_vector_rows.append({
+                            "fact_hash": io._sha(sentence),
+                            "fact_text": sentence,
+                            "provider": fsem["provider"],
+                            "dims": fsem["dims"],
+                            "vector": fsem["vector"],
+                            "fact_score": text._fact_score(sentence),
+                            "chunk_kind": chunk_kind,
+                        })
+
             vector_text = stem or piece
-            vector_val, provider, is_semantic = lgwks_run.embed(
-                vector_text,
-                embed_on=True,
-                provider=args.embed_provider,
-                model=(args.embed_model or None),
-                dims=0,
-            )
-            if vector_val is None and args.embed_provider == "apple-local":
-                raise EmbeddingProviderUnavailable(
-                    f"apple-local provider unavailable for model {args.embed_model or 'default'}"
-                )
-            provider_counts[provider] += 1
-            if is_semantic:
-                semantic_vectors += 1
+            dual = lgwks_run.embed_dual(vector_text, embed_on=True)
+            # deterministic chunk vector (always present)
+            cdet = dual["det"]
+            provider_counts[cdet["provider"]] += 1
             vector_rows.append({
-                "vector_id": f"vec-{io._sha(chunk_id + provider)[:16]}",
+                "vector_id": f"vec-{io._sha(chunk_id + cdet['provider'])[:16]}",
                 "chunk_id": chunk_id,
                 "document_id": doc_id,
-                "provider": provider,
-                "is_semantic": is_semantic,
-                "dims": len(vector_val or []),
+                "provider": cdet["provider"],
+                "is_semantic": False,
+                "dims": cdet["dims"],
                 "vector_text": vector_text[:2000],
-                "vector": vector_val,
+                "vector": cdet["vector"],
                 "fact_score": fact_score,
                 "chunk_kind": chunk_kind,
             })
+            # semantic chunk vector (primary; feeds NeoBERT)
+            if dual["sem"]:
+                csem = dual["sem"]
+                provider_counts[csem["provider"]] += 1
+                semantic_vectors += 1
+                vector_rows.append({
+                    "vector_id": f"vec-{io._sha(chunk_id + csem['provider'])[:16]}",
+                    "chunk_id": chunk_id,
+                    "document_id": doc_id,
+                    "provider": csem["provider"],
+                    "is_semantic": True,
+                    "dims": csem["dims"],
+                    "vector_text": vector_text[:2000],
+                    "vector": csem["vector"],
+                    "fact_score": fact_score,
+                    "chunk_kind": chunk_kind,
+                })
 
     io._emit_jsonl(run_dir / "sources.jsonl", source_rows)
     io._emit_jsonl(run_dir / "documents.jsonl", doc_rows)

@@ -125,7 +125,7 @@ def crawl_command(args: argparse.Namespace) -> int:
         chunk_words=450,
         chunk_overlap=70,
         fact_threshold=0.6,
-        embed_provider="deterministic",
+        embed_provider="dual",
         embed_model="",
         login_if_needed=True,
         login_url="",

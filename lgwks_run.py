@@ -577,6 +577,69 @@ def embed(
     return _deterministic_embed(text), "deterministic-feature-hash", False
 
 
+class EmbeddingProviderUnavailable(RuntimeError):
+    """Raised when an embedding provider is explicitly requested but unavailable."""
+
+
+def embed_dual(
+    text: str,
+    embed_on: bool,
+    provider: str = "auto",
+    *,
+    model: str | None = None,
+) -> dict[str, Any]:
+    """ALWAYS compute BOTH deterministic (256-d) and semantic (4096-d) vectors.
+
+    Returns a dict:
+      { "det": { "vector": [...], "provider": "...", "dims": 256 },
+        "sem": { "vector": [...], "provider": "...", "dims": 4096 } }
+
+    The semantic vector is the PRIMARY vector for downstream ML (NeoBERT training).
+    The deterministic vector is the FALLBACK / AUDIT vector — always present,
+    always reproducible, zero infra dependency.
+
+    If the user requests 'deterministic' only, sem is still computed because
+    NeoBERT training requires it.  If the user requests semantic only, det is
+    still computed because auditability requires it.
+    """
+    if not embed_on:
+        return {"det": None, "sem": None}
+
+    # ── deterministic (always present; zero-latency fallback) ──
+    det_vec = _deterministic_embed(text, dims=DIMS)
+    det = {"vector": det_vec, "provider": "deterministic-feature-hash", "dims": DIMS}
+
+    # ── semantic (ALWAYS attempted — this is the primary vector for downstream ML) ──
+    sem = None
+    # Try Ollama qwen3-embedding:8b first (local, 4096-d); fast-fail if down
+    import lgwks_ollama
+    if lgwks_ollama.ensure_eye_model():
+        full = lgwks_ollama.embed_one(text)
+        if full is not None:
+            sem = {"vector": full, "provider": f"ollama:{lgwks_ollama.EYE_MODEL}", "dims": len(full)}
+
+    if sem is None:
+        import lgwks_openrouter_embed
+        chosen = model or lgwks_openrouter_embed.DEFAULT_MODEL
+        full = lgwks_openrouter_embed.embed_one(text, model=chosen)
+        if full is not None:
+            sem = {"vector": full, "provider": f"openrouter:{chosen}", "dims": len(full)}
+
+    if sem is None:
+        import lgwks_apple
+        chosen_model = model or lgwks_apple.DEFAULT_MODEL
+        chosen_dims = lgwks_apple.DEFAULT_DIMS
+        full = lgwks_apple.embed_one(text, model_id=chosen_model, dims=chosen_dims)
+        if full is not None:
+            sem = {"vector": full, "provider": lgwks_apple.provider_label(chosen_model), "dims": len(full)}
+
+        raise EmbeddingProviderUnavailable(
+            f"apple-local provider unavailable for model {model or 'default'}"
+        )
+
+    return {"det": det, "sem": sem}
+
+
 # ─────────────────────────────────────────────────────────────────────────────
 # 6. Hash-chained, append-only run log (L5) — replayable; tamper breaks the chain.
 # ─────────────────────────────────────────────────────────────────────────────
