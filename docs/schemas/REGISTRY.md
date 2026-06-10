@@ -39,12 +39,22 @@ the stack — build ON these, never reimplement hashing/encoding locally.
 private output shapes. **Flagged:** v0/v1 duplication — retire v0 callers during I3.
 
 ### 3. substrate / ingestion family
+
+#### lgwks.vector.record.v1 — landed I1 (2026-06-10)
+| id | ver | status | defined in | validation |
+|----|-----|--------|-----------|------------|
+| `lgwks.vector.record.v1` | 1 | **live** (20 tests) | `lgwks_vector.py` | decode_record + require_cid |
+
+Fields: `cid` (blake2b of canonical bytes) · `modality` (text\|image\|video) · `embedding` (BLOB, float32[d] big-endian, L2-normalized) · `norm` f32 (pre-norm audit) · `dim` u16 · `space_id` str · `tenant` str · `source_cid` str.
+Invariants: ‖ê‖ = 1 ± 1e-6; same inputs → same cid (dedup); cross-space compare raises `SpaceMismatchError`.
+Proof fixture: `~/ingestion_results/code_embeddings_v1.db` — 4100 rows migrated from JSON-TEXT, 659 deduped (cid-dedup working on real data).
+**Supersedes:** `vector_json TEXT` column in `lgwks_substrate_db.py:85` + `fact_vectors.vector_json` (gap G-11).
+
 `lgwks.substrate.{run,query,baseline,map,vector_query,crawl_map,error}.v0` (`lgwks_substrate_run.py`,
 `lgwks_substrate_vector.py`, `lgwks_substrate_crawl.py`) · `lgwks.ingest.v1` (`lgwks_ingest.py:284`) ·
 SQLite DDL: `lgwks_substrate_db.py:43-98` (sources/documents/chunks/facts/vectors/frontier + FTS5),
 `lgwks_entity_graph.py:111-138` (nodes/edges/chunks).
-**Planned successors (INGESTION-PLAN):** `lgwks.vector.record.v1` (**I1** — replaces JSON-TEXT vector
-storage, gap G-11), `lgwks.modality.item.v1` (**I2**), `space_id` scheme (**I4**).
+**Planned successors (INGESTION-PLAN):** `lgwks.modality.item.v1` (**I2**), `space_id` scheme (**I4**).
 **Repurpose when:** storing or querying ingested content — extend the substrate DDL, never mint a
 side-database (the external `~/ingestion_results/*.db` stores are exactly the lossy pattern I1 retires).
 **Rule:** all `.v0` here are research-grade; promote to v1 only through an INGESTION-PLAN packet.

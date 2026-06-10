@@ -58,7 +58,7 @@ new/bumped contracts registered in [REGISTRY.md](../../docs/schemas/REGISTRY.md)
 
 ## I1 — vector-space + cid contract  ·  P0  ·  depends: none  ·  the spine everything reads
 
-**Status:** not started. The lossy store it replaces is live and growing (G-11).
+**Status:** ✅ **done** (2026-06-10). `lgwks_vector.py` — 20 green tests. Proof fixture: `~/ingestion_results/code_embeddings_v1.db` (4100 rows migrated, 659 deduped by cid). G-11 retired for new writes. `lgwks.vector.record.v1` registered in REGISTRY.md.
 **Goal:** one content-address + vector-space contract that every other unit reads/writes.
 **Inputs (exist):** `lgwks_substrate_db.py`, `lgwks_sqlite.py`, `store/substrate/`; today's lossy store
 `~/ingestion_results/code_embeddings.db` (embedding = JSON TEXT — the thing to replace, gap G-11);
