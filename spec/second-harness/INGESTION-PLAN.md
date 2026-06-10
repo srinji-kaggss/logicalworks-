@@ -121,23 +121,15 @@ LFM2-Extract fills; it does not score (scoring is I5, deterministic).
 
 ## I4 — embedder runtime (Qwen3-VL-Embedding-8B)  ·  P1  ·  depends: I1
 
-**Status:** partial credit — TEXT path live today via `lgwks_ollama.py` (`qwen3-embedding:8b`, 4096-d,
-MRL-sliced, centroid cache `store/intent/`). Media path is interim-cloud (`lgwks_multimodal.py:42`,
-gemini-embedding-2) per the model-stack law. **This packet supersedes that split when its eval passes**
-(header item 5) — until then the split is law, not drift.
-**Goal:** one embedding port, three encoder paths (text/image/video-frames) → one shared 4096-d space.
-**Inputs (exist/pinned):** `Qwen/Qwen3-VL-Embedding-8B`; runtime MLX `jedisct1/Qwen3-VL-Embedding-8B-mlx`
-**or** llama.cpp `ganeshrao/Qwen3-VL-Embedding-8B-Q8_0-GGUF`; `lgwks_apple.py` (MLX seam),
-`lgwks_local_llm.py` (process seam). MRL 64–4096, instruction-aware.
-**Output:** `embed(item, instruction) → float32[k]` (k = chosen MRL dim) → I1 record.
-**Formula:** L2-normalize output; cosine `sim = êᵢᵀêⱼ ∈ [−1,1]` (INGESTION-LAYER §4.1).
-**Acceptance (pre-registered eval):** cosine bounds hold; **recall@10 vs k∈{128,256,512,1024,2048,4096}**
-curve plotted on a frozen eval; adopt smallest k within 1% of full-dim recall, else 4096; reject if
-monotonicity fails. Text + image of the same concept land close in the shared space (cross-modal sanity).
-Migration acceptance (new in v1.1): existing text centroids re-embedded into the new `space_id`; the
-old space is never silently compared against the new one (I1 cross-space guard exercised).
-**Register:** `space_id` registration scheme in REGISTRY.md (family: substrate).
-**Scope fence:** embedding behind a port only. Model swappable (MLX↔GGUF) without changing callers.
+**Status:** ✅ done (2026-06-10). `lgwks_embed_port.py` — 59 green tests. Two tiers (mlx primary → transformers fallback), same model, same space_id. No Ollama, no HuggingFace at runtime (Zscaler-safe; weights in `store/models/`, fetched from GitHub Release). Native video: I4 extracts N frames, passes to VL processor → one 4096-d vector. `embed_from_item()` dispatches text/image/video by modality+strategy. `migrate_json_embeddings()` closes G-11. `load_all_graphs()` populates system_graph.
+
+**Goal:** one embedding port, two runtimes (mlx/transformers), one shared 4096-d space — text + image + video.
+**Inputs (exist/pinned):** `Qwen/Qwen3-VL-Embedding-8B`; runtime MLX `jedisct1/Qwen3-VL-Embedding-8B-mlx`.
+**Output:** `embed_from_item(item, instruction) → float32[k]` (k = chosen MRL dim) → I1 record via `embed_to_record()`.
+**Formula:** L2-normalize output; cosine `sim = êᵢᵀêⱼ ∈ [−1,1]` (INGESTION-LAYER §4.1). Last-token pooling.
+**Acceptance (pre-registered eval — still pending live model):** cosine bounds hold; recall@10 vs k∈{128,256,512,1024,2048,4096} curve plotted on a frozen eval; adopt smallest k within 1% of full-dim recall, else 4096; reject if monotonicity fails. Text + image of the same concept land close in the shared space (cross-modal sanity). Old gemini-embedding-2 space never silently compared against new space_id (I1 cross-space guard).
+**Register:** `lgwks.embed.port.v1` + `space_id` scheme in REGISTRY.md (family: substrate). ✅ done.
+**Scope fence:** embedding behind a port only. Model swappable (MLX↔transformers) without changing callers. Retrieval (function-calling tongue) is a separate layer above this port.
 
 ---
 

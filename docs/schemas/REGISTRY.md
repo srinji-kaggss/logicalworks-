@@ -121,6 +121,8 @@ Weights in `store/models/Qwen3-VL-Embedding-8B-mlx` (mlx) or `store/models/Qwen3
 | `quarantine` | any | raises `ValueError` |
 
 **space_id:** `"qwen3-vl-embedding-8b:d{k}"` — identical for both tiers. Pass `dim=k` (k ≤ 4096) for MRL truncation; port slices and re-normalises. I1 cross-space guard refuses any comparison against a different space_id.
+
+
 **Repurpose when:** storing or querying ingested content — extend the substrate DDL, never mint a
 side-database (the external `~/ingestion_results/*.db` stores are exactly the lossy pattern I1 retires).
 **Rule:** all `.v0` here are research-grade; promote to v1 only through an INGESTION-PLAN packet.
