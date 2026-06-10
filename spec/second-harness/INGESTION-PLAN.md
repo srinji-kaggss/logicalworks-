@@ -83,7 +83,7 @@ JSON→binary as the proof fixture.
 
 ## I2 — universal input handler  ·  P1  ·  depends: I1
 
-**Status:** not started; detection precedents exist.
+**Status:** ✅ **done** (2026-06-10). `lgwks_input.py` — 71 green tests. Two-phase design (classify/extract). Video frame extraction via ffmpeg. Image OCR via tesseract (graceful fallback to visual_embed). `extraction_strategy` contract field. 50-fuzz no-crash on both phases. `lgwks.modality.item.v1` registered in REGISTRY.md.
 **Goal:** accept ANY file type; route to modality; quarantine unknown; never crash.
 **Inputs (exist):** `graphify/detect.py` (file-type detect precedent), `lgwks_extract.py:156` (pdf via fitz),
 `lgwks_multimodal.py` (image seam), `store/untrusted/` (quarantine dir).

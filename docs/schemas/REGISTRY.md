@@ -43,8 +43,18 @@ private output shapes. **Flagged:** v0/v1 duplication — retire v0 callers duri
 `lgwks_substrate_vector.py`, `lgwks_substrate_crawl.py`) · `lgwks.ingest.v1` (`lgwks_ingest.py:284`) ·
 SQLite DDL: `lgwks_substrate_db.py:43-98` (sources/documents/chunks/facts/vectors/frontier + FTS5),
 `lgwks_entity_graph.py:111-138` (nodes/edges/chunks).
+#### lgwks.modality.item.v1 — landed I2 (2026-06-10)
+| id | ver | status | defined in | validation |
+|----|-----|--------|-----------|------------|
+| `lgwks.modality.item.v1` | 1 | **live** (71 tests) | `lgwks_input.py` | handle() + extract() |
+
+Fields: `schema` · `modality` (text\|image\|video\|quarantine) · `parsed_unit` (str or None) · `raw_bytes` (bytes or None) · `mime` (str) · `origin` (str) · `extraction_strategy` (text_direct\|ocr_image\|visual_embed\|video_frames\|none) · `frame_index` · `source_fingerprint` (blake2b-8 hex) · `quarantine_reason`.
+Invariants: text→`raw_bytes=None`; media/quarantine→`parsed_unit=None` until `extract()`; `extraction_strategy` always set; both `handle()` and `extract()` never raise.
+Two-phase: `handle()` = classify (fast, hook-safe); `extract()` = OCR/frame-sample (slow, async).
+Video: ffmpeg frame-sample → per-frame OCR text items → same `space_id` as code.
+
 **Planned successors (INGESTION-PLAN):** `lgwks.vector.record.v1` (**I1** — replaces JSON-TEXT vector
-storage, gap G-11), `lgwks.modality.item.v1` (**I2**), `space_id` scheme (**I4**).
+storage, gap G-11), `space_id` scheme (**I4**).
 **Repurpose when:** storing or querying ingested content — extend the substrate DDL, never mint a
 side-database (the external `~/ingestion_results/*.db` stores are exactly the lossy pattern I1 retires).
 **Rule:** all `.v0` here are research-grade; promote to v1 only through an INGESTION-PLAN packet.
