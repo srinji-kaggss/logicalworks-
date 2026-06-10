@@ -162,3 +162,28 @@ Next: U3 World-Graph query.
   the 2026-06-10 config revert — the U7 hook is now the only inbound mechanism, and its
   registration points at the dead `/Applications/Logical Works` (space) dir; re-register against
   `/Applications/logicalworks` before I7 live acceptance.
+
+---
+
+## 2026-06-10 — I1/I2/I4 landed; ingestion spine live on main
+
+**Merged to main (commits bb753be → 27460ad → 7e3df00):**
+
+- **I1 ✅** `lgwks_vector.py` — `lgwks.vector.record.v1`. 20 tests. Binary float32 BLOB store, blake2b CID, L2-norm, `SpaceMismatchError` cross-space guard. G-11 retired for new writes. Proof fixture: 4100 rows migrated, 659 deduped.
+- **I2 ✅** `lgwks_input.py` — `lgwks.modality.item.v1`. 73 tests. Two-phase handle()/extract(). Five strategies: text_direct | ocr_image | visual_embed | video_embed | none. video_embed: I2 passes raw bytes intact; I4 owns native VL embedding. `.ts` MIME false-positive fixed (extension checked before magic bytes). needs_extraction() = True only for ocr_image.
+- **I4 ✅** `lgwks_embed_port.py` — `lgwks.embed.port.v1`. 59 tests. Two tiers (mlx→transformers), same model (Qwen3-VL-Embedding-8B), same space_id, local_files_only=True (Zscaler-safe). Weights in store/models/ fetched from GitHub Release (not HuggingFace). Last-token pooling fix (hidden_states[-1][:, -1, :]). embed_from_item() dispatch. migrate_json_embeddings() closes G-11. load_all_graphs() populates system_graph.
+
+**Architecture decisions recorded this session:**
+- Retrieval layer (function-calling "tongue") is separate from the embed port — model-agnostic, sits above I4.
+- Re-ranking (I5/I6) is offline batch — monthly or post-large-commit. Hot query path is vector cosine only (all Rust).
+- Daemon backend is Rust; Python workers are subprocess with JSON-line protocol. No Python daemonising.
+- Package distributable from GitHub Release (Zscaler blocks HF). store/models/ gitignored; make download-models pulls weights.
+
+**GH issues opened for remaining packets:**
+- [#58](https://github.com/srinji-kaggss/logicalworks-/issues/58) I3 — crawler v2 + LFM2-Extract
+- [#59](https://github.com/srinji-kaggss/logicalworks-/issues/59) I5 — RESCAL scoring
+- [#60](https://github.com/srinji-kaggss/logicalworks-/issues/60) I6 — cubic centrality + δ
+- [#61](https://github.com/srinji-kaggss/logicalworks-/issues/61) I7 — L5 pack + hook re-registration
+- [#62](https://github.com/srinji-kaggss/logicalworks-/issues/62) I12 — Leiden/Louvain fix (P0, independent)
+
+**Remaining P3 packets** (I8 concurrency, I9 provenance, I10 viz, I11 waste ledger) not yet issued — I8 escalates to P0 before any multi-tenant/network exposure.
