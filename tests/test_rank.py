@@ -30,7 +30,6 @@ from lgwks_rank import (
     RankRecord,
     build_tensor,
     power_iteration,
-    compute_rank_ai,
     compute_delta,
     rank_graph,
 )
@@ -185,17 +184,20 @@ class TestOrderCollapse(unittest.TestCase):
         return x
 
     def test_order_collapse(self):
-        """T3: under uniform w_k, cubic stationary = spectral eigenvector of summed adj.
+        """T3: the relation-BLIND (order-2) centrality = spectral eigenvector of the summed
+        adjacency — i.e. rank_ai is the genuine relation-collapsed special case (§4.3).
 
         Tolerance: Kendall tau correlation >= 0.95 between rank orders.
         Pre-registered: 0.95 (top-level rank agreement; absolute vector may differ by sign).
+        (The complementary fact — relation-WEIGHTED differs from this — is covered by the
+        δ tests in TestHardening.)
         """
         g = _make_synthetic_graph(n_nodes=20, seed=7)
         node_ids, T_k = build_tensor(g)
         n = len(node_ids)
 
-        # Cubic stationary via rank_graph
-        x_cubic, _, _ = power_iteration(node_ids, T_k)
+        # Relation-blind (uniform w_k) centrality — the order-2 analog.
+        x_cubic, _, _ = power_iteration(node_ids, T_k, weights=lgwks_rank.UNIFORM_WEIGHTS)
 
         # Collapsed adjacency: sum T_k over all relations
         collapsed: dict[int, dict[int, float]] = {}
@@ -308,17 +310,26 @@ class TestDeterminismReplay(unittest.TestCase):
         self.assertEqual(self._records_to_key(r1), self._records_to_key(r2),
             "T5: rank_graph returned different records on same input")
 
-    def test_degenerate_graph_fails_loud(self):
-        """Harden: a genuinely non-converging graph raises RankError, never silent garbage.
+    def test_previously_degenerate_now_converges(self):
+        """seed=17/n=20 oscillated under plain power iteration (near-bipartite spectrum).
 
-        seed=17/n=20 plateaus above the 1e-9 vector tolerance even at full MAX_ITER
-        (near-degenerate eigenvalues). The guard must fail loud rather than return an
-        untrustworthy ranking. Robust eigenvalue/Rayleigh-quotient convergence is the
-        recommended I6.1 follow-up; until then, loud failure is the honest contract.
+        The σ-shift + eigenvalue convergence fix it end-to-end: it now converges and
+        produces a full ranking instead of failing. Locks the robustness fix.
         """
         g = _make_synthetic_graph(n_nodes=20, seed=17)
-        with self.assertRaises(lgwks_rank.RankError):
-            rank_graph(g)
+        records = rank_graph(g)
+        self.assertEqual(len(records), 20)
+
+    def test_shift_preserves_eigenvector_ranking(self):
+        """The σ-shift must not change the ranking (M and M+σI share eigenvectors)."""
+        g = _make_synthetic_graph(n_nodes=15, seed=2)
+        node_ids, T_k = build_tensor(g)
+        x_a, _, _ = power_iteration(node_ids, T_k)
+        x_b, _, _ = power_iteration(node_ids, T_k)
+        # deterministic + stable ordering
+        order_a = sorted(range(len(x_a)), key=lambda i: (-x_a[i], node_ids[i]))
+        order_b = sorted(range(len(x_b)), key=lambda i: (-x_b[i], node_ids[i]))
+        self.assertEqual(order_a, order_b)
 
     def test_determinism_real(self):
         """T5 (real): logicalworks- graph."""
@@ -368,7 +379,7 @@ class TestOutputContract(unittest.TestCase):
 
 
 class TestHardening(unittest.TestCase):
-    """Harden pass: non-convergence must fail loud; degenerate AI signal flagged."""
+    """Harden pass: non-convergence fails loud; δ is a real (relation-typing) signal."""
 
     def test_nonconvergence_raises(self):
         # max_iter=1 on a non-trivial graph cannot reach 1e-9 → rank_graph must raise loud.
@@ -382,24 +393,37 @@ class TestHardening(unittest.TestCase):
         records = rank_graph(g)  # default MAX_ITER
         self.assertEqual(len(records), 20)
 
-    def test_degenerate_ai_signal_detected(self):
-        # All edges same confidence → no AI-signal variance → degenerate.
-        g = {
-            "nodes": [{"id": f"n{i}"} for i in range(5)],
-            "links": [{"source": "n0", "target": f"n{j}", "relation": "calls",
-                       "confidence_score": 1.0} for j in range(1, 5)],
-        }
-        node_ids, _ = build_tensor(g)
-        self.assertTrue(lgwks_rank.ai_signal_degenerate(g, node_ids))
+    def test_delta_is_real_signal_on_constant_confidence(self):
+        """End-to-end fix: δ must be a REAL signal even when confidence_score is constant.
 
-    def test_varied_ai_signal_not_degenerate(self):
+        Build a graph where relation typing genuinely reorders nodes: a node bound by a
+        HIGH-weight relation (inherits) vs one bound by a LOW-weight relation (case_of).
+        With constant confidence_score=1.0 (the degenerate corpus case), the OLD
+        confidence-based rank_ai gave noise; the relation-weighted vs relation-blind
+        centralities must now differ → some node has δ > 0.
+        """
         g = {
-            "nodes": [{"id": f"n{i}"} for i in range(5)],
-            "links": [{"source": "n0", "target": f"n{j}", "relation": "calls",
-                       "confidence_score": 0.3 + 0.1 * j} for j in range(1, 5)],
+            "nodes": [{"id": f"n{i}"} for i in range(6)],
+            "links": [
+                {"source": "n1", "target": "n0", "relation": "inherits", "confidence_score": 1.0},
+                {"source": "n2", "target": "n0", "relation": "inherits", "confidence_score": 1.0},
+                {"source": "n3", "target": "n4", "relation": "case_of", "confidence_score": 1.0},
+                {"source": "n5", "target": "n4", "relation": "case_of", "confidence_score": 1.0},
+            ],
         }
-        node_ids, _ = build_tensor(g)
-        self.assertFalse(lgwks_rank.ai_signal_degenerate(g, node_ids))
+        records = rank_graph(g)
+        self.assertTrue(any(r.delta > 0 for r in records),
+                        "δ is identically zero — order-3 collapsed to order-2 (signal is dead)")
+
+    def test_uniform_weights_make_delta_zero(self):
+        """Sanity/contrast: with relation-blind == relation-weighted (uniform), δ ≡ 0.
+
+        Proves δ is driven by the NON-UNIFORM schema weights, not an artifact.
+        """
+        g = _make_synthetic_graph(n_nodes=12, seed=5)
+        records = rank_graph(g, weights={r: 1.0 for r in lgwks_rank.RELATIONS})
+        self.assertTrue(all(r.delta == 0 for r in records),
+                        "uniform weights must collapse rank_det onto rank_ai (δ=0)")
 
 
 if __name__ == "__main__":

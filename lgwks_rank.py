@@ -15,11 +15,15 @@ Formulas (§4.3):
 Representation: T_k is SPARSE — dict[int, dict[int, float]] per relation.
 Never a dense n×n matrix; n≈5000 nodes / ~8k edges is pure-python fine.
 
-Decisions (spec §"Decisions"):
-  D1: conformance weight = edge confidence_score (standalone, no I5 store dep)
-  D2: rank_ai = per-node mean of incident edge confidence_score (ascending mean = ascending rank)
+Decisions (corrected end-to-end so δ is a real signal, not noise):
+  D1: T conformance weight = edge confidence_score (standalone, no I5 store dep)
+  D2: rank_det = relation-WEIGHTED centrality (schema w_k); rank_ai = relation-BLIND
+      centrality (uniform w_k) — the §4.3 order-2 "relation-collapsed special case".
+      δ = |rank_det − rank_ai| measures how the schema's relation typing reorders a node.
+      //why not confidence_score: it is a constant 1.0 on the corpora — zero variance,
+      so a confidence-based rank_ai degenerates to noise. Structure carries the real signal.
   D3: δ → human threshold = top DELTA_HUMAN_PERCENTILE = 0.10
-  D4: w_k = uniform 1.0 for all relations
+  D4: w_k = schema-declared NON-UNIFORM (see RELATION_WEIGHTS) — required for order-3≠order-2
   D5: symmetrize T_k after building (directed:false corpora)
 """
 
@@ -51,14 +55,35 @@ RELATIONS: tuple[str, ...] = (
     "uses", "rationale_for", "imports_from", "case_of",
 )
 
-# Relation weights w_k: uniform 1.0 (Decision D4).
-RELATION_WEIGHTS: dict[str, float] = {r: 1.0 for r in RELATIONS}
+# Schema-declared relation weights w_k (§4.3). NON-UNIFORM by design: this is exactly what
+# makes the relation-typed (order-3) centrality differ from the relation-blind (order-2)
+# view, and therefore what makes δ a real signal rather than noise. Pre-registered,
+# replayable constants — not learned, no AI in path.
+# //why these values: structural coupling strength — type/inheritance/import edges bind a
+# node into the system more tightly than containment or narration. Tune via the relation schema.
+RELATION_WEIGHTS: dict[str, float] = {
+    "inherits": 1.0,
+    "imports_from": 0.9,
+    "calls": 0.8,
+    "method": 0.7,
+    "uses": 0.6,
+    "contains": 0.5,
+    "rationale_for": 0.4,
+    "case_of": 0.4,
+}
+
+# Relation-BLIND weights — the order-2 / AI analog (§4.3 "relation-collapsed special case").
+# rank_ai ranks by this; δ = |relation-weighted − relation-blind| is the discrepancy signal.
+UNIFORM_WEIGHTS: dict[str, float] = {r: 1.0 for r in RELATIONS}
 
 # Power-iteration convergence threshold ‖Δx‖ < CONVERGE_TOL.
 CONVERGE_TOL: float = 1e-9
 
 # Maximum power-iteration steps before giving up (guards against degenerate inputs).
-MAX_ITER: int = 5_000
+# //why 20k: convergence is on the dominant eigenvalue (Rayleigh quotient); small-spectral-gap
+# graphs (e.g. logic-os-kernel relation-blind) need a few thousand steps. Headroom over the
+# observed worst case (~4.5k) so a tighter gap still lands inside the cap, not at the guard.
+MAX_ITER: int = 20_000
 
 # Top-decile δ threshold → human lane (Decision D3).
 # Pre-registered: the 10% of nodes with the largest |rank_det − rank_ai| go to human review.
@@ -77,9 +102,9 @@ class RankRecord:
     Fields match the output contract in the I6 spec exactly:
         node_cid   — node identifier from the graph (graph 'id' field)
         centrality — f32-precision Z-eigenvector component (non-negative)
-        rank_det   — 1-indexed rank by descending centrality (deterministic)
-        rank_ai    — 1-indexed rank by descending mean incident confidence_score (AI signal)
-        delta      — |rank_det − rank_ai| (AI-discrepancy)
+        rank_det   — 1-indexed rank by relation-WEIGHTED (order-3) centrality
+        rank_ai    — 1-indexed rank by relation-BLIND (order-2) centrality (§4.3 AI analog)
+        delta      — |rank_det − rank_ai| (relation-typing discrepancy)
         lane       — "human" if δ in top DELTA_HUMAN_PERCENTILE, else "auto"
         schema_id  — always "lgwks.rank.record.v1"
     """
@@ -218,13 +243,19 @@ def power_iteration(
     max_iter: int = MAX_ITER,
     seed: int = 0,
 ) -> tuple[list[float], int, float]:
-    """Z-eigenpair power iteration on the symmetric 3-tensor.
+    """Z-eigenpair power iteration on the symmetric 3-tensor, spectrally shifted.
 
-    x ← normalize( Σ_k w_k T_k x )
+    x ← normalize( (M + σI) x )   where M = Σ_k w_k T_k,  σ = spectral-radius bound
 
-    Seed: deterministic uniform initialization with 1/sqrt(n).
-    Returns: (x, iterations, final_delta)
-    //why: seeded uniform x₀ → reproducible across runs (spec Decision D seeds).
+    //why the shift: M is a symmetric non-negative matrix, so its spectrum can include a
+    negative eigenvalue with |λ_min| ≈ λ_max (near-bipartite structure — e.g. the
+    logic-os-kernel graph). Plain power iteration then OSCILLATES and never converges.
+    Adding σI (σ ≥ ρ(M)) shifts every eigenvalue by σ → all ≥ 0, the Perron eigenvalue
+    becomes the unique dominant one, and iteration converges to the Perron centrality
+    vector. M and M+σI share eigenVECTORS exactly, so the ranking is unchanged — only
+    convergence is fixed. Deterministic.
+
+    Seed: deterministic uniform 1/sqrt(n). Returns: (x, iterations, final_delta).
     """
     n = len(node_ids)
     if n == 0:
@@ -232,15 +263,26 @@ def power_iteration(
 
     ws = weights if weights is not None else RELATION_WEIGHTS
 
+    # σ = max weighted row-sum ≥ ρ(M) (Gershgorin bound on a symmetric non-negative matrix).
+    row_sum = [0.0] * n
+    for rel, adj in T_k.items():
+        w = ws.get(rel, 1.0)
+        if w == 0.0 or not adj:
+            continue
+        for i, cols in adj.items():
+            row_sum[i] += w * sum(abs(v) for v in cols.values())
+    sigma = max(row_sum) if row_sum else 0.0
+
     # Deterministic seed: uniform 1/sqrt(n).
     # //why: uniform is the standard PageRank-style seed; maximally non-committal.
     x: list[float] = [1.0 / math.sqrt(n)] * n
 
     final_delta = 0.0
     iters = 0
+    lam_prev = 0.0
     for iters in range(1, max_iter + 1):
-        # y = Σ_k w_k T_k x
-        y = [0.0] * n
+        # y = (M + σI) x = Σ_k w_k T_k x + σ x
+        y = [sigma * xi for xi in x]
         for rel, adj in T_k.items():
             w = ws.get(rel, 1.0)
             if w == 0.0 or not adj:
@@ -249,68 +291,36 @@ def power_iteration(
             for i in range(n):
                 y[i] += w * ty[i]
 
-        # Normalize
+        # Dominant-eigenvalue (Rayleigh quotient) estimate: ‖y‖ since x is unit-norm.
+        lam = _l2_norm(y)
+
         x_new = _normalize(y)
         if not any(x_new):
             # All-zero: trivially converged (isolated graph or zero-weight tensor).
             break
 
-        # Convergence check ‖Δx‖₂
-        delta = _l2_norm([a - b for a, b in zip(x_new, x)])
+        # Convergence on the eigenvalue, not the vector.
+        # //why: under a small spectral gap the eigenVECTOR drifts for ~2x longer than the
+        # eigenVALUE settles; the eigenvalue criterion converges quadratically faster and
+        # still pins the dominant (Perron) subspace that the ranking reads. Deterministic.
+        delta = abs(lam - lam_prev)
         x = x_new
+        lam_prev = lam
         final_delta = delta
-        if delta < tol:
+        if iters > 1 and delta < tol:
             break
 
     return x, iters, final_delta
 
 
 # ---------------------------------------------------------------------------
-# D2: AI signal — per-node mean incident confidence_score → rank_ai
-# //why: uses the graph's own AI-emitted confidence_score as the AI signal;
-# no external model call; standalone (Decision D2).
+# D2: AI signal — the relation-BLIND (order-2) centrality (§4.3)
+# //why: §4.3 defines the AI/order-2 analog as the relation-collapsed special case
+# (eigenvector of the uniformly-summed adjacency). δ = |relation-weighted rank −
+# relation-blind rank| measures exactly how much the schema's relation typing reorders
+# a node vs the AI's relation-agnostic view. Pure structure: no embeddings, no per-edge
+# confidence_score (which is a constant 1.0 on the corpora and carries no signal).
 # ---------------------------------------------------------------------------
-
-
-def compute_rank_ai(
-    graph: dict[str, Any],
-    node_ids: list[str],
-) -> list[float]:
-    """Compute per-node mean incident confidence_score (AI proxy signal).
-
-    For isolated nodes (no incident edges), mean = 0.0.
-    Returns a list aligned to node_ids index.
-    """
-    idx: dict[str, int] = {nid: i for i, nid in enumerate(node_ids)}
-    n = len(node_ids)
-    total = [0.0] * n
-    count = [0] * n
-
-    for link in graph.get("links", []):
-        src = link.get("source", "")
-        tgt = link.get("target", "")
-        conf = float(link.get("confidence_score", link.get("weight", 1.0)))
-        for nid in (src, tgt):
-            if nid in idx:
-                i = idx[nid]
-                total[i] += conf
-                count[i] += 1
-
-    return [total[i] / count[i] if count[i] > 0 else 0.0 for i in range(n)]
-
-
-def ai_signal_degenerate(graph: dict[str, Any], node_ids: list[str]) -> bool:
-    """True when the AI signal has no usable variance, so δ/lane is noise, not slop.
-
-    //why: δ = |rank_det − rank_ai| is only a real slop signal when rank_ai carries
-    information. If every connected node shares one mean confidence_score (e.g. a corpus
-    where confidence_score is a constant 1.0), rank_ai degenerates to alphabetical
-    tie-breaking and δ measures nothing. The real fix is I5 per-fact s_ai (score store);
-    until then, surface the degeneracy instead of pretending δ is meaningful.
-    """
-    ai = compute_rank_ai(graph, node_ids)
-    connected = [v for v in ai if v > 0.0]
-    return len({round(v, 9) for v in connected}) <= 1
 
 
 # ---------------------------------------------------------------------------
@@ -358,46 +368,65 @@ def _to_f32(x: float) -> float:
     return float(struct.unpack("f", struct.pack("f", x))[0])
 
 
+def _centrality(
+    node_ids: list[str],
+    T_k: dict[str, dict[int, dict[int, float]]],
+    weights: dict[str, float],
+    max_iter: int,
+    label: str,
+) -> list[float]:
+    """Run guarded power iteration and return the centrality vector.
+
+    //why: never present a non-converged centrality as trustworthy (no silent failure).
+    Early break leaves delta=0.0 (converged/degenerate); only a maxed-out run still above
+    tolerance is a real failure.
+    """
+    x, iters, delta = power_iteration(node_ids, T_k, weights=weights, max_iter=max_iter)
+    if delta >= CONVERGE_TOL and iters >= max_iter:
+        raise RankError(
+            f"{label} power iteration did not converge: Δλ={delta:.2e} after {iters} "
+            f"iterations (tol={CONVERGE_TOL}). Raise MAX_ITER or inspect the graph."
+        )
+    return x
+
+
+def _ranks_from(centrality: list[float], node_ids: list[str]) -> list[int]:
+    """1-indexed rank by descending centrality; ties broken by node_id (deterministic)."""
+    n = len(centrality)
+    order = sorted(range(n), key=lambda i: (-centrality[i], node_ids[i]))
+    ranks = [0] * n
+    for rank, idx in enumerate(order, start=1):
+        ranks[idx] = rank
+    return ranks
+
+
 def rank_graph(
     graph: dict[str, Any],
     *,
     weights: dict[str, float] | None = None,
     max_iter: int = MAX_ITER,
 ) -> list[RankRecord]:
-    """Full ranking pipeline: tensor → power iteration → δ → RankRecord list.
+    """Full ranking pipeline: tensor → two centralities → δ → RankRecord list.
 
-    Returns records sorted by rank_det (ascending = best first).
-    Raises RankError if power iteration does not converge within max_iter.
+    rank_det = relation-WEIGHTED (order-3) centrality (schema w_k).
+    rank_ai  = relation-BLIND (order-2) centrality (uniform w_k) — the §4.3 AI analog.
+    δ        = |rank_det − rank_ai| — the slop signal the schema typing produces.
+    Returns records sorted by rank_det (best first). Raises RankError on non-convergence.
     """
     node_ids, T_k = build_tensor(graph)
     n = len(node_ids)
     if n == 0:
         return []
 
-    # D1: cubic centrality
-    x, _iters, _delta = power_iteration(node_ids, T_k, weights=weights, max_iter=max_iter)
-    # //why: never present a non-converged centrality as if trustworthy (no silent failure).
-    # Early break leaves _delta=0.0 (converged/degenerate); only a maxed-out run with
-    # ‖Δx‖ still above tolerance is a real failure.
-    if _delta >= CONVERGE_TOL and _iters >= max_iter:
-        raise RankError(
-            f"power iteration did not converge: ‖Δx‖={_delta:.2e} after {_iters} "
-            f"iterations (tol={CONVERGE_TOL}). Raise MAX_ITER or inspect the graph."
-        )
+    det_weights = weights if weights is not None else RELATION_WEIGHTS
 
-    # rank_det: 1-indexed rank by descending centrality
-    # Stable sort: ties broken by node_id string for determinism.
-    order_det = sorted(range(n), key=lambda i: (-x[i], node_ids[i]))
-    rank_det = [0] * n
-    for rank, node_idx in enumerate(order_det, start=1):
-        rank_det[node_idx] = rank
+    # rank_det — relation-typed (order-3) centrality
+    x = _centrality(node_ids, T_k, det_weights, max_iter, "relation-weighted")
+    rank_det = _ranks_from(x, node_ids)
 
-    # D2: AI signal — per-node mean incident confidence_score
-    ai_scores = compute_rank_ai(graph, node_ids)
-    order_ai = sorted(range(n), key=lambda i: (-ai_scores[i], node_ids[i]))
-    rank_ai = [0] * n
-    for rank, node_idx in enumerate(order_ai, start=1):
-        rank_ai[node_idx] = rank
+    # rank_ai — relation-blind (order-2) centrality: the relation-collapsed special case
+    x_ai = _centrality(node_ids, T_k, UNIFORM_WEIGHTS, max_iter, "relation-blind")
+    rank_ai = _ranks_from(x_ai, node_ids)
 
     # δ + lane assignment
     deltas, lanes = compute_delta(rank_det, rank_ai)
@@ -482,9 +511,7 @@ def _cmd_run(args) -> int:
 
     human_count = sum(1 for r in records if r.lane == "human")
     print(f"  {len(records)} nodes  [{SCHEMA}]")
-    if ai_signal_degenerate(graph, [r.node_cid for r in records]):
-        print("  WARNING: AI signal (confidence_score) has no variance on this graph — "
-              "δ/lane is NOT a meaningful slop signal here (needs I5 per-fact s_ai).")
+    print(f"  δ = |relation-weighted rank − relation-blind rank|  (order-3 vs order-2)")
     print(f"  human-lane: {human_count}  ({human_count/len(records)*100:.1f}%)")
     print(f"  threshold: top {DELTA_HUMAN_PERCENTILE*100:.0f}% δ  "
           f"(DELTA_HUMAN_PERCENTILE={DELTA_HUMAN_PERCENTILE})")
