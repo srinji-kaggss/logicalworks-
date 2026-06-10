@@ -18,6 +18,7 @@ claim conflicts across files, `principles.md` dictates precedence.
 | `spec/second-harness/` | Data/ingestion layer authority (v1.0) — owns its own decisions; see `CLAUDE.md` authority ladder. |
 | `HARDEN-NOTES.md`, `HARDEN-NOTES-expression-v1.md` (root) | Hardening-phase review records. Kept at root because `cl-ideas` symlinks them. |
 | `vision/prompts/_doctrine.md` | Cross-fleet agent doctrine (referenced by `logic-os-kernel` too). |
+| `docs/schemas/REGISTRY.md` | Schema registry — every cross-module contract, status, and repurpose rules. Minting without a registry row is a defect. |
 
 ## Rules
 - Decisions are append-only: supersede with a new record, never rewrite history.

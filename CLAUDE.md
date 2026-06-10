@@ -23,6 +23,8 @@ see `lgwks` ~lines 1834–1901). Moving them into a package breaks the CLI and t
 3. **Byte framework** → `axiom/` module docs + `docs/axiom-end-to-end-framework-2026-06-06.md`.
 4. **Governance & refusal policy** → `governance/` (see `governance/README.md`).
 5. **Doctrine (cross-fleet)** → `vision/prompts/_doctrine.md`.
+6. **Schemas/contracts** → `docs/schemas/REGISTRY.md` — check it BEFORE minting any
+   cross-module payload; repurpose > extend > mint.
 Build-state truth lives in `spec/second-harness/BUILDLOG*.md`, not in spec prose.
 
 ## Startup read order

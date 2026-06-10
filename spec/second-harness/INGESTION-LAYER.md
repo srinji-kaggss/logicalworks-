@@ -312,23 +312,23 @@ Each unit: issue-backed, tested-green before the next, math from §4–§6 prove
 Dependency order (← depends on):
 
 ```
-U1 store + contract           U2 ← U1        U3 ← U1        U4 ← U2,U3
-U5 ← U4                        U6 ← U5        U7 ← U6        U8 ← U4
+I1 store + contract           I2 ← I1        I3 ← I1        I4 ← I2,I3
+I5 ← I4                        I6 ← I5        I7 ← I6        I8 ← I4
 ```
 
 | Unit | Scope | Acceptance (the proof) |
 |---|---|---|
-| **U1** vector-space + cid contract | float32 binary vectors, L2-normalized; `cid` content-address; manifest declares space (G-11) | §4.1 norms == 1±1e-6; identical input → identical cid; round-trip lossless |
-| **U2** universal input handler | detect → modality route → quarantine unknown (§2) | every fixture type routes; unknown → `untrusted`, no crash |
-| **U3** crawler v2 (3 modality streams) | schema `lgwks.crawl.v2`, fetched+cid'd media (G-01) | 3 typed streams emitted; cid stable; frontier audit complete |
-| **U4** embedder runtime (Qwen3-VL-8B) | MLX or GGUF behind one port; 3 encoder paths → one 4096-d space (G-03) | cosine bounds; MRL recall@k curve (§4.1 verify) |
-| **U5** schema scoring (²/³ + MDL) | `R_k` construction, RESCAL score, MDL conformance + cid (G-04,05) | §4.2 marginal==cosine ≤1e-6; cross-model equal-cid; MDL separation margin |
-| **U6** cubic node centrality | tensor Z-eigen power iteration + AI-discrepancy δ (G-06) | converges; seed-stable; δ threshold pre-registered |
-| **U7** consumer tail (L5 pack) | token-budgeted, prose-free, handle-resolving (§7) | §7-INV holds; ≤ reflex cap; no dangling handle |
-| **U8** concurrency + isolation | worker-cap queue, token-bucket, 429 path (G-09); capability-token isolation (G-07) | §6 load test (0 × 5xx); §1-INV zero cross-tenant leak |
-| **U9** CRDT state | G-Set world / OR-Set tenant + cognition clock (G-08) | §5 permutation-convergence test byte-identical |
+| **I1** vector-space + cid contract | float32 binary vectors, L2-normalized; `cid` content-address; manifest declares space (G-11) | §4.1 norms == 1±1e-6; identical input → identical cid; round-trip lossless |
+| **I2** universal input handler | detect → modality route → quarantine unknown (§2) | every fixture type routes; unknown → `untrusted`, no crash |
+| **I3** crawler v2 (3 modality streams) | schema `lgwks.crawl.v2`, fetched+cid'd media (G-01) | 3 typed streams emitted; cid stable; frontier audit complete |
+| **I4** embedder runtime (Qwen3-VL-8B) | MLX or GGUF behind one port; 3 encoder paths → one 4096-d space (G-03) | cosine bounds; MRL recall@k curve (§4.1 verify) |
+| **I5** schema scoring (²/³ + MDL) | `R_k` construction, RESCAL score, MDL conformance + cid (G-04,05) | §4.2 marginal==cosine ≤1e-6; cross-model equal-cid; MDL separation margin |
+| **I6** cubic node centrality | tensor Z-eigen power iteration + AI-discrepancy δ (G-06) | converges; seed-stable; δ threshold pre-registered |
+| **I7** consumer tail (L5 pack) | token-budgeted, prose-free, handle-resolving (§7) | §7-INV holds; ≤ reflex cap; no dangling handle |
+| **I8** concurrency + isolation | worker-cap queue, token-bucket, 429 path (G-09); capability-token isolation (G-07) | §6 load test (0 × 5xx); §1-INV zero cross-tenant leak |
+| **I9** CRDT state | G-Set world / OR-Set tenant + cognition clock (G-08) | §5 permutation-convergence test byte-identical |
 
-LFM2-Extract (G-02) slots into U3 (the extract step) once U1's contract exists.
+LFM2-Extract (G-02) slots into I3 (the extract step) once I1's contract exists.
 graphify clustering fix (G-12) is independent — schedule anytime.
 
 ---
@@ -340,6 +340,6 @@ graphify clustering fix (G-12) is independent — schedule anytime.
    space, the scoring math, §4); (b) a separate viz-only X/Y/Z projection (§7.5), one-way, never feeds
    scoring. The math and the picture are decoupled. FINALIZED.
 3. **Models pinned** (§3.5): Qwen3-VL-Embedding-8B + LFM2-Extract; MLX or llama.cpp. FINALIZED.
-4. **Start at U1** (vector-space + cid contract — everything reads from it). Awaiting approval to begin.
+4. **Start at I1** (vector-space + cid contract — everything reads from it). Awaiting approval to begin.
 
 Self-contained per-unit work packets: [INGESTION-PLAN.md](INGESTION-PLAN.md).

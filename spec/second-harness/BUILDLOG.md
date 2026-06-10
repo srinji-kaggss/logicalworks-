@@ -144,3 +144,21 @@ All criteria pass: (1) envelope ✓ 0.21s; (2) missing required → ActorError c
 (3) scout→map at runtime, ingested=None for non-URL ✓ (actor-calls-actor); (4) ingest registered+
 required url ✓; (5) CLI ✓, bad input → typed error + exit 1 ✓. `lgwks run` verb deferred.
 Next: U3 World-Graph query.
+
+---
+
+## 2026-06-10 · Plan v1.1: I-rename, registry, re-prioritization (alignment session)
+
+- **INGESTION-PLAN/LAYER packets renamed U1–U12 → I1–I12.** The U-namespace collided with this
+  log's rebuild-track units (U1 capability map, U2 actor, U7 hook). This log is append-only and
+  keeps its historical U-ids; from here, rebuild units = U-track, ingestion packets = I-track.
+- **Schema registry created**: `docs/schemas/REGISTRY.md` — all ~80 contracts indexed by family
+  with repurpose rules; packets now carry `Register:` lines. Wired into /CLAUDE.md authority
+  ladder (rung 6) + governance/README.md.
+- **Plan re-prioritized**: P0 = I1 (spine) + I12 interpreter-pin half (broken in prod);
+  P1 = I4/I2/I3; P2 = I5→I6→I7; P3 = I8/I9/I10/I11 (I8 escalates to P0 before any
+  multi-tenant/network exposure). Verified-state credit marked per packet.
+- **Stale convergence note corrected**: the global `verify-before-assert.sh` hook was deleted in
+  the 2026-06-10 config revert — the U7 hook is now the only inbound mechanism, and its
+  registration points at the dead `/Applications/Logical Works` (space) dir; re-register against
+  `/Applications/logicalworks` before I7 live acceptance.
