@@ -1,0 +1,212 @@
+# Ingestion Layer — implementation plan (self-contained work packets)
+
+Companion to [INGESTION-LAYER.md](INGESTION-LAYER.md) (architecture + proofs). Each packet below is
+**self-contained**: it names its inputs (existing files/models), its output contract, the *one* formula
+it implements (inline), a falsifiable acceptance test, and an explicit scope fence. An executor (AI or
+human) picks up a packet and needs **only** the packet + the named files — not this conversation, not
+the other packets. This is the anti-context-blur, anti-slop discipline.
+
+Conventions every packet obeys: issue-backed · tested-green before the dependent starts · math proven by
+its acceptance eval · no scope beyond the fence · `//why` on non-obvious choices · evidence before "done".
+
+Dependency DAG:
+```
+U1 ──┬─ U2 ─┐
+     ├─ U3 ─┤
+     └─ U4 ─┴─ U5 ── U6 ── U7
+              U8 (┄ U1)     U10 (┄ U4)
+              U9 (┄ U1)     U11 (┄ U7)
+U12 independent
+```
+
+---
+
+## U1 — vector-space + cid contract  ·  depends: none  ·  the spine everything reads
+
+**Goal:** one content-address + vector-space contract that every other unit reads/writes.
+**Inputs (exist):** `lgwks_substrate_db.py`, `lgwks_sqlite.py`, `store/substrate/`; today's lossy store
+`~/ingestion_results/code_embeddings.db` (embedding = JSON TEXT — the thing to replace, gap G-11);
+crawler `Chunk{cid,position,text,word_count,simhash}` ([crawler/src/chunk.rs](../../crawler/src/chunk.rs)).
+**Output contract:**
+```
+record = { cid: blake2b(canonical_bytes),         # content address (dedup + audit anchor)
+           modality: text|image|video,
+           embedding: float32[d]  (BINARY blob, NOT json text),  d∈[64,4096]
+           norm: f32,                              # stored ‖e‖ pre-normalization (audit)
+           dim: u16, space_id: str,                # vector-space descriptor (manifest authority)
+           tenant: str, source_cid: str }
+```
+**Formula it guarantees:** `êᵢ = eᵢ/‖eᵢ‖₂`, stored normalized, `‖êᵢ‖ = 1`.
+**Acceptance (proof):** round-trip a vector → bit-identical out; `‖ê‖ = 1 ± 1e-6`; identical input bytes →
+identical `cid`; manifest declares `space_id` and a cross-space compare raises (never silently compares).
+**Scope fence:** storage + contract only. No embedding model, no scoring. Migrate `code_embeddings.db`
+JSON→binary as the proof fixture.
+
+---
+
+## U2 — universal input handler  ·  depends: U1
+
+**Goal:** accept ANY file type; route to modality; quarantine unknown; never crash.
+**Inputs (exist):** `graphify/detect.py` (file-type detect precedent), `lgwks_extract.py:156` (pdf via fitz),
+`lgwks_multimodal.py` (image seam), `store/untrusted/` (quarantine dir).
+**Output:** `handle(bytes,origin) → [ModalityItem{modality, parsed_unit|raw_ref, mime}]` per
+INGESTION-LAYER §2.
+**Routing table:** text/code→AST/DOM·chunk; pdf/docx/rtf→text-extract·chunk; image→image item;
+video→video item (keyframe-sample flag); audio→transcribe lane (deferred, G-10); unknown→`store/untrusted` + human.
+**Acceptance:** a fixture of every listed type routes correctly; an unknown/corrupt byte-blob lands in
+`untrusted` and the handler returns Ok (no panic, no exception escapes).
+**Scope fence:** detection + routing only. No fetching (U3), no embedding (U4).
+
+---
+
+## U3 — crawler v2 (3 modality streams) + LFM2-Extract  ·  depends: U1
+
+**Goal:** bump `lgwks.crawl.v1 → v2`: three fetched, cid'd, modality-typed streams; LFM2-Extract fills the
+strict schema into structured artifacts.
+**Inputs (exist):** crawler crate [crawler/src/](../../crawler/src) (gather/engine/extract/chunk/schema),
+today's `Assets{images: Vec<String>}` (URLs only — extend to fetched bytes); model
+`LiquidAI/LFM2-1.2B-Extract-GGUF` (+ `LFM2.5-VL-1.6B-Extract-GGUF`), runtime llama.cpp.
+**Output contract (`lgwks.crawl.v2`):** `Page.media: Vec<MediaItem{cid, modality, url, bytes_ref, mime}>`
+replacing text-only chunking; `Page.artifacts: StrictSchemaInstance` (LFM2-Extract fill).
+**Acceptance:** crawl a fixture page → 3 typed streams emitted; image/video bytes fetched + cid'd (not URL);
+frontier audit log complete (every URL terminal status); LFM2-Extract output **validates against the strict
+schema** (JSON-Schema pass) — a non-conformant fill is rejected, not stored.
+**Scope fence:** capture + typed emission + schema-fill only. No embedding (U4), no scoring (U5).
+LFM2-Extract fills; it does not score (scoring is U5, deterministic).
+
+---
+
+## U4 — embedder runtime (Qwen3-VL-Embedding-8B)  ·  depends: U1
+
+**Goal:** one embedding port, three encoder paths (text/image/video-frames) → one shared 4096-d space.
+**Inputs (exist/pinned):** `Qwen/Qwen3-VL-Embedding-8B`; runtime MLX `jedisct1/Qwen3-VL-Embedding-8B-mlx`
+**or** llama.cpp `ganeshrao/Qwen3-VL-Embedding-8B-Q8_0-GGUF`; `lgwks_apple.py` (MLX seam),
+`lgwks_local_llm.py` (process seam). MRL 64–4096, instruction-aware.
+**Output:** `embed(item, instruction) → float32[k]` (k = chosen MRL dim) → U1 record.
+**Formula:** L2-normalize output; cosine `sim = êᵢᵀêⱼ ∈ [−1,1]` (INGESTION-LAYER §4.1).
+**Acceptance (pre-registered eval):** cosine bounds hold; **recall@10 vs k∈{128,256,512,1024,2048,4096}**
+curve plotted on a frozen eval; adopt smallest k within 1% of full-dim recall, else 4096; reject if
+monotonicity fails. Text + image of the same concept land close in the shared space (cross-modal sanity).
+**Scope fence:** embedding behind a port only. Model swappable (MLX↔GGUF) without changing callers.
+
+---
+
+## U5 — schema scoring: ²/³ + R_k + MDL  ·  depends: U4
+
+**Goal:** the deterministic, non-AI score — cubic schema score + MDL conformance + cid.
+**Inputs:** U4 embeddings; strict schema `S`; INGESTION-LAYER §4.2/§4.4/§4.5.
+**Formulas (implement exactly):**
+```
+R_k = P_k · diag(d_k)                         # schema-derived, no learning (§4.5)
+score(i,k,j) = êᵢᵀ R_k êⱼ                     # cubic / order-3 (RESCAL)
+score_mdl(I) = 1 − |compress(c(I)|S)| / |compress(c(I))|     # canonical CBOR + zstd S-dictionary
+cid(I) = blake2b(c(I))
+```
+**Acceptance (proof):** `(1/m)Σ_k score(i,k,j)|_{R_k=I}` reproduces the cosine matrix ≤1e-6 (the §4.2
+marginal proof, executed); directed relation ⇒ `score(i,k,j)≠score(j,k,i)`; **same fact via 2 different
+extract models ⇒ identical cid**; `score_mdl` separates conformant vs corrupted fixtures by a
+pre-registered margin.
+**Scope fence:** scoring math only. The AI's self-score is *recorded* (U6 uses it), never used here.
+
+---
+
+## U6 — cubic node centrality + AI-discrepancy δ  ·  depends: U5
+
+**Goal:** the deterministic node value (cubic centrality) and the slop signal δ.
+**Formulas:**
+```
+node = argmax_{‖x‖=1} Σ_k wₖ (xᵀ Tₖ x)        # tensor Z-eigen (Lim/Qi); power iter x←normalize(Σ wₖ Tₖ x)
+δᵢ = | rank_det(i) − rank_ai(i) |             # AI score kept as signal; large δ ⇒ human lane
+```
+**Acceptance:** power iteration converges (‖Δx‖<1e-9) on the two existing graphs
+(`~/ingestion_results/{logicalworks-,logic-os-kernel}_graph/graph.json`); seed-stable (same inputs →
+identical ranking); δ distribution computed, threshold pre-registered; high-δ nodes routed to human lane.
+**Scope fence:** ranking + δ only. No injection/packing (U7).
+
+---
+
+## U7 — consumer tail (L5 pack)  ·  depends: U6
+
+**Goal:** the token-optimized, prose-free pack the AI consumer reads.
+**Inputs:** U6 ranks; [PRD-04](prd/PRD-04-context-economy.md) reflex cap + `lgwks.inbound.v1`;
+`lgwks_context.py`, `hooks/subconscious_inbound.py`.
+**Output (`lgwks.inbound.v1` extension):** `{ handles:[cid], scores, minimal_typed_fields }` — RRF-ordered
+(graph cubic rank ⊕ vector cosine rank), deterministic truncation order.
+**Acceptance (§7-INV):** L5 pack contains **no free-text field**; token count ≤ PRD-04 reflex cap; every
+handle resolves to a `cid` present in the store (zero dangling/hallucinated reference); truncation drops
+lowest-RRF first (load-bearing survives the cut).
+**Scope fence:** assembly + budgeting only. Generation/decisions stay with the consumer (PRD-04 INV-3).
+
+---
+
+## U8 — concurrency, queue, isolation  ·  depends: U1 (┄)
+
+**Goal:** no 5xx under load; hard tenant isolation.
+**Inputs (exist):** [lgwks_workercap.py](../../lgwks_workercap.py) (worker-cap formula), crawler politeness
+(jittered backoff), `store/projects/` + `store/substrate-global/`.
+**Formulas:** `c = min(⌊(RAM−Σreserve)/per_worker⌋,⌊(CPU−cpu_reserve)/cpu_per_worker⌋,|roles|)`;
+stability `ρ=λ/(cμ)<1`; token-bucket admission (rate cμ, burst B); `Q≥Q_max ⇒ 429 + Retry-After`.
+**Acceptance:** load test at λ ∈ {0.5cμ, cμ, 2cμ} → stable<1, bounded at 1, and at 2× **every** rejection is
+a typed 429 (zero 5xx); duplicate submission (same cid) ⇒ one row (idempotent shed); **§1-INV**: 10⁴
+randomized A/B queries leak zero cross-tenant cids; a query without a valid capability token is rejected.
+**Scope fence:** queue/admission/isolation only. No new compute.
+
+---
+
+## U9 — CRDT state  ·  depends: U1 (┄)
+
+**Goal:** concurrent writers converge without conflict.
+**Inputs:** U1 cid; [lgwks_cognition.py](../../lgwks_cognition.py) (hash-chain = logical clock).
+**Design:** world-nodes = **G-Set keyed by cid** (idempotent ⇒ CvRDT for free); tenant edges = **OR-Set**
+(add/remove + unique tags) or **LWW** tie-broken by cognition-chain head.
+**Acceptance (SEC proof, executed):** apply the same update multiset in N permutations across M replicas →
+all replicas converge to **byte-identical** state; adding the same cid-fact twice is a no-op.
+**Scope fence:** state-merge semantics only. No transport/networking.
+
+---
+
+## U10 — deterministic 3-D viz projection (DECOUPLED from semantic space)  ·  depends: U4 (┄)
+
+**Goal:** a replayable X/Y/Z coordinate per node for the visualization engine. This is a **viz-only**
+artifact, fully decoupled from the N-dim semantic space and the order-3 scoring (INGESTION-LAYER §7.5):
+derived one-way from the embedding, it **never feeds back** into scoring/retrieval.
+**Inputs:** U4 embeddings; `lgwks_graph_viz.py` (D3 renderer to feed).
+**Formula:** `y_i = Wᵀêᵢ ∈ ℝ³`, `W` = top-3 PCA axes (SVD), sign fixed by largest-magnitude-positive rule.
+**Acceptance:** same Ê → byte-identical `W` + coords; **scoring output is bit-identical with U10 present or
+absent** (proves one-way decoupling); reconstruction stress reported; optional seeded UMAP only if PCA
+stress > pre-registered threshold.
+**Scope fence:** projection output only. Not the renderer, not the scoring. The math must never be
+distorted for the picture; the picture is never the semantic truth.
+
+---
+
+## U11 — waste ledger (the proof context-optimization works)  ·  depends: U7
+
+**Goal:** measure that the score actually reduces tokens (else the whole optimization is asserted, G-13).
+**Inputs:** PRD-04 §04-c; the transcript the daemon tails; U7 packs; `lgwks_cognition.py` store.
+**Output:** per-session ledger: per injected item → `{tokens, used_within_N_turns: bool}` (cited/acted-on,
+derived from transcript). Cockpit shows **waste-rate**.
+**Acceptance:** ledger sums reconcile against the transcript; waste-rate computed; a high-waste injection is
+attributable to a specific low-yield item; threshold to raise the selection cut is pre-registered.
+**Scope fence:** measurement only. Does not change the router (it informs the next tuning).
+
+---
+
+## U12 — graphify clustering fix  ·  depends: none (independent)
+
+**Goal:** stop Leiden→Louvain degradation on py3.14 (gap G-12); add embedding-weighted edges.
+**Inputs:** `graphify/cluster.py` (Leiden via graspologic pinned `<3.13`); U4 embeddings.
+**Fix:** pin a py<3.13 interpreter for the cluster step OR vendor a Leiden impl; weight/augment edges by
+embedder cosine (semantic+structural hybrid) → tuned-resolution Leiden.
+**Acceptance:** Leiden actually runs (not Louvain fallback); on the two existing corpora, community count +
+modularity vs the current Louvain baseline reported; fewer, more coherent communities (pre-registered metric).
+**Scope fence:** clustering only.
+
+---
+
+## Sequencing note (reduce blur)
+
+Build **U1 first** — it is the contract every other packet reads; without it the others have no stable
+target and will drift (context blur). Then U2/U3/U4 fan out (independent given U1). U5→U6→U7 is the scoring
+spine. U8/U9 (infra) and U10/U11 (viz/proof) attach where the DAG shows. U12 anytime. Do not start a packet
+whose dependency is not tested-green — that is the blur/slop the sequencing exists to prevent.
