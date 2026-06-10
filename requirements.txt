@@ -5,3 +5,5 @@ playwright>=1.40
 leidenalg>=0.10; python_version < "3.13"
 igraph>=0.11; python_version < "3.13"
 jsonschema>=4.0
+cbor2>=5.4          # I5: canonical CBOR for MDL canonicalization
+zstandard>=0.21     # I5: MDL compression + dictionary training

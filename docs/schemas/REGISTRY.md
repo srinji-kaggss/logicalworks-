@@ -154,8 +154,16 @@ emit `bot.record.v1` with a new `kind` rather than minting a new findings schema
 `lgwks.graph.v2` (live; `lgwks.graph.v1` deprecated) + `lgwks.repo.graph.v0` (graph-over-repo bridge,
 `lgwks_graph.py`/`lgwks_repo.py`) + `lgwks.graph.{query,impact,complexity,path,neighbors,patterns}.v0`
 (`lgwks_schema.py:102-109`) · `lgwks.graph.cache.v1` (`.lgwks/graph.cache.json`).
-**Planned:** `lgwks.score.record.v1` (**I5**), `lgwks.rank.record.v1` (**I6**).
+**Planned:** `lgwks.rank.record.v1` (**I6**).
 **Repurpose when:** any code-structure question — query `graph.v2`; do not parse source ad-hoc.
+
+#### I5 deterministic scoring — landed (2026-06-10)
+| id | ver | status | defined in | validation |
+|----|-----|--------|-----------|------------|
+| `lgwks.schema.relations.v1` | 1 | **live** (I5) — D0: 8 typed-triple relations; `direction` declared, operators identity in v1 (directional Pₖ activation deferred → I5.1) | `lgwks_score.py` (`RELATIONS`) | dataclass + `lgwks_schema` |
+| `lgwks.score.record.v1` | 1 | **live** (I5) — RESCAL factored score + MDL conformance + content cid | `lgwks_score.py` (`ScoreRecord`) | dataclass; canonical CBOR + zstd |
+
+**v1 note:** scoring is batch/offline (INV-3, no AI in path). MDL + cid + factored-operator mechanism are active; per-relation directional `Pₖ` is identity in v1 so the §4.2 marginal-identity proof holds exactly — directional activation is I5.1.
 
 #### lgwks.graphify.cluster.v1 — landed I12 (2026-06-10)
 | id | ver | status | defined in | validation |
