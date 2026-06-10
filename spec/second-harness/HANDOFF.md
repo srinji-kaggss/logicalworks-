@@ -1,87 +1,82 @@
-# Handoff — lgwks rebuild (crawler landed) · 2026-06-09
+# Handoff — lgwks ingestion layer (scoring spine landing) · 2026-06-10
 
-You are the next agent on the lgwks rebuild. Read this fully before acting. It is
-written AI-for-AI; the Director's trust is low after a long session of me
-oversimplifying, over-sprawling, and asserting before verifying. Do not repeat that.
+You are the next agent on the lgwks rebuild. Read this fully before acting. Written
+AI-for-AI; receipts, not essays. Authority ladder: `/CLAUDE.md` → `governance/README.md`
+→ `spec/second-harness/INGESTION-PLAN.md` (work packets) → `docs/ARCHITECTURE.md` → the
+assigned GitHub issue. Build-state truth = `BUILDLOG.md`, not spec prose.
 
 ## Hard constraints (do not violate)
 
-1. **The model layer is OUT OF SCOPE.** Do not spec, map, or touch it. The Director
-   said so explicitly and repeatedly — it is "worse than imagined" and gets its own
-   session with him driving. Treat all models (Eye/Tongue/Membrane, Ollama, Gemini,
-   CoreML) as opaque dependencies. The text=local-Qwen / media=cloud-Gemini
-   (`google/gemini-embedding-2` via OpenRouter) split is INTENDED design — never change
-   the Gemini model; if a step needs it, STOP AND ASK.
+1. **The model layer is OUT OF SCOPE.** Do not spec, map, or touch it. Treat all models
+   (Eye/Tongue/Membrane, Ollama, Gemini, Qwen3-VL, CoreML) as opaque deps. The
+   text=local-Qwen / media=cloud-Gemini split is INTENDED. If a step needs the model
+   layer, STOP AND ASK.
 2. **Verify before you assert.** Every claim about env/git/files/tests runs the command
-   first. The compiler/test-runner is the verifier — claim nothing as working until
-   `cargo test` / `pytest` proves it.
-3. **No emojis. No sprawl.** Receipts, not essays. Don't mirror the Director's
-   thinking-out-loud on output.
-4. **On a real fork in the Director's intent, ASK (use AskUserQuestion) — don't guess.**
-   But don't ask what the code can answer; read the code.
-5. **Crawl ethic = honest-first.** Respect robots by default; stealth is a configured
-   escalation rung, never the default.
+   first. `cargo test` / `pytest` is the verifier. Use the repo venv: `.venv/bin/python`.
+3. **No emojis. No sprawl.** Receipts. Don't mirror the Director's thinking-out-loud.
+4. **On a real fork in the Director's intent, ASK (AskUserQuestion).** Don't ask what the
+   code can answer; read the code.
+5. **No silent failure, no gate weakening.** When a check fails, fix the thing under test,
+   never loosen the gate. Surface degeneracy/non-convergence loudly.
 
-## What this session built (verified)
+## Current state (verified — main @ docs-update commit)
 
-A standalone Rust crawler: **[`crawler/`](../../crawler)** — crate `lgwks-crawler`,
-contract `lgwks.crawl.v1`. **30 tests pass, 0 warnings, live-verified against
-example.com.** Spec: [CRAWLER-spec.md](CRAWLER-spec.md).
+Ingestion packets I1–I6 + I12 are **done and merged**. The deterministic scoring spine
+(I1 → I4/I5 → I6) is complete. Per-packet detail in `INGESTION-PLAN.md`; landings in
+`BUILDLOG.md` (2026-06-10 session 2). Contracts in `docs/schemas/REGISTRY.md`.
 
-- One upstream entry: `gather(GatherRequest{url, mode})`, modes `scrape|map|crawl`
-  (firecrawl's endpoints collapsed to one call). Three surfaces: lib `gather()`,
-  CLI `lgwks-crawler gather`, HTTP `POST /gather` (+ `/crawl`, `/healthz`).
-- BUILT: BFS recursion, robots+crawl-delay, per-host politeness + deterministic
-  backoff/jitter, conditional GET (304), reqwest/rustls fetch w/ retry, HTML→markdown
-  +links+canonical, **asset capture** (JS/CSS/img URLs + inline-asset cids),
-  **deterministic noise-min** (blake2b cid exact-dedup + simhash near-dup),
-  **chunking** (320w/48 overlap, content-addressed `Chunk`), frontier-as-audit-log.
-- Module map: `config schema error fingerprint dedup robots politeness extract
-  frontier fetch engine chunk gather api main`.
+- **I1** `lgwks_vector.py` — `lgwks.vector.record.v1` (binary f32, blake2b cid, space guard).
+- **I2** `lgwks_input.py` — `lgwks.modality.item.v1` (universal input routing).
+- **I3** `crawler/` v2 + `lgwks_lfm2_extract.py` — `lgwks.crawl.v2` + `…artifacts.v1` (PR #64).
+- **I4** `lgwks_embed_port.py` — `lgwks.embed.port.v1` (mlx→transformers, local-only).
+- **I5** `lgwks_score.py` — `lgwks.score.record.v1` + `lgwks.schema.relations.v1`: factored
+  RESCAL `R_k`, CBOR+zstd MDL, blake2b cid (PR #65). CLI `lgwks score`.
+- **I6** `lgwks_rank.py` — `lgwks.rank.record.v1`: relation-weighted vs relation-blind
+  centrality, σ-shifted power iteration + Rayleigh convergence, δ slop signal (PR #67).
+  CLI `lgwks rank`. Closes G-06.
+- **I12** graphify Leiden fix (PR #63).
 
-## NOT built (honest gaps — do not claim otherwise)
+Gaps G-04/05/06/11/12 closed (INGESTION-LAYER §8).
 
-- **Anti-bot bypass** (the firecrawl-class hole): no headless browser, no proxy pool,
-  no TLS/JA3 fingerprinting. Honest HTTP/2 only → hard walls (Cloudflare/DataDome)
-  block it. Provider ports designed (`RenderProvider`/`ProxyProvider`), not wired.
-- wget-completion: no disk-mirror, link-rewrite, or resumable re-crawl.
-- `search` mode (web-search→gather): needs a search provider; intentionally not faked.
-- Per-host concurrency / autoscaling: engine is sequential per run.
+## NOT built / deferred (honest — do not claim otherwise)
 
-## Decisions locked this session
+- **I7** (#61) — consumer tail (L5 reflex pack + RRF). **Next packet.** Code dependency
+  (I6) is now satisfied. Spec posted on the issue. **Blocked only on an ops action:**
+  re-register the inbound hook `hooks/subconscious_inbound.py` against the live
+  `/Applications/logicalworks` project dir (it currently points at the dead space-named
+  `/Applications/Logical Works`). Confirm the path with the Director before relying on
+  live hook behavior.
+- **I5.1 (deferred, not yet issued)** — directional `P_k` activation. I5 ships identity
+  operators (so the §4.2 marginal-identity proof holds exactly); scoring currently
+  collapses to cosine. Genuine directional/embedding-coupled scoring is future work.
+- **§4.3 honesty** — with fixed `w_k`, I6 centrality is a relation-WEIGHTED eigenvector
+  centrality (faithful to §4.3 for the n×m×n tensor), not a free cubic-in-x optimization.
+  δ is a structural signal until I5.1 wires per-fact `s_ai`.
+- **I8–I11 (P3, not yet issued)** — I8 (queue/isolation) escalates to **P0 before any
+  multi-tenant or network exposure**. I10 viz must never run ahead of the spine.
 
-- End state: "all of it eventually (Axiom under lgwks under the subconscious), but the
-  **daemon ships Day 1**." The daemon is the AI's subconscious + the math doing PM/
-  AI-management (gate work, sequence scope, score output, auto-write governance).
-- lgwks today is a CLI; the end state grows it into a stateful daemon (per
-  [../PRD.md](../PRD.md) §14) + a human **neo-IDE** consumer over the same JSON
-  control bus (CLI is the control bus, not the UI — see machine-nervous-system.md).
-- Crawler = Rust (settled). The 107 Python modules collapse to ~6 real capabilities;
-  the work is extracting working fragments from scattered half-implementations.
+## Workflow that worked this session (the Director's loop)
 
-## Open decisions — need the Director (ask, don't assume)
-
-1. **Daemon language** — Go (speed) vs Rust (fleet-consistency w/ axiom/logic-os-kernel).
-   The crawler is Rust; the daemon is undecided. Nervous-system doc favors
-   Python-orchestrator + Rust-seams + daemon-last.
-2. **Canonical content-address scheme** — axiom=blake2, substrate=sha256, crawler=blake2b.
-   Must unify (recommend blake2b, migrate substrate). Correctness issue.
-3. **Next crawler lift** — bypass stack (headless+proxy+TLS-fp) vs wget-completion vs
-   `search` mode. Director was asked; answer pending.
-
-## Doc map
-
-- [../PRD.md](../PRD.md) — end-state authority (subconscious daemon).
-- [prd/INDEX.md](prd/INDEX.md) — decomposed PRDs (PRD-01..10).
-- [../../docs/machine-nervous-system.md](../../docs/machine-nervous-system.md) — runtime
-  lanes + the language-split posture + control-bus principle. (Models section: ignore.)
-- [REBUILD-v0-draft.md](REBUILD-v0-draft.md) — the model-free spine + settled/open decisions.
-- [CRAWLER-spec.md](CRAWLER-spec.md) — crawler feature matrix + bypass analysis + hashing decision.
-- [BUILDLOG-model-stack.md](BUILDLOG-model-stack.md) — prior model-stack work (now superseded scope; models OUT).
+Per substantive packet: **spec (GH issue comment) → implement → hacker-harden → merge.**
+Implementation can be delegated to a Sonnet subagent (the issue spec is the contract);
+**review/harden in the main thread** — green subagent tests repeatedly hid real defects
+(hollow signals, silent non-convergence, dead/unwired CLI). Recurring integration traps:
+(1) every new `lgwks.*.vN` literal needs a `REGISTRY.md` row or the `governance.yml` CI
+gate fails; (2) a new CLI verb must be wired in the `lgwks` dispatcher AND added to
+`lgwks_home._DOMAINS` (the `test_home` L0 no-Other-catch-all invariant); (3) run the
+registry gate from the repo root, not a `.claude/` worktree (it skips `.claude` paths).
 
 ## Suggested next step
 
-Resolve open decision #3 with the Director, then either: build the bypass stack
-(start with `RenderProvider` — decide chromiumoxide vs reuse Python playwright over
-IPC) OR wire `search` + wget-mirror. Keep each addition tested-green before claiming it.
-Do NOT start the daemon spine until decision #1 (language) is settled.
+Build **I7** (#61): RRF fusion of I6 cubic rank ⊕ vector cosine rank → token-budgeted L5
+reflex pack (`lgwks.inbound.v1` extension, 1500-token cap, deterministic truncation,
+zero-dangling handles). Spec on the issue. Resolve the hook re-registration path with the
+Director. Then consider filing I5.1 and the I8–I11 issues.
+
+## Doc map
+
+- `INGESTION-PLAN.md` — per-packet contracts/status (rung 1 for the data layer).
+- `INGESTION-LAYER.md` — architecture + proven math (§4 scoring, §7 consumer tail) + §8 gap log.
+- `BUILDLOG.md` — append-only build-state truth.
+- `docs/schemas/REGISTRY.md` — every cross-module contract; check before minting.
+- `prd/PRD-04-context-economy.md` — reflex-cap + RRF authority for I7.
