@@ -154,8 +154,14 @@ emit `bot.record.v1` with a new `kind` rather than minting a new findings schema
 `lgwks.graph.v2` (live; `lgwks.graph.v1` deprecated) + `lgwks.repo.graph.v0` (graph-over-repo bridge,
 `lgwks_graph.py`/`lgwks_repo.py`) + `lgwks.graph.{query,impact,complexity,path,neighbors,patterns}.v0`
 (`lgwks_schema.py:102-109`) · `lgwks.graph.cache.v1` (`.lgwks/graph.cache.json`).
-**Planned:** `lgwks.rank.record.v1` (**I6**).
 **Repurpose when:** any code-structure question — query `graph.v2`; do not parse source ad-hoc.
+
+#### I6 cubic node centrality — landed (2026-06-10)
+| id | ver | status | defined in | validation |
+|----|-----|--------|-----------|------------|
+| `lgwks.rank.record.v1` | 1 | **live** (I6) — Z-eigenpair cubic centrality + AI-discrepancy δ; top-decile δ → human lane | `lgwks_rank.py` (`RankRecord`) | frozen dataclass; power-iter convergence + seed-stability tests |
+
+**v1 note:** ranking is batch/offline (INV-3, no AI in path). Conformance weight = edge `confidence_score`. δ threshold = top 10% pre-registered as `DELTA_HUMAN_PERCENTILE`. Relation weights uniform 1.0.
 
 #### I5 deterministic scoring — landed (2026-06-10)
 | id | ver | status | defined in | validation |
