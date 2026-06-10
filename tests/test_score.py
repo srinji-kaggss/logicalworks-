@@ -328,6 +328,42 @@ class TestReplayDeterminism(unittest.TestCase):
 # Schema / relation constants
 # ---------------------------------------------------------------------------
 
+class TestHardening(unittest.TestCase):
+    """Harden pass: cross-model type-normalization (§4.4) + operator-length guards."""
+
+    def test_int_float_cid_equal(self):
+        # Two extractors emit the same fact, one as int, one as float → same cid.
+        a = {"i_cid": "x", "k": "calls", "j_cid": "y", "weight": 1, "confidence_score": 2}
+        b = {"i_cid": "x", "k": "calls", "j_cid": "y", "weight": 1.0, "confidence_score": 2.0}
+        self.assertEqual(canonicalize(a), canonicalize(b))
+        self.assertEqual(content_cid(a), content_cid(b))
+
+    def test_nested_int_float_cid_equal(self):
+        a = {"i_cid": "x", "k": "calls", "j_cid": "y", "meta": {"n": 3, "v": [1, 2]}}
+        b = {"i_cid": "x", "k": "calls", "j_cid": "y", "meta": {"n": 3.0, "v": [1.0, 2.0]}}
+        self.assertEqual(content_cid(a), content_cid(b))
+
+    def test_bool_not_coerced_to_float(self):
+        # bool must stay distinct from 1.0/0.0 (CBOR treats them differently).
+        t = {"i_cid": "x", "k": "calls", "j_cid": "y", "flag": True}
+        one = {"i_cid": "x", "k": "calls", "j_cid": "y", "flag": 1}
+        self.assertNotEqual(content_cid(t), content_cid(one))
+
+    def test_score_triple_rejects_perm_length_mismatch(self):
+        e1 = _make_embedding(1, 8)
+        e2 = _make_embedding(2, 8)
+        bad = FactoredRelation("bad", perm=(1, 0), signs=None, mask=None, direction="directed")
+        with self.assertRaises(ValueError):
+            score_triple(e1, bad, e2)
+
+    def test_score_triple_rejects_mask_length_mismatch(self):
+        e1 = _make_embedding(1, 8)
+        e2 = _make_embedding(2, 8)
+        bad = FactoredRelation("bad", perm=None, signs=None, mask=(True, False), direction="directed")
+        with self.assertRaises(ValueError):
+            score_triple(e1, bad, e2)
+
+
 class TestSchemaConstants(unittest.TestCase):
     def test_schema_ids_are_versioned_lgwks_strings(self):
         self.assertRegex(SCHEMA, r"^lgwks\..+\.v\d+$")

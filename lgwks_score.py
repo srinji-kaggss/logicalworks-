@@ -108,6 +108,13 @@ def score_triple(
     d = len(ei)
     if len(ej) != d:
         raise ValueError(f"dimension mismatch: len(ei)={d}, len(ej)={len(ej)}")
+    # Operator factors must match the embedding dim, else silent corruption / IndexError.
+    if rel.perm is not None and len(rel.perm) != d:
+        raise ValueError(f"perm length {len(rel.perm)} != dim {d} for relation {rel.relation_id!r}")
+    if rel.signs is not None and len(rel.signs) != d:
+        raise ValueError(f"signs length {len(rel.signs)} != dim {d} for relation {rel.relation_id!r}")
+    if rel.mask is not None and len(rel.mask) != d:
+        raise ValueError(f"mask length {len(rel.mask)} != dim {d} for relation {rel.relation_id!r}")
 
     # Compute P_k^T êᵢ
     if rel.perm is not None:
@@ -134,16 +141,37 @@ def score_triple(
 # ---------------------------------------------------------------------------
 
 
+def _normalize_value(v: Any) -> Any:
+    """Normalize types so logically-equal facts canonicalize identically.
+
+    Two extract models emitting the same fact must produce the same cid even when
+    one serializes a number as int (1) and the other as float (1.0). Rule: every
+    non-bool integer is coerced to float; structures are normalized recursively.
+    bool is preserved (CBOR/JSON treat it distinctly). //why: §4.4 cross-model cid.
+    """
+    if isinstance(v, bool):
+        return v
+    if isinstance(v, int):
+        return float(v)
+    if isinstance(v, dict):
+        return {k: _normalize_value(x) for k, x in v.items()}
+    if isinstance(v, (list, tuple)):
+        return [_normalize_value(x) for x in v]
+    return v
+
+
 def canonicalize(instance: dict[str, Any]) -> bytes:
     """Canonical CBOR form of a graph instance.
 
-    Excludes s_ai (side-channel per INV-3). Sorts keys. Deterministic.
-    Identical logical content → byte-identical output regardless of insertion order.
+    Excludes s_ai (side-channel per INV-3). Normalizes numeric types recursively
+    (int→float) so model-to-model int/float variance does not fork the cid. cbor2
+    canonical=True fixes map-key ordering at every level. Deterministic: identical
+    logical content → byte-identical output regardless of insertion order or numeric type.
     """
     import cbor2  # soft dep; imported here so module loads without it
 
-    cleaned = {k: v for k, v in instance.items() if k != "s_ai"}
-    return cbor2.dumps(dict(sorted(cleaned.items())), canonical=True)
+    cleaned = {k: _normalize_value(v) for k, v in instance.items() if k != "s_ai"}
+    return cbor2.dumps(cleaned, canonical=True)
 
 
 def content_cid(instance: dict[str, Any]) -> str:
@@ -253,6 +281,7 @@ def _cmd_relations(args) -> int:
         print(_json.dumps({"schema": RELATIONS_SCHEMA, "relations": items}, indent=2))
     else:
         print(f"  {len(items)} relations  [{RELATIONS_SCHEMA}]")
+        print("  note: v1 operators are identity; direction is declared, not yet active (I5.1)")
         for r in items:
             print(f"    {r['relation']:<20} {r['direction']}")
     return 0
