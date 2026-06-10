@@ -54,7 +54,73 @@ Proof fixture: `~/ingestion_results/code_embeddings_v1.db` — 4100 rows migrate
 `lgwks_substrate_vector.py`, `lgwks_substrate_crawl.py`) · `lgwks.ingest.v1` (`lgwks_ingest.py:284`) ·
 SQLite DDL: `lgwks_substrate_db.py:43-98` (sources/documents/chunks/facts/vectors/frontier + FTS5),
 `lgwks_entity_graph.py:111-138` (nodes/edges/chunks).
-**Planned successors (INGESTION-PLAN):** `lgwks.modality.item.v1` (**I2**), `space_id` scheme (**I4**).
+#### lgwks.modality.item.v1 — landed I2 (2026-06-10)
+| id | ver | status | defined in | validation |
+|----|-----|--------|-----------|------------|
+| `lgwks.modality.item.v1` | 1 | **live** (73 tests) | `lgwks_input.py` | handle() + extract() |
+
+**Fields** (every item has all of these):
+
+| field | type | what it holds |
+|-------|------|--------------|
+| `schema` | str | always `"lgwks.modality.item.v1"` |
+| `modality` | str | `"text"` · `"image"` · `"video"` · `"quarantine"` |
+| `parsed_unit` | str or None | decoded text — set for text items; `None` for image/video/quarantine |
+| `raw_bytes` | bytes or None | raw file bytes — set for image/video/quarantine; `None` for text |
+| `mime` | str | MIME type from magic bytes |
+| `origin` | str | file path or identifier passed to `handle()` |
+| `extraction_strategy` | str | `"text_direct"` · `"ocr_image"` · `"visual_embed"` · `"video_embed"` · `"none"` |
+| `frame_index` | int | always `-1` (reserved) |
+| `source_fingerprint` | str | blake2b-8 hex over first 64KB — for dedup |
+| `quarantine_reason` | str | non-empty only when `modality="quarantine"` |
+
+**Invariants:** text → `raw_bytes=None`; image/video/quarantine → `parsed_unit=None`; `extraction_strategy` always set; `handle()` and `extract()` never raise; `needs_extraction()` is `True` only for `"ocr_image"`.
+
+**Two-phase:** `handle(bytes, origin)` = classify fast (hook-safe). `extract(item)` = OCR only — returns item unchanged for all other strategies.
+
+**Video path:** `handle()` sets `extraction_strategy="video_embed"`, `raw_bytes=<file bytes>`. `extract()` is a no-op. I4 (`lgwks_embed_port.EmbedPort`) opens the bytes, extracts frames, and calls the VL model — one 4096-d vector out. I2 never touches video content.
+
+#### lgwks.embed.port.v1 — landed I4 (2026-06-10)
+| id | ver | status | defined in | validation |
+|----|-----|--------|-----------|------------|
+| `lgwks.embed.port.v1` | 1 | **live** (59 tests) | `lgwks_embed_port.py` | EmbedPort |
+
+**What it does:** takes any `lgwks.modality.item.v1` item → produces a `lgwks.vector.record.v1` blob.
+
+**Quick start** (self-contained — no assumed context):
+```python
+from lgwks_input import handle          # I2: classify any file
+from lgwks_embed_port import EmbedPort  # I4: embed it
+
+items = handle(file_bytes, "myfile.mp4")
+with EmbedPort() as port:              # auto-selects mlx or transformers
+    for item in items:
+        vec    = port.embed_from_item(item)
+        record = port.embed_to_record(vec, modality=item.modality,
+                                      source_cid="b2b256:...", tenant="myproject")
+        # pass record to I1 (lgwks_vector.upsert_record)
+```
+
+**Model:** `Qwen3-VL-Embedding-8B` — local only, no HuggingFace at runtime (Zscaler-safe).
+Weights in `store/models/Qwen3-VL-Embedding-8B-mlx` (mlx) or `store/models/Qwen3-VL-Embedding-8B` (transformers). Fetch once via `make download-models` (pulls from GitHub Release, not HF).
+
+**Tiers** (same model, same `space_id` — auto-selected):
+
+| tier | when active |
+|------|------------|
+| `mlx` | `store/models/Qwen3-VL-Embedding-8B-mlx` exists + `mlx_vlm` importable |
+| `transformers` | `store/models/Qwen3-VL-Embedding-8B` exists |
+
+**`embed_from_item(item)` routing:**
+
+| modality | extraction_strategy | calls |
+|----------|---------------------|-------|
+| `text` | `text_direct` | `embed_text(parsed_unit)` |
+| `image` | `visual_embed` | `embed_image(raw_bytes)` |
+| `video` | `video_embed` | `embed_video(raw_bytes)` — N frames extracted here, native VL |
+| `quarantine` | any | raises `ValueError` |
+
+**space_id:** `"qwen3-vl-embedding-8b:d{k}"` — identical for both tiers. Pass `dim=k` (k ≤ 4096) for MRL truncation; port slices and re-normalises. I1 cross-space guard refuses any comparison against a different space_id.
 **Repurpose when:** storing or querying ingested content — extend the substrate DDL, never mint a
 side-database (the external `~/ingestion_results/*.db` stores are exactly the lossy pattern I1 retires).
 **Rule:** all `.v0` here are research-grade; promote to v1 only through an INGESTION-PLAN packet.
