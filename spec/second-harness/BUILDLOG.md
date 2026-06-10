@@ -187,3 +187,25 @@ Next: U3 World-Graph query.
 - [#62](https://github.com/srinji-kaggss/logicalworks-/issues/62) I12 — Leiden/Louvain fix (P0, independent)
 
 **Remaining P3 packets** (I8 concurrency, I9 provenance, I10 viz, I11 waste ledger) not yet issued — I8 escalates to P0 before any multi-tenant/network exposure.
+
+---
+
+## 2026-06-10 (session 2) · I3, I5, I6 landed; I12 merged; scope-creep cleanup
+
+Scoring spine advanced. Loop per packet: spec (GH issue comment) → implement → hacker-harden → merge. I5/I6 implementation delegated to Sonnet subagents; review/harden done in the Opus main thread (caught real defects behind green tests).
+
+**Merged to main:**
+- **I12 ✅** (PR #63, pre-session) — graphify Leiden fix; `LeidenUnavailableError`, no silent Louvain substitution (G-12).
+- **I3 ✅** (PR #64) — `lgwks.crawl.v1→v2`: `crawler/src/media.rs` (fetched/cid'd/modality-typed media), `lgwks_lfm2_extract.py` (strict-schema fill, jsonschema-validated), `lgwks.crawl.artifacts.v1`. Recovered from a pre-I12 worktree, **rebased onto post-I12 main** (preserved the I12 cluster fix). 34 Rust + 15 py tests. Harden: registered the unregistered `lgwks.lfm2_extract.v1` literal (CI gate).
+- **I5 ✅** (PR #65) — `lgwks_score.py` — factored RESCAL `R_k=P_k·diag(d_k)` (O(d), never densified), canonical-CBOR+zstd MDL, blake2b cid. `lgwks.score.record.v1` + `lgwks.schema.relations.v1`. 23 tests. Harden fixes: REGISTRY rows (CI gate), cross-model cid via recursive int→float normalization, operator-length guards, **dead CLI wired** (`lgwks score` was never registered in the dispatcher; also added to `lgwks_home._DOMAINS` L0 invariant). **I5.1 deferred:** directional `P_k` identity in v1.
+- **I6 ✅** (PR #67) — `lgwks_rank.py` — `lgwks.rank.record.v1`, 23 tests, closes G-06. Harden caught silent non-convergence + a hollow δ; **fixed end-to-end**: `rank_det`=relation-WEIGHTED, `rank_ai`=relation-BLIND centrality, `δ`=their discrepancy (the old confidence_score source is a constant 1.0 → noise). Convergence: σ-shift kills near-bipartite oscillation (logic-os-kernel), Rayleigh-quotient criterion handles small spectral gaps, MAX_ITER 20k.
+- **chore** (PR #66) — removed orphaned `tests/test_scope_creep_guard.py` (the hook it loaded was removed from `~/.claude/hooks`; only the test was ever in-repo).
+
+**Decisions / honest notes recorded:**
+- §4.3 centrality with fixed `w_k` is a relation-WEIGHTED eigenvector centrality (the relation mode is contracted with schema weights, not a free cubic-in-x optimization) — faithful to §4.3 for this n×m×n tensor. Genuine embedding-coupled `R_k` scoring is the §4.2 retrieval lane (I7/RRF).
+- δ is now a structural signal (relation-typing vs relation-blind), independent of any AI score until I5.1 wires per-fact `s_ai`.
+- Harden lesson reconfirmed: green subagent tests hid real defects (hollow δ, silent non-convergence, dead CLI) — adversarial review in the main thread is load-bearing.
+
+**Gaps closed:** G-04, G-05 (I5); G-06 (I6); G-11 (I1/I4); G-12 (I12). See INGESTION-LAYER §8.
+
+**Open:** I7 (#61) — next; code dep (I6) now satisfied; blocked only on the inbound-hook re-registration ops action. I5.1 (directional `P_k`) deferred, not yet issued. I8–I11 (P3) not yet issued.

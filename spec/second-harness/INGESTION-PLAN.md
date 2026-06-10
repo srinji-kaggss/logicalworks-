@@ -100,8 +100,7 @@ video→video item (keyframe-sample flag); audio→transcribe lane (deferred, G-
 
 ## I3 — crawler v2 (3 modality streams) + LFM2-Extract  ·  P1  ·  depends: I1
 
-**Status:** partial credit — crawler v1 (`lgwks.crawl.v1`) landed with 30 green tests; this packet is the
-v1→v2 bump only.
+**Status:** ✅ **done** (2026-06-10), PR #64. `lgwks.crawl.v1 → v2`: `crawler/src/media.rs` (fetched, cid'd, modality-typed media), `lgwks_lfm2_extract.py` (strict-schema fill, `jsonschema`-validated, rejects non-conformant), `docs/schemas/lgwks.crawl.artifacts.v1.json`. 34 Rust + 15 py tests green. `lgwks.crawl.v2` + `lgwks.crawl.artifacts.v1` + `lgwks.lfm2_extract.v1` registered.
 **Goal:** bump `lgwks.crawl.v1 → v2`: three fetched, cid'd, modality-typed streams; LFM2-Extract fills the
 strict schema into structured artifacts.
 **Inputs (exist):** crawler crate [crawler/src/](../../crawler/src) (gather/engine/extract/chunk/schema),
@@ -135,7 +134,7 @@ LFM2-Extract fills; it does not score (scoring is I5, deterministic).
 
 ## I5 — schema scoring: ²/³ + R_k + MDL  ·  P2  ·  depends: I4
 
-**Status:** not started.
+**Status:** ✅ **done** (2026-06-10), PR #65. `lgwks_score.py` — factored RESCAL `R_k = P_k·diag(d_k)` (O(d), never densified), canonical-CBOR + zstd MDL, blake2b cid; `lgwks.score.record.v1` + `lgwks.schema.relations.v1` (D0). 23 tests. Cross-model cid via recursive int→float normalization. **Deferred (I5.1):** directional `P_k` is identity in v1 (marginal-identity proof holds); directional activation pending.
 **Goal:** the deterministic, non-AI score — cubic schema score + MDL conformance + cid.
 **Inputs:** I4 embeddings; strict schema `S`; INGESTION-LAYER §4.2/§4.4/§4.5.
 **Formulas (implement exactly):**
@@ -156,7 +155,7 @@ pre-registered margin.
 
 ## I6 — cubic node centrality + AI-discrepancy δ  ·  P2  ·  depends: I5
 
-**Status:** not started; both eval graphs exist on disk.
+**Status:** ✅ **done** (2026-06-10), PR #67. `lgwks_rank.py` — `lgwks.rank.record.v1`, 23 tests, closes G-06. `rank_det` = relation-WEIGHTED (schema non-uniform `w_k`) centrality; `rank_ai` = relation-BLIND (order-2) centrality; `δ = |rank_det − rank_ai|` is the real signal (the old confidence_score source was a constant 1.0 → noise; redefined end-to-end). Convergence hardened: σ-shift (kills near-bipartite oscillation) + Rayleigh-quotient criterion; both eval graphs converge; non-convergence raises (no silent garbage). **Note:** with fixed `w_k`, this is a relation-weighted eigenvector centrality (faithful to §4.3 for the n×m×n tensor); embedding-coupled `R_k` scoring is the §4.2 lane (I7/RRF).
 **Goal:** the deterministic node value (cubic centrality) and the slop signal δ.
 **Formulas:**
 ```

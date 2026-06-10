@@ -291,15 +291,15 @@ present or absent (proves one-way decoupling); reconstruction stress reported.
 | G-01 | crawler v2 schema (3 modality streams + fetched media) — not built; today text-only + image URLs | high |
 | G-02 | LFM2-Extract integration + GGUF runtime wiring — not built | high |
 | G-03 | Qwen3-VL-Embedding-8B runtime (MLX `jedisct1/...-mlx` or GGUF `ganeshrao/...Q8`) — not installed/wired | high |
-| G-04 | schema operators `R_k` — concrete deterministic construction from schema typing undefined | high |
-| G-05 | MDL compressor + `S`-trained dictionary — chosen (CBOR+zstd) but not implemented/validated | med |
-| G-06 | tensor Z-eigen centrality — no impl; need convergence + seed-stability eval | med |
+| G-04 | schema operators `R_k` — ✅ **CLOSED (I5, PR #65)**: factored `R_k=P_k·diag(d_k)`, O(d). Directional `P_k` identity in v1 → I5.1 | ~~high~~ |
+| G-05 | MDL compressor + `S`-trained dictionary — ✅ **CLOSED (I5, PR #65)**: canonical CBOR + zstd dict; cross-model equal-cid + separation margin tested | ~~med~~ |
+| G-06 | tensor Z-eigen centrality — ✅ **CLOSED (I6, PR #67)**: σ-shifted power iteration + Rayleigh convergence; both eval graphs converge, seed-stable | ~~med~~ |
 | G-07 | capability-token tenant isolation — not implemented (today: path separation only) | high (T0) |
 | G-08 | CRDT layer (G-Set/OR-Set + cognition-clock) — not implemented | med |
 | G-09 | queue/admission (token bucket, 429 path, Q_max) — not implemented; engine is sequential per run | high |
 | G-10 | audio transcribe lane — deferred | low |
-| G-11 | embeddings stored as JSON text today (`code_embeddings.db`) — must be float32 binary for §4 math | med |
-| G-12 | graphify Leiden→Louvain fallback on py3.14 (graspologic pinned <3.13) — clustering degraded | med |
+| G-11 | embeddings stored as JSON text — ✅ **CLOSED (I1/I4)**: float32 binary BLOB store, `migrate_json_embeddings()` | ~~med~~ |
+| G-12 | graphify Leiden→Louvain fallback on py3.14 — ✅ **CLOSED (I12, PR #63)**: `LeidenUnavailableError`, no silent substitution | ~~med~~ |
 | G-13 | waste ledger (PRD-04 §04-c) — the *only* proof the score optimizes context; injected-but-unused rate per item — unbuilt | high |
 
 Gaps should also be appended to [docs/os-framework-architectural-gaps.json](../../docs/os-framework-architectural-gaps.json).
