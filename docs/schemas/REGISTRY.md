@@ -154,6 +154,14 @@ emit `bot.record.v1` with a new `kind` rather than minting a new findings schema
 **Planned:** `lgwks.score.record.v1` (**I5**), `lgwks.rank.record.v1` (**I6**).
 **Repurpose when:** any code-structure question — query `graph.v2`; do not parse source ad-hoc.
 
+#### lgwks.graphify.cluster.v1 — landed I12 (2026-06-10)
+| id | ver | status | defined in | validation |
+|----|-----|--------|-----------|------------|
+| `lgwks.graphify.cluster.v1` | 1 | **live** | `graphify/cluster.py` | `ClusterResult` dataclass |
+
+Fields: `schema` · `algorithm` (leiden\|louvain — which actually ran) · `communities` (list of node-id lists) · `community_count` · `modularity` · `resolution` · `seed` · `metadata{leidenalg_available, py_version, forced}`.
+**Invariant:** Leiden→Louvain silent substitution is never permitted. `LeidenUnavailableError` raised when Leiden is requested on py≥3.13. Louvain only via `force_louvain=True` (sets `metadata.forced=True`).
+
 ### 7. portal / capture / JEPA / synthesis family
 `lgwks.portal.v1` + `lgwks.portal.code.v1` (`lgwks_portal.py:25-26`) · `lgwks.capture.v1`
 (`lgwks_capture.py:19`) · `lgwks.jepa.{package,doctor}.v1` (`lgwks_jepa.py`) ·
