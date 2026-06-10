@@ -4,3 +4,4 @@ playwright>=1.40
 # On py3.13+, use graphify.cluster(force_louvain=True) or pin to a py3.12 interpreter
 leidenalg>=0.10; python_version < "3.13"
 igraph>=0.11; python_version < "3.13"
+jsonschema>=4.0

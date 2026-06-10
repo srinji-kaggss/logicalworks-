@@ -1,0 +1,24 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "lgwks.crawl.artifacts.v1",
+  "description": "Strict schema for LFM2-Extract fills. Every field is typed and bounded. Non-conformant output is rejected by lgwks_lfm2_extract.fill_schema().",
+  "type": "object",
+  "required": ["title", "summary", "entities", "topics"],
+  "additionalProperties": false,
+  "properties": {
+    "title":    { "type": "string", "maxLength": 256 },
+    "summary":  { "type": "string", "maxLength": 1024 },
+    "entities": {
+      "type": "array",
+      "items": { "type": "string", "maxLength": 128 },
+      "maxItems": 20
+    },
+    "topics": {
+      "type": "array",
+      "items": { "type": "string", "maxLength": 64 },
+      "maxItems": 10
+    },
+    "language": { "type": "string", "maxLength": 10 },
+    "source":   { "type": "string", "enum": ["lfm2", "stdlib"] }
+  }
+}

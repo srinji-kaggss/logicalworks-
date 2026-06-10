@@ -17,6 +17,15 @@ pub fn cid(text: &str) -> String {
     format!("cid-{}", hex::encode(&digest[..16]))
 }
 
+/// Content id of raw bytes — same blake2b-512 scheme, no normalization.
+/// Used for media assets (images, video) where byte identity matters, not text identity.
+pub fn cid_bytes(data: &[u8]) -> String {
+    let mut hasher = Blake2b512::new();
+    hasher.update(data);
+    let digest = hasher.finalize();
+    format!("cid-{}", hex::encode(&digest[..16]))
+}
+
 /// Lowercase, collapse whitespace. The normalization that makes "same content,
 /// different spacing" collapse to one cid.
 fn normalize(text: &str) -> String {

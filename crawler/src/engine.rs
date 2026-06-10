@@ -10,7 +10,7 @@ use crate::fingerprint;
 use crate::frontier::{registrable_host, Frontier};
 use crate::robots::RobotsRules;
 use crate::schema::*;
-use crate::{extract, politeness::Politeness};
+use crate::{extract, media, politeness::Politeness};
 use std::collections::HashMap;
 use std::time::{SystemTime, UNIX_EPOCH};
 
@@ -153,6 +153,9 @@ impl Engine {
                 crate::chunk::chunk_text(&ex.text, self.cfg.chunk_words, self.cfg.chunk_overlap)
             };
 
+            // v2: fetch media bytes for all image URLs found on the page.
+            let media_items = media::fetch_media(&ex.assets.images, &self.cfg).await;
+
             let page = Page {
                 cid: cid(&ex.text),
                 url: target.url.clone(),
@@ -165,6 +168,8 @@ impl Engine {
                 links: ex.links,
                 assets: ex.assets,
                 chunks,
+                media: media_items,
+                artifacts: None, // populated by lgwks_lfm2_extract.py (offline)
                 depth: target.depth,
                 discovered_by: target.discovered_by.clone(),
                 http: HttpMeta {
