@@ -1,3 +1,8 @@
+> **STATUS: historical draft (2026-06-02).** Data/ingestion authority is now
+> `spec/second-harness/INGESTION-LAYER.md` + `INGESTION-PLAN.md` (v1.0, final);
+> model-stack build truth is `spec/second-harness/BUILDLOG-model-stack.md`.
+> Verify there before building from this file. (Banner added 2026-06-10.)
+
 # SPEC — Tier-E Machine: the model (v1, FINALIZE)
 
 Status: drafting (Director, 2026-06-02). Pins the **model** before the bottom-up build.
