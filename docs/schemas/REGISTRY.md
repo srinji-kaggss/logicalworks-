@@ -31,12 +31,15 @@ the stack — build ON these, never reimplement hashing/encoding locally.
 ### 2. crawl family
 | id | ver | status | defined in | validation |
 |----|-----|--------|-----------|------------|
-| `lgwks.crawl.v1` | 1 | **live** (30 tests) | `crawler/src/schema.rs:7` (serde) | serde |
-| `lgwks.crawl.v0` | 0 | **deprecated** — python-side near-duplicate of v1 | `lgwks_substrate_crawl.py` | dict |
-| `lgwks.crawl.v2` | 2 | **planned** (INGESTION-PLAN **I3**) | spec only | JSON-Schema required |
+| `lgwks.crawl.v2` | 2 | **live** (I3, 2026-06-10) — v1→v2 bump | `crawler/src/schema.rs` (serde) | serde + JSON-Schema |
+| `lgwks.crawl.v1` | 1 | **superseded-by: v2** (on I3 landing) | `crawler/src/schema.rs` (serde) | serde |
+| `lgwks.crawl.v0` | 0 | **deprecated** — python-side near-duplicate; retire callers | `lgwks_substrate_crawl.py` | dict |
+| `lgwks.crawl.artifacts.v1` | 1 | **live** (I3) | `docs/schemas/lgwks.crawl.artifacts.v1.json` | jsonschema |
+| `lgwks.lfm2_extract.v1` | 1 | **live** (I3) — LFM2-Extract fill component; emits `lgwks.crawl.artifacts.v1` | `lgwks_lfm2_extract.py` (`SCHEMA_VERSION`) | jsonschema |
 | chunk record | — | live, versionless ⚠ | `crawler/src/chunk.rs:11` `{cid,position,text,word_count,simhash}` | serde |
-**Repurpose when:** any fetch-and-structure job — point at v1/v2, do not write ad-hoc scrapers with
-private output shapes. **Flagged:** v0/v1 duplication — retire v0 callers during I3.
+
+**v2 additions over v1:** `Page.media: Vec<MediaItem{cid,modality,url,mime,byte_count,fetch_status}>` (fetched bytes, not URLs); `Page.artifacts: Option<JSON>` (LFM2-Extract fill); `Modality` enum (image\|video); schema bumped to `lgwks.crawl.v2`. LFM2-Extract fills `lgwks.crawl.artifacts.v1`; non-conformant fills rejected by `lgwks_lfm2_extract.fill_schema()`.
+**Repurpose when:** any fetch-and-structure job — point at v2, do not write ad-hoc scrapers with private output shapes. v0 callers must be retired.
 
 ### 3. substrate / ingestion family
 

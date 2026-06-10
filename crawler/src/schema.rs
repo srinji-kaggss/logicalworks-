@@ -1,10 +1,35 @@
-//! The wire contract — `lgwks.crawl.v1`. This is the SAME JSON the AI calls and
+//! The wire contract — `lgwks.crawl.v2`. This is the SAME JSON the AI calls and
 //! the end product's frontend calls (the control-bus principle: one machine
 //! contract, many renderers). Everything content-addressed for replay/audit.
+//!
+//! v2 additions over v1: Page.media (fetched, CID'd media), Page.artifacts
+//! (LFM2-Extract strict schema fill), Modality enum, MediaItem struct.
 
 use serde::{Deserialize, Serialize};
 
-pub const SCHEMA_VERSION: &str = "lgwks.crawl.v1";
+pub const SCHEMA_VERSION: &str = "lgwks.crawl.v2";
+
+/// Modality of a media asset. Text is handled by the chunks path; this enum
+/// covers the two byte-stream modalities the v2 crawler fetches.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum Modality {
+    Image,
+    Video,
+}
+
+/// A fetched media asset — content-addressed by raw bytes, not by URL.
+/// `byte_count` is stored so consumers know size without re-fetching.
+/// The cid IS the dedup key; the consumer locates bytes via cid in the store.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct MediaItem {
+    pub cid: String,        // blake2b of raw bytes (cid_bytes())
+    pub modality: Modality,
+    pub url: String,        // original URL (audit anchor)
+    pub mime: String,       // from Content-Type header
+    pub byte_count: u64,
+    pub fetch_status: u16,
+}
 
 /// One crawled page. `cid` is the blake2 content id of the normalized text —
 /// stable across runs, the dedup key, and the audit anchor.
@@ -21,6 +46,10 @@ pub struct Page {
     pub assets: crate::extract::Assets,
     /// Content-addressed text chunks — the cleanup/synthesis layer.
     pub chunks: Vec<crate::chunk::Chunk>,
+    /// v2: fetched, CID'd, modality-typed media streams (images + video).
+    pub media: Vec<MediaItem>,
+    /// v2: strict schema fill from LFM2-Extract. None when model unavailable.
+    pub artifacts: Option<serde_json::Value>,
     pub depth: u32,
     pub discovered_by: String,
     pub http: HttpMeta,
