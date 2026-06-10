@@ -34,7 +34,7 @@ from lgwks_input import (
     STRATEGY_TEXT_DIRECT,
     STRATEGY_OCR_IMAGE,
     STRATEGY_VISUAL_EMBED,
-    STRATEGY_VIDEO_FRAMES,
+    STRATEGY_VIDEO_EMBED,
     STRATEGY_NONE,
     ModalityItem,
     extract,
@@ -243,7 +243,7 @@ class TestVideoRouting(unittest.TestCase):
         items = handle(_MP4_MAGIC, "clip.mp4")
         item = items[0]
         # strategy is VIDEO_FRAMES if ffmpeg available, else NONE
-        self.assertIn(item.extraction_strategy, (STRATEGY_VIDEO_FRAMES, STRATEGY_NONE))
+        self.assertIn(item.extraction_strategy, (STRATEGY_VIDEO_EMBED, STRATEGY_NONE))
 
     def test_mp4_extension(self):
         items = handle(b"\x00" * 32, "video.mp4", filename="video.mp4")
@@ -422,40 +422,47 @@ class TestExtractFuzz(unittest.TestCase):
 
 
 # ---------------------------------------------------------------------------
-# A13 — video strategy set correctly based on ffmpeg availability
+# A13 — video always gets STRATEGY_VIDEO_EMBED; extract() is a pass-through
+# I4 handles native VL embedding — I2 does no frame extraction
 # ---------------------------------------------------------------------------
 
 class TestVideoStrategy(unittest.TestCase):
-    def test_strategy_video_frames_when_ffmpeg_available(self):
-        with patch("lgwks_input._ffmpeg_available", return_value=True):
-            items = handle(_MP4_MAGIC, "vid.mp4")
-        self.assertEqual(items[0].extraction_strategy, STRATEGY_VIDEO_FRAMES)
+    def test_video_always_strategy_video_embed(self):
+        # No ffmpeg dependency — strategy is unconditional
+        items = handle(_MP4_MAGIC, "vid.mp4")
+        self.assertEqual(items[0].extraction_strategy, STRATEGY_VIDEO_EMBED)
 
-    def test_strategy_none_when_ffmpeg_unavailable(self):
-        with patch("lgwks_input._ffmpeg_available", return_value=False):
-            items = handle(_MP4_MAGIC, "vid.mp4")
-        self.assertEqual(items[0].extraction_strategy, STRATEGY_NONE)
+    def test_video_raw_bytes_intact(self):
+        items = handle(_MP4_MAGIC, "vid.mp4")
+        self.assertEqual(items[0].raw_bytes, _MP4_MAGIC)
 
-    def test_extract_video_frames_produces_items_when_ffmpeg_available(self):
-        # Only run if real ffmpeg is present (integration test)
-        import shutil
-        if not shutil.which("ffmpeg"):
-            self.skipTest("ffmpeg not installed")
-        # Create a minimal valid mp4-like item; if ffmpeg can't decode it,
-        # extract() must still return quarantine, not raise.
+    def test_video_parsed_unit_is_none(self):
+        items = handle(_MP4_MAGIC, "vid.mp4")
+        self.assertIsNone(items[0].parsed_unit)
+
+    def test_extract_video_is_passthrough(self):
+        # extract() on video_embed is a no-op — I4 owns the embedding step
         item = ModalityItem(
             schema=SCHEMA, modality="video",
-            parsed_unit=None, raw_bytes=b"\x00\x00\x00\x18ftypisom" + b"\x00" * 32,
+            parsed_unit=None, raw_bytes=_MP4_MAGIC,
             mime="video/mp4", origin="test.mp4",
-            extraction_strategy=STRATEGY_VIDEO_FRAMES,
+            extraction_strategy=STRATEGY_VIDEO_EMBED,
+        )
+        result = extract(item)
+        self.assertEqual(len(result), 1)
+        self.assertIs(result[0], item)  # exact same object returned
+
+    def test_extract_video_never_raises(self):
+        item = ModalityItem(
+            schema=SCHEMA, modality="video",
+            parsed_unit=None, raw_bytes=_MP4_MAGIC,
+            mime="video/mp4", origin="test.mp4",
+            extraction_strategy=STRATEGY_VIDEO_EMBED,
         )
         try:
-            result = extract(item)
+            extract(item)
         except Exception as exc:
-            self.fail(f"extract() raised: {exc}")
-        self.assertGreater(len(result), 0)
-        # Result is either frame items or a quarantine — both are valid
-        self.assertTrue(all(r.schema == SCHEMA for r in result))
+            self.fail(f"extract() raised on video item: {exc}")
 
 
 # ---------------------------------------------------------------------------
@@ -554,13 +561,14 @@ class TestNeedsExtraction(unittest.TestCase):
         )
         self.assertTrue(item.needs_extraction())
 
-    def test_video_frames_needs_extraction(self):
+    def test_video_embed_does_not_need_extract_call(self):
+        # video_embed is handled by I4, not by extract() — needs_extraction() = False
         item = ModalityItem(
             schema=SCHEMA, modality="video", parsed_unit=None,
             raw_bytes=_MP4_MAGIC, mime="video/mp4", origin="f.mp4",
-            extraction_strategy=STRATEGY_VIDEO_FRAMES,
+            extraction_strategy=STRATEGY_VIDEO_EMBED,
         )
-        self.assertTrue(item.needs_extraction())
+        self.assertFalse(item.needs_extraction())
 
     def test_none_does_not_need_extraction(self):
         item = ModalityItem(

@@ -5,47 +5,43 @@ I2 of the INGESTION-PLAN: two-phase design.
 Phase 1  handle()   — classifies bytes → ModalityItem with extraction_strategy.
                        Fast, never raises, suitable for real-time hook path.
 
-Phase 2  extract()  — performs the actual extraction work declared by the strategy.
-                       May be slow (OCR, frame sampling); run async / off-path.
+Phase 2  extract()  — performs extraction declared by the strategy (OCR only).
+                       May be slow; run async / off-path.
 
 Routing table
 -------------
 text/code extensions + UTF-8 decodable  → text,      strategy=text_direct
-PDF                                      → text,      strategy=text_direct (inline extraction)
+PDF                                      → text,      strategy=text_direct
 DOCX/PPTX/XLSX/RTF                       → text,      strategy=text_direct (if markitdown)
                                          → quarantine if markitdown unavailable
-PNG/JPEG/GIF/WEBP/BMP/TIFF              → image,     strategy=ocr_image  (tesseract if avail)
+PNG/JPEG/GIF/WEBP/BMP/TIFF              → image,     strategy=ocr_image (tesseract if avail)
                                          → image,     strategy=visual_embed if no OCR
-MP4/MOV/AVI/MKV/WEBM                    → video,     strategy=video_frames (ffmpeg required)
+MP4/MOV/AVI/MKV/WEBM                    → video,     strategy=video_embed (I4 native VL)
 audio (MP3/WAV/FLAC/AAC/OGG)            → quarantine strategy=none
 anything else                            → quarantine strategy=none
 
-Extraction strategies (resolved by extract())
-  text_direct   — parsed_unit already populated, no-op
-  ocr_image     — run tesseract on raw_bytes → new text ModalityItem
-  visual_embed  — no OCR available; embed as image, same schema, no text
-  video_frames  — ffmpeg frame-sample → per-frame text ModalityItems (OCR or fingerprint)
-  none          — quarantined; no extraction possible
+Extraction strategies
+---------------------
+  text_direct   — parsed_unit already populated; no-op in extract()
+  ocr_image     — tesseract OCR on raw_bytes → new text ModalityItem
+  visual_embed  — no OCR available; I4 embeds image natively via Qwen3-VL
+  video_embed   — I4 embeds video natively via Qwen3-VL-Embedding-8B video API
+                  (raw_bytes passed directly; no frame extraction here)
+  none          — quarantined; nothing to do
 
-handle() NEVER raises — all errors → quarantine item.
-extract() NEVER raises — extraction failures produce a quarantine item.
+Video design
+------------
+Qwen3-VL-Embedding-8B accepts video natively. I4 calls the VL video path:
+    processor(text=instruction, videos=[video_bytes_or_path])
+producing one 4096-d vector in the SAME space as text and image embeddings.
+I2 does NOT extract frames — that is the model's job. We just classify and
+keep the raw bytes intact.
 
-Video frame extraction design (first principles)
--------------------------------------------------
-A 1B-class vision model treats video as: sample N frames → per-frame text description
-→ embed descriptions with the SAME text embedder → same vector space as code.
-This means video and code queries can retrieve each other — cross-modal retrieval
-at zero extra embedding cost. For a screen recording of a bug, the extracted text
-("frame 4: terminal output ERROR null pointer lgwks_cognition.py:145") hits the
-same ANN index as a code search.
-
-Anti-hallucination extraction rules
--------------------------------------
-1. For text: parsed_unit is ALWAYS the raw decoded source — never an LLM summary
-   (summaries live in the intelligence layer upstream, not here)
-2. For images: OCR is deterministic (tesseract) — no model generation
-3. For video frames: OCR + perceptual hash fingerprint — deterministic pipeline
-4. Extraction strategy is a CONTRACT: downstream can audit what happened
+Anti-hallucination rules
+------------------------
+parsed_unit is ALWAYS raw decoded source — never an LLM summary.
+Summaries live in the intelligence layer (Liquid Nano, I3 upstream), not here.
+OCR (tesseract) is deterministic. extraction_strategy is a CONTRACT.
 
 Authority: spec/second-harness/INGESTION-PLAN.md §I2
 Schema id: lgwks.modality.item.v1
@@ -55,7 +51,6 @@ from __future__ import annotations
 
 import hashlib
 import mimetypes
-import struct
 import subprocess
 import sys
 import tempfile
@@ -73,15 +68,14 @@ if str(_REPO_ROOT) not in sys.path:
 # Extraction strategy constants
 # ---------------------------------------------------------------------------
 
-STRATEGY_TEXT_DIRECT  = "text_direct"   # parsed_unit already populated
-STRATEGY_OCR_IMAGE    = "ocr_image"     # run tesseract on raw_bytes
-STRATEGY_VISUAL_EMBED = "visual_embed"  # no OCR; embed image vector directly
-STRATEGY_VIDEO_FRAMES = "video_frames"  # ffmpeg sample → per-frame text items
-STRATEGY_NONE         = "none"          # quarantine — no extraction possible
+STRATEGY_TEXT_DIRECT  = "text_direct"   # parsed_unit populated; no-op
+STRATEGY_OCR_IMAGE    = "ocr_image"     # tesseract OCR → text ModalityItem
+STRATEGY_VISUAL_EMBED = "visual_embed"  # I4 embeds image via Qwen3-VL
+STRATEGY_VIDEO_EMBED  = "video_embed"   # I4 embeds video via Qwen3-VL native video API
+STRATEGY_NONE         = "none"          # quarantine; nothing to do
 
 # ---------------------------------------------------------------------------
 # Extension routing tables
-# (aligned with lgwks_embed.TEXT_EXT and lgwks_multimodal._IMAGE_EXTS)
 # ---------------------------------------------------------------------------
 
 _TEXT_EXTS = frozenset({
@@ -104,7 +98,6 @@ _TEXT_EXTS = frozenset({
 
 _IMAGE_EXTS = frozenset({".png", ".jpg", ".jpeg", ".webp", ".gif", ".bmp", ".tiff", ".tif"})
 _VIDEO_EXTS = frozenset({".mp4", ".mov", ".avi", ".mkv", ".webm", ".m4v", ".3gp", ".flv"})
-_DOC_EXTS   = frozenset({".pdf", ".docx", ".pptx", ".xlsx", ".doc", ".rtf", ".odt"})
 _AUDIO_EXTS = frozenset({".mp3", ".wav", ".flac", ".aac", ".ogg", ".m4a", ".opus", ".wma"})
 
 QUARANTINE_DIR = _REPO_ROOT / "store" / "untrusted"
@@ -119,15 +112,13 @@ class ModalityItem:
     """Single lgwks.modality.item.v1 instance.
 
     modality            : "text" | "image" | "video" | "quarantine"
-    parsed_unit         : extracted text string (text items, text_direct strategy)
-                          None for image/video/quarantine until extract() is called
-    raw_bytes           : original bytes (image / video / quarantine items)
-                          None for text_direct items (already extracted)
-    mime                : detected MIME type string
-    origin              : caller-supplied label (filepath, URL, logical handle)
-    extraction_strategy : what extract() should do with this item
-    frame_index         : for video frame items produced by extract(), the frame number
-    source_fingerprint  : perceptual hash of raw_bytes (for dedup in video frames)
+    parsed_unit         : raw decoded text (text items only); None for media/quarantine
+    raw_bytes           : original bytes for image/video/quarantine; None for text
+    mime                : detected MIME type
+    origin              : caller label (filepath, URL, logical handle)
+    extraction_strategy : contract for what extract() / I4 should do
+    frame_index         : -1 unless this item is a video frame (from a future VL split)
+    source_fingerprint  : blake2b-8 hex of raw content — dedup signal
     quarantine_reason   : non-empty only when modality == "quarantine"
     """
     schema: str
@@ -145,12 +136,12 @@ class ModalityItem:
         return self.modality == "quarantine"
 
     def needs_extraction(self) -> bool:
-        return self.extraction_strategy not in (STRATEGY_TEXT_DIRECT, STRATEGY_NONE)
+        """True only for strategies that extract() can do work on (OCR).
+        VIDEO_EMBED and VISUAL_EMBED are I4's domain — not extract()'s."""
+        return self.extraction_strategy == STRATEGY_OCR_IMAGE
 
     def word_count(self) -> int:
-        if self.parsed_unit:
-            return len(self.parsed_unit.split())
-        return 0
+        return len(self.parsed_unit.split()) if self.parsed_unit else 0
 
 
 # ---------------------------------------------------------------------------
@@ -195,16 +186,16 @@ def _detect_mime(data: bytes, filename: str) -> str:
 
 
 # ---------------------------------------------------------------------------
-# Perceptual fingerprint (deterministic, no model needed)
+# Fingerprint
 # ---------------------------------------------------------------------------
 
 def _fingerprint(data: bytes) -> str:
-    """blake2b-8 of the first 64KB — fast dedup signal for media items."""
+    """blake2b-8 of the first 64KB — dedup signal, not a cid."""
     return hashlib.blake2b(data[:65536], digest_size=8).hexdigest()
 
 
 # ---------------------------------------------------------------------------
-# Text extraction helpers (inline — no LLM; raw source only)
+# Text extraction (deterministic, no LLM)
 # ---------------------------------------------------------------------------
 
 def _try_pdf_text(data: bytes, max_chars: int = 100_000) -> Optional[str]:
@@ -215,12 +206,10 @@ def _try_pdf_text(data: bytes, max_chars: int = 100_000) -> Optional[str]:
     except ImportError:
         pass
     try:
-        result = subprocess.run(
-            ["pdftotext", "-", "-"],
-            input=data, capture_output=True, timeout=30
-        )
-        if result.returncode == 0:
-            text = result.stdout.decode("utf-8", errors="replace")
+        r = subprocess.run(["pdftotext", "-", "-"], input=data,
+                           capture_output=True, timeout=30)
+        if r.returncode == 0:
+            text = r.stdout.decode("utf-8", errors="replace")
             return text[:max_chars] if text.strip() else None
     except (FileNotFoundError, subprocess.TimeoutExpired, OSError):
         pass
@@ -228,21 +217,19 @@ def _try_pdf_text(data: bytes, max_chars: int = 100_000) -> Optional[str]:
         import io as _io
         import fitz  # type: ignore[import-untyped]
         doc = fitz.open(stream=_io.BytesIO(data), filetype="pdf")
-        parts = [page.get_text() for page in doc]
+        text = "\n".join(p.get_text() for p in doc)
         doc.close()
-        text = "\n".join(parts)
         return text[:max_chars] if text.strip() else None
     except (ImportError, Exception):
         return None
 
 
-def _try_doc_text(data: bytes, mime: str, filename: str, max_chars: int = 100_000) -> Optional[str]:
+def _try_doc_text(data: bytes, filename: str, max_chars: int = 100_000) -> Optional[str]:
     ext = Path(filename).suffix.lower()
     try:
         import io as _io
         from markitdown import MarkItDown  # type: ignore[import-untyped]
-        md = MarkItDown()
-        result = md.convert_stream(_io.BytesIO(data), file_extension=ext or ".bin")
+        result = MarkItDown().convert_stream(_io.BytesIO(data), file_extension=ext or ".bin")
         text = result.text_content if hasattr(result, "text_content") else str(result)
         return text[:max_chars] if text and text.strip() else None
     except (ImportError, Exception):
@@ -260,14 +247,12 @@ def _try_doc_text(data: bytes, mime: str, filename: str, max_chars: int = 100_00
 
 
 def _decode_text(data: bytes, max_chars: int = 500_000) -> Optional[str]:
-    try:
-        return data[:max_chars].decode("utf-8")
-    except UnicodeDecodeError:
-        pass
-    try:
-        return data[:max_chars].decode("latin-1")
-    except Exception:
-        return None
+    for enc in ("utf-8", "latin-1"):
+        try:
+            return data[:max_chars].decode(enc)
+        except UnicodeDecodeError:
+            continue
+    return None
 
 
 def _looks_text(data: bytes) -> bool:
@@ -279,140 +264,36 @@ def _looks_text(data: bytes) -> bool:
 
 
 # ---------------------------------------------------------------------------
-# OCR helper (deterministic, no model)
+# Image OCR (optional, deterministic)
 # ---------------------------------------------------------------------------
 
 def _tesseract_available() -> bool:
     try:
-        result = subprocess.run(["tesseract", "--version"], capture_output=True, timeout=3)
-        return result.returncode == 0
+        return subprocess.run(["tesseract", "--version"],
+                              capture_output=True, timeout=3).returncode == 0
     except (FileNotFoundError, subprocess.TimeoutExpired, OSError):
         return False
 
 
 def _ocr_image_bytes(data: bytes, timeout: int = 30) -> Optional[str]:
-    """Run tesseract OCR on image bytes. Returns None if unavailable or fails."""
+    """Run tesseract on image bytes. Returns None if unavailable or produces no text."""
     if not _tesseract_available():
         return None
+    img_path: Optional[Path] = None
     try:
         with tempfile.NamedTemporaryFile(suffix=".png", delete=False) as f:
             img_path = Path(f.name)
             f.write(data)
-        result = subprocess.run(
-            ["tesseract", str(img_path), "stdout", "--psm", "3"],
-            capture_output=True, timeout=timeout
-        )
+        r = subprocess.run(["tesseract", str(img_path), "stdout", "--psm", "3"],
+                           capture_output=True, timeout=timeout)
         img_path.unlink(missing_ok=True)
-        if result.returncode == 0:
-            text = result.stdout.decode("utf-8", errors="replace").strip()
-            return text if text else None
-    except (subprocess.TimeoutExpired, OSError, Exception):
-        try:
+        if r.returncode == 0:
+            text = r.stdout.decode("utf-8", errors="replace").strip()
+            return text or None
+    except Exception:
+        if img_path:
             img_path.unlink(missing_ok=True)
-        except Exception:
-            pass
     return None
-
-
-# ---------------------------------------------------------------------------
-# Video frame extraction
-# ---------------------------------------------------------------------------
-
-def _ffmpeg_available() -> bool:
-    try:
-        result = subprocess.run(["ffmpeg", "-version"], capture_output=True, timeout=3)
-        return result.returncode == 0
-    except (FileNotFoundError, subprocess.TimeoutExpired, OSError):
-        return False
-
-
-def _extract_video_frames(
-    data: bytes,
-    origin: str,
-    *,
-    fps: float = 1.0,
-    max_frames: int = 30,
-    ocr: bool = True,
-) -> list[ModalityItem]:
-    """Frame-sample a video and produce one ModalityItem per frame.
-
-    For each frame:
-      - If tesseract available: OCR → text ModalityItem with parsed_unit
-      - Always: perceptual fingerprint stored in source_fingerprint
-      - Frame index stored in frame_index
-
-    The text items live in the SAME vector space as code (they are just text).
-    A screen recording of a bug therefore hits the same ANN index as code search.
-
-    Returns list of items. Never raises — returns quarantine item on failure.
-    """
-    if not _ffmpeg_available():
-        return [_quarantine(data, origin, "video_frames: ffmpeg not available")]
-
-    has_ocr = ocr and _tesseract_available()
-
-    with tempfile.TemporaryDirectory() as tmp:
-        tmp_path = Path(tmp)
-        vid_path = tmp_path / "input.mp4"
-        vid_path.write_bytes(data)
-
-        frame_dir = tmp_path / "frames"
-        frame_dir.mkdir()
-
-        try:
-            result = subprocess.run(
-                [
-                    "ffmpeg", "-i", str(vid_path),
-                    "-vf", f"fps={fps},scale=1280:-1",
-                    "-frames:v", str(max_frames),
-                    "-q:v", "3",
-                    str(frame_dir / "frame_%04d.png"),
-                ],
-                capture_output=True, timeout=120,
-            )
-            if result.returncode != 0 and not list(frame_dir.glob("*.png")):
-                return [_quarantine(data, origin,
-                                   f"ffmpeg failed: {result.stderr[:200].decode('utf-8','replace')}")]
-        except (subprocess.TimeoutExpired, OSError) as exc:
-            return [_quarantine(data, origin, f"video_frames error: {exc}")]
-
-        items: list[ModalityItem] = []
-        for i, frame_path in enumerate(sorted(frame_dir.glob("*.png"))):
-            frame_bytes = frame_path.read_bytes()
-            fp = _fingerprint(frame_bytes)
-
-            if has_ocr:
-                ocr_text = _ocr_image_bytes(frame_bytes)
-                if ocr_text:
-                    items.append(ModalityItem(
-                        schema=SCHEMA,
-                        modality="text",
-                        parsed_unit=f"[video:{origin} frame:{i+1}] {ocr_text}",
-                        raw_bytes=None,
-                        mime="text/plain",
-                        origin=f"{origin}#frame{i+1}",
-                        extraction_strategy=STRATEGY_TEXT_DIRECT,
-                        frame_index=i + 1,
-                        source_fingerprint=fp,
-                    ))
-                    continue
-
-            # No OCR available: emit image item with source_fingerprint for dedup
-            items.append(ModalityItem(
-                schema=SCHEMA,
-                modality="image",
-                parsed_unit=None,
-                raw_bytes=frame_bytes,
-                mime="image/png",
-                origin=f"{origin}#frame{i+1}",
-                extraction_strategy=STRATEGY_VISUAL_EMBED,
-                frame_index=i + 1,
-                source_fingerprint=fp,
-            ))
-
-        if not items:
-            return [_quarantine(data, origin, "video_frames: no frames extracted")]
-        return items
 
 
 # ---------------------------------------------------------------------------
@@ -424,31 +305,25 @@ def _quarantine(data: bytes, origin: str, reason: str) -> ModalityItem:
         QUARANTINE_DIR.mkdir(parents=True, exist_ok=True)
     except OSError:
         pass
-    mime = _sniff_mime(data)
     return ModalityItem(
-        schema=SCHEMA,
-        modality="quarantine",
-        parsed_unit=None,
-        raw_bytes=data,
-        mime=mime,
-        origin=origin,
+        schema=SCHEMA, modality="quarantine",
+        parsed_unit=None, raw_bytes=data,
+        mime=_sniff_mime(data), origin=origin,
         extraction_strategy=STRATEGY_NONE,
-        source_fingerprint=_fingerprint(data) if data else "",
+        source_fingerprint=_fingerprint(data),
         quarantine_reason=reason,
     )
 
 
 # ---------------------------------------------------------------------------
-# Phase 1 — handle() : classify and annotate (fast, never raises)
+# Phase 1 — handle() : classify + annotate (fast, never raises)
 # ---------------------------------------------------------------------------
 
 def handle(data: bytes, origin: str, *, filename: str = "") -> list[ModalityItem]:
-    """Phase 1: classify raw bytes → ModalityItem(s) with extraction_strategy.
+    """Classify raw bytes into a ModalityItem. Fast; no model calls; never raises.
 
-    Fast path — suitable for real-time hook. No OCR, no ffmpeg, no LLM.
-    Call extract() on items whose needs_extraction() is True for the full pipeline.
-
-    Returns at least one ModalityItem. Never raises.
+    Video items carry raw_bytes intact and strategy=video_embed — I4 passes them
+    directly to Qwen3-VL's native video embedding API. No frame extraction here.
     """
     if not data:
         return [_quarantine(data, origin, "empty payload")]
@@ -458,7 +333,7 @@ def handle(data: bytes, origin: str, *, filename: str = "") -> list[ModalityItem
     mime = _detect_mime(data, fname)
 
     try:
-        # ── text extensions take priority — prevents .ts → video/MP2T etc. ──
+        # text extensions first — prevents stdlib mimetypes misroutes (.ts → video)
         if ext in _TEXT_EXTS:
             text = _decode_text(data)
             if text is not None:
@@ -471,42 +346,32 @@ def handle(data: bytes, origin: str, *, filename: str = "") -> list[ModalityItem
                 )]
             return [_quarantine(data, origin, f"text extension {ext} but not decodable")]
 
-        # ── image ──────────────────────────────────────────────────────────
+        # image
         if mime.startswith("image/") or ext in _IMAGE_EXTS:
-            fp = _fingerprint(data)
             strategy = STRATEGY_OCR_IMAGE if _tesseract_available() else STRATEGY_VISUAL_EMBED
             return [ModalityItem(
                 schema=SCHEMA, modality="image",
                 parsed_unit=None, raw_bytes=data,
                 mime=mime, origin=origin,
                 extraction_strategy=strategy,
-                source_fingerprint=fp,
+                source_fingerprint=_fingerprint(data),
             )]
 
-        # ── video ──────────────────────────────────────────────────────────
+        # video — raw bytes passed to I4; Qwen3-VL embeds natively
         if mime.startswith("video/") or ext in _VIDEO_EXTS:
-            if not _ffmpeg_available():
-                return [ModalityItem(
-                    schema=SCHEMA, modality="video",
-                    parsed_unit=None, raw_bytes=data,
-                    mime=mime, origin=origin,
-                    extraction_strategy=STRATEGY_NONE,
-                    source_fingerprint=_fingerprint(data),
-                    quarantine_reason="ffmpeg unavailable",
-                )]
             return [ModalityItem(
                 schema=SCHEMA, modality="video",
                 parsed_unit=None, raw_bytes=data,
                 mime=mime, origin=origin,
-                extraction_strategy=STRATEGY_VIDEO_FRAMES,
+                extraction_strategy=STRATEGY_VIDEO_EMBED,
                 source_fingerprint=_fingerprint(data),
             )]
 
-        # ── audio → quarantine ─────────────────────────────────────────────
+        # audio → quarantine (no audio embedder)
         if mime.startswith("audio/") or ext in _AUDIO_EXTS:
             return [_quarantine(data, origin, "audio not yet supported")]
 
-        # ── PDF ────────────────────────────────────────────────────────────
+        # PDF
         if mime == "application/pdf" or ext == ".pdf":
             text = _try_pdf_text(data)
             if text:
@@ -519,9 +384,9 @@ def handle(data: bytes, origin: str, *, filename: str = "") -> list[ModalityItem
                 )]
             return [_quarantine(data, origin, "pdf extraction failed")]
 
-        # ── Office / RTF ───────────────────────────────────────────────────
+        # Office / RTF
         if ext in {".docx", ".pptx", ".xlsx", ".doc", ".rtf", ".odt"}:
-            text = _try_doc_text(data, mime, fname)
+            text = _try_doc_text(data, fname)
             if text:
                 return [ModalityItem(
                     schema=SCHEMA, modality="text",
@@ -532,9 +397,9 @@ def handle(data: bytes, origin: str, *, filename: str = "") -> list[ModalityItem
                 )]
             return [_quarantine(data, origin, f"office extraction unavailable for {ext}")]
 
-        # ── ZIP (unknown office) ───────────────────────────────────────────
+        # ZIP (unknown office type)
         if mime == "application/zip":
-            text = _try_doc_text(data, mime, fname)
+            text = _try_doc_text(data, fname)
             if text:
                 return [ModalityItem(
                     schema=SCHEMA, modality="text",
@@ -545,7 +410,7 @@ def handle(data: bytes, origin: str, *, filename: str = "") -> list[ModalityItem
                 )]
             return [_quarantine(data, origin, "zip: office extraction unavailable")]
 
-        # ── MIME-based text routing ────────────────────────────────────────
+        # MIME-based text
         if mime.startswith("text/") or mime in {
             "application/json", "application/javascript",
             "application/x-python", "application/x-sh",
@@ -561,7 +426,7 @@ def handle(data: bytes, origin: str, *, filename: str = "") -> list[ModalityItem
                     source_fingerprint=_fingerprint(data),
                 )]
 
-        # ── heuristic: mostly-printable ────────────────────────────────────
+        # heuristic: mostly-printable bytes
         if _looks_text(data):
             text = _decode_text(data)
             if text is not None:
@@ -580,28 +445,26 @@ def handle(data: bytes, origin: str, *, filename: str = "") -> list[ModalityItem
 
 
 # ---------------------------------------------------------------------------
-# Phase 2 — extract() : run the extraction strategy (slow, async-friendly)
+# Phase 2 — extract() : run OCR (slow, async-friendly)
+# Only OCR_IMAGE needs work here. VIDEO_EMBED is handled entirely by I4.
 # ---------------------------------------------------------------------------
 
-def extract(item: ModalityItem, *, fps: float = 1.0, max_frames: int = 30) -> list[ModalityItem]:
-    """Phase 2: perform the extraction declared by item.extraction_strategy.
+def extract(item: ModalityItem) -> list[ModalityItem]:
+    """Run the extraction strategy declared on item.
 
-    text_direct  → [item]  (no-op, already extracted)
-    ocr_image    → OCR via tesseract → [text item]  or [quarantine if fails]
-    visual_embed → [item]  (no text possible; embed visually downstream)
-    video_frames → ffmpeg frame sample → [text or image items, one per frame]
-    none         → [item]  (quarantine, leave as-is)
+    text_direct   → [item]  no-op
+    ocr_image     → tesseract OCR → [text item]; fallback → [visual_embed item]
+    visual_embed  → [item]  no-op; I4 embeds via Qwen3-VL image path
+    video_embed   → [item]  no-op; I4 embeds via Qwen3-VL native video path
+    none          → [item]  no-op; quarantine
 
     Never raises.
     """
     try:
-        if item.extraction_strategy == STRATEGY_TEXT_DIRECT:
-            return [item]
-
-        if item.extraction_strategy == STRATEGY_NONE:
-            return [item]
-
-        if item.extraction_strategy == STRATEGY_VISUAL_EMBED:
+        if item.extraction_strategy in (
+            STRATEGY_TEXT_DIRECT, STRATEGY_VISUAL_EMBED,
+            STRATEGY_VIDEO_EMBED, STRATEGY_NONE,
+        ):
             return [item]
 
         if item.extraction_strategy == STRATEGY_OCR_IMAGE:
@@ -616,23 +479,15 @@ def extract(item: ModalityItem, *, fps: float = 1.0, max_frames: int = 30) -> li
                     extraction_strategy=STRATEGY_TEXT_DIRECT,
                     source_fingerprint=item.source_fingerprint,
                 )]
-            # OCR failed — keep as visual_embed (still useful)
+            # OCR ran but returned no text — fall back to visual embed
             return [ModalityItem(
                 schema=item.schema, modality=item.modality,
-                parsed_unit=item.parsed_unit, raw_bytes=item.raw_bytes,
+                parsed_unit=None, raw_bytes=item.raw_bytes,
                 mime=item.mime, origin=item.origin,
                 extraction_strategy=STRATEGY_VISUAL_EMBED,
                 source_fingerprint=item.source_fingerprint,
                 quarantine_reason="ocr_image: tesseract returned no text",
             )]
-
-        if item.extraction_strategy == STRATEGY_VIDEO_FRAMES:
-            if item.raw_bytes is None:
-                return [_quarantine(b"", item.origin, "video_frames: no raw_bytes")]
-            return _extract_video_frames(
-                item.raw_bytes, item.origin,
-                fps=fps, max_frames=max_frames
-            )
 
         return [_quarantine(item.raw_bytes or b"", item.origin,
                             f"unknown strategy: {item.extraction_strategy!r}")]
@@ -643,27 +498,19 @@ def extract(item: ModalityItem, *, fps: float = 1.0, max_frames: int = 30) -> li
 
 
 # ---------------------------------------------------------------------------
-# Convenience: classify + extract in one call
+# Convenience wrappers
 # ---------------------------------------------------------------------------
 
-def handle_and_extract(
-    data: bytes,
-    origin: str,
-    *,
-    filename: str = "",
-    fps: float = 1.0,
-    max_frames: int = 30,
-) -> list[ModalityItem]:
-    """Classify and immediately extract. Suitable for batch / background ingestion."""
-    classified = handle(data, origin, filename=filename)
+def handle_and_extract(data: bytes, origin: str, *, filename: str = "") -> list[ModalityItem]:
+    """Classify + OCR extraction in one call. Video items pass through unchanged."""
     result: list[ModalityItem] = []
-    for item in classified:
-        result.extend(extract(item, fps=fps, max_frames=max_frames))
+    for item in handle(data, origin, filename=filename):
+        result.extend(extract(item))
     return result
 
 
 def handle_path(path: Path, *, origin: str = "") -> list[ModalityItem]:
-    """Classify a file from disk (phase 1 only — no extraction)."""
+    """Classify a file from disk (phase 1 only)."""
     label = origin or str(path)
     try:
         data = path.read_bytes()
