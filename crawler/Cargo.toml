@@ -1,0 +1,25 @@
+[package]
+name = "lgwks-crawler"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+anyhow = "1.0.102"
+axum = "0.8.9"
+blake2 = "0.10.6"
+bytes = "1.11.1"
+clap = { version = "4.6.1", features = ["derive"] }
+futures = "0.3.32"
+hex = "0.4.3"
+regex = "1.12.4"
+reqwest = { version = "0.12", default-features = false, features = ["rustls-tls", "gzip", "brotli", "deflate", "http2", "charset"] }
+scraper = "0.27.0"
+serde = { version = "1.0.228", features = ["derive"] }
+serde_json = "1.0.150"
+sitemap = "0.4.1"
+texting_robots = "0.2.2"
+thiserror = "2.0.18"
+tokio = { version = "1.52.3", features = ["full"] }
+tracing = "0.1.44"
+tracing-subscriber = { version = "0.3.23", features = ["json"] }
+url = "2.5.8"
