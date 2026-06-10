@@ -1471,6 +1471,10 @@ def build_parser() -> argparse.ArgumentParser:
     import lgwks_score
     lgwks_score.add_parser(sub)
 
+    # rank — cubic node centrality + AI-discrepancy δ (I6)
+    import lgwks_rank
+    lgwks_rank.add_parser(sub)
+
     # route — deterministic intent router (tiny-bert + heuristic fallback)
     import lgwks_intent_router
     lgwks_intent_router.add_parser(sub)
