@@ -1,0 +1,16 @@
+name: Governance gates
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  schema-registry:
+    name: schema registry conformance
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: every lgwks.*.vN literal has a registry row
+        run: python3 scripts/check_schema_registry.py

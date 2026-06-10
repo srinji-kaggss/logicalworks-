@@ -70,7 +70,8 @@ JSON Schemas** in `docs/schemas/lgwks-bot-{record,plan}-v1.schema.json`, validat
 emit `bot.record.v1` with a new `kind` rather than minting a new findings schema.
 
 ### 6. scoring / graph family
-`lgwks.graph.v2` (live; v1 deprecated) + `lgwks.graph.{query,impact,complexity,path,neighbors,patterns}.v0`
+`lgwks.graph.v2` (live; `lgwks.graph.v1` deprecated) + `lgwks.repo.graph.v0` (graph-over-repo bridge,
+`lgwks_graph.py`/`lgwks_repo.py`) + `lgwks.graph.{query,impact,complexity,path,neighbors,patterns}.v0`
 (`lgwks_schema.py:102-109`) · `lgwks.graph.cache.v1` (`.lgwks/graph.cache.json`).
 **Planned:** `lgwks.score.record.v1` (**I5**), `lgwks.rank.record.v1` (**I6**).
 **Repurpose when:** any code-structure question — query `graph.v2`; do not parse source ad-hoc.
@@ -93,6 +94,31 @@ fields, don't fork the envelope.
 `lgwks.state.v1` · `lgwks.engine.v1` · `lgwks.detect.v1` · `lgwks.docs.v1` · `lgwks.depthpack.v1` ·
 `lgwks.codegraph.v1` · `lgwks.map.v1` · `lgwks.had.intent.v1` (spec/second-harness/prd/).
 **Rule:** a planned schema becomes real only via its packet/PRD unit + a status flip here.
+
+### 10. CLI / repo-ops family (v0 research — gate-registered 2026-06-10)
+`lgwks.repo.{audit,cleanup,handoff,merge,recover,sync}.v0` (`lgwks_repo.py`) ·
+`lgwks.run_index.v0` (`lgwks_run.py`) · `lgwks.codebase.v0` (`lgwks_codebase.py`) ·
+`lgwks.manifest.for_agent.v0` (`lgwks_manifest.py`) · `lgwks.jarvis.substrate_crawl.v0`
+(jarvis↔crawler bridge) · `lgwks.debug.v0` (`lgwks_debug.py`) · `lgwks.algebra.v0` (`lgwks_math.py`).
+**Repurpose when:** machine-readable CLI output — reuse the verb's existing envelope before minting.
+
+### 11. model-stack family (W-track, live)
+`lgwks.algorithms.catalog.v1` (`lgwks_algorithms.py`, W2 catalog) · `lgwks.sast.catalog.v1` +
+`lgwks.sast.flow.v1` (`lgwks_sast.py`) · `lgwks.model_hub.doctor.v1` (`lgwks_model_hub.py`) ·
+`lgwks.workflow.run.v1` (`lgwks_workflows.py`).
+**Repurpose when:** any deterministic scorer/detector → a CATALOG entry + these envelopes, not a new shape.
+
+### 12. JEPA manifest-level ids (live, supplement family 7)
+`lgwks.jepa.v1` (manifest verb envelope) · `lgwks.machine.packet.v1` · `lgwks.human.summary.v1` ·
+`lgwks.links.index.v1` (all `lgwks_project_artifacts.py`) · `lgwks.concept.graph.v0` (`lgwks_spawn.py`).
+
+### 13. Documentation fixtures (NOT contracts — listed so the gate distinguishes them)
+`lgwks.foo.v0`, `lgwks.foo.v1` — example ids inside `lgwks_schema.py` docs/scanner strings only.
+
+## Mechanical enforcement
+`scripts/check_schema_registry.py` (run: `make check-registry` or directly) fails CI when a
+`lgwks.*.v<N>` literal in src lacks a registry row. Scope: `*.py/*.rs/*.sh`, excluding tests/,
+worktrees, caches. This section's rule 4 is therefore enforced, not advisory.
 
 ## Known debts (flagged 2026-06-10)
 1. **Validation asymmetry:** ~45 contracts are manual-dict validated; only bot fabric has formal

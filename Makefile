@@ -1,6 +1,9 @@
-.PHONY: install test test-python test-rust clean doctor models help
+.PHONY: install test test-python test-rust check-registry clean doctor models help
 
-test: test-python test-rust
+test: check-registry test-python test-rust
+
+check-registry:
+	python3 scripts/check_schema_registry.py
 
 install:
 	./install.sh
