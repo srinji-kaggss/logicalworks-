@@ -1,2 +1,6 @@
 # lgwks runtime dependencies — lightweight, no ML training
 playwright>=1.40
+# Leiden community detection — requires Python <3.13 (leidenalg constraint)
+# On py3.13+, use graphify.cluster(force_louvain=True) or pin to a py3.12 interpreter
+leidenalg>=0.10; python_version < "3.13"
+igraph>=0.11; python_version < "3.13"
