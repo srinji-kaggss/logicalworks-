@@ -296,12 +296,29 @@ class TestDeterminismReplay(unittest.TestCase):
         )
 
     def test_determinism_synthetic(self):
-        """T5 (synthetic): two rank_graph calls on same data → identical records."""
-        g = _make_synthetic_graph(n_nodes=20, seed=17)
+        """T5 (synthetic): two rank_graph calls on same data → identical records.
+
+        //why seed=7: determinism is only meaningful on a converging graph. seed=17 has a
+        near-degenerate spectral gap that does not converge under the strict 1e-9 vector
+        tolerance — that case is covered by test_degenerate_graph_fails_loud below.
+        """
+        g = _make_synthetic_graph(n_nodes=20, seed=7)
         r1 = rank_graph(g)
         r2 = rank_graph(g)
         self.assertEqual(self._records_to_key(r1), self._records_to_key(r2),
             "T5: rank_graph returned different records on same input")
+
+    def test_degenerate_graph_fails_loud(self):
+        """Harden: a genuinely non-converging graph raises RankError, never silent garbage.
+
+        seed=17/n=20 plateaus above the 1e-9 vector tolerance even at full MAX_ITER
+        (near-degenerate eigenvalues). The guard must fail loud rather than return an
+        untrustworthy ranking. Robust eigenvalue/Rayleigh-quotient convergence is the
+        recommended I6.1 follow-up; until then, loud failure is the honest contract.
+        """
+        g = _make_synthetic_graph(n_nodes=20, seed=17)
+        with self.assertRaises(lgwks_rank.RankError):
+            rank_graph(g)
 
     def test_determinism_real(self):
         """T5 (real): logicalworks- graph."""
@@ -348,6 +365,41 @@ class TestOutputContract(unittest.TestCase):
             self.assertLessEqual(r.rank_det, n)
             self.assertGreaterEqual(r.rank_ai, 1)
             self.assertLessEqual(r.rank_ai, n)
+
+
+class TestHardening(unittest.TestCase):
+    """Harden pass: non-convergence must fail loud; degenerate AI signal flagged."""
+
+    def test_nonconvergence_raises(self):
+        # max_iter=1 on a non-trivial graph cannot reach 1e-9 → rank_graph must raise loud.
+        g = _make_synthetic_graph(n_nodes=20, seed=3)
+        with self.assertRaises(lgwks_rank.RankError):
+            rank_graph(g, max_iter=1)
+
+    def test_convergence_does_not_raise(self):
+        # Full max_iter converges → no raise.
+        g = _make_synthetic_graph(n_nodes=20, seed=3)
+        records = rank_graph(g)  # default MAX_ITER
+        self.assertEqual(len(records), 20)
+
+    def test_degenerate_ai_signal_detected(self):
+        # All edges same confidence → no AI-signal variance → degenerate.
+        g = {
+            "nodes": [{"id": f"n{i}"} for i in range(5)],
+            "links": [{"source": "n0", "target": f"n{j}", "relation": "calls",
+                       "confidence_score": 1.0} for j in range(1, 5)],
+        }
+        node_ids, _ = build_tensor(g)
+        self.assertTrue(lgwks_rank.ai_signal_degenerate(g, node_ids))
+
+    def test_varied_ai_signal_not_degenerate(self):
+        g = {
+            "nodes": [{"id": f"n{i}"} for i in range(5)],
+            "links": [{"source": "n0", "target": f"n{j}", "relation": "calls",
+                       "confidence_score": 0.3 + 0.1 * j} for j in range(1, 5)],
+        }
+        node_ids, _ = build_tensor(g)
+        self.assertFalse(lgwks_rank.ai_signal_degenerate(g, node_ids))
 
 
 if __name__ == "__main__":

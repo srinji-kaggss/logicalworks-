@@ -37,6 +37,10 @@ from typing import Any
 
 SCHEMA = "lgwks.rank.record.v1"
 
+
+class RankError(RuntimeError):
+    """Raised when ranking cannot produce a trustworthy result (e.g. non-convergence)."""
+
 # ---------------------------------------------------------------------------
 # Constants (pre-registered at module level per spec)
 # ---------------------------------------------------------------------------
@@ -295,6 +299,20 @@ def compute_rank_ai(
     return [total[i] / count[i] if count[i] > 0 else 0.0 for i in range(n)]
 
 
+def ai_signal_degenerate(graph: dict[str, Any], node_ids: list[str]) -> bool:
+    """True when the AI signal has no usable variance, so δ/lane is noise, not slop.
+
+    //why: δ = |rank_det − rank_ai| is only a real slop signal when rank_ai carries
+    information. If every connected node shares one mean confidence_score (e.g. a corpus
+    where confidence_score is a constant 1.0), rank_ai degenerates to alphabetical
+    tie-breaking and δ measures nothing. The real fix is I5 per-fact s_ai (score store);
+    until then, surface the degeneracy instead of pretending δ is meaningful.
+    """
+    ai = compute_rank_ai(graph, node_ids)
+    connected = [v for v in ai if v > 0.0]
+    return len({round(v, 9) for v in connected}) <= 1
+
+
 # ---------------------------------------------------------------------------
 # D2: δ computation + lane assignment
 # ---------------------------------------------------------------------------
@@ -344,10 +362,12 @@ def rank_graph(
     graph: dict[str, Any],
     *,
     weights: dict[str, float] | None = None,
+    max_iter: int = MAX_ITER,
 ) -> list[RankRecord]:
     """Full ranking pipeline: tensor → power iteration → δ → RankRecord list.
 
     Returns records sorted by rank_det (ascending = best first).
+    Raises RankError if power iteration does not converge within max_iter.
     """
     node_ids, T_k = build_tensor(graph)
     n = len(node_ids)
@@ -355,7 +375,15 @@ def rank_graph(
         return []
 
     # D1: cubic centrality
-    x, _iters, _delta = power_iteration(node_ids, T_k, weights=weights)
+    x, _iters, _delta = power_iteration(node_ids, T_k, weights=weights, max_iter=max_iter)
+    # //why: never present a non-converged centrality as if trustworthy (no silent failure).
+    # Early break leaves _delta=0.0 (converged/degenerate); only a maxed-out run with
+    # ‖Δx‖ still above tolerance is a real failure.
+    if _delta >= CONVERGE_TOL and _iters >= max_iter:
+        raise RankError(
+            f"power iteration did not converge: ‖Δx‖={_delta:.2e} after {_iters} "
+            f"iterations (tol={CONVERGE_TOL}). Raise MAX_ITER or inspect the graph."
+        )
 
     # rank_det: 1-indexed rank by descending centrality
     # Stable sort: ties broken by node_id string for determinism.
@@ -454,6 +482,9 @@ def _cmd_run(args) -> int:
 
     human_count = sum(1 for r in records if r.lane == "human")
     print(f"  {len(records)} nodes  [{SCHEMA}]")
+    if ai_signal_degenerate(graph, [r.node_cid for r in records]):
+        print("  WARNING: AI signal (confidence_score) has no variance on this graph — "
+              "δ/lane is NOT a meaningful slop signal here (needs I5 per-fact s_ai).")
     print(f"  human-lane: {human_count}  ({human_count/len(records)*100:.1f}%)")
     print(f"  threshold: top {DELTA_HUMAN_PERCENTILE*100:.0f}% δ  "
           f"(DELTA_HUMAN_PERCENTILE={DELTA_HUMAN_PERCENTILE})")
