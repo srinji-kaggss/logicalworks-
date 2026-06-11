@@ -386,3 +386,32 @@ New module `lgwks_daemon.py` — minimal session daemon (PRD-08 lifecycle stub):
 **Registry gate:** no new schemas minted (waste and crdt schemas already registered). Schema `lgwks.waste.ledger.v1` and `lgwks.crdt.state.v1` already live.
 
 **Tests:** existing `tests/test_crdt.py` (T1–T6) and `tests/test_waste.py` (T1–T6) remain green. No new tests added in this session (both modules were already tested; the wiring is thin adapter code).
+
+**I9 byte-identical convergence proof (closes #73):** `tests/test_crdt.py` T1 (SEC convergence) applies the same 8-element update multiset to 3 replicas across 8 random permutations and asserts `state_A == state_B == state_C` after merge. This is the byte-identical convergence proof. GSet.merge = set-union (commutative, associative, idempotent by construction). ORSet.merge = pairwise union of adds/removes sets (same CvRDT laws). LWW tie-break by `(seq, head)` is deterministic (no wall-clock) — same inputs produce the same winner across runs. All three types pass the SEC property test.
+
+**I11 daemon-loop wired (closes #75):** `lgwks_session.session_end()` calls `_maybe_append_waste()` when `LGWKS_TRANSCRIPT_PATH` is set. `lgwks_pipeline.run_pipeline()` Stage 12 does the same inline. `LGWKS_TRANSCRIPT_PATH` must be set to the live transcript path by the Director before relying on live waste tracking (per issue #75 scope note).
+
+---
+
+## 2026-06-11 (session 7b) · I8 "basically working" — tenant isolation + WAL concurrency (branch: claude/crdt-waste-daemon-integration-i66xrv)
+
+**Build:** one WHERE clause + WAL. Exactly per PLANS-NEXT-5.md scope fence.
+
+**`lgwks_vector.query_for_tenant(conn, tenant, *, space_id, limit)` (new):**
+```sql
+WHERE (tenant = ? OR tenant = 'world') [AND space_id = ?]
+```
+`WORLD_TENANT = 'world'` sentinel exported as a module constant. The `vr_space_tenant` index on `(space_id, tenant)` (already in `VECTOR_RECORDS_DDL`) makes both arms of the OR index-backed when `space_id` is supplied. This is the `lgwks_capability` first home: the capability token's `tenant` field feeds this WHERE without requiring crypto enforcement yet (as specced).
+
+**WAL verification:** `lgwks_vector._connect()` already routes through `lgwks_sqlite.connect()` (WAL + BUSY retry) or sets `PRAGMA journal_mode=WAL` manually in the ImportError fallback. No bare `sqlite3.connect` on the write path. The migration source (line 301) is read-only legacy — WAL is irrelevant there. No change needed.
+
+**Tests (`tests/test_i8_tenant_isolation.py`, 5 tests, all green):**
+- T1: `query_for_tenant('A')` returns A-rows + world-rows, never B-rows.
+- T2: two concurrent threads writing to a WAL-backed on-disk store → zero errors, no lost rows (`store_count == 40`).
+- T3: world rows visible to every named tenant.
+- T4: empty tenant `''` sees only world rows, not named-tenant rows.
+- T_space: `space_id` filter excludes wrong-space rows from both arms.
+
+**Registry gate:** no new schemas. `WORLD_TENANT` constant is a module-level string, not a schema payload.
+
+**Honest scope (do not overclaim):** this is one WHERE clause. Cryptographic §1-INV enforcement (capability-token crypto, per-tenant durable queue, admission, CRDT deployment on the live store, promotion audit) remains deferred per ARCH-two-db-multitenant.md + SCOPE-DEFERRED.md. `lgwks_admission.py` stays parked for the durable-queue future. `lgwks_capability.guard()` has its first conceptual home (token.tenant → query_for_tenant) but the crypto wiring is not in scope here.

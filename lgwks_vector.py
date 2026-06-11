@@ -276,6 +276,47 @@ def query_by_source(
     return [decode_record(r) for r in rows]
 
 
+# Sentinel value for world-tier rows (shared across all tenants).
+WORLD_TENANT = "world"
+
+
+def query_for_tenant(
+    conn: sqlite3.Connection,
+    tenant: str,
+    *,
+    space_id: Optional[str] = None,
+    limit: Optional[int] = None,
+) -> list[VectorRecord]:
+    """Return own-tenant rows UNION world rows, never another tenant's standard rows.
+
+    This is the §1-INV basic read: a query for tenant T sees T's rows ⊕ world rows.
+    The vr_space_tenant index covers (space_id, tenant) so both arms of the OR hit
+    the index when space_id is supplied.
+
+    //why OR not UNION: a single WHERE … OR … is one index scan per arm; SQLite's
+    query planner uses the vr_space_tenant index for both. Correct isolation follows:
+    rows where tenant != T and tenant != 'world' are never returned.
+    """
+    if space_id:
+        sql = (
+            "SELECT cid, modality, embedding, norm, dim, space_id, tenant, source_cid "
+            "FROM vector_records "
+            "WHERE (tenant = ? OR tenant = ?) AND space_id = ?"
+        )
+        params: tuple = (tenant, WORLD_TENANT, space_id)
+    else:
+        sql = (
+            "SELECT cid, modality, embedding, norm, dim, space_id, tenant, source_cid "
+            "FROM vector_records WHERE tenant = ? OR tenant = ?"
+        )
+        params = (tenant, WORLD_TENANT)
+    if limit is not None:
+        sql += " LIMIT ?"
+        params = params + (limit,)
+    rows = conn.execute(sql, params).fetchall()
+    return [decode_record(r) for r in rows]
+
+
 def store_count(conn: sqlite3.Connection) -> int:
     return conn.execute("SELECT COUNT(*) FROM vector_records").fetchone()[0]
 
