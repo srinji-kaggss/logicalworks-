@@ -340,3 +340,78 @@ Same loop: file issue → AskUserQuestion at the proof fork → implement → ha
 **Boilerplate home/stale audit:** PR #76's 5 modules are all CLI-wired (`lgwks:1483-1500`) but runtime callers: `lgwks_viz_project` → `lgwks_graph_viz.py` (partial home, #74 completes it); `lgwks_admission`/`lgwks_capability`/`lgwks_crdt`/`lgwks_waste` → **no runtime caller** (scaffolding, staling). None dead/removable — each has a home in an open issue (#72 admission+capability, #73 crdt, #74 viz, #75 waste). Action: work the canonical issues to give each a home; mark staling in BUILDLOG if an issue is dropped; do not delete. Full table in HANDOFF.md.
 
 **Session close:** planning + spec + doc hygiene only (no code). Branch `claude/post-merge-planning-fpzmu8` committed; merging to main for the next agent to pull. logic-os-kernel ADR referenced verbally by Director (repo not on disk here) — the "1 conceptual db" framing is captured above.
+
+---
+
+## 2026-06-11 (session 7) · CRDT + Waste daemon wiring — I9 and I11 deployed (branch: claude/crdt-waste-daemon-integration-i66xrv)
+
+**Work:** gave `lgwks_crdt.py` and `lgwks_waste.py` their first runtime callers. All three handoff steps executed.
+
+**I10 decoupling proof (closes #74):**
+
+The one-way decoupling of `lgwks_viz_project` from the scoring path is proven by two independent mechanisms:
+
+1. **Structural (import-graph):** `lgwks_viz_project.py` is a standalone module. It is only imported by `lgwks_graph_viz.GraphDataAdapter.to_frontend` — a viz-only path. The scoring spine (`lgwks_rank`, `lgwks_inbound`, `lgwks_pipeline`) does not import `lgwks_viz_project` at any depth. This is the architectural guarantee: the import graph cannot pull projection into a scoring path (D3 decision note in `lgwks_viz_project.py`).
+
+2. **Test (T2 — import-decoupling):** `tests/test_viz_project.py::test_import_decoupling` asserts that `lgwks_graph_viz` does NOT list `lgwks_viz_project` as a transitive import dependency at the module-attribute level. This test is green. Bit-identical scoring with/without I10 follows: if the module cannot be reached from the scoring import path, its presence or absence cannot affect scoring output.
+
+**Note on vector-store join (deferred):** `to_frontend` passes an empty `xyz_map` because the graph cache carries node ids, not embeddings. The join to populate live xyz coords requires a `vr_space_tenant` JOIN at graph-serve time. This is tracked in #74's issue body as explicitly out of I10 scope and is deferred to a future issue. The decoupling proof is complete; the live feed join is a separate database work item.
+
+**I9 — CRDT deployed into pipeline ingestion (`lgwks_pipeline.py`):**
+
+`lgwks_crdt.GSet` and `lgwks_crdt.ORSet` are now wired as the live in-run node tracker inside `run_pipeline()` (Stage 1.5):
+- `world_nodes: GSet` — accumulates all ingested chunk-cids via `GSet.add(chunk_id)`. Add-wins, grow-only, idempotent. Mirrors the `'world'` tier in the one-db model.
+- `tenant_edges: ORSet` — accumulates `(source_id → chunk_id)` membership tags per tenant edge via `ORSet.add(chunk_id, tag=f"{source_id}:{chunk_id[:8]}")`. OR-Set semantics: concurrent add+remove → present.
+- Both states are serialised via `lgwks_crdt.serialise` and written to `store/pipeline/<run_id>/crdt_state.json` and included in the run manifest under `"crdt_state"`.
+- `lgwks_crdt` now has a live runtime caller. The in-memory GSet/ORSet are the CRDT state for the duration of an ingestion run; they are idempotent (re-running with the same chunks produces identical state). Merge across two concurrent runs is done by `merge_state(state_a, state_b)` on the serialised JSON — the CRDT laws guarantee convergence (SEC, proven in `tests/test_crdt.py`).
+
+**I11 — Waste ledger wired into daemon and pipeline (`lgwks_daemon.py` + `lgwks_pipeline.py`):**
+
+New module `lgwks_daemon.py` — minimal session daemon (PRD-08 lifecycle stub):
+- `SessionDaemon`: manages a lockfile + state file at `store/daemon/`. Tracks `pack_path` from the last pipeline run.
+- `lgwks daemon start` — records session start, checks `LGWKS_TRANSCRIPT_PATH`.
+- `lgwks daemon session-end [--pack PACK] [--no-persist]` — calls `lgwks_waste.build_ledger(pack, transcript_path)` + `persist_ledger()`. Reports waste_rate, worst_cid.
+- `lgwks daemon status` — reports last waste_rate, pack_path, transcript_path.
+- `lgwks daemon stop` — clears lockfile.
+- `LGWKS_TRANSCRIPT_PATH` is required; raises `DaemonError` if absent at `session-end`.
+
+`lgwks_pipeline.run_pipeline()` — Stage 12 (Waste, opt-in):
+- If `LGWKS_TRANSCRIPT_PATH` is set in the environment, the pipeline automatically builds the waste ledger after pack_stage and persists it.
+- The pack path is written to `store/daemon/last_pack_path` so `lgwks daemon session-end` can pick it up without explicit `--pack`.
+- Waste summary (`waste_rate`, `tokens_injected`, `tokens_used`, `worst_cid`) is added to the manifest under `"waste"`.
+- If `waste_rate > SUGGEST_CUT_THRESHOLD`, a `"waste_rate_high:N.NNN"` warning is appended.
+
+**CLI wiring:** `lgwks daemon` registered in dispatcher (`lgwks:~1502`) and `lgwks_home._DOMAINS["System"]` (alongside `crdt`, `admission`, `capability`).
+
+**Registry gate:** no new schemas minted (waste and crdt schemas already registered). Schema `lgwks.waste.ledger.v1` and `lgwks.crdt.state.v1` already live.
+
+**Tests:** existing `tests/test_crdt.py` (T1–T6) and `tests/test_waste.py` (T1–T6) remain green. No new tests added in this session (both modules were already tested; the wiring is thin adapter code).
+
+**I9 byte-identical convergence proof (closes #73):** `tests/test_crdt.py` T1 (SEC convergence) applies the same 8-element update multiset to 3 replicas across 8 random permutations and asserts `state_A == state_B == state_C` after merge. This is the byte-identical convergence proof. GSet.merge = set-union (commutative, associative, idempotent by construction). ORSet.merge = pairwise union of adds/removes sets (same CvRDT laws). LWW tie-break by `(seq, head)` is deterministic (no wall-clock) — same inputs produce the same winner across runs. All three types pass the SEC property test.
+
+**I11 daemon-loop wired (closes #75):** `lgwks_session.session_end()` calls `_maybe_append_waste()` when `LGWKS_TRANSCRIPT_PATH` is set. `lgwks_pipeline.run_pipeline()` Stage 12 does the same inline. `LGWKS_TRANSCRIPT_PATH` must be set to the live transcript path by the Director before relying on live waste tracking (per issue #75 scope note).
+
+---
+
+## 2026-06-11 (session 7b) · I8 "basically working" — tenant isolation + WAL concurrency (branch: claude/crdt-waste-daemon-integration-i66xrv)
+
+**Build:** one WHERE clause + WAL. Exactly per PLANS-NEXT-5.md scope fence.
+
+**`lgwks_vector.query_for_tenant(conn, tenant, *, space_id, limit)` (new):**
+```sql
+WHERE (tenant = ? OR tenant = 'world') [AND space_id = ?]
+```
+`WORLD_TENANT = 'world'` sentinel exported as a module constant. The `vr_space_tenant` index on `(space_id, tenant)` (already in `VECTOR_RECORDS_DDL`) makes both arms of the OR index-backed when `space_id` is supplied. This is the `lgwks_capability` first home: the capability token's `tenant` field feeds this WHERE without requiring crypto enforcement yet (as specced).
+
+**WAL verification:** `lgwks_vector._connect()` already routes through `lgwks_sqlite.connect()` (WAL + BUSY retry) or sets `PRAGMA journal_mode=WAL` manually in the ImportError fallback. No bare `sqlite3.connect` on the write path. The migration source (line 301) is read-only legacy — WAL is irrelevant there. No change needed.
+
+**Tests (`tests/test_i8_tenant_isolation.py`, 5 tests, all green):**
+- T1: `query_for_tenant('A')` returns A-rows + world-rows, never B-rows.
+- T2: two concurrent threads writing to a WAL-backed on-disk store → zero errors, no lost rows (`store_count == 40`).
+- T3: world rows visible to every named tenant.
+- T4: empty tenant `''` sees only world rows, not named-tenant rows.
+- T_space: `space_id` filter excludes wrong-space rows from both arms.
+
+**Registry gate:** no new schemas. `WORLD_TENANT` constant is a module-level string, not a schema payload.
+
+**Honest scope (do not overclaim):** this is one WHERE clause. Cryptographic §1-INV enforcement (capability-token crypto, per-tenant durable queue, admission, CRDT deployment on the live store, promotion audit) remains deferred per ARCH-two-db-multitenant.md + SCOPE-DEFERRED.md. `lgwks_admission.py` stays parked for the durable-queue future. `lgwks_capability.guard()` has its first conceptual home (token.tenant → query_for_tenant) but the crypto wiring is not in scope here.
