@@ -121,6 +121,33 @@ After I8: **#73 (I9 — deploy CRDT on both tiers, ARCH L6:** G-Set world / OR-S
 live stores) → **#74 (I10** vector-store join) → **#75 (I11** daemon wiring; confirm `LGWKS_TRANSCRIPT_PATH`
 with the Director). After #75 the ingestion plan is fully landed.
 
+### Simplest-now correction (session 6 final — read this before the two-DB spec above)
+The Director scoped I8 down: **"it's all 1 conceptual db; world data shared; standard data called in at
+query; log the complexity as future, get the thing working basically."** So the **now-build** is minimal —
+one logical store (`vector_records`), a `tenant` column with a `'world'` sentinel for shared rows, a tenant
+read = `WHERE tenant = ? OR tenant = 'world'`, and WAL (`lgwks_sqlite.connect`) for basic concurrency. See
+[PLANS-NEXT-5.md](PLANS-NEXT-5.md). The full capability-crypto / durable-queue / CRDT / promotion hardening
+([ARCH-two-db-multitenant.md](ARCH-two-db-multitenant.md), [SCOPE-DEFERRED.md](SCOPE-DEFERRED.md)) is the
+*destination*, not the next commit. North star (framing only, do not over-build): an AI-first Unix-style CLI,
+"the daemon you code on" — keep modules small/composable.
+
+### Boilerplate home/stale audit (session 6 — what to wire vs what is staling)
+PR #76 added 5 modules. All are CLI-wired in the `lgwks` dispatcher (`lgwks:1483-1500`) but most have **no
+runtime caller** — they are scaffolding that will stale unless the canonical issue that owns each is worked.
+None is dead/removable; each has a designated home in an open issue:
+
+| module | runtime caller? | home (open issue) | status |
+|--------|-----------------|-------------------|--------|
+| `lgwks_viz_project.py` | yes — `lgwks_graph_viz.py` | #74 (I10 vector-store join completes the feed) | **partial home**; needs the cid→embedding join |
+| `lgwks_capability.py` | none | #72 (I8) — first home = the simplest tenant WHERE; crypto enforcement later | scaffolding; minimal home via I8-basic |
+| `lgwks_admission.py` | none | #72 (I8) — parked for the *durable-queue future*; WAL covers basic concurrency now | scaffolding; **staling** unless durable-queue work lands |
+| `lgwks_crdt.py` | none | #73 (I9) — deploy as live merge path on both tiers | scaffolding; staling unless #73 worked |
+| `lgwks_waste.py` | none | #75 (I11) — daemon-loop wiring + live transcript | scaffolding; staling unless #75 worked |
+
+**Action for the next agent:** work the canonical issues in order (#72-basic → #73 → #74 → #75); that is what
+gives each orphaned module a home. If an issue is dropped, mark its module staling in BUILDLOG rather than
+pretending it is integrated. Do not delete — the scaffolding is the seed of the logged future work.
+
 **Open ops action (carried from I7):** re-register `hooks/subconscious_inbound.py` against the live
 `/Applications/logicalworks` dir (currently points at dead space-named path). Confirm path first.
 

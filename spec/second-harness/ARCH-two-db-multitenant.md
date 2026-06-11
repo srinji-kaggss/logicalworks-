@@ -1,5 +1,11 @@
 # Architecture — two-DB multi-tenant concurrency: where we lack · 2026-06-11 (session 6)
 
+> **Status: FUTURE complexity (logged, not the now-build).** Director (session 6 final): it is all *one
+> conceptual DB* — world data shared, tenant ("standard") data called in at query; *"log the complexity as
+> future, for now get the thing working basically."* The **basic** version is one WHERE clause + WAL
+> ([PLANS-NEXT-5.md](PLANS-NEXT-5.md)). This doc is the map of the *full* multi-tenant hardening to grow into
+> later — read it to understand the destination, not to build it now.
+
 Director question (session 6): concurrency is **within one tenant AND across tenants**; the complexity is the
 **two databases** — one shared world DB everyone has ("the Google") and one private DB per human+AI pair.
 *"That's the security load. Think FIGMA / Google Workspace daemons. Where do we lack."* This doc answers it:
