@@ -71,9 +71,13 @@ registry gate from the repo root, not a `.claude/` worktree (it skips `.claude` 
 ## Suggested next step
 
 Per build order **I7 → I5.1 → I8** (PLANS-NEXT-3.md): I7 and I5.1 both landed (session 3).
-Next is **I8** — concurrency, queue, isolation (PLANS-NEXT-3 §PACKET I8). **File the GH
-issue first** (not yet issued); note the P3→**P0** escalation trigger (before any
-multi-tenant or network exposure) explicitly in the issue body. New modules
+Next is **I8** — concurrency, queue, isolation. The **entire remaining backlog (I8, I9, I10,
+I11) is now fully detailed and phone-executable in [PLANS-NEXT-4.md](PLANS-NEXT-4.md)** — the
+single authoritative "everything left" reference (I12 done PR #63; I8 carried forward from
+PLANS-NEXT-3 §I8 with refreshed inputs; I9/I10/I11 newly detailed). Build order:
+**I8 → (I9 ∥ I10 ∥ I11)**; I10 is viz-only and must never run ahead of the spine. **File the GH
+issue first** for each (none yet issued); for I8 note the P3→**P0** escalation trigger (before
+any multi-tenant or network exposure) explicitly in the issue body. New modules
 `lgwks_admission.py` (token-bucket admission, typed 429 + Retry-After, idempotent shed by
 cid) + `lgwks_capability.py` (capability-token tenant isolation, zero cross-tenant cid
 leak); reuse `lgwks_workercap.compute_worker_cap` for `c` and the crawler backoff for
