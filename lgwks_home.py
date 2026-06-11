@@ -408,17 +408,22 @@ def _repo_for_command(verb: str, repo: Path | None) -> list[str]:
 
 
 _DOMAINS: dict[str, list[str]] = {
+    # Primary product — the subconscious loop and operator surface
+    "Subconscious": ["map", "session", "solve", "debug", "intent", "doctor",
+                     "spawn", "portal", "do", "agent-os"],
+    # Research and knowledge work — the conscious-layer tools
     "Research":  ["jarvis", "fetch", "refine", "preview", "extract", "convert",
                   "x", "manifest", "login", "cohere", "comprehend", "geo", "public",
                   "akinator", "run", "context", "model-hub", "capture", "jepa",
                   "workflow"],
     "GitHub":    ["gh"],
-    "DevOps":    ["repo", "review", "session", "project", "batch", "refactor", "hooks", "agent-os", "portal", "do"],
-    "System":    ["solve", "debug", "doctor", "intent", "entity-graph", "graph",
-                  "substrate", "repl", "initialize", "auth", "keyvault", "foundation",
-                  "aup", "spawn", "schema", "score", "rank", "inbound", "route", "codebase",
+    "DevOps":    ["repo", "review", "project", "batch", "refactor", "hooks"],
+    "System":    ["repl", "initialize", "auth", "keyvault", "foundation",
+                  "aup", "schema", "route", "codebase"],
+    # L0 substrate — ingestion, vector store, contracts (foundational, not the product)
+    "Substrate": ["store", "memory", "embed", "axiom", "pipeline", "waste",
+                  "entity-graph", "graph", "substrate", "score", "rank", "inbound",
                   "admission", "capability", "crdt", "viz-project"],
-    "Data":      ["store", "memory", "embed", "axiom", "pipeline", "waste"],
 }
 
 

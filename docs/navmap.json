@@ -111,7 +111,6 @@
         "lgwks_hooks",
         "lgwks_html",
         "lgwks_inbound",
-        "lgwks_ingest",
         "lgwks_input",
         "lgwks_intent",
         "lgwks_intent_classifier",
@@ -180,16 +179,7 @@
         "tools.train_intent_classifier"
       ],
       "orphan": [
-        "lgwks_actor",
-        "lgwks_math"
-      ],
-      "staling": [
-        "lgwks_algorithms",
-        "lgwks_diff",
-        "lgwks_had",
-        "lgwks_local_llm",
-        "lgwks_monitor",
-        "lgwks_sast"
+        "lgwks_ingest"
       ]
     },
     "by_subsystem": {
@@ -210,9 +200,7 @@
         "lgwks_bot_slop_math",
         "lgwks_bot_stress",
         "lgwks_cohere",
-        "lgwks_debug",
-        "lgwks_diff",
-        "lgwks_monitor"
+        "lgwks_debug"
       ],
       "CLI / home / membrane surface": [
         "lgwks_foundation",
@@ -247,20 +235,16 @@
         "lgwks_graph_viz",
         "lgwks_refactor",
         "lgwks_repo",
-        "lgwks_review",
-        "lgwks_sast"
+        "lgwks_review"
       ],
       "Harness / daemon / orchestration": [
         "hooks.subconscious_inbound",
-        "lgwks_actor",
         "lgwks_agent_os",
-        "lgwks_algorithms",
         "lgwks_capabilities",
         "lgwks_context",
         "lgwks_cycle",
         "lgwks_do",
         "lgwks_ground",
-        "lgwks_had",
         "lgwks_hooks",
         "lgwks_map",
         "lgwks_portal",
@@ -299,7 +283,6 @@
         "lgwks_intent_classifier",
         "lgwks_intent_router",
         "lgwks_machine",
-        "lgwks_math",
         "lgwks_multiply",
         "lgwks_steering",
         "lgwks_vault",
@@ -309,7 +292,6 @@
         "lgwks_apple",
         "lgwks_coreml",
         "lgwks_jepa",
-        "lgwks_local_llm",
         "lgwks_model_hub",
         "lgwks_multimodal",
         "lgwks_ollama",
@@ -601,23 +583,6 @@
         "scripts"
       ]
     },
-    "lgwks_actor": {
-      "deps": [
-        "lgwks_ingest",
-        "lgwks_map"
-      ],
-      "has_cli": false,
-      "has_tests": false,
-      "integration": "unreferenced",
-      "last_commit_days": 1,
-      "loc": 138,
-      "owning_issue": null,
-      "packet": null,
-      "purpose": "U2 Actor contract (second-harness PRD \u00a712, L1).",
-      "staleness": "orphan",
-      "subsystem": "Harness / daemon / orchestration",
-      "used_by": []
-    },
     "lgwks_admission": {
       "deps": [
         "lgwks_workercap"
@@ -652,20 +617,6 @@
       "used_by": [
         "lgwks(dispatcher)"
       ]
-    },
-    "lgwks_algorithms": {
-      "deps": [],
-      "has_cli": false,
-      "has_tests": true,
-      "integration": "unreferenced",
-      "last_commit_days": 1,
-      "loc": 190,
-      "owning_issue": null,
-      "packet": null,
-      "purpose": "L4 narrow-ML catalog (semantic-escalation-harness stage L4).",
-      "staleness": "staling",
-      "subsystem": "Harness / daemon / orchestration",
-      "used_by": []
     },
     "lgwks_apple": {
       "deps": [],
@@ -872,8 +823,7 @@
       "used_by": [
         "lgwks(dispatcher)",
         "lgwks_cognition",
-        "lgwks_ground",
-        "lgwks_monitor"
+        "lgwks_ground"
       ]
     },
     "lgwks_capabilities": {
@@ -1142,20 +1092,6 @@
         "lgwks(dispatcher)"
       ]
     },
-    "lgwks_diff": {
-      "deps": [],
-      "has_cli": false,
-      "has_tests": true,
-      "integration": "unreferenced",
-      "last_commit_days": 2,
-      "loc": 145,
-      "owning_issue": null,
-      "packet": null,
-      "purpose": "generic semantic diffing engine.",
-      "staleness": "staling",
-      "subsystem": "Bots / detection / static analysis",
-      "used_by": []
-    },
     "lgwks_do": {
       "deps": [
         "lgwks_aup",
@@ -1286,7 +1222,6 @@
         "lgwks_files",
         "lgwks_ground",
         "lgwks_input",
-        "lgwks_monitor",
         "lgwks_search"
       ]
     },
@@ -1492,22 +1427,6 @@
         "lgwks_search"
       ]
     },
-    "lgwks_had": {
-      "deps": [
-        "lgwks_intent_classifier"
-      ],
-      "has_cli": false,
-      "has_tests": true,
-      "integration": "unreferenced",
-      "last_commit_days": 1,
-      "loc": 221,
-      "owning_issue": null,
-      "packet": null,
-      "purpose": "Human Assumption Decoder (consultant semantic-escalation-harness, intent math).",
-      "staleness": "staling",
-      "subsystem": "Harness / daemon / orchestration",
-      "used_by": []
-    },
     "lgwks_home": {
       "deps": [
         "lgwks_capabilities",
@@ -1523,7 +1442,7 @@
       "has_tests": true,
       "integration": "integrated",
       "last_commit_days": 0,
-      "loc": 1038,
+      "loc": 1043,
       "owning_issue": null,
       "packet": null,
       "purpose": "the launcher. Type `lgwks` (bare) and the whole thing pops up.",
@@ -1607,17 +1526,15 @@
       ],
       "has_cli": false,
       "has_tests": false,
-      "integration": "integrated",
+      "integration": "unreferenced",
       "last_commit_days": 1,
       "loc": 338,
       "owning_issue": null,
       "packet": null,
       "purpose": "the advanced web-crawler workflow, as ONE function an AI agent runs.",
-      "staleness": "active",
+      "staleness": "orphan",
       "subsystem": "Research / web acquisition / extract",
-      "used_by": [
-        "lgwks_actor"
-      ]
+      "used_by": []
     },
     "lgwks_input": {
       "deps": [
@@ -1672,7 +1589,6 @@
       "staleness": "active",
       "subsystem": "Membrane / intent / steering",
       "used_by": [
-        "lgwks_had",
         "lgwks_model_hub",
         "lgwks_pipeline",
         "tools"
@@ -1756,20 +1672,6 @@
         "scripts"
       ]
     },
-    "lgwks_local_llm": {
-      "deps": [],
-      "has_cli": false,
-      "has_tests": true,
-      "integration": "unreferenced",
-      "last_commit_days": 2,
-      "loc": 78,
-      "owning_issue": null,
-      "packet": null,
-      "purpose": "Local LLM inference bridge via Ollama (Docker Desktop).",
-      "staleness": "staling",
-      "subsystem": "Models / runtime (opaque dep)",
-      "used_by": []
-    },
     "lgwks_machine": {
       "deps": [
         "lgwks_cognition"
@@ -1810,7 +1712,6 @@
         "lgwks(dispatcher)",
         "lgwks_geoexpr",
         "lgwks_intent_classifier",
-        "lgwks_math",
         "lgwks_spawn",
         "lgwks_workflows",
         "tools"
@@ -1829,25 +1730,8 @@
       "staleness": "active",
       "subsystem": "Harness / daemon / orchestration",
       "used_by": [
-        "hooks",
-        "lgwks_actor"
+        "hooks"
       ]
-    },
-    "lgwks_math": {
-      "deps": [
-        "lgwks_ui"
-      ],
-      "has_cli": false,
-      "has_tests": false,
-      "integration": "unreferenced",
-      "last_commit_days": 2,
-      "loc": 418,
-      "owning_issue": null,
-      "packet": null,
-      "purpose": "algebraic signatures of every CLI verb.",
-      "staleness": "orphan",
-      "subsystem": "Membrane / intent / steering",
-      "used_by": []
     },
     "lgwks_memory": {
       "deps": [
@@ -1892,23 +1776,6 @@
         "lgwks_jepa",
         "scripts"
       ]
-    },
-    "lgwks_monitor": {
-      "deps": [
-        "lgwks_cache",
-        "lgwks_extract"
-      ],
-      "has_cli": false,
-      "has_tests": true,
-      "integration": "unreferenced",
-      "last_commit_days": 2,
-      "loc": 219,
-      "owning_issue": null,
-      "packet": null,
-      "purpose": "context upkeep and change detection.",
-      "staleness": "staling",
-      "subsystem": "Bots / detection / static analysis",
-      "used_by": []
     },
     "lgwks_multimodal": {
       "deps": [
@@ -2363,20 +2230,6 @@
         "lgwks_substrate_run",
         "lgwks_substrate_vector"
       ]
-    },
-    "lgwks_sast": {
-      "deps": [],
-      "has_cli": false,
-      "has_tests": true,
-      "integration": "unreferenced",
-      "last_commit_days": 1,
-      "loc": 421,
-      "owning_issue": null,
-      "packet": null,
-      "purpose": "comprehensive static code review: a real CFG + flow-sensitive taint engine.",
-      "staleness": "staling",
-      "subsystem": "Graph / AST / code intelligence",
-      "used_by": []
     },
     "lgwks_schema": {
       "deps": [],
@@ -2853,7 +2706,6 @@
         "lgwks_home",
         "lgwks_intent",
         "lgwks_manifest",
-        "lgwks_math",
         "lgwks_multiply",
         "lgwks_preview",
         "lgwks_refactor",
@@ -3109,6 +2961,7 @@
         "lgwks(dispatcher)",
         "lgwks_aup",
         "lgwks_auth_runtime",
+        "lgwks_home",
         "lgwks_intent_classifier",
         "lgwks_manifest",
         "scripts"
@@ -3125,15 +2978,14 @@
   "totals": {
     "by_integration": {
       "cli_only": 0,
-      "integrated": 124,
-      "unreferenced": 8
+      "integrated": 123,
+      "unreferenced": 1
     },
     "by_staleness": {
-      "active": 124,
-      "orphan": 2,
-      "staling": 6
+      "active": 123,
+      "orphan": 1
     },
-    "loc": 46651,
-    "modules": 132
+    "loc": 44826,
+    "modules": 124
   }
 }

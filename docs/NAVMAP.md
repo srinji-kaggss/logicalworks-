@@ -1,8 +1,8 @@
 # NAVMAP — lgwks module atlas (generated; do not hand-edit)
 
-> `scripts/gen_navmap.py` from source — re-run to refresh. **132 modules · 46,651 LOC.** Read/query this FIRST. Strict machine-readable contract: `docs/navmap.json` (`lgwks.navmap.v1`).
+> `scripts/gen_navmap.py` from source — re-run to refresh. **124 modules · 44,826 LOC.** Read/query this FIRST. Strict machine-readable contract: `docs/navmap.json` (`lgwks.navmap.v1`).
 
-**Staleness:** `active` 124 · `orphan` 2 · `staling` 6
+**Staleness:** `active` 123 · `orphan` 1
 
 Rules — `active`: referenced by another module/dispatcher (static or dynamic), or a tested CLI verb <180d · `scaffolding`: no caller, owned by an open issue · `staling`: no caller anywhere, but built/tested or has a CLI verb, no issue (wire or retire) · `orphan`: no caller, no tests, no CLI, no issue (deletion candidate).
 
@@ -25,7 +25,7 @@ Row legend: `cli` `test` · `←N` imported by N · `→N` imports N · `Nd` day
 | `lgwks_capability` | capability-token tenant isolation boundary (I8). | 195 | active | cli test ←2 0d |
 | `lgwks_crdt` | CRDT state: G-Set, OR-Set, LWW-Register (I9). | 304 | active | cli test ←3 0d |
 | `lgwks_embed_port` | embedder runtime (lgwks.embed.port.v1). | 653 | active | test ←1 →2 1d |
-| `lgwks_extract` | ingest every file format → text. The "read anything" port. | 277 | active | test ←5 →4 2d |
+| `lgwks_extract` | ingest every file format → text. The "read anything" port. | 277 | active | test ←4 →4 2d |
 | `lgwks_inbound` | L5 consumer pack: RRF fusion + token-budgeted reflex envelope (I7). | 331 | active | cli test ←3 →2 0d |
 | `lgwks_input` | universal input handler (lgwks.modality.item.v1). | 530 | active | ←1 →1 1d |
 | `lgwks_pipeline` | unified ingestion and ranking spine. | 1487 | active | cli test ←1 →12 0d |
@@ -46,7 +46,7 @@ Row legend: `cli` `test` · `←N` imported by N · `→N` imports N · `Nd` day
 | `lgwks_files` | the `extract` and `convert` verbs: the read-anything port made into CLI surface. | 62 | active | ←2 →1 2d |
 | `lgwks_geoexpr` | deterministic geometric-CLI compiler (SPEC-geometric-cli-translator-v1). | 388 | active | cli ←3 →4 2d |
 | `lgwks_html` | robust, deterministic HTML-to-Markdown and semantic link/table parser. | 318 | active | test ←4 →1 2d |
-| `lgwks_ingest` | the advanced web-crawler workflow, as ONE function an AI agent runs. | 338 | active | ←1 →8 1d |
+| `lgwks_ingest` | the advanced web-crawler workflow, as ONE function an AI agent runs. | 338 | orphan | →8 1d |
 | `lgwks_preview` | the safe sibling of `lgwks x`. Same brace math, no execution, human rendering. | 214 | active | cli ←1 →3 2d |
 | `lgwks_public` | open-license public source layer. | 183 | active | cli ←2 2d |
 | `lgwks_search` | the missing primitive: a zero-key, free web + news search provider. | 522 | active | test ←3 →3 2d |
@@ -54,7 +54,7 @@ Row legend: `cli` `test` · `←N` imported by N · `→N` imports N · `Nd` day
 | `lgwks_sites` | site-aware extractors for high-value platforms. | 195 | active | test ←1 2d |
 | `lgwks_substrate_crawl` | web crawl engine, auth-gate detection, and frontier management. | 430 | active | ←3 →4 2d |
 
-## Bots / detection / static analysis  ·  9 mod · 3,207 LOC
+## Bots / detection / static analysis  ·  7 mod · 2,843 LOC
 
 | module | purpose | loc | stale | rel |
 |---|---|---|---|---|
@@ -65,8 +65,6 @@ Row legend: `cli` `test` · `←N` imported by N · `→N` imports N · `Nd` day
 | `lgwks_bot_stress` | U8: Concurrent Stress Bot. | 329 | active | test ←1 →1 2d |
 | `lgwks_cohere` | Coherence Engine pipeline (spec-00). | 170 | active | cli test ←1 →5 2d |
 | `lgwks_debug` | automated debugging: turn "it's broken" into "here's why + next step." | 514 | active | cli test ←1 →1 2d |
-| `lgwks_diff` | generic semantic diffing engine. | 145 | staling | test 2d |
-| `lgwks_monitor` | context upkeep and change detection. | 219 | staling | test →2 2d |
 
 ## Axiom byte framework  ·  8 mod · 1,757 LOC
 
@@ -81,7 +79,7 @@ Row legend: `cli` `test` · `←N` imported by N · `→N` imports N · `Nd` day
 | `axiom.wire` | Canonical TLV wire — tag-length-value over LEB128 (the WASM section / protobuf TLV shape, but we OWN the | 106 | active | ←12 2d |
 | `lgwks_axiom` | CLI harness over the standalone Axiom byte framework. | 1060 | active | cli ←1 →2 2d |
 
-## Graph / AST / code intelligence  ·  9 mod · 6,117 LOC
+## Graph / AST / code intelligence  ·  8 mod · 5,696 LOC
 
 | module | purpose | loc | stale | rel |
 |---|---|---|---|---|
@@ -93,24 +91,20 @@ Row legend: `cli` `test` · `←N` imported by N · `→N` imports N · `Nd` day
 | `lgwks_refactor` | deterministic AST-based refactoring engine. | 337 | active | cli test ←2 →1 2d |
 | `lgwks_repo` | repo lifecycle commands: audit, recover, cleanup, merge, handoff, graph. | 740 | active | cli test ←5 →4 2d |
 | `lgwks_review` | graph-aware, spec-bound code review. | 665 | active | cli test ←3 →9 2d |
-| `lgwks_sast` | comprehensive static code review: a real CFG + flow-sensitive taint engine. | 421 | staling | test 1d |
 
-## Harness / daemon / orchestration  ·  26 mod · 8,610 LOC
+## Harness / daemon / orchestration  ·  23 mod · 8,061 LOC
 
 | module | purpose | loc | stale | rel |
 |---|---|---|---|---|
 | `hooks.subconscious_inbound` | Second-harness U7 — subconscious inbound tap (UserPromptSubmit hook). | 46 | active | test ←9 →1 1d |
-| `lgwks_actor` | U2 Actor contract (second-harness PRD §12, L1). | 138 | orphan | →2 1d |
 | `lgwks_agent_os` | fleet startup/bootstrap helpers for the Logical Works prompt layer (#1). | 554 | active | cli test ←1 2d |
-| `lgwks_algorithms` | L4 narrow-ML catalog (semantic-escalation-harness stage L4). | 190 | staling | test 1d |
 | `lgwks_capabilities` | the resolver that fixes "the tool isn't where it should be." | 268 | active | ←5 2d |
 | `lgwks_context` | graduated-resolution (LOD) context pack for the next spawn (#9 harness layer). | 187 | active | cli ←2 2d |
 | `lgwks_cycle` | project deploy cycle ledger. | 145 | active | ←4 →1 2d |
 | `lgwks_do` | unified orchestrator: code, research, govern, cleanup, ship. | 512 | active | cli ←2 →6 2d |
 | `lgwks_ground` | fused live grounding for the research loop (#9 / harness layer). | 165 | active | ←2 →4 2d |
-| `lgwks_had` | Human Assumption Decoder (consultant semantic-escalation-harness, intent math). | 221 | staling | test →1 1d |
 | `lgwks_hooks` | audit-first hook system for lgwks. (hardened v2) | 896 | active | cli test ←1 2d |
-| `lgwks_map` | U1 Capability Map (second-harness PRD §12). | 90 | active | ←2 1d |
+| `lgwks_map` | U1 Capability Map (second-harness PRD §12). | 90 | active | ←1 1d |
 | `lgwks_portal` | deterministic portal packets for coding-agent re-entry. | 276 | active | cli test ←3 →1 2d |
 | `lgwks_project` | one-prompt project orchestrator front door (re-export shim). | 122 | active | cli ←6 →5 2d |
 | `lgwks_project_deploy` | `lgwks project deploy` verb. | 564 | active | ←3 →7 2d |
@@ -126,20 +120,19 @@ Row legend: `cli` `test` · `←N` imported by N · `→N` imports N · `Nd` day
 | `lgwks_workercap` | computed worker-slot ceiling from a probed host profile. | 99 | active | ←3 2d |
 | `lgwks_workflows` | unified AI workflow harness. | 1149 | active | cli ←2 →13 2d |
 
-## Membrane / intent / steering  ·  10 mod · 3,502 LOC
+## Membrane / intent / steering  ·  9 mod · 3,084 LOC
 
 | module | purpose | loc | stale | rel |
 |---|---|---|---|---|
 | `lgwks_concept` | deterministic concept extraction and activation steering. | 624 | active | test ←1 2d |
 | `lgwks_intent` | schema-driven intent router. A 10-line declaration drives automation. | 567 | active | cli test ←2 →1 2d |
-| `lgwks_intent_classifier` | custom English intent classifier for the CLI membrane. | 486 | active | test ←4 →2 1d |
+| `lgwks_intent_classifier` | custom English intent classifier for the CLI membrane. | 486 | active | test ←3 →2 1d |
 | `lgwks_intent_router` | deterministic intent routing with tiny-bert. | 275 | active | cli test ←1 →2 2d |
 | `lgwks_machine` | the Tier-E MACHINE (build #3, z1). The intent/goal engine — NOT AI. It scores and | 271 | active | test ←2 →1 2d |
-| `lgwks_math` | algebraic signatures of every CLI verb. | 418 | orphan | →1 2d |
 | `lgwks_multiply` | the `x` verb: multiply intent instead of issuing it N times. | 204 | active | ←5 →1 2d |
 | `lgwks_steering` | the adjustable control surface, both sides of the membrane. | 101 | active | ←4 2d |
 | `lgwks_vault` | hardened INTENT-VAULT store (build #3, enterprise grade). | 402 | active | test ←3 →1 2d |
-| `tools.train_intent_classifier` | train_intent_classifier.py — training script for the custom English intent classifier. | 154 | active | ←6 →1 2d |
+| `tools.train_intent_classifier` | train_intent_classifier.py — training script for the custom English intent classifier. | 154 | active | ←7 →1 2d |
 
 ## Governance / gates / refusal / auth  ·  12 mod · 3,359 LOC
 
@@ -158,22 +151,22 @@ Row legend: `cli` `test` · `←N` imported by N · `→N` imports N · `Nd` day
 | `lgwks_verify` | the Verifier oracle (spec-01), hardened with provenance tracking. | 253 | active | test ←5 2d |
 | `scripts.check_schema_registry` | Registry conformance gate (governance/README.md + docs/schemas/REGISTRY.md rule 4). | 71 | active | ←4 1d |
 
-## CLI / home / membrane surface  ·  5 mod · 3,340 LOC
+## CLI / home / membrane surface  ·  5 mod · 3,345 LOC
 
 | module | purpose | loc | stale | rel |
 |---|---|---|---|---|
 | `lgwks_foundation` | T3 structured extraction via Apple Foundation Models (macOS 26+, on-device). | 200 | active | cli ←3 2d |
 | `lgwks_gh` | GitHub surface: issues, PRs, state maps, hardening, deterministic "what's next". | 880 | active | cli test ←1 →1 2d |
-| `lgwks_home` | the launcher. Type `lgwks` (bare) and the whole thing pops up. | 1038 | active | test ←4 →8 0d |
-| `lgwks_manifest` | the machine-first contract. `lgwks manifest` → one JSON blob an AGENT reads instead | 1105 | active | ←7 →4 2d |
-| `lgwks_ui` | our own terminal visual language. Deliberately NOT Claude Code. | 117 | active | ←19 2d |
+| `lgwks_home` | the launcher. Type `lgwks` (bare) and the whole thing pops up. | 1043 | active | test ←4 →8 0d |
+| `lgwks_manifest` | the machine-first contract. `lgwks manifest` → one JSON blob an AGENT reads instead | 1105 | active | ←6 →4 2d |
+| `lgwks_ui` | our own terminal visual language. Deliberately NOT Claude Code. | 117 | active | ←18 2d |
 
 ## Substrate / storage / schema  ·  15 mod · 3,837 LOC
 
 | module | purpose | loc | stale | rel |
 |---|---|---|---|---|
 | `lgwks_batch` | schema-validated batch execution for real shell commands. | 287 | active | cli ←1 →1 2d |
-| `lgwks_cache` | the UNTRUSTED-CACHE store (build #2, z2 evidence / z4 quarantine). | 116 | active | ←4 2d |
+| `lgwks_cache` | the UNTRUSTED-CACHE store (build #2, z2 evidence / z4 quarantine). | 116 | active | ←3 2d |
 | `lgwks_capture` | unified operator-facing capture compiler over substrate + portal. | 196 | active | cli test ←2 →2 2d |
 | `lgwks_cognition` | the COGNITION-LOG store (build #2, z4 core). | 138 | active | ←6 →1 2d |
 | `lgwks_lfm2_extract` | lgwks_lfm2_extract — strict schema fill via LFM2-1.2B-Extract (GGUF, llama.cpp). | 209 | active | test ←1 0d |
@@ -188,14 +181,13 @@ Row legend: `cli` `test` · `←N` imported by N · `→N` imports N · `Nd` day
 | `lgwks_substrate_text` | text processing: chunking, scoring, stemming, fact extraction. | 137 | active | ←3 →1 2d |
 | `lgwks_substrate_vector` | vector search, vector space identity, and cross-space guards. | 253 | active | ←2 →3 2d |
 
-## Models / runtime (opaque dep)  ·  9 mod · 1,945 LOC
+## Models / runtime (opaque dep)  ·  8 mod · 1,867 LOC
 
 | module | purpose | loc | stale | rel |
 |---|---|---|---|---|
 | `lgwks_apple` | Apple-local embedding provider seam. | 146 | active | ←2 2d |
 | `lgwks_coreml` | local text classification via CoreML. | 142 | active | ←1 2d |
 | `lgwks_jepa` | first executable multi-view JEPA package surface. | 335 | active | cli test ←2 →4 2d |
-| `lgwks_local_llm` | Local LLM inference bridge via Ollama (Docker Desktop). | 78 | staling | test 2d |
 | `lgwks_model_hub` | repo-resident model loading + developer setup for local CoreML use. | 577 | active | cli test ←4 →3 2d |
 | `lgwks_multimodal` | image extraction + multimodal embedding seam. | 354 | active | ←4 →1 2d |
 | `lgwks_ollama` | local Ollama provider for the Eye (embeddings), Issue #7. | 108 | active | ←5 2d |
