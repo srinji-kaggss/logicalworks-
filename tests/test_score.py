@@ -188,6 +188,92 @@ class TestDirectionality(unittest.TestCase):
 
 
 # ---------------------------------------------------------------------------
+# I5.1 — directional operator activation (antisymmetric N_k, exact marginal)
+# ---------------------------------------------------------------------------
+
+class TestDirectionalActivation(unittest.TestCase):
+    """build_operators now emits directional R_k. Acceptance (issue #69):
+    marginal stays identity, every directed relation is asymmetric, replayable,
+    symmetric stays symmetric."""
+
+    DIM = 16
+    N = 6
+
+    def setUp(self):
+        self.embs = [_make_embedding(i, self.DIM) for i in range(self.N)]
+        self.ops = build_operators(self.DIM)
+
+    def test_marginal_identity_with_directional_operators(self):
+        # The §4.2 guard, re-run on the BUILT directional operators: the antisymmetric
+        # family must cancel so (1/m)Σ_k score = cosine, ≤1e-6.
+        m = len(self.ops)
+        for i in range(self.N):
+            for j in range(self.N):
+                cos = sum(x * y for x, y in zip(self.embs[i], self.embs[j]))
+                avg = sum(score_triple(self.embs[i], r, self.embs[j])
+                          for r in self.ops.values()) / m
+                self.assertAlmostEqual(avg, cos, delta=1e-6,
+                    msg=f"marginal broke for ({i},{j}): avg={avg} cos={cos}")
+
+    def test_every_directed_relation_is_asymmetric(self):
+        # The bug I5.1 fixes: today directed scores are exactly symmetric. Now each directed
+        # relation must have embeddings where score(i,k,j) ≠ score(j,k,i).
+        directed = [r for r in self.ops.values() if r.direction == "directed"]
+        self.assertTrue(directed)
+        for rel in directed:
+            self.assertIsNotNone(rel.antisym, f"{rel.relation_id} directed but no N_k")
+            found = False
+            for i in range(self.N):
+                for j in range(self.N):
+                    s_ij = score_triple(self.embs[i], rel, self.embs[j])
+                    s_ji = score_triple(self.embs[j], rel, self.embs[i])
+                    if abs(s_ij - s_ji) > 1e-9:
+                        found = True
+                        break
+                if found:
+                    break
+            self.assertTrue(found, f"{rel.relation_id} produced no asymmetric pair (still cosine)")
+
+    def test_operators_replayable(self):
+        # Same schema + dim → byte-identical operators (assert on the antisym tuples).
+        a = build_operators(self.DIM)
+        b = build_operators(self.DIM)
+        self.assertEqual({k: v.antisym for k, v in a.items()},
+                         {k: v.antisym for k, v in b.items()})
+        # and the family sums to zero (the marginal guarantee, asserted structurally)
+        from collections import defaultdict
+        net = defaultdict(float)
+        for rel in a.values():
+            for (x, y, c) in (rel.antisym or ()):
+                net[(x, y)] += c
+        for coord, total in net.items():
+            self.assertAlmostEqual(total, 0.0, places=12,
+                msg=f"Σ_k N_k must vanish at {coord} for exact marginal; got {total}")
+
+    def test_symmetric_relation_stays_symmetric(self):
+        # A symmetric relation must keep N_k = None and score(i,k,j) == score(j,k,i).
+        rels = {
+            "calls":   {"direction": "directed", "arg_typing": None, "dim_mask": None},
+            "contains":{"direction": "directed", "arg_typing": None, "dim_mask": None},
+            "sibling": {"direction": "symmetric", "arg_typing": None, "dim_mask": None},
+        }
+        ops = build_operators(self.DIM, relations=rels)
+        sym = ops["sibling"]
+        self.assertIsNone(sym.antisym, "symmetric relation must have no N_k")
+        for i in range(self.N):
+            for j in range(self.N):
+                self.assertAlmostEqual(
+                    score_triple(self.embs[i], sym, self.embs[j]),
+                    score_triple(self.embs[j], sym, self.embs[i]), places=12)
+
+    def test_odd_directed_count_rejected(self):
+        # An odd directed count cannot be fully-directional AND exact-marginal → loud failure.
+        rels = {"calls": {"direction": "directed", "arg_typing": None, "dim_mask": None}}
+        with self.assertRaises(ValueError):
+            build_operators(self.DIM, relations=rels)
+
+
+# ---------------------------------------------------------------------------
 # T3 — Cross-model CID idempotency (§4.4)
 # ---------------------------------------------------------------------------
 

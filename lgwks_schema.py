@@ -151,8 +151,8 @@ def _build_registry() -> dict[str, dict[str, Any]]:
             "description": "Substrate engine crawl result for URL sources",
             "output": "JSON with artifact paths, engine=substrate",
         },
-        "lgwks.schema.relations.v1": {
-            "description": "D0 relation schema: 8 directed typed-triple relations for RESCAL order-3 scoring (I5)",
+        "lgwks.schema.relations.v2": {
+            "description": "D0 relation schema: 8 directed typed-triple relations for RESCAL order-3 scoring; v2 activates directional antisymmetric operators (I5.1), marginal stays identity",
             "output": "JSON with schema, relations list",
         },
         "lgwks.score.record.v1": {

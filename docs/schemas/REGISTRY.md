@@ -139,7 +139,7 @@ side-database (the external `~/ingestion_results/*.db` stores are exactly the lo
 | `lgwks.pipeline.manifest.v1` | 1 | live | `lgwks_pipeline.py:52` |
 | `lgwks.manifest.v0` / `lgwks.intent.v0` / `lgwks.hooks.v0` / `lgwks.audit.v0` / `lgwks.gh.v0` / `lgwks.session.summary.v0` | 0 | live, research-grade | `lgwks_schema.py:66-133`, `lgwks_gh.py:82` |
 | `lgwks.intent.centroids.v1` | 1 | live (cache) | `lgwks_intent_classifier.py:68` |
-| `lgwks.inbound.v1` | 1 | **planned** (PRD; extended by **I7**) | spec only |
+| `lgwks.inbound.v1` | 1 | live (**I7**) — reflex pack: `handles[]`, `scores{}`, `budget{limit_tokens,used_tokens,truncated_count,truncated[]}` (count exact, cid list bounded ≤64), `depth_handles[{id,est_tokens,kind}]` | `lgwks_inbound.py` |
 | `lgwks.waste.ledger.v1` | 1 | **planned** (**I11**) | spec only |
 **Repurpose when:** any new capability → wrap as an actor (`ActorSpec` + `lgwks.actor.v1` envelope)
 instead of a bare function with a private dict. Actor-calls-actor is the sanctioned composition path.
@@ -166,7 +166,8 @@ emit `bot.record.v1` with a new `kind` rather than minting a new findings schema
 #### I5 deterministic scoring — landed (2026-06-10)
 | id | ver | status | defined in | validation |
 |----|-----|--------|-----------|------------|
-| `lgwks.schema.relations.v1` | 1 | **live** (I5) — D0: 8 typed-triple relations; `direction` declared, operators identity in v1 (directional Pₖ activation deferred → I5.1) | `lgwks_score.py` (`RELATIONS`) | dataclass + `lgwks_schema` |
+| `lgwks.schema.relations.v1` | 1 | superseded-by **v2** (I5) — D0: 8 typed-triple relations; operators identity, directional Pₖ deferred | `lgwks_score.py` (`RELATIONS`) | dataclass + `lgwks_schema` |
+| `lgwks.schema.relations.v2` | 2 | **live** (I5.1) — directional operators active: `R_k = P_k·diag(d_k) + N_k`, antisymmetric `N_k` paired so `Σ_k N_k = 0` ⇒ `(1/m)Σ R_k = I` exact (§4.2 proof holds) while directed relations score asymmetrically. `FactoredRelation.antisym`. | `lgwks_score.py` (`build_operators`) | dataclass + `lgwks_schema` |
 | `lgwks.score.record.v1` | 1 | **live** (I5) — RESCAL factored score + MDL conformance + content cid | `lgwks_score.py` (`ScoreRecord`) | dataclass; canonical CBOR + zstd |
 
 **v1 note:** scoring is batch/offline (INV-3, no AI in path). MDL + cid + factored-operator mechanism are active; per-relation directional `Pₖ` is identity in v1 so the §4.2 marginal-identity proof holds exactly — directional activation is I5.1.

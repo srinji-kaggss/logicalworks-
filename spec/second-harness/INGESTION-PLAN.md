@@ -134,7 +134,10 @@ LFM2-Extract fills; it does not score (scoring is I5, deterministic).
 
 ## I5 — schema scoring: ²/³ + R_k + MDL  ·  P2  ·  depends: I4
 
-**Status:** ✅ **done** (2026-06-10), PR #65. `lgwks_score.py` — factored RESCAL `R_k = P_k·diag(d_k)` (O(d), never densified), canonical-CBOR + zstd MDL, blake2b cid; `lgwks.score.record.v1` + `lgwks.schema.relations.v1` (D0). 23 tests. Cross-model cid via recursive int→float normalization. **Deferred (I5.1):** directional `P_k` is identity in v1 (marginal-identity proof holds); directional activation pending.
+**Status:** ✅ **done** (2026-06-10), PR #65. `lgwks_score.py` — factored RESCAL `R_k = P_k·diag(d_k)` (O(d), never densified), canonical-CBOR + zstd MDL, blake2b cid; `lgwks.score.record.v1` + `lgwks.schema.relations.v1` (D0). 23 tests. Cross-model cid via recursive int→float normalization.
+
+### I5.1 — directional `P_k` activation · ✅ **done** (2026-06-10, issue #69)
+Directional scoring activated via an antisymmetric operator term: `R_k = P_k·diag(d_k) + N_k`, `N_kᵀ = −N_k`, the 8 directed relations paired in sorted order so `Σ_k N_k = 0` ⇒ `(1/m)Σ_k R_k = I` **exact** (§4.2 proof untouched) while directed relations score asymmetrically. `FactoredRelation.antisym`; schema `lgwks.schema.relations.v1 → v2`. **Honest scope:** this is *structural* directionality (deterministic, replayable, breaks the cosine collapse). It is NOT yet semantic argument-typing — `arg_typing` is `None` for all relations, so there is no semantic data to derive a meaningful per-argument direction from; the asymmetry orientation is a fixed coordinate-pair convention, and paired relations are necessarily direction-coupled (the cost of exact marginal). Semantic typing is future work once `arg_typing` is populated. 28 tests (marginal preserved, every directed relation asymmetric, replayable, symmetric stays symmetric, odd-count rejected, cross-model cid unaffected).
 **Goal:** the deterministic, non-AI score — cubic schema score + MDL conformance + cid.
 **Inputs:** I4 embeddings; strict schema `S`; INGESTION-LAYER §4.2/§4.4/§4.5.
 **Formulas (implement exactly):**

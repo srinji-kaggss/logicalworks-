@@ -34,18 +34,20 @@ Ingestion packets I1–I6 + I12 are **done and merged**. The deterministic scori
 - **I6** `lgwks_rank.py` — `lgwks.rank.record.v1`: relation-weighted vs relation-blind
   centrality, σ-shifted power iteration + Rayleigh convergence, δ slop signal (PR #67).
   CLI `lgwks rank`. Closes G-06.
+- **I7** `lgwks_inbound.py` — `lgwks.inbound.v1`: RRF fusion of graph rank ⊕ vector cosine
+  rank (`RRF_K=60`), 1500-token reflex cap, deterministic truncation (bulk first, depth
+  pointers survive), zero-dangling handles. CLI `lgwks inbound run|info`. 14 tests incl
+  real-graph. Hook extension still gated on the re-registration ops action (below).
+- **I5.1** `lgwks_score.py` — directional operators activated: `R_k = P_k·diag(d_k) + N_k`,
+  antisymmetric `N_k` paired so `Σ_k N_k = 0` ⇒ marginal stays identity (§4.2 proof exact)
+  while directed relations score asymmetrically. Schema relations v1→v2 (issue #69). 28 tests.
+  **Structural** directionality only — semantic arg-typing remains future work (`arg_typing=None`).
 - **I12** graphify Leiden fix (PR #63).
 
 Gaps G-04/05/06/11/12 closed (INGESTION-LAYER §8).
 
 ## NOT built / deferred (honest — do not claim otherwise)
 
-- **I7** (#61) — consumer tail (L5 reflex pack + RRF). **Next packet.** Code dependency
-  (I6) is now satisfied. Spec posted on the issue. **Blocked only on an ops action:**
-  re-register the inbound hook `hooks/subconscious_inbound.py` against the live
-  `/Applications/logicalworks` project dir (it currently points at the dead space-named
-  `/Applications/Logical Works`). Confirm the path with the Director before relying on
-  live hook behavior.
 - **I5.1 (deferred, not yet issued)** — directional `P_k` activation. I5 ships identity
   operators (so the §4.2 marginal-identity proof holds exactly); scoring currently
   collapses to cosine. Genuine directional/embedding-coupled scoring is future work.
@@ -68,10 +70,21 @@ registry gate from the repo root, not a `.claude/` worktree (it skips `.claude` 
 
 ## Suggested next step
 
-Build **I7** (#61): RRF fusion of I6 cubic rank ⊕ vector cosine rank → token-budgeted L5
-reflex pack (`lgwks.inbound.v1` extension, 1500-token cap, deterministic truncation,
-zero-dangling handles). Spec on the issue. Resolve the hook re-registration path with the
-Director. Then consider filing I5.1 and the I8–I11 issues.
+Per build order **I7 → I5.1 → I8** (PLANS-NEXT-3.md): I7 and I5.1 both landed (session 3).
+Next is **I8** — concurrency, queue, isolation (PLANS-NEXT-3 §PACKET I8). **File the GH
+issue first** (not yet issued); note the P3→**P0** escalation trigger (before any
+multi-tenant or network exposure) explicitly in the issue body. New modules
+`lgwks_admission.py` (token-bucket admission, typed 429 + Retry-After, idempotent shed by
+cid) + `lgwks_capability.py` (capability-token tenant isolation, zero cross-tenant cid
+leak); reuse `lgwks_workercap.compute_worker_cap` for `c` and the crawler backoff for
+Retry-After jitter. `git grep -niE 'tenant|capability.?token|store/projects'` FIRST —
+repurpose > mint.
+
+**Open ops action (carried from I7):** to wire the L5 reflex pack into the live
+`UserPromptSubmit` hook, re-register `hooks/subconscious_inbound.py` against the live
+`/Applications/logicalworks` dir (it points at the dead space-named `/Applications/Logical
+Works`). Confirm the path with the Director before relying on live hook behavior. The I7
+module + CLI + tests do not depend on it.
 
 ## Doc map
 
