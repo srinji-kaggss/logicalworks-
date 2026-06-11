@@ -36,8 +36,12 @@ Ingestion packets I1–I6 + I12 are **done and merged**. The deterministic scori
   CLI `lgwks rank`. Closes G-06.
 - **I7** `lgwks_inbound.py` — `lgwks.inbound.v1`: RRF fusion of graph rank ⊕ vector cosine
   rank (`RRF_K=60`), 1500-token reflex cap, deterministic truncation (bulk first, depth
-  pointers survive), zero-dangling handles. CLI `lgwks inbound run|info`. 12 tests
-  (session 3). Hook extension still gated on the re-registration ops action (below).
+  pointers survive), zero-dangling handles. CLI `lgwks inbound run|info`. 14 tests incl
+  real-graph. Hook extension still gated on the re-registration ops action (below).
+- **I5.1** `lgwks_score.py` — directional operators activated: `R_k = P_k·diag(d_k) + N_k`,
+  antisymmetric `N_k` paired so `Σ_k N_k = 0` ⇒ marginal stays identity (§4.2 proof exact)
+  while directed relations score asymmetrically. Schema relations v1→v2 (issue #69). 28 tests.
+  **Structural** directionality only — semantic arg-typing remains future work (`arg_typing=None`).
 - **I12** graphify Leiden fix (PR #63).
 
 Gaps G-04/05/06/11/12 closed (INGESTION-LAYER §8).
@@ -66,13 +70,15 @@ registry gate from the repo root, not a `.claude/` worktree (it skips `.claude` 
 
 ## Suggested next step
 
-Per build order **I7 → I5.1 → I8** (PLANS-NEXT-3.md): I7 landed (session 3). Next is
-**I5.1** — directional `P_k` operator activation (`lgwks_score.py:73 build_operators`,
-currently all-identity → scoring collapses to cosine). **File the GH issue first**
-(not yet issued). The hard constraint: any directional `P_k` must keep the §4.2
-marginal-identity proof `(1/m)Σ_k R_k = I` to ≤1e-6 — if neither derivation (sign-flip
-involution / antisymmetric tie-break) closes cleanly, STOP AND ASK (the proof is
-load-bearing). Then I8 (queue/isolation, P3→P0 before any multi-tenant/network exposure).
+Per build order **I7 → I5.1 → I8** (PLANS-NEXT-3.md): I7 and I5.1 both landed (session 3).
+Next is **I8** — concurrency, queue, isolation (PLANS-NEXT-3 §PACKET I8). **File the GH
+issue first** (not yet issued); note the P3→**P0** escalation trigger (before any
+multi-tenant or network exposure) explicitly in the issue body. New modules
+`lgwks_admission.py` (token-bucket admission, typed 429 + Retry-After, idempotent shed by
+cid) + `lgwks_capability.py` (capability-token tenant isolation, zero cross-tenant cid
+leak); reuse `lgwks_workercap.compute_worker_cap` for `c` and the crawler backoff for
+Retry-After jitter. `git grep -niE 'tenant|capability.?token|store/projects'` FIRST —
+repurpose > mint.
 
 **Open ops action (carried from I7):** to wire the L5 reflex pack into the live
 `UserPromptSubmit` hook, re-register `hooks/subconscious_inbound.py` against the live

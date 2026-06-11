@@ -188,6 +188,16 @@ R_k = P_k · diag(d_k)        where
 *Verify:* same schema → byte-identical operators; directed relation ⇒ `score(i,k,j) ≠ score(j,k,i)`;
 marginal identity to ≤1e-6.
 
+**I5.1 refinement (implemented, issue #69) — direction via an antisymmetric term, not `P_k`.**
+A pure signed-permutation `P_k` (with `d_k=1`) provably *cannot* be both asymmetric and
+marginal-preserving: it is orthogonal, so each `P_k` adds at most `+1` to any diagonal entry,
+and `Σ_k P_k = m·I` then forces every `P_k = I` (and an orthogonal involution is symmetric).
+So directionality is supplied by an **additive antisymmetric operator**: `R_k = P_k·diag(d_k) + N_k`,
+`N_kᵀ = −N_k`. The `m` directed relations are paired so `Σ_k N_k = 0`, giving
+`(1/m)Σ_k R_k = I` **exact** (proof intact) while `R_k ≠ R_kᵀ` for each directed relation. This is
+*structural* direction (deterministic/replayable, breaks the cosine collapse); semantic
+argument-typing remains future work (all `arg_typing = None` today).
+
 ### §4.7 How the score yields optimized context (the consumer payoff)
 Context optimization = fewest load-bearing tokens, zero pollution. The scores are the deterministic
 instrument:
@@ -291,7 +301,7 @@ present or absent (proves one-way decoupling); reconstruction stress reported.
 | G-01 | crawler v2 schema (3 modality streams + fetched media) — not built; today text-only + image URLs | high |
 | G-02 | LFM2-Extract integration + GGUF runtime wiring — not built | high |
 | G-03 | Qwen3-VL-Embedding-8B runtime (MLX `jedisct1/...-mlx` or GGUF `ganeshrao/...Q8`) — not installed/wired | high |
-| G-04 | schema operators `R_k` — ✅ **CLOSED (I5, PR #65)**: factored `R_k=P_k·diag(d_k)`, O(d). Directional `P_k` identity in v1 → I5.1 | ~~high~~ |
+| G-04 | schema operators `R_k` — ✅ **CLOSED (I5, PR #65; I5.1, issue #69)**: factored `R_k=P_k·diag(d_k)+N_k`, O(d). Directional activation via antisymmetric `N_k` (Σ_k N_k=0 ⇒ marginal stays identity); schema relations v2. Structural directionality; semantic arg-typing still future | ~~high~~ |
 | G-05 | MDL compressor + `S`-trained dictionary — ✅ **CLOSED (I5, PR #65)**: canonical CBOR + zstd dict; cross-model equal-cid + separation margin tested | ~~med~~ |
 | G-06 | tensor Z-eigen centrality — ✅ **CLOSED (I6, PR #67)**: σ-shifted power iteration + Rayleigh convergence; both eval graphs converge, seed-stable | ~~med~~ |
 | G-07 | capability-token tenant isolation — not implemented (today: path separation only) | high (T0) |

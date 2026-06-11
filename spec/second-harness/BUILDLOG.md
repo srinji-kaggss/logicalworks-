@@ -232,3 +232,19 @@ Same loop: spec (PLANS-NEXT-3 §I7) → implement → hacker-harden in the Opus 
 - **DEFERRED RISK (pre-existing, not I7 — Director: log & defer):** running the FULL `tests/` dir fails collection of `tests/test_vector_record.py` (`ImportError: cannot import name 'SpaceMismatchError' from 'lgwks_vector' (unknown location)`) — cross-test import pollution shadowing `lgwks_vector` as a namespace package. `test_vector_record.py` passes alone (20) and the error reproduces with `test_inbound.py` excluded → independent of I7. **Impact:** a bare `pytest tests/` aborts at collection; per-module runs are green. **Deferred:** fix the sys.path/namespace pollution (likely an earlier-collected test inserting a dir named `lgwks_vector` onto the path) in a dedicated test-hygiene pass; not blocking I7/I5.1.
 
 **Open:** I5.1 (directional `P_k`, not yet issued — next per build order I7→I5.1→I8). I8 (queue/isolation, P3→P0 before exposure). I9–I11 not yet issued.
+
+---
+
+## 2026-06-10 (session 3 cont.) · I5.1 landed — directional `P_k` activation (issue #69)
+
+Same loop: file issue → AskUserQuestion at the proof fork → implement → harden. Built directly (no subagent).
+
+**The fork (surfaced to Director, AskUserQuestion):** the packet assumed a signed-permutation `P_k` could be made directional. It provably cannot while preserving the §4.2 marginal proof — an orthogonal `P_k` adds ≤+1 per diagonal entry, so `Σ_k P_k = m·I` forces every `P_k = I`; an orthogonal involution is symmetric. Director approved **Option 1: additive antisymmetric term** (overriding the packet's "perm/signs-only, don't touch score_triple" fence).
+
+**Landed:**
+- **I5.1 ✅** — `lgwks_score.py`: `R_k = P_k·diag(d_k) + N_k`, `N_kᵀ = −N_k`. `FactoredRelation.antisym` (tuple of `(a,b,c)` generators, O(1)/relation). `build_operators` pairs the 8 directed relations in **sorted** order, each pair sharing one coordinate slot with opposite sign (+c/−c) so `Σ_k N_k = 0` ⇒ `(1/m)Σ_k R_k = I` **exact**; `score_triple` adds `Σ c·(êᵢ[a]êⱼ[b] − êᵢ[b]êⱼ[a])`. `ANTISYM_C=1.0` pre-registered. Symmetric relations → `antisym=None`. Odd directed count → loud `ValueError` (can't be fully-directional AND exact-marginal). Schema `lgwks.schema.relations.v1 → v2` (superseded row + curated map in `lgwks_schema.py`). 28 tests (was 23): existing marginal-identity now runs the directional operators and still holds ≤1e-6; +5 new (every directed relation asymmetric, replayable `Σ N_k = 0`, symmetric stays symmetric, odd-count rejected). `lscore` 11 green. Registry gate green (100 rows).
+- **Isolation verified:** no consumer of `build_operators`/`FactoredRelation`/`score_triple` outside `lgwks_score.py`+tests; operators are not serialized/hashed into the cid (cid stays content-only) → cross-model cid unaffected.
+
+**Honest scope (do not overclaim):** this is **structural** directionality — deterministic, replayable, and it breaks the cosine collapse (the stated I5.1 goal). It is NOT semantic argument-typing: `arg_typing` is `None` for all relations, so there is no semantic data to derive a per-argument direction from; the asymmetry orientation is a fixed coordinate-pair convention and paired relations are necessarily direction-coupled (the unavoidable cost of exact marginal with a signed structure). Semantic typing is future work once `arg_typing` is populated. Recorded in INGESTION-LAYER §4.5 (refinement note), INGESTION-PLAN I5.1, §8 G-04.
+
+**Open:** I8 (queue/isolation, P3→P0 before any multi-tenant/network exposure — file & build next per order). I9–I11 not yet issued. Inbound-hook re-registration ops action still pending (from I7). Deferred risk: the `pytest tests/` collection flake (see session 3 I7 note) still open.

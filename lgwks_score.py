@@ -6,7 +6,7 @@ Batch/offline only — not hot-path.
 
 Authority: spec/second-harness/INGESTION-LAYER.md §4.2/§4.4/§4.5
 Schema:    lgwks.score.record.v1
-Relations: lgwks.schema.relations.v1
+Relations: lgwks.schema.relations.v2  (I5.1: directional antisymmetric R_k activated)
 """
 
 from __future__ import annotations
@@ -21,7 +21,7 @@ from typing import Any, Optional
 # ---------------------------------------------------------------------------
 
 SCHEMA = "lgwks.score.record.v1"
-RELATIONS_SCHEMA = "lgwks.schema.relations.v1"
+RELATIONS_SCHEMA = "lgwks.schema.relations.v2"   # v2 (I5.1): directional antisymmetric operators active
 
 # ---------------------------------------------------------------------------
 # D0 — relation schema (the pure-function source of R_k replayability)
@@ -49,17 +49,24 @@ RELATIONS: dict[str, dict[str, Any]] = {
 
 @dataclass(frozen=True)
 class FactoredRelation:
-    """R_k factored as permutation + sign + dimension mask.
+    """R_k = P_k·diag(d_k) + N_k, stored O(d).
 
-    perm=None  → identity P_k (default v1)
-    signs=None → all +1 (default v1)
-    mask=None  → all-ones d_k (default v1, DECISION §4)
+    perm=None    → identity P_k (default)
+    signs=None   → all +1 (default)
+    mask=None    → all-ones d_k (default, DECISION §4)
+    antisym=None → no antisymmetric term, N_k = 0 (symmetric relation)
+
+    antisym is a tuple of (a, b, c) generators meaning N_k[a,b] += c and N_k[b,a] -= c
+    (antisymmetric by construction). It supplies relation DIRECTION (I5.1): a non-zero N_k
+    makes R_k ≠ R_kᵀ, so score(i,k,j) ≠ score(j,k,i), while the per-relation family is built
+    so Σ_k N_k = 0 → (1/m)Σ_k R_k = I, keeping the §4.2 marginal-identity proof EXACT.
     """
     relation_id: str
     perm: Optional[tuple[int, ...]]    # P_k permutation index; None = identity
     signs: Optional[tuple[int, ...]]   # ±1 per dim (signed perm); None = all +1
     mask: Optional[tuple[bool, ...]]   # d_k bitset; None = all True
     direction: str                      # "directed" | "symmetric"
+    antisym: Optional[tuple[tuple[int, int, float], ...]] = None  # N_k generators (I5.1)
 
 
 def _invert_perm(perm: tuple[int, ...]) -> tuple[int, ...]:
@@ -70,14 +77,47 @@ def _invert_perm(perm: tuple[int, ...]) -> tuple[int, ...]:
     return tuple(inv)
 
 
+# Antisymmetric magnitude for directional operators (I5.1). PRE-REGISTERED, not tuned.
+# //why 1.0: the term is a structural direction signal, not a learned weight; on L2-normalized
+# embeddings it is a small bounded perturbation of cosine, and any positive constant gives the
+# same sign structure for score(i,k,j) − score(j,k,i). Kept at unity for replay clarity.
+ANTISYM_C: float = 1.0
+
+
 def build_operators(dim: int, *, relations: dict = RELATIONS) -> dict[str, FactoredRelation]:
     """Build one FactoredRelation per relation in the schema.
 
-    v1 defaults: identity P_k, all-ones d_k (perm=None, mask=None).
-    dim is validated; operators are dimension-agnostic at default.
+    P_k stays identity (perm/signs/mask=None). DIRECTION is supplied by an antisymmetric
+    term N_k (I5.1): directed relations are paired in sorted order, each pair sharing one
+    coordinate pair (a,b) with opposite sign (+c / −c), so Σ_k N_k = 0 and the §4.2 marginal
+    proof holds EXACTLY while every directed relation scores asymmetrically. Symmetric
+    relations get N_k = None (identity, R_k = R_kᵀ). Pure function of the schema → replayable.
+
+    Requires an EVEN number of directed relations (each needs a sign-opposite partner to keep
+    Σ N_k = 0); an odd count cannot be both fully-directional and exact-marginal → raise loudly.
     """
     if dim < 1:
         raise ValueError(f"dim must be ≥ 1, got {dim}")
+
+    directed = sorted(r for r, p in relations.items() if p["direction"] == "directed")
+    if directed and dim < 2:
+        raise ValueError(f"directional operators need dim ≥ 2 (got {dim}); a 1-D space has no antisymmetry")
+    if len(directed) % 2 != 0:
+        raise ValueError(
+            f"directional P_k requires an even number of directed relations for exact "
+            f"marginal identity (Σ_k N_k = 0); got {len(directed)}: {directed}"
+        )
+
+    # Assign each consecutive sorted pair its own coordinate pair (cycled if dim is small).
+    slots = dim // 2
+    antisym_for: dict[str, tuple[tuple[int, int, float], ...]] = {}
+    for pair_idx in range(len(directed) // 2):
+        slot = pair_idx % slots
+        a, b = 2 * slot, 2 * slot + 1
+        first, second = directed[2 * pair_idx], directed[2 * pair_idx + 1]
+        antisym_for[first] = ((a, b, +ANTISYM_C),)
+        antisym_for[second] = ((a, b, -ANTISYM_C),)
+
     return {
         rel_id: FactoredRelation(
             relation_id=rel_id,
@@ -85,6 +125,7 @@ def build_operators(dim: int, *, relations: dict = RELATIONS) -> dict[str, Facto
             signs=None,
             mask=None,
             direction=props["direction"],
+            antisym=antisym_for.get(rel_id),
         )
         for rel_id, props in relations.items()
     }
@@ -115,6 +156,12 @@ def score_triple(
         raise ValueError(f"signs length {len(rel.signs)} != dim {d} for relation {rel.relation_id!r}")
     if rel.mask is not None and len(rel.mask) != d:
         raise ValueError(f"mask length {len(rel.mask)} != dim {d} for relation {rel.relation_id!r}")
+    if rel.antisym is not None:
+        for a, b, _c in rel.antisym:
+            if not (0 <= a < d and 0 <= b < d):
+                raise ValueError(
+                    f"antisym coords ({a},{b}) out of range for dim {d}, relation {rel.relation_id!r}"
+                )
 
     # Compute P_k^T êᵢ
     if rel.perm is not None:
@@ -132,7 +179,16 @@ def score_triple(
     else:
         rhs = list(ej)
 
-    return sum(l * r for l, r in zip(lhs, rhs))
+    score = sum(l * r for l, r in zip(lhs, rhs))
+
+    # Antisymmetric direction term N_k (I5.1): êᵢᵀ N_k êⱼ = Σ c·(êᵢ[a]êⱼ[b] − êᵢ[b]êⱼ[a]).
+    # This is what makes score(i,k,j) ≠ score(j,k,i) for directed relations; the family's
+    # generators cancel in the marginal (Σ_k N_k = 0), so cosine is reproduced exactly.
+    if rel.antisym is not None:
+        for a, b, c in rel.antisym:
+            score += c * (ei[a] * ej[b] - ei[b] * ej[a])
+
+    return score
 
 
 # ---------------------------------------------------------------------------
@@ -281,7 +337,7 @@ def _cmd_relations(args) -> int:
         print(_json.dumps({"schema": RELATIONS_SCHEMA, "relations": items}, indent=2))
     else:
         print(f"  {len(items)} relations  [{RELATIONS_SCHEMA}]")
-        print("  note: v1 operators are identity; direction is declared, not yet active (I5.1)")
+        print("  note: v2 operators are directional (antisymmetric N_k); marginal stays identity (I5.1)")
         for r in items:
             print(f"    {r['relation']:<20} {r['direction']}")
     return 0

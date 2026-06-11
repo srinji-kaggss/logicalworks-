@@ -166,7 +166,8 @@ emit `bot.record.v1` with a new `kind` rather than minting a new findings schema
 #### I5 deterministic scoring — landed (2026-06-10)
 | id | ver | status | defined in | validation |
 |----|-----|--------|-----------|------------|
-| `lgwks.schema.relations.v1` | 1 | **live** (I5) — D0: 8 typed-triple relations; `direction` declared, operators identity in v1 (directional Pₖ activation deferred → I5.1) | `lgwks_score.py` (`RELATIONS`) | dataclass + `lgwks_schema` |
+| `lgwks.schema.relations.v1` | 1 | superseded-by **v2** (I5) — D0: 8 typed-triple relations; operators identity, directional Pₖ deferred | `lgwks_score.py` (`RELATIONS`) | dataclass + `lgwks_schema` |
+| `lgwks.schema.relations.v2` | 2 | **live** (I5.1) — directional operators active: `R_k = P_k·diag(d_k) + N_k`, antisymmetric `N_k` paired so `Σ_k N_k = 0` ⇒ `(1/m)Σ R_k = I` exact (§4.2 proof holds) while directed relations score asymmetrically. `FactoredRelation.antisym`. | `lgwks_score.py` (`build_operators`) | dataclass + `lgwks_schema` |
 | `lgwks.score.record.v1` | 1 | **live** (I5) — RESCAL factored score + MDL conformance + content cid | `lgwks_score.py` (`ScoreRecord`) | dataclass; canonical CBOR + zstd |
 
 **v1 note:** scoring is batch/offline (INV-3, no AI in path). MDL + cid + factored-operator mechanism are active; per-relation directional `Pₖ` is identity in v1 so the §4.2 marginal-identity proof holds exactly — directional activation is I5.1.
