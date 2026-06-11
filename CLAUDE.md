@@ -29,10 +29,13 @@ Build-state truth lives in `spec/second-harness/BUILDLOG*.md`, not in spec prose
 
 ## Startup read order
 1. This file.
-2. `governance/README.md` — governance map.
-3. `spec/second-harness/HANDOFF.md` + `INGESTION-PLAN.md` — current work packets.
-4. `docs/ARCHITECTURE.md` — system shape.
-5. Assigned issue(s) — GitHub Issues are the work tracker.
+2. `docs/NAVMAP.md` — **generated module atlas (132 modules / ~46k LOC): what every file is, its
+   subsystem, who calls it, and its staleness.** Read/query this BEFORE grepping the code surface.
+   Machine-readable + queryable: `docs/navmap.json` (`lgwks.navmap.v1`). Refresh: `python3 scripts/gen_navmap.py`.
+3. `governance/README.md` — governance map.
+4. `spec/second-harness/HANDOFF.md` + `INGESTION-PLAN.md` — current work packets.
+5. `docs/ARCHITECTURE.md` — system shape.
+6. Assigned issue(s) — GitHub Issues are the work tracker.
 
 ## Search discipline (verify before assert)
 Partial search is the dominant agent failure mode. Before claiming a file,

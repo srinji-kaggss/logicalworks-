@@ -144,6 +144,7 @@ side-database (the external `~/ingestion_results/*.db` stores are exactly the lo
 | `lgwks.admission.v1` | 1 | **live** (**I8**) — token-bucket admission result envelope: `cid`, `status` (`admitted`/`rejected_429`), `reason`, `retry_after` | `lgwks_admission.py` (`Admitted`, `Rejected429`) |
 | `lgwks.capability.v1` | 1 | **live** (**I8**) — capability-token tenant isolation: `tenant`, `nonce`, `sig` (hmac-sha256) | `lgwks_capability.py` (`CapabilityToken`) |
 | `lgwks.crdt.state.v1` | 1 | **live** (**I9**) — CRDT state envelope: `type` (`gset`/`orset`/`lww`) + type-specific fields; SEC proof in `tests/test_crdt.py` | `lgwks_crdt.py`; JSON-Schema: `docs/schemas/lgwks.crdt.state.v1.json` |
+| `lgwks.navmap.v1` | 1 | **live** — generated module atlas for AI navigation: `totals`, `index{by_subsystem,by_staleness,by_issue,by_packet}`, `modules{<name>:{purpose,loc,deps,used_by,subsystem,staleness,integration,owning_issue,packet,last_commit_days,has_cli,has_tests}}`. Regenerate via `scripts/gen_navmap.py`; read `docs/NAVMAP.md` first | `scripts/gen_navmap.py`; output `docs/navmap.json`; JSON-Schema: `docs/schemas/lgwks.navmap.v1.json` |
 **Repurpose when:** any new capability → wrap as an actor (`ActorSpec` + `lgwks.actor.v1` envelope)
 instead of a bare function with a private dict. Actor-calls-actor is the sanctioned composition path.
 
