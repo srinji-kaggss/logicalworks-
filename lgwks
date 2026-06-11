@@ -1499,6 +1499,10 @@ def build_parser() -> argparse.ArgumentParser:
     import lgwks_waste
     lgwks_waste.add_parser(sub)
 
+    # map — U1 capability map: rank lgwks verbs by relevance to an intent
+    import lgwks_map
+    lgwks_map.add_parser(sub)
+
     # route — deterministic intent router (tiny-bert + heuristic fallback)
     import lgwks_intent_router
     lgwks_intent_router.add_parser(sub)

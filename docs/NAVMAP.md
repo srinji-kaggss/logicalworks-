@@ -1,6 +1,6 @@
 # NAVMAP — lgwks module atlas (generated; do not hand-edit)
 
-> `scripts/gen_navmap.py` from source — re-run to refresh. **124 modules · 44,826 LOC.** Read/query this FIRST. Strict machine-readable contract: `docs/navmap.json` (`lgwks.navmap.v1`).
+> `scripts/gen_navmap.py` from source — re-run to refresh. **124 modules · 45,028 LOC.** Read/query this FIRST. Strict machine-readable contract: `docs/navmap.json` (`lgwks.navmap.v1`).
 
 **Staleness:** `active` 123 · `orphan` 1
 
@@ -40,13 +40,13 @@ Row legend: `cli` `test` · `←N` imported by N · `→N` imports N · `Nd` day
 | module | purpose | loc | stale | rel |
 |---|---|---|---|---|
 | `lgwks_auth_runtime` | read-only auth resolver for crawler fetches. | 200 | active | ←3 2d |
-| `lgwks_browser` | bot-resilient, JS-rendering fetch via a real browser (playwright). The eyes for pages | 571 | active | test ←8 →2 1d |
+| `lgwks_browser` | bot-resilient, JS-rendering fetch via a real browser (playwright). The eyes for pages | 571 | active | test ←8 →2 2d |
 | `lgwks_crawl` | single-page fetch shim: delegates to lgwks_substrate.build_run(max_pages=1). | 204 | active | cli test ←2 →4 2d |
 | `lgwks_expression` | - lgwks-expression/1 parser and resolver. | 768 | active | ←1 →1 2d |
 | `lgwks_files` | the `extract` and `convert` verbs: the read-anything port made into CLI surface. | 62 | active | ←2 →1 2d |
 | `lgwks_geoexpr` | deterministic geometric-CLI compiler (SPEC-geometric-cli-translator-v1). | 388 | active | cli ←3 →4 2d |
 | `lgwks_html` | robust, deterministic HTML-to-Markdown and semantic link/table parser. | 318 | active | test ←4 →1 2d |
-| `lgwks_ingest` | the advanced web-crawler workflow, as ONE function an AI agent runs. | 338 | orphan | →8 1d |
+| `lgwks_ingest` | the advanced web-crawler workflow, as ONE function an AI agent runs. | 338 | orphan | →8 2d |
 | `lgwks_preview` | the safe sibling of `lgwks x`. Same brace math, no execution, human rendering. | 214 | active | cli ←1 →3 2d |
 | `lgwks_public` | open-license public source layer. | 183 | active | cli ←2 2d |
 | `lgwks_search` | the missing primitive: a zero-key, free web + news search provider. | 522 | active | test ←3 →3 2d |
@@ -92,7 +92,7 @@ Row legend: `cli` `test` · `←N` imported by N · `→N` imports N · `Nd` day
 | `lgwks_repo` | repo lifecycle commands: audit, recover, cleanup, merge, handoff, graph. | 740 | active | cli test ←5 →4 2d |
 | `lgwks_review` | graph-aware, spec-bound code review. | 665 | active | cli test ←3 →9 2d |
 
-## Harness / daemon / orchestration  ·  23 mod · 8,061 LOC
+## Harness / daemon / orchestration  ·  23 mod · 8,075 LOC
 
 | module | purpose | loc | stale | rel |
 |---|---|---|---|---|
@@ -104,7 +104,7 @@ Row legend: `cli` `test` · `←N` imported by N · `→N` imports N · `Nd` day
 | `lgwks_do` | unified orchestrator: code, research, govern, cleanup, ship. | 512 | active | cli ←2 →6 2d |
 | `lgwks_ground` | fused live grounding for the research loop (#9 / harness layer). | 165 | active | ←2 →4 2d |
 | `lgwks_hooks` | audit-first hook system for lgwks. (hardened v2) | 896 | active | cli test ←1 2d |
-| `lgwks_map` | U1 Capability Map (second-harness PRD §12). | 90 | active | ←1 1d |
+| `lgwks_map` | U1 Capability Map (second-harness PRD §12). | 104 | active | cli ←2 1d |
 | `lgwks_portal` | deterministic portal packets for coding-agent re-entry. | 276 | active | cli test ←3 →1 2d |
 | `lgwks_project` | one-prompt project orchestrator front door (re-export shim). | 122 | active | cli ←6 →5 2d |
 | `lgwks_project_deploy` | `lgwks project deploy` verb. | 564 | active | ←3 →7 2d |
@@ -151,14 +151,14 @@ Row legend: `cli` `test` · `←N` imported by N · `→N` imports N · `Nd` day
 | `lgwks_verify` | the Verifier oracle (spec-01), hardened with provenance tracking. | 253 | active | test ←5 2d |
 | `scripts.check_schema_registry` | Registry conformance gate (governance/README.md + docs/schemas/REGISTRY.md rule 4). | 71 | active | ←4 1d |
 
-## CLI / home / membrane surface  ·  5 mod · 3,345 LOC
+## CLI / home / membrane surface  ·  5 mod · 3,533 LOC
 
 | module | purpose | loc | stale | rel |
 |---|---|---|---|---|
 | `lgwks_foundation` | T3 structured extraction via Apple Foundation Models (macOS 26+, on-device). | 200 | active | cli ←3 2d |
 | `lgwks_gh` | GitHub surface: issues, PRs, state maps, hardening, deterministic "what's next". | 880 | active | cli test ←1 →1 2d |
 | `lgwks_home` | the launcher. Type `lgwks` (bare) and the whole thing pops up. | 1043 | active | test ←4 →8 0d |
-| `lgwks_manifest` | the machine-first contract. `lgwks manifest` → one JSON blob an AGENT reads instead | 1105 | active | ←6 →4 2d |
+| `lgwks_manifest` | the machine-first contract. `lgwks manifest` → one JSON blob an AGENT reads instead | 1293 | active | ←6 →4 2d |
 | `lgwks_ui` | our own terminal visual language. Deliberately NOT Claude Code. | 117 | active | ←18 2d |
 
 ## Substrate / storage / schema  ·  15 mod · 3,837 LOC

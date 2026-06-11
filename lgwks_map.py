@@ -81,6 +81,20 @@ def map_intent(intent: str, *, top: int = 8) -> dict[str, Any]:
     }
 
 
+def _cmd_map(args) -> int:
+    result = map_intent(args.intent, top=args.top)
+    print(json.dumps(result, indent=2))
+    return 0
+
+
+def add_parser(sub) -> None:
+    p = sub.add_parser("map", help="rank lgwks verbs by relevance to an intent (U1 capability map)")
+    p.add_argument("intent", help="natural-language intent string")
+    p.add_argument("--top", type=int, default=8, help="number of results (default 8)")
+    p.add_argument("--json", action="store_true", help="structured output (default; always JSON)")
+    p.set_defaults(func=_cmd_map)
+
+
 if __name__ == "__main__":
     import sys
     if len(sys.argv) < 2:
