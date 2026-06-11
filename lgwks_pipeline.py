@@ -1178,6 +1178,17 @@ def run_pipeline(args: argparse.Namespace) -> dict[str, Any]:
         file=sys.stderr,
     )
 
+    # ── Stage 1.5: CRDT node tracking (I9) ───────────────────────────────────
+    import lgwks_crdt as _crdt
+    _tenant = getattr(args, "tenant", "world")
+    world_nodes = _crdt.GSet()
+    tenant_edges = _crdt.ORSet()
+    for _c in all_chunks:
+        world_nodes = world_nodes.add(_c.chunk_id)
+        if _c.source_id:
+            tenant_edges = tenant_edges.add(_c.chunk_id, tag=f"{_tenant}:{_c.chunk_id[:8]}")
+    print(f"[stage 1.5] crdt world_nodes={len(world_nodes.value())} tenant_edges={len(tenant_edges.value())}", file=sys.stderr)
+
     # ── Stage 2: Qualify ──────────────────────────────────────────────────────
     avg_fact = sum(c.fact_score for c in all_chunks) / max(len(all_chunks), 1)
     print(f"[stage 2] avg_fact_score={avg_fact:.3f}", file=sys.stderr)
@@ -1313,9 +1324,52 @@ def run_pipeline(args: argparse.Namespace) -> dict[str, Any]:
         if research_summary:
             print(f"[stage 11] research done: {research_summary}", file=sys.stderr)
 
+    # ── Stage 12: Waste ledger (I11, opt-in via LGWKS_TRANSCRIPT_PATH) ──────────
+    waste_result: dict[str, Any] | None = None
+    _transcript_path = os.environ.get("LGWKS_TRANSCRIPT_PATH", "")
+    if _transcript_path:
+        try:
+            import lgwks_waste as _waste
+            _inbound_pack = {
+                "schema": "lgwks.inbound.v1",
+                "handles": [r.chunk.chunk_id for r in ranked],
+                "depth_handles": [
+                    {"id": r.chunk.chunk_id, "est_tokens": math.ceil(len(r.chunk.text) / 4)}
+                    for r in ranked
+                ],
+                "budget": {
+                    "used_tokens": sum(math.ceil(len(r.chunk.text) / 4) for r in ranked),
+                    "truncated": [],
+                },
+            }
+            _ledger = _waste.build_ledger([_inbound_pack], _transcript_path)
+            _waste.persist_ledger(_ledger)
+            _rate = _waste.waste_rate(_ledger)
+            _worst = _waste.worst_item(_ledger)
+            waste_result = {
+                "waste_rate": _rate,
+                "tokens_injected": _ledger["totals"]["tokens_injected"],
+                "tokens_used": _ledger["totals"]["tokens_used"],
+                "worst_cid": _worst["cid"] if _worst else None,
+            }
+            if _rate > _waste.SUGGEST_CUT_THRESHOLD:
+                warnings.append(f"waste_rate_high:{_rate:.3f}")
+            print(f"[stage 12] waste_rate={_rate:.3f}", file=sys.stderr)
+        except Exception as _exc:
+            waste_result = {"error": str(_exc)}
+            print(f"[stage 12] waste ledger error: {_exc}", file=sys.stderr)
+
     # ── Write artifacts ───────────────────────────────────────────────────────
     (out_dir / "pack.json").write_text(
         json.dumps(pack, indent=2, ensure_ascii=False), encoding="utf-8"
+    )
+
+    _crdt_state = {
+        "world_nodes": _crdt.serialise(world_nodes),
+        "tenant_edges": _crdt.serialise(tenant_edges),
+    }
+    (out_dir / "crdt_state.json").write_text(
+        json.dumps(_crdt_state, indent=2, ensure_ascii=False), encoding="utf-8"
     )
 
     manifest: dict[str, Any] = {
@@ -1337,15 +1391,19 @@ def run_pipeline(args: argparse.Namespace) -> dict[str, Any]:
         "coherence_score": coherence,
         "providers_used": providers_used,
         "parameters": _parameter_snapshot(),
+        "crdt_state": _crdt_state,
         "artifacts": {
             "pack": str(out_dir / "pack.json"),
             "ranked_views": str(out_dir / "ranked_views.jsonl"),
+            "crdt_state": str(out_dir / "crdt_state.json"),
             "manifest": str(out_dir / "manifest.json"),
         },
         "warnings": warnings,
     }
     if research_summary is not None:
         manifest["research"] = research_summary
+    if waste_result is not None:
+        manifest["waste"] = waste_result
 
     (out_dir / "manifest.json").write_text(
         json.dumps(manifest, indent=2, ensure_ascii=False), encoding="utf-8"

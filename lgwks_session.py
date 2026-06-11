@@ -292,7 +292,53 @@ def session_end(repo: Path, note: str = "") -> dict[str, Any]:
     history = _shell_history_last_n(50)
     summary = _summarize_activity(repo, activity, history)
     _write_marker(repo, "end", note)
+    transcript_path = os.environ.get("LGWKS_TRANSCRIPT_PATH", "")
+    if transcript_path:
+        _maybe_append_waste(repo, summary, transcript_path)
     return summary
+
+
+def _maybe_append_waste(repo: Path, summary: dict[str, Any], transcript_path: str) -> None:
+    """Append waste metrics to summary dict using the most recent pipeline pack."""
+    pipeline_store = repo / "store" / "pipeline"
+    if not pipeline_store.exists():
+        return
+    packs = sorted(pipeline_store.glob("*/pack.json"), key=lambda p: p.stat().st_mtime)
+    if not packs:
+        return
+    latest_pack = packs[-1]
+    try:
+        import math as _math
+        import lgwks_waste as _waste
+        with open(latest_pack, encoding="utf-8") as fh:
+            raw = json.load(fh)
+        chunks = raw.get("ranked_chunks", [])
+        if not chunks:
+            return
+        inbound_pack = {
+            "schema": "lgwks.inbound.v1",
+            "handles": [c["chunk_id"] for c in chunks],
+            "depth_handles": [
+                {"id": c["chunk_id"], "est_tokens": _math.ceil(len(c.get("text", "")) / 4)}
+                for c in chunks
+            ],
+            "budget": {
+                "used_tokens": sum(_math.ceil(len(c.get("text", "")) / 4) for c in chunks),
+                "truncated": [],
+            },
+        }
+        ledger = _waste.build_ledger([inbound_pack], transcript_path)
+        _waste.persist_ledger(ledger)
+        worst = _waste.worst_item(ledger)
+        summary["waste"] = {
+            "waste_rate": _waste.waste_rate(ledger),
+            "tokens_injected": ledger["totals"]["tokens_injected"],
+            "tokens_used": ledger["totals"]["tokens_used"],
+            "worst_cid": worst["cid"] if worst else None,
+            "pack_source": str(latest_pack),
+        }
+    except Exception as exc:
+        summary["waste"] = {"error": str(exc)}
 
 
 def session_summary(repo: Path, n_commits: int = 20) -> dict[str, Any]:
