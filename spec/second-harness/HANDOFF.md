@@ -1,8 +1,8 @@
-# Handoff — lgwks ingestion layer · 2026-06-11 (session 7, post PR #79)
+# Handoff — lgwks subconscious build · 2026-06-11 (session 8, main @ 8353036)
 
-> Refreshed session 7: I8–I11 fully closed (PR #79); issues #72–#75 all closed. **The I-series
-> (I1–I12) is fully landed.** No open ingestion issues remain. The dated "Current state" sections
-> below are append-only history — the **latest** state is the session-7 block at the bottom.
+> Refreshed session 8: I-series fully landed (session 7). U1 CLI wired + U6 engine built.
+> **PRD §13 first slice is 2/3 done: U1 ✅ U6 ✅ U7-minimal pending.** No open GH issues.
+> The dated "Current state" sections below are append-only history — the **latest** state is the session-8 block at the bottom.
 
 You are the next agent on the lgwks rebuild. Read this fully before acting. Written
 AI-for-AI; receipts, not essays. Authority ladder: `/CLAUDE.md` → `governance/README.md`
@@ -170,10 +170,39 @@ module + CLI + tests do not depend on it.
 
 **Next:** no open ingestion issues. Remaining deferred surfaces: crypto §1-INV enforcement, per-tenant durable queue, promotion audit, network/MCP (all in ARCH-two-db-multitenant.md + SCOPE-DEFERRED.md). The P3→P0 trigger for `lgwks_admission` fires before any multi-tenant or network exposure. The hook re-registration ops action (subconscious_inbound.py → live `/Applications/logicalworks` path) is still pending — confirm path with Director before relying on live hook behavior.
 
+## Session 8 state (2026-06-11, main @ 8353036)
+
+**PRD §13 first slice: 2/3 done.**
+
+| unit | status | module | commit |
+|---|---|---|---|
+| U1 Capability Map | ✅ CLI wired + all verbs covered | `lgwks_map.py` — `add_parser` + 64 intent strings filled | 0b8665d |
+| U6 Subconscious Engine | ✅ standalone green | `lgwks_engine.py` — `lgwks.engine.schema.v1` | 8353036 |
+| U7 Inbound hook | **next** | upgrade `hooks/subconscious_inbound.py` to call `run_engine()` | — |
+
+**What U7-minimal requires (do not hook until Director confirms):**
+1. Replace the `lgwks_map.map_intent()` call in `hooks/subconscious_inbound.py` with `lgwks_engine.run_engine(prompt)`.
+2. Format `additionalContext` from the full §6 schema (C/G/P + selections + flags), not just the verb list.
+3. Confirm the hook path is registered against the live `/Applications/logicalworks` dir (not the dead `/Applications/Logical Works` path).
+4. Test standalone: pipe a JSON prompt payload to `python3 hooks/subconscious_inbound.py` and verify `additionalContext` contains the §6 schema.
+5. Only then re-register with `lgwks hooks install`.
+
+**Codebase shape (session 8):**
+- 125 modules, 45,246 LOC, 0 staling (NAVMAP regenerated)
+- archive/: 8 modules parked (lgwks_actor, lgwks_algorithms, lgwks_diff, lgwks_had, lgwks_local_llm, lgwks_math, lgwks_monitor, lgwks_sast)
+- 63 CLI verbs, all mapped to a home domain (no-Other invariant holds)
+- Governance gate: 97/97 schema IDs registered
+
+**open ops action (carried from I7):** re-register `hooks/subconscious_inbound.py` against the live `/Applications/logicalworks` dir — confirm path with Director before wiring U7.
+
+**Parallel tracks (do not block U7):** U2 (Actor contract), U3 (World-Graph query), U4 (BERT runtime), U5 (Transcript Cortex) all run in parallel per PRD §12 and upgrade U6 once landed. PRD §13 says: U1 + U7-minimal first (deterministic signals), BERT upgrades the `attention` field after.
+
 ## Doc map
 
-- `INGESTION-PLAN.md` — per-packet contracts/status (rung 1 for the data layer).
+- `spec/second-harness/PRD.md` — authoritative end-state. §12 unit table. §13 first slice.
+- `INGESTION-PLAN.md` — per-packet contracts/status (rung 1 for the data layer, all done).
 - `INGESTION-LAYER.md` — architecture + proven math (§4 scoring, §7 consumer tail) + §8 gap log.
 - `BUILDLOG.md` — append-only build-state truth.
 - `docs/schemas/REGISTRY.md` — every cross-module contract; check before minting.
+- `docs/NAVMAP.md` + `docs/navmap.json` — generated module atlas (125 modules); refresh with `python3 scripts/gen_navmap.py`.
 - `prd/PRD-04-context-economy.md` — reflex-cap + RRF authority for I7.

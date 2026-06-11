@@ -415,3 +415,63 @@ WHERE (tenant = ? OR tenant = 'world') [AND space_id = ?]
 **Registry gate:** no new schemas. `WORLD_TENANT` constant is a module-level string, not a schema payload.
 
 **Honest scope (do not overclaim):** this is one WHERE clause. Cryptographic §1-INV enforcement (capability-token crypto, per-tenant durable queue, admission, CRDT deployment on the live store, promotion audit) remains deferred per ARCH-two-db-multitenant.md + SCOPE-DEFERRED.md. `lgwks_admission.py` stays parked for the durable-queue future. `lgwks_capability.guard()` has its first conceptual home (token.tenant → query_for_tenant) but the crypto wiring is not in scope here.
+
+---
+
+## 2026-06-11 (session 8) · U1 CLI wiring + U6 Subconscious Engine (commits 0b8665d, 8353036)
+
+### U1 — `lgwks map` wired into CLI dispatcher (commit 0b8665d)
+
+**Problem:** `lgwks_map.py` had `map_intent()` working but no `add_parser()` and was not registered in the dispatcher. `lgwks map "<intent>"` gave `invalid choice: 'map'`. Also 64 of 188 verbs in `lgwks_manifest._VERB_META` had empty intent strings (34% no-metadata) — made capability map scoring useless for those verbs.
+
+**Fix:**
+- Added `add_parser()` + `_cmd_map()` + `--json` flag to `lgwks_map.py`
+- Registered `lgwks_map` in dispatcher (after `lgwks_waste` block)
+- Filled all 64 missing intent strings in `lgwks_manifest._VERB_META`
+- `map` already in `_DOMAINS["Subconscious"]` — no-Other invariant holds (62 verbs)
+
+**T1–T5 from issue #80 all pass (issue closed):**
+- T1: ranked output with scores (36 matches for SQL injection query)
+- T2: zero diff — deterministic
+- T3: 0.6s warm — under 1s
+- T4: valid JSON (7 keys)
+- T5: graceful empty on nonsense prompt
+
+### U6 — `lgwks_engine.py` — Subconscious Engine deterministic first slice (commit 8353036)
+
+**Goal (PRD §13 first slice):** capability map + world-graph retrieval + deterministic C/G/P — no BERT. Proves the subconscious engine produces the §6 schema standalone before the hook (U7) is wired.
+
+**`lgwks_engine.run_engine(prompt, *, repo, top, db_path)` → `lgwks.engine.schema.v1`:**
+
+| field | computation |
+|---|---|
+| `attention` | `null` — BERT placeholder (U4/U5 upgrade path) |
+| `retrieval` | `entity_graph.resolve_nodes(token)` per query token — graceful if DB absent |
+| `last_state` | most recent session marker from `~/.config/lgwks/session-markers.jsonl` |
+| `insights.scores.coverage_C` | `cap_coverage + 0.3 * graph_token_coverage` (blended, ≤1.0) |
+| `insights.scores.gap_G` | `1 − C` (BERT replaces with weighted unverified-claim sum in U5) |
+| `insights.scores.confidence_P` | `0.30 + 0.58 * C * (1 − 0.2 * G)` — bounded [0.30, 0.88], never overconfident |
+| `insights.selections` | top-`top` verbs from U1 with `{verb, intent, score}` |
+| `insights.flags` | `unverified_claim` (hedge patterns), `intent_drift` (multi-intent patterns) — deterministic regex |
+| `pathways` | first 3 verb names from selections |
+
+**Non-generative by construction (INV-3). Fail-silent on any sub-component (INV-6).**
+
+**10 tests green (`tests/test_engine.py`):**
+- T1: required keys + types (schema, attention, retrieval, last_state, insights, pathways)
+- T2: deterministic — byte-identical JSON across two calls
+- T3: <1s warm
+- T4: graceful with no entity graph DB — empty retrieval, valid scores
+- T5: unknown prompt — no crash, empty selections OK
+- T6a: `unverified_claim` flag fires on hedge language
+- T6b: `intent_drift` flag fires on multi-intent prompt
+- T7: C ∈ [0,1], G ∈ [0,1], P ∈ [0.30, 0.90]
+- T8: `pathways` = first 3 selection verbs
+
+**Wiring:** dispatcher (after `map`), `_DOMAINS["Subconscious"]`, `lgwks_manifest._VERB_META`
+
+**Registry:** `lgwks.map.v1` + `lgwks.engine.schema.v1` rows added to REGISTRY.md. Governance gate: 97/97 schema IDs registered.
+
+**NAVMAP:** 125 modules (was 124), `lgwks_engine` active, 0 staling.
+
+**What's next:** U7-minimal — upgrade `hooks/subconscious_inbound.py` to call `lgwks_engine.run_engine()` instead of `lgwks_map.map_intent()`. Closes the first working subconscious loop (prompt → hook → §6 schema in Opus context). Director confirmed: get standalone working first, then hook. Standalone is green.
