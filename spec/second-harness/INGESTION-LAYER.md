@@ -304,13 +304,13 @@ present or absent (proves one-way decoupling); reconstruction stress reported.
 | G-04 | schema operators `R_k` — ✅ **CLOSED (I5, PR #65; I5.1, issue #69)**: factored `R_k=P_k·diag(d_k)+N_k`, O(d). Directional activation via antisymmetric `N_k` (Σ_k N_k=0 ⇒ marginal stays identity); schema relations v2. Structural directionality; semantic arg-typing still future | ~~high~~ |
 | G-05 | MDL compressor + `S`-trained dictionary — ✅ **CLOSED (I5, PR #65)**: canonical CBOR + zstd dict; cross-model equal-cid + separation margin tested | ~~med~~ |
 | G-06 | tensor Z-eigen centrality — ✅ **CLOSED (I6, PR #67)**: σ-shifted power iteration + Rayleigh convergence; both eval graphs converge, seed-stable | ~~med~~ |
-| G-07 | capability-token tenant isolation — not implemented (today: path separation only) | high (T0) |
-| G-08 | CRDT layer (G-Set/OR-Set + cognition-clock) — not implemented | med |
-| G-09 | queue/admission (token bucket, 429 path, Q_max) — not implemented; engine is sequential per run | high |
+| G-07 | capability-token tenant isolation — ⚠ **boilerplate landed (I8, PR #76), NOT wired**: `lgwks_capability.py` (`guard`/`make_tenant_filter`, hmac-sha256 token) exists + tested, but the live store reads (`lgwks_vector.get_record`/`query_by_source`) do not yet filter on `tenant`. Wiring + live-store 10⁴ isolation proof specced in PLANS-NEXT-5.md (Gap A). MUST close before any multi-tenant/network exposure | high (T0) |
+| G-08 | CRDT layer (G-Set/OR-Set + cognition-clock) — ⚠ **boilerplate landed (I9, PR #76)**: `lgwks_crdt.py` (G-Set/OR-Set/LWW, cognition-chain clock, SEC convergence over 8 permutations) exists + tested green. Issue #73 — nearest to done; needs BUILDLOG byte-identical-convergence proof + close | med |
+| G-09 | queue/admission (token bucket, 429 path, Q_max) — ⚠ **boilerplate landed (I8, PR #76)**: `lgwks_admission.py` (`TokenBucket`/`AdmissionQueue`/`admission_decision`, idempotent cid shed) exists + tested. Sustained-load λ-sweep with zero-5xx proof still pending (PLANS-NEXT-5.md Gap B); engine still sequential per run | high |
 | G-10 | audio transcribe lane — deferred | low |
 | G-11 | embeddings stored as JSON text — ✅ **CLOSED (I1/I4)**: float32 binary BLOB store, `migrate_json_embeddings()` | ~~med~~ |
 | G-12 | graphify Leiden→Louvain fallback on py3.14 — ✅ **CLOSED (I12, PR #63)**: `LeidenUnavailableError`, no silent substitution | ~~med~~ |
-| G-13 | waste ledger (PRD-04 §04-c) — the *only* proof the score optimizes context; injected-but-unused rate per item — unbuilt | high |
+| G-13 | waste ledger (PRD-04 §04-c) — the *only* proof the score optimizes context; injected-but-unused rate per item — ⚠ **boilerplate landed (I11, PR #76)**: `lgwks_waste.py` (`build_ledger`/`waste_rate`/`worst_item`, `lgwks.waste.ledger.v1` live) exists + tested. Issue #75 — needs daemon-loop wiring + live transcript path (`LGWKS_TRANSCRIPT_PATH`, confirm with Director) to measure a real session | high |
 
 Gaps should also be appended to [docs/os-framework-architectural-gaps.json](../../docs/os-framework-architectural-gaps.json).
 

@@ -310,3 +310,20 @@ Same loop: file issue → AskUserQuestion at the proof fork → implement → ha
 **Registry gate:** green — 95 ids / 103 rows (unchanged; no new schemas introduced in this session).
 
 **Test count:** 44 passed / 12 skipped (numpy-gated I10 tests skip cleanly) across the four new test files. All non-numpy tests green.
+
+---
+
+## 2026-06-11 (session 6) · Post-merge planning — I8 P3→P0 hardening specced (branch: claude/post-merge-planning-fpzmu8)
+
+**Build-state summary:** PR #76 merged the I8–I11 boilerplate to main (@ 6c2fdac). GH issues #72–#75 filed and open. No code change this session — planning + spec + doc hygiene only. Registry gate re-verified green (95 ids / 103 rows). The I-series (I1–I12) is the entire active backlog; there is no I13.
+
+**Specced:** `spec/second-harness/PLANS-NEXT-5.md` — the I8 (#72) hardening contract, the gap between "boilerplate green" and the issue's `Done =` line. Three falsifiable gaps, split NOW-safe vs exposure-gated:
+- **Gap A (NOW, load-bearing):** the capability boundary is **not wired into the live store reads** — `lgwks_vector.get_record` (:248) and `query_by_source` (:260) filter on cid/source_cid/space_id, never `tenant`, despite the `vr_space_tenant` index (:49) and `VectorRecord.tenant` (:75) existing. `lgwks_capability.guard()`/`make_tenant_filter()` exist but bind to nothing. Fix: add `*_for_tenant` reads, route the guarded path through them, keep `make_tenant_filter` as defense-in-depth. Isolation is a fiction until a read path cannot return another tenant's cid.
+- **Gap B (exposure-gated):** sustained-load λ-sweep {0.5cμ, cμ, 2cμ} with zero 5xx (T1 today is a step-clock replay, not sustained arrival).
+- **Gap C (exposure-gated):** the P3→P0 escalation is prose in `lgwks admission info`/`capability info`, not an enforced fail-closed checkpoint. Wire a `require_*` guard at the exposure entrypoint; entrypoint choice depends on which surface opens first (Director fork).
+
+**Exposure fork (Director's):** I8 is P3 single-operator-local, P0 before exposure (second operator / network surface / client data in shared substrate / concurrent writers). NOW-safe half (Gap A + determinism + idempotent-shed) is worth building regardless; gated half lands before the first trigger event. Director selected I8 as the next issue to close; exposure-timeline confirmation pending.
+
+**Doc hygiene:** HANDOFF.md refreshed — added session-6 current-state block + reframed "Suggested next step" around closing the open tail (I8 → #73 I9 → #74 I10 → #75 I11); flagged the dated sections as append-only history. Governance verified clean (governance/README.md ingestion-authority pointer + principles.md "capability check" layer both consistent with I8 — nothing stale).
+
+**Next (sequenced):** I8 hardening per PLANS-NEXT-5 → close #72 → #73 (I9, nearest done) → #74 (I10 vector-store join) → #75 (I11 daemon wiring). After #75 the ingestion plan is fully landed.
