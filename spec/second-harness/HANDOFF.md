@@ -99,23 +99,27 @@ no I13.
 
 ## Suggested next step
 
-**Close the open I-series tail, I8 first.** I8 (#72) is next because it is the security/isolation gate that
-escalates **P3→P0 before any multi-tenant or network exposure** (gaps G-07 high/T0, G-09 high). Its hardening
-is specced in **[PLANS-NEXT-5.md](PLANS-NEXT-5.md)** (session 6) — three gaps, NOW-safe vs exposure-gated:
+**Close the open I-series tail, I8 first — reframed (session 6) as multi-tenant concurrency + isolation over
+the two-DB topology.** Director clarified the real surface: concurrency is within one tenant *and* across
+tenants; the complexity is the **shared world DB ("the Google", `store/substrate-global/`) + the private
+per-pair DB (`store/projects/`)**; the §1-INV tenant isolation holding **under concurrent load** is the
+security load (Figma / Google Workspace daemon model). Gap analysis: **[ARCH-two-db-multitenant.md](ARCH-two-db-multitenant.md)**
+(L1–L9). I8 packet: **[PLANS-NEXT-5.md](PLANS-NEXT-5.md)**. Deferred surfaces (network/MCP, sharing/ACL):
+**[SCOPE-DEFERRED.md](SCOPE-DEFERRED.md)**.
 
-1. **I8 Gap A (NOW):** the capability boundary is NOT wired into the live store reads —
-   `lgwks_vector.get_record`/`query_by_source` filter on cid/source_cid, never tenant. Add `*_for_tenant`
-   reads and route the `guard()` path through them. This is the load-bearing fix; isolation is a fiction
-   until a read path cannot return another tenant's cid.
-2. **I8 Gap B (exposure-gated):** sustained-load λ-sweep {0.5cμ, cμ, 2cμ} with zero 5xx.
-3. **I8 Gap C (exposure-gated):** wire the P3→P0 escalation to a fail-closed checkpoint at the exposure
-   entrypoint (it is documented prose today, not enforced). Confirm with the Director which surface opens
-   first before choosing the entrypoint.
+**Hardest surface = §1-INV under concurrency** (ARCH L1+L2+L7 enforced through L3+L4). Build order inside I8:
+1. **Enforce §1-INV (L1/L2):** tier-routing access layer + tenant-scoped private reads
+   (`get_record_for_tenant`/`query_by_source_for_tenant`, capability-guarded). Today `lgwks_vector` reads
+   never filter on `tenant` → A can read B. The load-bearing fix.
+2. **Tier-scoped capability (L7):** token scopes `tenant:rw` / `world:r` / `world:promote`, not a flat tenant.
+3. **Per-tenant durable no-drop fair queue (L3/L4):** durable cross-process `admission_queue` table over
+   `lgwks_sqlite.connect` (WAL); backpressure not 429; per-tenant buckets ordered AFTER cap (fixes the
+   fail-OPEN, RECONCILE.md:318); fair leasing ≤ `c`; lease/reap crash-durability.
+4. **Promotion audit (L5):** tenant→world is the only cross-tier write, logged to the cognition chain.
 
-After I8: **#73 (I9 CRDT** — nearest to done; SEC/CvRDT tests green, mostly needs BUILDLOG proof + close) →
-**#74 (I10** vector-store join: SQLite join on `vr_space_tenant` by cid so `to_frontend` emits real coords,
-not an empty `xyz_map`) → **#75 (I11** daemon-loop wiring + live transcript path; confirm
-`LGWKS_TRANSCRIPT_PATH` with the Director). After #75 the ingestion plan is fully landed.
+After I8: **#73 (I9 — deploy CRDT on both tiers, ARCH L6:** G-Set world / OR-Set+LWW tenant, wired to the
+live stores) → **#74 (I10** vector-store join) → **#75 (I11** daemon wiring; confirm `LGWKS_TRANSCRIPT_PATH`
+with the Director). After #75 the ingestion plan is fully landed.
 
 **Open ops action (carried from I7):** re-register `hooks/subconscious_inbound.py` against the live
 `/Applications/logicalworks` dir (currently points at dead space-named path). Confirm path first.

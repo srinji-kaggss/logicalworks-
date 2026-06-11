@@ -313,17 +313,24 @@ Same loop: file issue → AskUserQuestion at the proof fork → implement → ha
 
 ---
 
-## 2026-06-11 (session 6) · Post-merge planning — I8 P3→P0 hardening specced (branch: claude/post-merge-planning-fpzmu8)
+## 2026-06-11 (session 6) · Post-merge planning — I8 reframed as multi-tenant concurrency + isolation (two-DB) (branch: claude/post-merge-planning-fpzmu8)
 
 **Build-state summary:** PR #76 merged the I8–I11 boilerplate to main (@ 6c2fdac). GH issues #72–#75 filed and open. No code change this session — planning + spec + doc hygiene only. Registry gate re-verified green (95 ids / 103 rows). The I-series (I1–I12) is the entire active backlog; there is no I13.
 
-**Specced:** `spec/second-harness/PLANS-NEXT-5.md` — the I8 (#72) hardening contract, the gap between "boilerplate green" and the issue's `Done =` line. Three falsifiable gaps, split NOW-safe vs exposure-gated:
-- **Gap A (NOW, load-bearing):** the capability boundary is **not wired into the live store reads** — `lgwks_vector.get_record` (:248) and `query_by_source` (:260) filter on cid/source_cid/space_id, never `tenant`, despite the `vr_space_tenant` index (:49) and `VectorRecord.tenant` (:75) existing. `lgwks_capability.guard()`/`make_tenant_filter()` exist but bind to nothing. Fix: add `*_for_tenant` reads, route the guarded path through them, keep `make_tenant_filter` as defense-in-depth. Isolation is a fiction until a read path cannot return another tenant's cid.
-- **Gap B (exposure-gated):** sustained-load λ-sweep {0.5cμ, cμ, 2cμ} with zero 5xx (T1 today is a step-clock replay, not sustained arrival).
-- **Gap C (exposure-gated):** the P3→P0 escalation is prose in `lgwks admission info`/`capability info`, not an enforced fail-closed checkpoint. Wire a `require_*` guard at the exposure entrypoint; entrypoint choice depends on which surface opens first (Director fork).
+**Director directive (session 6):** the real surface for I8 is **concurrency within one tenant AND across tenants**, over **two databases** — the shared world DB ("the Google", `store/substrate-global/`) everyone reads, and the private per-human+AI-pair DB (`store/projects/`). The §1-INV tenant isolation holding **under concurrent multi-tenant load** is the security load (Figma / Google Workspace daemon model). Multi-tenant/network exposure framing from the first pass was too narrow: isolation is **core to I8 now**, not a P3→P0 gate; network/MCP is genuinely deferred. "Address all gaps based on the hardest surface; assume local ops but maybe mcp/http in the end not now; log scope creep separately."
 
-**Exposure fork (Director's):** I8 is P3 single-operator-local, P0 before exposure (second operator / network surface / client data in shared substrate / concurrent writers). NOW-safe half (Gap A + determinism + idempotent-shed) is worth building regardless; gated half lands before the first trigger event. Director selected I8 as the next issue to close; exposure-timeline confirmation pending.
+**Key finding — the topology is already specified; we lack the enforcement.** `INGESTION-LAYER §1` already defines the two-tier store (world-nodes DB ▲promote tenant folders) + **§1-INV (T0):** "A read in tenant A can never observe tenant B's rows … enforced by a capability token, not `if tenant ==` … cross-tenant flow only by promotion." So the write model is **promotion-only** (no direct tenant→world write — resolves that question without asking). The lacks are all in enforcement + concurrency:
+- **L1 (T0/critical):** §1-INV unenforced — `lgwks_vector.get_record`/`query_by_source` (:248,260) never filter on `tenant`; `lgwks_capability.guard()` binds to nothing. A can read B today.
+- **L2:** the world/tenant seam is not modeled in the access path (no tier-routing; promotion-only unenforced).
+- **L3:** admission is global and **fail-OPEN per-tenant** (RECONCILE.md:318,360 — limiter before auth context).
+- **L4:** queue is in-memory, single-process, **drop-on-full** — cannot coordinate the separate crawler process (`crawler/src/main.rs`) or multiple tenant daemons; drops internal work.
+- **L5:** no provenance/audit on promotion to the world DB. **L6:** CRDT (`lgwks_crdt.py`) not deployed on the two stores. **L7:** capability token is single-scope, not tier-aware. **L8/L9 deferred:** cross-workspace sharing/ACL, network/MCP/federation.
 
-**Doc hygiene:** HANDOFF.md refreshed — added session-6 current-state block + reframed "Suggested next step" around closing the open tail (I8 → #73 I9 → #74 I10 → #75 I11); flagged the dated sections as append-only history. Governance verified clean (governance/README.md ingestion-authority pointer + principles.md "capability check" layer both consistent with I8 — nothing stale).
+**Specced (3 new docs):**
+- `ARCH-two-db-multitenant.md` — the "where do we lack" gap analysis: topology, Figma/Workspace mapping, L1–L9 table (severity + code anchors), the hardest surface (§1-INV under concurrency = L1+L2+L7 through L3+L4), and how it threads into I8/I9.
+- `PLANS-NEXT-5.md` (rewritten) — I8 packet: build order = enforce §1-INV (L1/L2) → tier-scoped caps (L7) → per-tenant durable no-drop fair queue (L3/L4, reuses `lgwks_sqlite.connect` WAL + `ConnectionPool.acquire` backpressure precedent) → promotion audit (L5). Acceptance: 10⁴ A/B zero-leak against the **live two-tier store under concurrency** + no-drop/fairness/crash-durable/backpressure/worker-cap/replay.
+- `SCOPE-DEFERRED.md` — D1 external 429, D2 network/MCP transport, D3 cross-workspace sharing/ACL, D4 cross-machine federation, D5 promotion governance UI, D6 per-tenant billing. Promotion-only + isolation-now confirmed as NOT deferrable.
 
-**Next (sequenced):** I8 hardening per PLANS-NEXT-5 → close #72 → #73 (I9, nearest done) → #74 (I10 vector-store join) → #75 (I11 daemon wiring). After #75 the ingestion plan is fully landed.
+**Doc hygiene:** HANDOFF.md "Suggested next step" reframed two-DB-first; §8 gap log G-07/G-08/G-09 reframed (isolation core, CRDT-not-deployed, queue-wrong-shape) with pointers to ARCH doc. Governance verified clean.
+
+**Next (sequenced):** I8 per PLANS-NEXT-5 (§1-INV under concurrency first) → close #72 → #73 (I9 — deploy CRDT on both tiers, L6) → #74 (I10 vector-store join) → #75 (I11 daemon wiring). After #75 the ingestion plan is fully landed.
