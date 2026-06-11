@@ -140,7 +140,10 @@ side-database (the external `~/ingestion_results/*.db` stores are exactly the lo
 | `lgwks.manifest.v0` / `lgwks.intent.v0` / `lgwks.hooks.v0` / `lgwks.audit.v0` / `lgwks.gh.v0` / `lgwks.session.summary.v0` | 0 | live, research-grade | `lgwks_schema.py:66-133`, `lgwks_gh.py:82` |
 | `lgwks.intent.centroids.v1` | 1 | live (cache) | `lgwks_intent_classifier.py:68` |
 | `lgwks.inbound.v1` | 1 | live (**I7**) — reflex pack: `handles[]`, `scores{}`, `budget{limit_tokens,used_tokens,truncated_count,truncated[]}` (count exact, cid list bounded ≤64), `depth_handles[{id,est_tokens,kind}]` | `lgwks_inbound.py` |
-| `lgwks.waste.ledger.v1` | 1 | **planned** (**I11**) | spec only |
+| `lgwks.waste.ledger.v1` | 1 | **live** (**I11**) — per-session waste ledger: `session_id`, `window_turns`, `items[{cid,tokens,used_within_n,first_use_turn}]`, `totals{tokens_injected,tokens_used,waste_rate}` | `lgwks_waste.py`; JSON-Schema: `docs/schemas/lgwks.waste.ledger.v1.json` |
+| `lgwks.admission.v1` | 1 | **live** (**I8**) — token-bucket admission result envelope: `cid`, `status` (`admitted`/`rejected_429`), `reason`, `retry_after` | `lgwks_admission.py` (`Admitted`, `Rejected429`) |
+| `lgwks.capability.v1` | 1 | **live** (**I8**) — capability-token tenant isolation: `tenant`, `nonce`, `sig` (hmac-sha256) | `lgwks_capability.py` (`CapabilityToken`) |
+| `lgwks.crdt.state.v1` | 1 | **live** (**I9**) — CRDT state envelope: `type` (`gset`/`orset`/`lww`) + type-specific fields; SEC proof in `tests/test_crdt.py` | `lgwks_crdt.py`; JSON-Schema: `docs/schemas/lgwks.crdt.state.v1.json` |
 **Repurpose when:** any new capability → wrap as an actor (`ActorSpec` + `lgwks.actor.v1` envelope)
 instead of a bare function with a private dict. Actor-calls-actor is the sanctioned composition path.
 

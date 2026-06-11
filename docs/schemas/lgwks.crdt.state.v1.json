@@ -1,0 +1,50 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "lgwks.crdt.state.v1",
+  "description": "CRDT state serialisation envelope for G-Set, OR-Set, and LWW-Register. Crosses the store file boundary (REGISTRY rule 3). No free-text fields.",
+  "type": "object",
+  "required": ["schema", "type"],
+  "additionalProperties": false,
+  "properties": {
+    "schema": { "type": "string", "enum": ["lgwks.crdt.state.v1"] },
+    "type":   { "type": "string", "enum": ["gset", "orset", "lww"] }
+  },
+  "oneOf": [
+    {
+      "description": "G-Set: grow-only set of cids",
+      "properties": {
+        "schema":   { "type": "string" },
+        "type":     { "type": "string", "enum": ["gset"] },
+        "elements": { "type": "array", "items": { "type": "string" }, "uniqueItems": true }
+      },
+      "required": ["schema", "type", "elements"]
+    },
+    {
+      "description": "OR-Set: observed-remove set with per-element tags",
+      "properties": {
+        "schema":  { "type": "string" },
+        "type":    { "type": "string", "enum": ["orset"] },
+        "adds":    {
+          "type": "object",
+          "additionalProperties": { "type": "array", "items": { "type": "string" } }
+        },
+        "removes": {
+          "type": "object",
+          "additionalProperties": { "type": "array", "items": { "type": "string" } }
+        }
+      },
+      "required": ["schema", "type", "adds", "removes"]
+    },
+    {
+      "description": "LWW-Register: last-writer-wins, tie-broken by (seq, head)",
+      "properties": {
+        "schema": { "type": "string" },
+        "type":   { "type": "string", "enum": ["lww"] },
+        "value":  {},
+        "head":   { "type": "string" },
+        "seq":    { "type": "integer" }
+      },
+      "required": ["schema", "type", "head", "seq"]
+    }
+  ]
+}

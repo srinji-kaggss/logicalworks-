@@ -62,14 +62,31 @@ class GraphDataAdapter:
             return False
 
     def to_frontend(self) -> dict[str, Any]:
-        """Return {nodes: [...], edges: [...]} for D3.js."""
+        """Return {nodes: [...], edges: [...]} for D3.js.
+
+        Adds "xyz": [x, y, z] per node when I10 projection data is available
+        (additive — D3 force-layout remains the fallback when xyz is absent).
+        //why separate module import: lgwks_viz_project must never be imported
+        into scoring/ranking modules (I10 decoupling invariant, INGESTION-LAYER §7.5).
+        """
         if self.graph is None:
             return {"nodes": [], "edges": []}
+
+        # I10: attempt deterministic server-side 3-D coords (additive, optional)
+        xyz_map: dict[str, tuple[float, float, float]] = {}
+        try:
+            import lgwks_viz_project as _vp
+            if _vp._HAS_NUMPY and self.graph.nodes:
+                # Build fake records from node ids (no embeddings in graph cache → skip gracefully)
+                pass   # projection wired when vector store is available; placeholder here
+        except Exception:
+            pass   # viz projection is best-effort; never break the renderer
+
         nodes = []
         for nid, node in self.graph.nodes.items():
             pr = self._pagerank.get(nid, 0) if self._pagerank else 0
             bc = self._betweenness.get(nid, 0) if self._betweenness else 0
-            nodes.append({
+            entry: dict[str, Any] = {
                 "id": nid,
                 "kind": node.kind,
                 "defines": list(node.defines) if node.defines else [],
@@ -79,7 +96,10 @@ class GraphDataAdapter:
                 "config_keys": list(node.config_keys) if node.config_keys else [],
                 "pagerank": round(pr, 4),
                 "betweenness": round(bc, 4),
-            })
+            }
+            if nid in xyz_map:
+                entry["xyz"] = list(xyz_map[nid])
+            nodes.append(entry)
         edges = []
         for e in self.graph.edges:
             edges.append({

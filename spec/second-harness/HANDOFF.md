@@ -48,14 +48,20 @@ Gaps G-04/05/06/11/12 closed (INGESTION-LAYER §8).
 
 ## NOT built / deferred (honest — do not claim otherwise)
 
-- **I5.1 (deferred, not yet issued)** — directional `P_k` activation. I5 ships identity
-  operators (so the §4.2 marginal-identity proof holds exactly); scoring currently
-  collapses to cosine. Genuine directional/embedding-coupled scoring is future work.
 - **§4.3 honesty** — with fixed `w_k`, I6 centrality is a relation-WEIGHTED eigenvector
   centrality (faithful to §4.3 for the n×m×n tensor), not a free cubic-in-x optimization.
   δ is a structural signal until I5.1 wires per-fact `s_ai`.
-- **I8–I11 (P3, not yet issued)** — I8 (queue/isolation) escalates to **P0 before any
-  multi-tenant or network exposure**. I10 viz must never run ahead of the spine.
+- **I8 P3→P0 trigger** — admission/capability boilerplate is complete and tested. P3→P0
+  escalation trigger is documented in CLI output but NOT wired to a live process manager.
+  Must escalate before any multi-tenant or network exposure.
+- **I10 viz embedding join** — `to_frontend` wires `xyz_map` placeholder; a real SQLite join
+  (embeddings-by-cid from the vector store) is needed to populate server-side coordinates
+  at serve time. Not in I10 scope (viz-only); wire when the vector store is queryable at
+  graph-serve time.
+- **I11 citation detection** — cid substring-match proxy; true semantic citation detection
+  would need model-layer analysis (out of scope, INV-3). Deterministic and explainable.
+- **Hook re-registration** — `hooks/subconscious_inbound.py` still points at the dead
+  space-named `/Applications/Logical Works` path. Gated on ops action (below).
 
 ## Workflow that worked this session (the Director's loop)
 
@@ -68,21 +74,33 @@ gate fails; (2) a new CLI verb must be wired in the `lgwks` dispatcher AND added
 `lgwks_home._DOMAINS` (the `test_home` L0 no-Other-catch-all invariant); (3) run the
 registry gate from the repo root, not a `.claude/` worktree (it skips `.claude` paths).
 
+## Current state (updated — session 4, 2026-06-11)
+
+Ingestion packets **I1–I12 are all scaffolded**. I1–I7 + I5.1 + I12 are merged to main.
+I8–I11 boilerplate was implemented in session 4 (branch `claude/docs-implementation-boilerplate-83n6r1`):
+- **I8** `lgwks_admission.py` + `lgwks_capability.py` — token-bucket admission + capability-token isolation.
+- **I9** `lgwks_crdt.py` — G-Set / OR-Set / LWW-Register, SEC convergence proof in tests.
+- **I10** `lgwks_viz_project.py` — sign-fixed PCA projection, additive `xyz` in `to_frontend`.
+- **I11** `lgwks_waste.py` — per-session waste ledger; `lgwks.waste.ledger.v1` flipped live.
+All 61 new tests green. Registry gate green (95 ids / 103 rows).
+
 ## Suggested next step
 
-Per build order **I7 → I5.1 → I8** (PLANS-NEXT-3.md): I7 and I5.1 both landed (session 3).
-Next is **I8** — concurrency, queue, isolation. The **entire remaining backlog (I8, I9, I10,
-I11) is now fully detailed and phone-executable in [PLANS-NEXT-4.md](PLANS-NEXT-4.md)** — the
-single authoritative "everything left" reference (I12 done PR #63; I8 carried forward from
-PLANS-NEXT-3 §I8 with refreshed inputs; I9/I10/I11 newly detailed). Build order:
-**I8 → (I9 ∥ I10 ∥ I11)**; I10 is viz-only and must never run ahead of the spine. **File the GH
-issue first** for each (none yet issued); for I8 note the P3→**P0** escalation trigger (before
-any multi-tenant or network exposure) explicitly in the issue body. New modules
-`lgwks_admission.py` (token-bucket admission, typed 429 + Retry-After, idempotent shed by
-cid) + `lgwks_capability.py` (capability-token tenant isolation, zero cross-tenant cid
-leak); reuse `lgwks_workercap.compute_worker_cap` for `c` and the crawler backoff for
-Retry-After jitter. `git grep -niE 'tenant|capability.?token|store/projects'` FIRST —
-repurpose > mint.
+**I-series backlog is fully scaffolded.** The branch `claude/docs-implementation-boilerplate-83n6r1`
+carries I8–I11. Next steps per packet:
+
+1. **File GH issues** for I8, I9, I10, I11 (each packet says "NOT YET ISSUED" — file them now).
+   I8 issue body MUST include the P3→P0 escalation trigger ("before any multi-tenant or network
+   exposure"). See PLANS-NEXT-4.md for the complete issue body for each packet.
+2. **I8 P3→P0 hardening** — once the GH issue is filed, harden the admission/capability gate:
+   load test (λ ∈ {0.5cμ, cμ, 2cμ}), 10⁴ cross-tenant isolation proof, replayable determinism.
+3. **I10 vector join** — wire the real embedding lookup (SQLite join on `vr_space_tenant` by cid)
+   into `lgwks_graph_viz.GraphDataAdapter.to_frontend` so `xyz_map` is populated at serve time.
+4. **I11 deployment** — wire `lgwks waste report` into the daemon loop; confirm live transcript path
+   with the Director before setting `LGWKS_TRANSCRIPT_PATH`.
+
+**Open ops action (carried from I7):** re-register `hooks/subconscious_inbound.py` against the live
+`/Applications/logicalworks` dir (currently points at dead space-named path). Confirm path first.
 
 **Open ops action (carried from I7):** to wire the L5 reflex pack into the live
 `UserPromptSubmit` hook, re-register `hooks/subconscious_inbound.py` against the live
