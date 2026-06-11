@@ -54,22 +54,24 @@ def _make_store(tenant: str, n: int = 10) -> list[_FakeRecord]:
 class TestTokenRequired(unittest.TestCase):
     """T1: a query without a valid token is rejected (CapabilityError), never partial."""
 
-    def test_guard_no_key_call_succeeds(self):
-        """Without key= the guard cannot verify — it passes (key-less use case)."""
+    def test_guard_valid_token_succeeds(self):
+        """T1: valid token with correct key → guard passes and returns query result."""
         token, key = issue_token("alice")
-        result = guard(token, lambda t: f"data-for-{t}")
-        self.assertEqual(result, "data-for-alice", "T1: valid token (no key) must succeed")
+        result = guard(token, lambda t: f"data-for-{t}", key)
+        self.assertEqual(result, "data-for-alice", "T1: valid token with key must succeed")
 
     def test_guard_wrong_key_raises(self):
         token, _good_key = issue_token("alice")
         bad_key = secrets.token_bytes(32)
         with self.assertRaises(CapabilityError, msg="T1: wrong key must raise CapabilityError"):
-            guard(token, lambda t: f"data-{t}", key=bad_key)
+            guard(token, lambda t: f"data-{t}", bad_key)
 
     def test_guard_empty_tenant_raises(self):
+        # Empty tenant is caught before signature validation — pass any key bytes.
+        dummy_key = secrets.token_bytes(32)
         token = CapabilityToken(tenant="", nonce="aaa", sig="bbb")
         with self.assertRaises(CapabilityError, msg="T1: empty tenant must raise CapabilityError"):
-            guard(token, lambda t: t)
+            guard(token, lambda t: t, dummy_key)
 
     def test_issue_empty_tenant_raises(self):
         with self.assertRaises(ValueError, msg="T1: issuing token for empty tenant must raise"):

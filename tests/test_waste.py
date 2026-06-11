@@ -7,7 +7,7 @@ All tests map to acceptance clauses from PLANS-NEXT-4.md §PACKET I11
   T2: waste_rate       — waste_rate ∈ [0,1] on a fixture with known used/unused split.
   T3: attributable     — high-waste injection is attributable to a specific low-yield item.
   T4: no_prose         — ledger dict has no free-text field (only cids, ints, bools, floats).
-  T5: threshold        — SUGGEST_CUT_THRESHOLD is pre-registered; I11 reports, does not act.
+  T5: threshold        — SUGGEST_CUT_THRESHOLD is a module constant; I11 reports, does not act.
   T6: deterministic    — same (packs, transcript, N) → identical ledger.
 """
 
@@ -110,31 +110,31 @@ class TestWasteRate(unittest.TestCase):
         handles = ["cid-0", "cid-1", "cid-2"]
         pack = _make_pack(handles, used_tokens=30)
         ledger = build_ledger([pack], [])  # empty transcript → nothing cited
-        self.assertAlmostEqual(waste_rate(ledger), 1.0, places=3,
-                               msg="T2: all unused → waste_rate must be 1.0")
+        self.assertEqual(waste_rate(ledger), 1.0,
+                         "T2: all unused → waste_rate must be exactly 1.0")
 
     def test_all_used(self):
+        """T2: all items cited → waste_rate == 0.0 exactly."""
         handles = ["cid-alpha", "cid-beta"]
         pack = _make_pack(handles, used_tokens=20)
         transcript = _make_transcript(handles)  # all cited
         ledger = build_ledger([pack], transcript, window_turns=5)
         r = waste_rate(ledger)
-        self.assertGreaterEqual(r, 0.0, "T2: waste_rate must be >= 0")
-        self.assertLessEqual(r, 1.0, "T2: waste_rate must be <= 1")
+        self.assertEqual(r, 0.0,
+                         f"T2: all used → waste_rate must be exactly 0.0, got {r}")
 
-    def test_partial_use(self):
+    def test_partial_use_exact_value(self):
+        """T2: one-of-three cited → waste_rate == 2/3 (equal token budgets)."""
         handles = ["used-cid", "unused-cid-a", "unused-cid-b"]
-        pack = _make_pack(handles, used_tokens=30)
-        # Only the first is cited
+        pack = _make_pack(handles, used_tokens=30)  # 10 tokens each (30//3)
         transcript = _make_transcript(["used-cid"])
         ledger = build_ledger([pack], transcript, window_turns=5)
         r = waste_rate(ledger)
-        self.assertGreaterEqual(r, 0.0, "T2: partial waste_rate >= 0")
-        self.assertLessEqual(r, 1.0, "T2: partial waste_rate <= 1")
-        # At least some waste since two of three handles are unused
-        items = ledger["items"]
-        unused = [it for it in items if not it["used_within_n"]]
-        self.assertGreater(len(unused), 0, "T2: at least some unused items expected")
+        # 10 used out of 30 injected → waste_rate = 1 - 10/30 = 2/3
+        self.assertAlmostEqual(r, 2.0 / 3.0, places=6,
+                               msg=f"T2: 1-of-3 used → waste_rate must be 2/3, got {r}")
+        unused = [it for it in ledger["items"] if not it["used_within_n"]]
+        self.assertEqual(len(unused), 2, "T2: exactly 2 items must be unused")
 
 
 # ---------------------------------------------------------------------------
@@ -147,7 +147,6 @@ class TestAttributable(unittest.TestCase):
     def test_worst_item_identified(self):
         handles = ["used-cid-0", "big-waste-cid", "tiny-waste-cid"]
         pack = _make_pack(handles, used_tokens=60)
-        # Only used-cid-0 cited; big-waste-cid is the biggest unused item
         transcript = _make_transcript(["used-cid-0"])
         ledger = build_ledger([pack], transcript, window_turns=5)
         w = worst_item(ledger)
@@ -175,8 +174,9 @@ class TestAttributable(unittest.TestCase):
 class TestNoProse(unittest.TestCase):
     """T4: ledger dict has no free-text fields — only cids, ints, bools, floats, schema str."""
 
+    # Allowed string-valued keys — "transcript_source" is NOT a ledger field (removed in rewrite)
     _ALLOWED_STR_KEYS = frozenset({
-        "schema", "session_id", "transcript_source", "cid",
+        "schema", "session_id", "cid",
     })
 
     def _check_no_prose(self, obj, path: str = "") -> None:
@@ -184,7 +184,6 @@ class TestNoProse(unittest.TestCase):
         if isinstance(obj, dict):
             for k, v in obj.items():
                 if isinstance(v, str):
-                    # string values are allowed ONLY for known typed fields
                     self.assertIn(
                         k, self._ALLOWED_STR_KEYS,
                         msg=f"T4: free-text string at {path}.{k} = {v!r} violates no-prose invariant",
@@ -209,11 +208,9 @@ class TestNoProse(unittest.TestCase):
         pack = _make_pack(handles, used_tokens=10)
         ledger = build_ledger([pack], [])
         for item in ledger.get("items", []):
-            # Each item must have only typed fields: cid (str), tokens (int), etc.
             self.assertIn("cid", item, "T4: item must have cid")
             self.assertIsInstance(item["tokens"], int, "T4: tokens must be int")
             self.assertIsInstance(item["used_within_n"], bool, "T4: used_within_n must be bool")
-            # first_use_turn is int or null — not a string
             fut = item.get("first_use_turn")
             self.assertIsInstance(fut, (int, type(None)), "T4: first_use_turn must be int or null")
 
@@ -223,7 +220,7 @@ class TestNoProse(unittest.TestCase):
 # ---------------------------------------------------------------------------
 
 class TestThresholdPreRegistered(unittest.TestCase):
-    """T5: SUGGEST_CUT_THRESHOLD is a pre-registered float constant; I11 reports, does not act."""
+    """T5: SUGGEST_CUT_THRESHOLD is a pre-registered module constant; I11 reports, does not act."""
 
     def test_threshold_is_constant(self):
         self.assertIsInstance(SUGGEST_CUT_THRESHOLD, float,
@@ -237,13 +234,13 @@ class TestThresholdPreRegistered(unittest.TestCase):
         self.assertIsInstance(WINDOW_TURNS, int, "T5: WINDOW_TURNS must be int")
         self.assertGreater(WINDOW_TURNS, 0, "T5: WINDOW_TURNS must be > 0")
 
-    def test_ledger_contains_threshold(self):
+    def test_ledger_does_not_contain_threshold(self):
+        """T5: suggest_cut_threshold is a CLI-reporting constant, NOT a ledger field (scope fence)."""
         pack = _make_pack(["cid-t"], used_tokens=10)
         ledger = build_ledger([pack], [])
-        self.assertIn("suggest_cut_threshold", ledger,
-                      "T5: ledger must include suggest_cut_threshold field")
-        self.assertEqual(ledger["suggest_cut_threshold"], SUGGEST_CUT_THRESHOLD,
-                         "T5: reported threshold must match SUGGEST_CUT_THRESHOLD constant")
+        self.assertNotIn("suggest_cut_threshold", ledger,
+                         "T5: ledger must NOT contain suggest_cut_threshold "
+                         "(I11 scope fence: report only, never persisted in ledger)")
 
 
 # ---------------------------------------------------------------------------
@@ -262,7 +259,6 @@ class TestDeterministic(unittest.TestCase):
         transcript = _make_transcript(["cid-det-0"])
         l1 = self._build(transcript)
         l2 = self._build(transcript)
-        # Serialise to JSON to compare (excludes any object identity)
         j1 = json.dumps(l1, sort_keys=True)
         j2 = json.dumps(l2, sort_keys=True)
         self.assertEqual(j1, j2, "T6: build_ledger must be deterministic (byte-identical JSON)")
@@ -273,8 +269,6 @@ class TestDeterministic(unittest.TestCase):
         pack = _make_pack(handles, used_tokens=20)
         l3 = build_ledger([pack], transcript, window_turns=3)
         l1 = build_ledger([pack], transcript, window_turns=1)
-        # With window=3 we search further ahead — result may differ from window=1
-        # (This test just asserts both produce valid ledgers, not equality)
         self.assertEqual(l3["schema"], SCHEMA)
         self.assertEqual(l1["schema"], SCHEMA)
 
@@ -287,7 +281,6 @@ class TestDeterministic(unittest.TestCase):
             os.environ["LGWKS_TRANSCRIPT_PATH"] = fpath
             handles = ["cid-det-0"]
             pack = _make_pack(handles, used_tokens=10)
-            # Build with path from env (passing None-like as transcript path is handled by CLI)
             ledger = build_ledger([pack], fpath, window_turns=3)
             self.assertEqual(ledger["schema"], SCHEMA)
         finally:

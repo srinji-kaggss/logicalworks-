@@ -18,8 +18,8 @@ Formula (INGESTION-PLAN §I8):
 Decisions:
     D1: injectable clock (Callable[[], float]) mirrors probe_host env-override
         discipline — deterministic replay without changing any CLI signature.
-    D2: Retry-After jitter reuses the crawler backoff pattern (base + 25 % uniform
-        noise); do not reinvent.
+    D2: Retry-After jitter reuses the crawler backoff pattern (base + 25% uniform
+        noise); jitter RNG is injectable for deterministic tests.
     D3: μ, B, Q_max are pre-registered config inputs, never tuned under test.
 """
 
@@ -27,6 +27,7 @@ from __future__ import annotations
 
 import random
 import time
+from collections import deque
 from dataclasses import dataclass, field
 from typing import Any, Callable
 
@@ -61,7 +62,7 @@ class Admitted:
 class Rejected429:
     """Rate-limited or queue full. retry_after is jittered Retry-After (seconds)."""
     cid: str
-    reason: str       # "rate_limited" | "queue_full" | "duplicate_shed"
+    reason: str       # "rate_limited" | "queue_full"
     retry_after: float
     schema: str = SCHEMA
     status: str = "rejected_429"
@@ -71,30 +72,31 @@ class Rejected429:
 # TokenBucket
 # ---------------------------------------------------------------------------
 
-@dataclass
 class TokenBucket:
-    """Token-bucket rate limiter with injectable clock.
+    """Token-bucket rate limiter with injectable clock (D1).
 
     rate  = c·μ (tokens/s): the refill rate equals concurrency cap × service rate.
     burst = B   (tokens):   maximum instantaneous burst allowed.
 
     //why injectable clock: wall-clock reads are non-deterministic for replay.
-    Mirror probe_host's env-pinnable discipline (D1).
+    Mirror probe_host's env-pinnable discipline.
     """
 
-    rate: float
-    burst: float
-    _clock: Callable[[], float] = field(default_factory=lambda: time.monotonic, repr=False)
-    _tokens: float = field(init=False)
-    _last: float = field(init=False)
-
-    def __post_init__(self) -> None:
-        if self.rate <= 0:
-            raise ValueError(f"TokenBucket rate must be > 0, got {self.rate!r}")
-        if self.burst <= 0:
-            raise ValueError(f"TokenBucket burst must be > 0, got {self.burst!r}")
-        self._tokens = float(self.burst)
-        self._last = self._clock()
+    def __init__(
+        self,
+        rate: float,
+        burst: float,
+        clock: Callable[[], float] = time.monotonic,
+    ) -> None:
+        if rate <= 0:
+            raise ValueError(f"TokenBucket rate must be > 0, got {rate!r}")
+        if burst <= 0:
+            raise ValueError(f"TokenBucket burst must be > 0, got {burst!r}")
+        self.rate = rate
+        self.burst = burst
+        self._clock = clock
+        self._tokens = float(burst)
+        self._last = clock()
 
     def _refill(self) -> None:
         now = self._clock()
@@ -125,30 +127,35 @@ class AdmissionQueue:
     """Bounded FIFO queue with idempotent cid deduplication.
 
     submit(item, cid) → Admitted | Rejected429
-      - Duplicate cid: returns Admitted (already present — one row, idempotent).
-      - Full queue: returns Rejected429(reason="queue_full") with jittered Retry-After.
+      - Duplicate cid: Admitted (already present — one row, idempotent shed).
+      - Full queue:    Rejected429(reason="queue_full") with jittered Retry-After.
     """
 
-    def __init__(self, q_max: int, *, clock: Callable[[], float] = time.monotonic) -> None:
+    def __init__(
+        self,
+        q_max: int,
+        *,
+        rng: random.Random | None = None,
+    ) -> None:
         if q_max < 1:
             raise ValueError(f"q_max must be >= 1, got {q_max}")
         self._q_max = q_max
-        self._items: list[tuple[str, Any]] = []   # (cid, item) in FIFO order
+        self._items: deque[tuple[str, Any]] = deque()   # (cid, item) FIFO
         self._seen: set[str] = set()
-        self._clock = clock
+        self._rng = rng   # injectable for deterministic tests (D2)
 
     def submit(self, item: Any, *, cid: str) -> Admitted | Rejected429:
         """Submit item with the given cid. Duplicate → idempotent Admitted."""
         if cid in self._seen:
-            # //why: idempotent shed — cid is the dedup key from I1; identical input
-            # bytes → identical cid → second submission is a no-op (not an error).
-            return Admitted(cid=cid, status="admitted")
+            # //why idempotent shed: cid is the dedup key from I1. Identical
+            # input bytes → identical cid → second submission is a no-op.
+            return Admitted(cid=cid)
 
         if len(self._items) >= self._q_max:
             return Rejected429(
                 cid=cid,
                 reason="queue_full",
-                retry_after=_jitter(1.0),
+                retry_after=_jitter(1.0, rng=self._rng),
             )
 
         self._items.append((cid, item))
@@ -156,10 +163,10 @@ class AdmissionQueue:
         return Admitted(cid=cid)
 
     def pop(self) -> tuple[str, Any] | None:
-        """Pop next (cid, item) FIFO pair, or None if empty."""
+        """Pop next (cid, item) FIFO pair in O(1), or None if empty."""
         if not self._items:
             return None
-        return self._items.pop(0)
+        return self._items.popleft()
 
     @property
     def size(self) -> int:
@@ -171,12 +178,18 @@ class AdmissionQueue:
 
 
 # ---------------------------------------------------------------------------
-# Retry-After jitter (reuses crawler backoff pattern — D2)
+# Retry-After jitter — injectable RNG for deterministic tests (D2)
 # ---------------------------------------------------------------------------
 
-def _jitter(base: float) -> float:
-    """base + uniform(0, 0.25·base) — same anti-thundering-herd pattern as the crawler."""
-    return base + random.uniform(0.0, base * 0.25)
+def _jitter(base: float, *, rng: random.Random | None = None) -> float:
+    """base + uniform(0, 0.25·base) — anti-thundering-herd, same pattern as crawler.
+
+    rng: injectable Random instance for deterministic replay (D2). Uses the
+    global random module when None, which is fine for production (jitter purpose
+    is spread, not security); tests that need determinism inject a seeded rng.
+    """
+    r: Any = rng if rng is not None else random
+    return base + r.uniform(0.0, base * 0.25)
 
 
 # ---------------------------------------------------------------------------
@@ -189,17 +202,20 @@ def admission_decision(
     item: Any = None,
     bucket: TokenBucket,
     queue: AdmissionQueue,
+    rng: random.Random | None = None,
 ) -> Admitted | Rejected429:
     """Full admission gate: token-bucket → queue enqueue.
 
     Stability guarantee (INGESTION-PLAN §I8):
-      ρ = λ/(c·μ) < 1 → stable throughput; rate-limit rejects at saturation.
-      Q ≥ Q_max → Rejected429(reason="queue_full"); never unbounded growth.
+      ρ = λ/(c·μ) < 1 → stable; rate-limit rejects at saturation.
+      Q ≥ Q_max → Rejected429(reason="queue_full"); never unbounded.
       Duplicate cid → Admitted (idempotent, zero 5xx).
+
+    rng: injectable for deterministic replay of Retry-After values (D2).
     """
     if not bucket.try_acquire():
-        retry = _jitter(1.0 / bucket.rate if bucket.rate > 0 else 1.0)
-        return Rejected429(cid=cid, reason="rate_limited", retry_after=retry)
+        base = 1.0 / bucket.rate if bucket.rate > 0 else 1.0
+        return Rejected429(cid=cid, reason="rate_limited", retry_after=_jitter(base, rng=rng))
 
     return queue.submit(item, cid=cid)
 
@@ -215,17 +231,18 @@ def make_admission_gate(
     burst: float = DEFAULT_BURST,
     q_max: int = DEFAULT_Q_MAX,
     clock: Callable[[], float] = time.monotonic,
+    rng: random.Random | None = None,
 ) -> tuple[TokenBucket, AdmissionQueue, dict]:
     """Build a TokenBucket + Queue sized from compute_worker_cap.
 
-    Returns (bucket, queue, cap_info) where cap_info carries the full breakdown
-    for audit/logging.  mu/burst/q_max are pre-registered — inject, don't tune.
+    Returns (bucket, queue, cap_info). mu/burst/q_max are pre-registered.
+    rng: injectable for test replay; leave None in production.
     """
     cap_info = lgwks_workercap.compute_worker_cap(role_count)
     c = cap_info["computed_cap"]
-    rate = float(c) * mu   # token refill rate = c·μ
-    bucket = TokenBucket(rate=rate, burst=burst, _clock=clock)
-    queue = AdmissionQueue(q_max=q_max, clock=clock)
+    rate = float(c) * mu
+    bucket = TokenBucket(rate=rate, burst=burst, clock=clock)
+    queue = AdmissionQueue(q_max=q_max, rng=rng)
     return bucket, queue, cap_info
 
 
@@ -269,8 +286,6 @@ def _cmd_info(args) -> int:
         "rate_c_mu": rate,
         "burst": getattr(args, "burst", DEFAULT_BURST),
         "q_max": getattr(args, "q_max", DEFAULT_Q_MAX),
-        "utilization_at_half_load": 0.5 if rate > 0 else None,
-        "utilization_at_full_load": 1.0 if rate > 0 else None,
         "stability_note": "rho < 1 required; at 2x load all rejects are typed 429 (zero 5xx)",
         "p3_to_p0_trigger": "escalates to P0 before any multi-tenant or network exposure",
         "host": cap_info["host"],

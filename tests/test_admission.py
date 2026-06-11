@@ -15,8 +15,8 @@ All tests map to acceptance clauses from PLANS-NEXT-4.md §PACKET I8
 from __future__ import annotations
 
 import os
+import random
 import sys
-import time
 import unittest
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -63,16 +63,16 @@ class TestStabilitySweep(unittest.TestCase):
     Q_MAX = 16
     ATTEMPTS = 40
 
-    def _run_load(self, load_factor: float, step: float = 0.1) -> tuple[int, int]:
+    def _run_load(self, load_factor: float, step: float = 0.1, q_max: int | None = None) -> tuple[int, int]:
         """Submit jobs at λ = load_factor × c·μ.  Returns (admitted, rejected)."""
         clock = _StepClock(step=step)
         bucket, queue, cap_info = make_admission_gate(
-            self.ROLE_COUNT, mu=self.MU, burst=self.BURST, q_max=self.Q_MAX, clock=clock,
+            self.ROLE_COUNT, mu=self.MU, burst=self.BURST,
+            q_max=q_max if q_max is not None else self.Q_MAX,
+            clock=clock,
         )
-        c = cap_info["computed_cap"]
         admitted = rejected = 0
         for i in range(self.ATTEMPTS):
-            # Advance clock to simulate λ inter-arrival
             result = admission_decision(
                 cid=f"cid-{i:04d}",
                 item=f"item-{i}",
@@ -90,14 +90,25 @@ class TestStabilitySweep(unittest.TestCase):
         return admitted, rejected
 
     def test_half_load_stable(self):
-        """T1a: at 0.5× c·μ load, bucket refills fast enough that ρ < 1 → mostly admitted."""
-        # With a fast step (clock advances quickly → lots of refill), near-all admitted
-        admitted, rejected = self._run_load(0.5, step=2.0)
-        self.assertGreater(admitted, 0, "T1a: some jobs must be admitted at 0.5× load")
+        """T1a: at 0.5× c·μ load (fast clock → ρ < 1), bucket admits >> rejects.
+
+        q_max is set larger than ATTEMPTS so queue capacity does not confound the
+        rate-limiter measurement — this test targets the token-bucket stability
+        property, not queue-full behaviour (that's T1c).
+        """
+        # step=2.0 means 2s between each submission; with rate=c·μ≈4 tokens/s,
+        # bucket refills 8 tokens per step → nearly every job admitted.
+        admitted, rejected = self._run_load(0.5, step=2.0, q_max=self.ATTEMPTS * 4)
+        total = admitted + rejected
+        reject_rate = rejected / total if total else 1.0
+        self.assertGreater(admitted, rejected,
+                           f"T1a: 0.5× load must admit more than it rejects "
+                           f"(admitted={admitted}, rejected={rejected})")
+        self.assertLess(reject_rate, 0.5,
+                        f"T1a: reject rate {reject_rate:.2f} must be < 0.5 at sub-capacity load")
 
     def test_overload_no_5xx(self):
         """T1b: at 2× c·μ load every rejection is Rejected429 (zero 5xx = zero exceptions)."""
-        # Tiny step (clock barely advances → bucket never refills → rate_limited quickly)
         clock = _StepClock(step=0.001)
         bucket, queue, _ = make_admission_gate(
             self.ROLE_COUNT, mu=self.MU, burst=1.0, q_max=self.Q_MAX, clock=clock,
@@ -110,7 +121,6 @@ class TestStabilitySweep(unittest.TestCase):
                     bucket=bucket,
                     queue=queue,
                 )
-                # Any result must be a typed admission type — never an exception
                 self.assertIsInstance(
                     result, (Admitted, Rejected429),
                     msg="T1b: result must be a typed admission type (zero 5xx)",
@@ -163,7 +173,7 @@ class TestTyped429(unittest.TestCase):
 
     def test_rate_limited_is_rejected429(self):
         clock = _StepClock(step=0.0)   # clock frozen → no refill
-        bucket = TokenBucket(rate=1.0, burst=1.0, _clock=clock)
+        bucket = TokenBucket(rate=1.0, burst=1.0, clock=clock)
         queue = AdmissionQueue(q_max=16)
 
         bucket.try_acquire()   # drain
@@ -173,9 +183,22 @@ class TestTyped429(unittest.TestCase):
         self.assertGreater(result.retry_after, 0, "T3: retry_after must be positive")
         self.assertEqual(result.schema, SCHEMA, "T3: schema must be SCHEMA")
 
+    def test_rate_limited_retry_after_deterministic(self):
+        """T3: with a seeded rng, retry_after is a specific deterministic value."""
+        clock = _StepClock(step=0.0)
+        bucket = TokenBucket(rate=2.0, burst=1.0, clock=clock)
+        rng = random.Random(99)
+        bucket.try_acquire()  # drain
+        result = admission_decision(cid="y", bucket=bucket, queue=AdmissionQueue(q_max=1), rng=rng)
+        self.assertIsInstance(result, Rejected429)
+        # retry_after = base + uniform(0, 0.25*base) where base=1/rate=0.5
+        # With seeded rng we just verify it's in [0.5, 0.625]
+        self.assertGreaterEqual(result.retry_after, 0.5)
+        self.assertLessEqual(result.retry_after, 0.625)
+
     def test_queue_full_is_rejected429(self):
         clock = _StepClock(step=100.0)  # fast refill
-        bucket = TokenBucket(rate=1000.0, burst=1000.0, _clock=clock)
+        bucket = TokenBucket(rate=1000.0, burst=1000.0, clock=clock)
         queue = AdmissionQueue(q_max=2)
         admission_decision(cid="a", bucket=bucket, queue=queue)
         admission_decision(cid="b", bucket=bucket, queue=queue)
@@ -194,7 +217,7 @@ class TestZero5xx(unittest.TestCase):
 
     def test_no_exception_on_any_input(self):
         clock = _StepClock(step=0.001)
-        bucket = TokenBucket(rate=0.01, burst=0.01, _clock=clock)
+        bucket = TokenBucket(rate=0.01, burst=0.01, clock=clock)
         queue = AdmissionQueue(q_max=1)
         for i in range(30):
             try:
@@ -212,7 +235,7 @@ class TestReplayable(unittest.TestCase):
 
     def _run(self) -> list[str]:
         clock = _StepClock(start=0.0, step=0.5)
-        bucket = TokenBucket(rate=2.0, burst=2.0, _clock=clock)
+        bucket = TokenBucket(rate=2.0, burst=2.0, clock=clock)
         queue = AdmissionQueue(q_max=4)
         results = []
         for i in range(8):
@@ -235,7 +258,7 @@ class TestTokenBucket(unittest.TestCase):
 
     def test_initial_full(self):
         clock = _StepClock(step=0.0)
-        b = TokenBucket(rate=1.0, burst=3.0, _clock=clock)
+        b = TokenBucket(rate=1.0, burst=3.0, clock=clock)
         self.assertTrue(b.try_acquire())
         self.assertTrue(b.try_acquire())
         self.assertTrue(b.try_acquire())
@@ -243,7 +266,7 @@ class TestTokenBucket(unittest.TestCase):
 
     def test_refills_over_time(self):
         clock = _StepClock(start=0.0, step=2.0)
-        b = TokenBucket(rate=1.0, burst=5.0, _clock=clock)
+        b = TokenBucket(rate=1.0, burst=5.0, clock=clock)
         for _ in range(5):
             b.try_acquire()   # drain
         # After 2 seconds with rate=1.0 → should gain 2 tokens

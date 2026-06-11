@@ -1,7 +1,7 @@
 {
   "$schema": "http://json-schema.org/draft-07/schema#",
   "title": "lgwks.waste.ledger.v1",
-  "description": "Per-session waste ledger correlating injected items against downstream use. No free-text fields — only cids, ints, bools, floats (PRD-04 §04-c). I11.",
+  "description": "Per-session waste ledger correlating injected items against downstream use. No free-text fields — only cids, ints, bools, floats (PRD-04 §04-c). I11. suggest_cut_threshold is a module constant reported via CLI, never persisted in the ledger (I11 scope fence).",
   "type": "object",
   "required": ["schema", "session_id", "window_turns", "items", "totals"],
   "additionalProperties": false,
@@ -9,8 +9,6 @@
     "schema":      { "type": "string", "enum": ["lgwks.waste.ledger.v1"] },
     "session_id":  { "type": "string" },
     "window_turns":{ "type": "integer", "minimum": 1 },
-    "suggest_cut_threshold": { "type": "number", "minimum": 0, "maximum": 1 },
-    "transcript_source": { "type": "string" },
     "items": {
       "type": "array",
       "items": {

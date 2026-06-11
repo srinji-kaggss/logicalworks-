@@ -21,15 +21,15 @@ Decisions:
     D1: secret is a 32-byte random token; hmac-sha256 over (tenant, nonce) signs
         the capability so a forged / mutated token is detected.
     D2: token equality and validation are pure functions — no I/O, replayable.
-    D3: guard() wraps any query callable and enforces the tenant filter before
-        the callable sees any data.
+    D3: guard() requires a key — there is no keyless verification path. Capability
+        tokens without a signing key provide zero isolation guarantee; accepting
+        them silently would make the "isolation boundary" a fiction.
 """
 
 from __future__ import annotations
 
 import hashlib
 import hmac
-import os
 import secrets
 from dataclasses import dataclass
 from typing import Any, Callable
@@ -68,7 +68,7 @@ def issue_token(tenant: str, *, key: bytes | None = None) -> tuple[CapabilityTok
     """Issue a fresh capability token for tenant.
 
     Returns (token, key) where key is the signing secret (caller stores it;
-    pass the same key to validate() for verification).
+    pass the same key to guard() and validate() for verification).
     //why: key is returned rather than stored here — the caller (session/daemon)
     owns the secret lifecycle; this module never writes to disk.
     """
@@ -93,7 +93,7 @@ def _sign(key: bytes, tenant: str, nonce: str) -> str:
 
 
 # ---------------------------------------------------------------------------
-# Guard — enforces tenant filter on every read
+# Guard — enforces token validity before every read
 # ---------------------------------------------------------------------------
 
 class CapabilityError(PermissionError):
@@ -103,32 +103,35 @@ class CapabilityError(PermissionError):
 def guard(
     token: CapabilityToken,
     query_fn: Callable[[str], Any],
-    *,
-    key: bytes | None = None,
+    key: bytes,
 ) -> Any:
-    """Validate token then call query_fn(token.tenant).
+    """Validate token signature then call query_fn(token.tenant).
 
-    query_fn receives the validated tenant string and is responsible for
-    filtering every read on tenant == token.tenant (the vr_space_tenant index
-    makes this a zero-cost filter in SQLite).
+    key is REQUIRED — there is no keyless path (D3). Accepting an unverified
+    token would reduce the isolation boundary to an empty-string check, which
+    any caller could trivially bypass with a non-empty tenant string.
 
-    A missing or invalid token raises CapabilityError — no partial result,
-    no fallthrough (INGESTION-PLAN §I8 acceptance: "token required").
+    query_fn receives the validated tenant string and must filter every store
+    read on tenant == token.tenant (the vr_space_tenant index provides O(1)
+    lookup; see lgwks_vector.py:49).
+
+    Raises CapabilityError on invalid signature, empty tenant, or wrong key —
+    no partial result, no silent fallthrough.
     """
-    if key is not None and not validate(token, key):
+    if not token.tenant:
+        raise CapabilityError("capability token has empty tenant — rejected")
+    if not validate(token, key):
         raise CapabilityError(
             f"capability token rejected: invalid signature for tenant {token.tenant!r}"
         )
-    if not token.tenant:
-        raise CapabilityError("capability token has empty tenant — rejected")
     return query_fn(token.tenant)
 
 
 def make_tenant_filter(token: CapabilityToken) -> Callable[[list], list]:
     """Return a filter function that drops any record whose tenant != token.tenant.
 
-    Wraps the vr_space_tenant index path (lgwks_vector.py:49): even if an upstream
-    query forgets to add WHERE tenant=?, this filter enforces the boundary.
+    Defense-in-depth: even if an upstream query omits the WHERE tenant=? clause,
+    this filter enforces the boundary before results reach the caller.
     """
     expected = token.tenant
 
@@ -168,9 +171,10 @@ def _cmd_info(args) -> int:
         "filter_field": "VectorRecord.tenant (lgwks_vector.py:75)",
         "index": "vr_space_tenant ON (space_id, tenant) (lgwks_vector.py:49)",
         "token_alg": "hmac-sha256(key, tenant:nonce)",
+        "key_required": "guard() requires a signing key — no keyless path (D3)",
         "p3_to_p0_trigger": "escalates to P0 before any multi-tenant or network exposure",
         "cross_tenant_leak": "impossible — every read filtered on token.tenant before store access",
-        "token_required": "queries without a valid token are rejected (CapabilityError), never partial",
+        "token_required": "guard() raises CapabilityError on any invalid/forged token",
     }, indent=2))
     return 0
 
@@ -185,6 +189,6 @@ def _cmd_issue(args) -> int:
         "nonce": token.nonce,
         "sig": token.sig,
         "key_hex": key.hex(),
-        "note": "store key_hex securely; it is the signing secret for this token",
+        "note": "store key_hex securely — required for guard() and validate()",
     }, indent=2))
     return 0
