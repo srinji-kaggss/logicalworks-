@@ -310,3 +310,33 @@ Same loop: file issue → AskUserQuestion at the proof fork → implement → ha
 **Registry gate:** green — 95 ids / 103 rows (unchanged; no new schemas introduced in this session).
 
 **Test count:** 44 passed / 12 skipped (numpy-gated I10 tests skip cleanly) across the four new test files. All non-numpy tests green.
+
+---
+
+## 2026-06-11 (session 6) · Post-merge planning — I8 reframed as multi-tenant concurrency + isolation (two-DB) (branch: claude/post-merge-planning-fpzmu8)
+
+**Build-state summary:** PR #76 merged the I8–I11 boilerplate to main (@ 6c2fdac). GH issues #72–#75 filed and open. No code change this session — planning + spec + doc hygiene only. Registry gate re-verified green (95 ids / 103 rows). The I-series (I1–I12) is the entire active backlog; there is no I13.
+
+**Director directive (session 6):** the real surface for I8 is **concurrency within one tenant AND across tenants**, over **two databases** — the shared world DB ("the Google", `store/substrate-global/`) everyone reads, and the private per-human+AI-pair DB (`store/projects/`). The §1-INV tenant isolation holding **under concurrent multi-tenant load** is the security load (Figma / Google Workspace daemon model). Multi-tenant/network exposure framing from the first pass was too narrow: isolation is **core to I8 now**, not a P3→P0 gate; network/MCP is genuinely deferred. "Address all gaps based on the hardest surface; assume local ops but maybe mcp/http in the end not now; log scope creep separately."
+
+**Key finding — the topology is already specified; we lack the enforcement.** `INGESTION-LAYER §1` already defines the two-tier store (world-nodes DB ▲promote tenant folders) + **§1-INV (T0):** "A read in tenant A can never observe tenant B's rows … enforced by a capability token, not `if tenant ==` … cross-tenant flow only by promotion." So the write model is **promotion-only** (no direct tenant→world write — resolves that question without asking). The lacks are all in enforcement + concurrency:
+- **L1 (T0/critical):** §1-INV unenforced — `lgwks_vector.get_record`/`query_by_source` (:248,260) never filter on `tenant`; `lgwks_capability.guard()` binds to nothing. A can read B today.
+- **L2:** the world/tenant seam is not modeled in the access path (no tier-routing; promotion-only unenforced).
+- **L3:** admission is global and **fail-OPEN per-tenant** (RECONCILE.md:318,360 — limiter before auth context).
+- **L4:** queue is in-memory, single-process, **drop-on-full** — cannot coordinate the separate crawler process (`crawler/src/main.rs`) or multiple tenant daemons; drops internal work.
+- **L5:** no provenance/audit on promotion to the world DB. **L6:** CRDT (`lgwks_crdt.py`) not deployed on the two stores. **L7:** capability token is single-scope, not tier-aware. **L8/L9 deferred:** cross-workspace sharing/ACL, network/MCP/federation.
+
+**Specced (3 new docs):**
+- `ARCH-two-db-multitenant.md` — the "where do we lack" gap analysis: topology, Figma/Workspace mapping, L1–L9 table (severity + code anchors), the hardest surface (§1-INV under concurrency = L1+L2+L7 through L3+L4), and how it threads into I8/I9.
+- `PLANS-NEXT-5.md` (rewritten) — I8 packet: build order = enforce §1-INV (L1/L2) → tier-scoped caps (L7) → per-tenant durable no-drop fair queue (L3/L4, reuses `lgwks_sqlite.connect` WAL + `ConnectionPool.acquire` backpressure precedent) → promotion audit (L5). Acceptance: 10⁴ A/B zero-leak against the **live two-tier store under concurrency** + no-drop/fairness/crash-durable/backpressure/worker-cap/replay.
+- `SCOPE-DEFERRED.md` — D1 external 429, D2 network/MCP transport, D3 cross-workspace sharing/ACL, D4 cross-machine federation, D5 promotion governance UI, D6 per-tenant billing. Promotion-only + isolation-now confirmed as NOT deferrable.
+
+**Doc hygiene:** HANDOFF.md "Suggested next step" reframed two-DB-first; §8 gap log G-07/G-08/G-09 reframed (isolation core, CRDT-not-deployed, queue-wrong-shape) with pointers to ARCH doc. Governance verified clean.
+
+**Next (sequenced):** I8 per PLANS-NEXT-5 (§1-INV under concurrency first) → close #72 → #73 (I9 — deploy CRDT on both tiers, L6) → #74 (I10 vector-store join) → #75 (I11 daemon wiring). After #75 the ingestion plan is fully landed.
+
+**Simplest-now correction + handoff (session 6 final):** Director scoped I8 down — "it's all 1 conceptual db; world data shared; standard data called in at query; log the complexity as future, get the thing working basically." PLANS-NEXT-5.md rewritten to the minimal version: one logical store (`vector_records`), `tenant` column + `'world'` sentinel, tenant read = `WHERE tenant=? OR tenant='world'`, WAL (`lgwks_sqlite.connect`) for basic concurrency. The full two-DB hardening (ARCH-two-db-multitenant.md, now marked FUTURE) + SCOPE-DEFERRED stay as the destination, not the next commit. North star (framing only): AI-first Unix-style CLI, "the daemon you code on" — keep modules small/composable, don't mint a framework.
+
+**Boilerplate home/stale audit:** PR #76's 5 modules are all CLI-wired (`lgwks:1483-1500`) but runtime callers: `lgwks_viz_project` → `lgwks_graph_viz.py` (partial home, #74 completes it); `lgwks_admission`/`lgwks_capability`/`lgwks_crdt`/`lgwks_waste` → **no runtime caller** (scaffolding, staling). None dead/removable — each has a home in an open issue (#72 admission+capability, #73 crdt, #74 viz, #75 waste). Action: work the canonical issues to give each a home; mark staling in BUILDLOG if an issue is dropped; do not delete. Full table in HANDOFF.md.
+
+**Session close:** planning + spec + doc hygiene only (no code). Branch `claude/post-merge-planning-fpzmu8` committed; merging to main for the next agent to pull. logic-os-kernel ADR referenced verbally by Director (repo not on disk here) — the "1 conceptual db" framing is captured above.

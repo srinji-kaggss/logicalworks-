@@ -1,4 +1,8 @@
-# Handoff — lgwks ingestion layer (scoring spine landing) · 2026-06-10
+# Handoff — lgwks ingestion layer · 2026-06-11 (session 6, post PR #76)
+
+> Refreshed session 6: I8–I11 boilerplate merged (PR #76); issues #72–#75 filed/open; next = close the
+> tail, I8 first ([PLANS-NEXT-5.md](PLANS-NEXT-5.md)). The dated "Current state" sections below are
+> append-only history — the **latest** state is the session-6 block lower in this file.
 
 You are the next agent on the lgwks rebuild. Read this fully before acting. Written
 AI-for-AI; receipts, not essays. Authority ladder: `/CLAUDE.md` → `governance/README.md`
@@ -84,20 +88,65 @@ I8–I11 boilerplate was implemented in session 4 (branch `claude/docs-implement
 - **I11** `lgwks_waste.py` — per-session waste ledger; `lgwks.waste.ledger.v1` flipped live.
 All 61 new tests green. Registry gate green (95 ids / 103 rows).
 
+## Current state (updated — session 6, 2026-06-11, post PR #76)
+
+**I8–I11 boilerplate is merged to main** (PR #76 @ 6c2fdac — admission, capability, CRDT, viz-projection,
+waste ledger; adversarially reviewed). **GH issues #72–#75 are filed and OPEN** (I8/I9/I10/I11, label
+`ingestion`). The modules + tests are landed; what remains per issue is the **hardening/deployment** half of
+each `Done =` line — the boilerplate is the structure, not the close. The I-series plan (I1–I12) is the
+*entire* active backlog; PLANS-NEXT-4 closes with "after I11 the ingestion plan is fully landed" — there is
+no I13.
+
 ## Suggested next step
 
-**I-series backlog is fully scaffolded.** The branch `claude/docs-implementation-boilerplate-83n6r1`
-carries I8–I11. Next steps per packet:
+**Close the open I-series tail, I8 first — reframed (session 6) as multi-tenant concurrency + isolation over
+the two-DB topology.** Director clarified the real surface: concurrency is within one tenant *and* across
+tenants; the complexity is the **shared world DB ("the Google", `store/substrate-global/`) + the private
+per-pair DB (`store/projects/`)**; the §1-INV tenant isolation holding **under concurrent load** is the
+security load (Figma / Google Workspace daemon model). Gap analysis: **[ARCH-two-db-multitenant.md](ARCH-two-db-multitenant.md)**
+(L1–L9). I8 packet: **[PLANS-NEXT-5.md](PLANS-NEXT-5.md)**. Deferred surfaces (network/MCP, sharing/ACL):
+**[SCOPE-DEFERRED.md](SCOPE-DEFERRED.md)**.
 
-1. **File GH issues** for I8, I9, I10, I11 (each packet says "NOT YET ISSUED" — file them now).
-   I8 issue body MUST include the P3→P0 escalation trigger ("before any multi-tenant or network
-   exposure"). See PLANS-NEXT-4.md for the complete issue body for each packet.
-2. **I8 P3→P0 hardening** — once the GH issue is filed, harden the admission/capability gate:
-   load test (λ ∈ {0.5cμ, cμ, 2cμ}), 10⁴ cross-tenant isolation proof, replayable determinism.
-3. **I10 vector join** — wire the real embedding lookup (SQLite join on `vr_space_tenant` by cid)
-   into `lgwks_graph_viz.GraphDataAdapter.to_frontend` so `xyz_map` is populated at serve time.
-4. **I11 deployment** — wire `lgwks waste report` into the daemon loop; confirm live transcript path
-   with the Director before setting `LGWKS_TRANSCRIPT_PATH`.
+**Hardest surface = §1-INV under concurrency** (ARCH L1+L2+L7 enforced through L3+L4). Build order inside I8:
+1. **Enforce §1-INV (L1/L2):** tier-routing access layer + tenant-scoped private reads
+   (`get_record_for_tenant`/`query_by_source_for_tenant`, capability-guarded). Today `lgwks_vector` reads
+   never filter on `tenant` → A can read B. The load-bearing fix.
+2. **Tier-scoped capability (L7):** token scopes `tenant:rw` / `world:r` / `world:promote`, not a flat tenant.
+3. **Per-tenant durable no-drop fair queue (L3/L4):** durable cross-process `admission_queue` table over
+   `lgwks_sqlite.connect` (WAL); backpressure not 429; per-tenant buckets ordered AFTER cap (fixes the
+   fail-OPEN, RECONCILE.md:318); fair leasing ≤ `c`; lease/reap crash-durability.
+4. **Promotion audit (L5):** tenant→world is the only cross-tier write, logged to the cognition chain.
+
+After I8: **#73 (I9 — deploy CRDT on both tiers, ARCH L6:** G-Set world / OR-Set+LWW tenant, wired to the
+live stores) → **#74 (I10** vector-store join) → **#75 (I11** daemon wiring; confirm `LGWKS_TRANSCRIPT_PATH`
+with the Director). After #75 the ingestion plan is fully landed.
+
+### Simplest-now correction (session 6 final — read this before the two-DB spec above)
+The Director scoped I8 down: **"it's all 1 conceptual db; world data shared; standard data called in at
+query; log the complexity as future, get the thing working basically."** So the **now-build** is minimal —
+one logical store (`vector_records`), a `tenant` column with a `'world'` sentinel for shared rows, a tenant
+read = `WHERE tenant = ? OR tenant = 'world'`, and WAL (`lgwks_sqlite.connect`) for basic concurrency. See
+[PLANS-NEXT-5.md](PLANS-NEXT-5.md). The full capability-crypto / durable-queue / CRDT / promotion hardening
+([ARCH-two-db-multitenant.md](ARCH-two-db-multitenant.md), [SCOPE-DEFERRED.md](SCOPE-DEFERRED.md)) is the
+*destination*, not the next commit. North star (framing only, do not over-build): an AI-first Unix-style CLI,
+"the daemon you code on" — keep modules small/composable.
+
+### Boilerplate home/stale audit (session 6 — what to wire vs what is staling)
+PR #76 added 5 modules. All are CLI-wired in the `lgwks` dispatcher (`lgwks:1483-1500`) but most have **no
+runtime caller** — they are scaffolding that will stale unless the canonical issue that owns each is worked.
+None is dead/removable; each has a designated home in an open issue:
+
+| module | runtime caller? | home (open issue) | status |
+|--------|-----------------|-------------------|--------|
+| `lgwks_viz_project.py` | yes — `lgwks_graph_viz.py` | #74 (I10 vector-store join completes the feed) | **partial home**; needs the cid→embedding join |
+| `lgwks_capability.py` | none | #72 (I8) — first home = the simplest tenant WHERE; crypto enforcement later | scaffolding; minimal home via I8-basic |
+| `lgwks_admission.py` | none | #72 (I8) — parked for the *durable-queue future*; WAL covers basic concurrency now | scaffolding; **staling** unless durable-queue work lands |
+| `lgwks_crdt.py` | none | #73 (I9) — deploy as live merge path on both tiers | scaffolding; staling unless #73 worked |
+| `lgwks_waste.py` | none | #75 (I11) — daemon-loop wiring + live transcript | scaffolding; staling unless #75 worked |
+
+**Action for the next agent:** work the canonical issues in order (#72-basic → #73 → #74 → #75); that is what
+gives each orphaned module a home. If an issue is dropped, mark its module staling in BUILDLOG rather than
+pretending it is integrated. Do not delete — the scaffolding is the seed of the logged future work.
 
 **Open ops action (carried from I7):** re-register `hooks/subconscious_inbound.py` against the live
 `/Applications/logicalworks` dir (currently points at dead space-named path). Confirm path first.
