@@ -1475,6 +1475,10 @@ def build_parser() -> argparse.ArgumentParser:
     import lgwks_rank
     lgwks_rank.add_parser(sub)
 
+    # inbound — L5 consumer pack: RRF fusion + reflex token budget (I7)
+    import lgwks_inbound
+    lgwks_inbound.add_parser(sub)
+
     # route — deterministic intent router (tiny-bert + heuristic fallback)
     import lgwks_intent_router
     lgwks_intent_router.add_parser(sub)

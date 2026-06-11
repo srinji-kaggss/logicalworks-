@@ -34,18 +34,16 @@ Ingestion packets I1–I6 + I12 are **done and merged**. The deterministic scori
 - **I6** `lgwks_rank.py` — `lgwks.rank.record.v1`: relation-weighted vs relation-blind
   centrality, σ-shifted power iteration + Rayleigh convergence, δ slop signal (PR #67).
   CLI `lgwks rank`. Closes G-06.
+- **I7** `lgwks_inbound.py` — `lgwks.inbound.v1`: RRF fusion of graph rank ⊕ vector cosine
+  rank (`RRF_K=60`), 1500-token reflex cap, deterministic truncation (bulk first, depth
+  pointers survive), zero-dangling handles. CLI `lgwks inbound run|info`. 12 tests
+  (session 3). Hook extension still gated on the re-registration ops action (below).
 - **I12** graphify Leiden fix (PR #63).
 
 Gaps G-04/05/06/11/12 closed (INGESTION-LAYER §8).
 
 ## NOT built / deferred (honest — do not claim otherwise)
 
-- **I7** (#61) — consumer tail (L5 reflex pack + RRF). **Next packet.** Code dependency
-  (I6) is now satisfied. Spec posted on the issue. **Blocked only on an ops action:**
-  re-register the inbound hook `hooks/subconscious_inbound.py` against the live
-  `/Applications/logicalworks` project dir (it currently points at the dead space-named
-  `/Applications/Logical Works`). Confirm the path with the Director before relying on
-  live hook behavior.
 - **I5.1 (deferred, not yet issued)** — directional `P_k` activation. I5 ships identity
   operators (so the §4.2 marginal-identity proof holds exactly); scoring currently
   collapses to cosine. Genuine directional/embedding-coupled scoring is future work.
@@ -68,10 +66,19 @@ registry gate from the repo root, not a `.claude/` worktree (it skips `.claude` 
 
 ## Suggested next step
 
-Build **I7** (#61): RRF fusion of I6 cubic rank ⊕ vector cosine rank → token-budgeted L5
-reflex pack (`lgwks.inbound.v1` extension, 1500-token cap, deterministic truncation,
-zero-dangling handles). Spec on the issue. Resolve the hook re-registration path with the
-Director. Then consider filing I5.1 and the I8–I11 issues.
+Per build order **I7 → I5.1 → I8** (PLANS-NEXT-3.md): I7 landed (session 3). Next is
+**I5.1** — directional `P_k` operator activation (`lgwks_score.py:73 build_operators`,
+currently all-identity → scoring collapses to cosine). **File the GH issue first**
+(not yet issued). The hard constraint: any directional `P_k` must keep the §4.2
+marginal-identity proof `(1/m)Σ_k R_k = I` to ≤1e-6 — if neither derivation (sign-flip
+involution / antisymmetric tie-break) closes cleanly, STOP AND ASK (the proof is
+load-bearing). Then I8 (queue/isolation, P3→P0 before any multi-tenant/network exposure).
+
+**Open ops action (carried from I7):** to wire the L5 reflex pack into the live
+`UserPromptSubmit` hook, re-register `hooks/subconscious_inbound.py` against the live
+`/Applications/logicalworks` dir (it points at the dead space-named `/Applications/Logical
+Works`). Confirm the path with the Director before relying on live hook behavior. The I7
+module + CLI + tests do not depend on it.
 
 ## Doc map
 
