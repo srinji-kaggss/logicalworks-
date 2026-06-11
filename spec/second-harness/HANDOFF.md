@@ -1,8 +1,8 @@
-# Handoff — lgwks ingestion layer · 2026-06-11 (session 6, post PR #76)
+# Handoff — lgwks ingestion layer · 2026-06-11 (session 7, post PR #79)
 
-> Refreshed session 6: I8–I11 boilerplate merged (PR #76); issues #72–#75 filed/open; next = close the
-> tail, I8 first ([PLANS-NEXT-5.md](PLANS-NEXT-5.md)). The dated "Current state" sections below are
-> append-only history — the **latest** state is the session-6 block lower in this file.
+> Refreshed session 7: I8–I11 fully closed (PR #79); issues #72–#75 all closed. **The I-series
+> (I1–I12) is fully landed.** No open ingestion issues remain. The dated "Current state" sections
+> below are append-only history — the **latest** state is the session-7 block at the bottom.
 
 You are the next agent on the lgwks rebuild. Read this fully before acting. Written
 AI-for-AI; receipts, not essays. Authority ladder: `/CLAUDE.md` → `governance/README.md`
@@ -139,14 +139,12 @@ None is dead/removable; each has a designated home in an open issue:
 | module | runtime caller? | home (open issue) | status |
 |--------|-----------------|-------------------|--------|
 | `lgwks_viz_project.py` | yes — `lgwks_graph_viz.py` | #74 (I10 vector-store join completes the feed) | **partial home**; needs the cid→embedding join |
-| `lgwks_capability.py` | none | #72 (I8) — first home = the simplest tenant WHERE; crypto enforcement later | scaffolding; minimal home via I8-basic |
-| `lgwks_admission.py` | none | #72 (I8) — parked for the *durable-queue future*; WAL covers basic concurrency now | scaffolding; **staling** unless durable-queue work lands |
-| `lgwks_crdt.py` | none | #73 (I9) — deploy as live merge path on both tiers | scaffolding; staling unless #73 worked |
-| `lgwks_waste.py` | none | #75 (I11) — daemon-loop wiring + live transcript | scaffolding; staling unless #75 worked |
+| `lgwks_capability.py` | `lgwks_vector.query_for_tenant()` | #72 closed | **homed** — tenant field feeds WHERE clause |
+| `lgwks_admission.py` | none | deferred — parked for durable-queue future | scaffolding; staling; SCOPE-DEFERRED.md |
+| `lgwks_crdt.py` | `lgwks_pipeline.run_pipeline()` Stage 1.5 | #73 closed | **homed** — GSet/ORSet live node tracker |
+| `lgwks_waste.py` | `lgwks_session.session_end()` + pipeline Stage 12 | #75 closed | **homed** — wired via LGWKS_TRANSCRIPT_PATH |
 
-**Action for the next agent:** work the canonical issues in order (#72-basic → #73 → #74 → #75); that is what
-gives each orphaned module a home. If an issue is dropped, mark its module staling in BUILDLOG rather than
-pretending it is integrated. Do not delete — the scaffolding is the seed of the logged future work.
+**I-series status (session 7):** I1–I12 all landed. No open ingestion issues. `lgwks_admission.py` is the one remaining staling module — its home is the durable-queue / P3→P0 future work documented in ARCH-two-db-multitenant.md.
 
 **Open ops action (carried from I7):** re-register `hooks/subconscious_inbound.py` against the live
 `/Applications/logicalworks` dir (currently points at dead space-named path). Confirm path first.
@@ -156,6 +154,21 @@ pretending it is integrated. Do not delete — the scaffolding is the seed of th
 `/Applications/logicalworks` dir (it points at the dead space-named `/Applications/Logical
 Works`). Confirm the path with the Director before relying on live hook behavior. The I7
 module + CLI + tests do not depend on it.
+
+## Session 7 state (2026-06-11, PR #79 → main @ 7e570b5)
+
+**I-series: fully landed.** Issues #72–#75 closed. I1–I12 all done.
+
+| module | status | home |
+|---|---|---|
+| `lgwks_vector` | ✅ homed | I1 + I8 (query_for_tenant) |
+| `lgwks_crdt` | ✅ homed | I9 — pipeline Stage 1.5 |
+| `lgwks_viz_project` | ✅ homed (partial) | I10 — graph_viz.to_frontend; vector-store join deferred |
+| `lgwks_waste` | ✅ homed | I11 — session_end + pipeline Stage 12 |
+| `lgwks_admission` | staling | parked for durable-queue future (SCOPE-DEFERRED.md) |
+| `lgwks_capability` | ✅ homed | I8 — tenant field → query_for_tenant WHERE clause |
+
+**Next:** no open ingestion issues. Remaining deferred surfaces: crypto §1-INV enforcement, per-tenant durable queue, promotion audit, network/MCP (all in ARCH-two-db-multitenant.md + SCOPE-DEFERRED.md). The P3→P0 trigger for `lgwks_admission` fires before any multi-tenant or network exposure. The hook re-registration ops action (subconscious_inbound.py → live `/Applications/logicalworks` path) is still pending — confirm path with Director before relying on live hook behavior.
 
 ## Doc map
 

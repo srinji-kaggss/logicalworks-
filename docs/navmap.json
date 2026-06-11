@@ -1019,7 +1019,7 @@
       "has_cli": false,
       "has_tests": true,
       "integration": "integrated",
-      "last_commit_days": 1,
+      "last_commit_days": 2,
       "loc": 624,
       "owning_issue": null,
       "packet": null,
@@ -1099,6 +1099,7 @@
       "subsystem": "Ingestion spine (I1\u2013I12)",
       "used_by": [
         "lgwks(dispatcher)",
+        "lgwks_pipeline",
         "scripts"
       ]
     },
@@ -1210,7 +1211,7 @@
       "has_cli": false,
       "has_tests": true,
       "integration": "integrated",
-      "last_commit_days": 0,
+      "last_commit_days": 1,
       "loc": 653,
       "owning_issue": null,
       "packet": "I4",
@@ -1625,7 +1626,7 @@
       "has_cli": false,
       "has_tests": false,
       "integration": "integrated",
-      "last_commit_days": 0,
+      "last_commit_days": 1,
       "loc": 530,
       "owning_issue": null,
       "packet": "I2",
@@ -1916,7 +1917,7 @@
       "has_cli": false,
       "has_tests": false,
       "integration": "integrated",
-      "last_commit_days": 1,
+      "last_commit_days": 2,
       "loc": 354,
       "owning_issue": null,
       "packet": null,
@@ -2014,6 +2015,7 @@
     "lgwks_pipeline": {
       "deps": [
         "lgwks_apple",
+        "lgwks_crdt",
         "lgwks_embed",
         "lgwks_entity_graph",
         "lgwks_intent_classifier",
@@ -2022,13 +2024,14 @@
         "lgwks_ollama",
         "lgwks_research",
         "lgwks_run",
-        "lgwks_substrate"
+        "lgwks_substrate",
+        "lgwks_waste"
       ],
       "has_cli": true,
       "has_tests": true,
       "integration": "integrated",
-      "last_commit_days": 2,
-      "loc": 1429,
+      "last_commit_days": 0,
+      "loc": 1487,
       "owning_issue": null,
       "packet": null,
       "purpose": "unified ingestion and ranking spine.",
@@ -2342,7 +2345,7 @@
       "has_cli": true,
       "has_tests": false,
       "integration": "integrated",
-      "last_commit_days": 1,
+      "last_commit_days": 2,
       "loc": 787,
       "owning_issue": null,
       "packet": null,
@@ -2441,13 +2444,14 @@
     "lgwks_session": {
       "deps": [
         "lgwks_repo",
-        "lgwks_ui"
+        "lgwks_ui",
+        "lgwks_waste"
       ],
       "has_cli": true,
       "has_tests": true,
       "integration": "integrated",
-      "last_commit_days": 1,
-      "loc": 412,
+      "last_commit_days": 0,
+      "loc": 458,
       "owning_issue": null,
       "packet": null,
       "purpose": "session boundary analyzer (begin / end / summary).",
@@ -2544,7 +2548,7 @@
       "has_cli": true,
       "has_tests": true,
       "integration": "integrated",
-      "last_commit_days": 1,
+      "last_commit_days": 2,
       "loc": 207,
       "owning_issue": null,
       "packet": null,
@@ -2663,7 +2667,7 @@
       "has_cli": false,
       "has_tests": false,
       "integration": "integrated",
-      "last_commit_days": 1,
+      "last_commit_days": 2,
       "loc": 430,
       "owning_issue": null,
       "packet": null,
@@ -2736,7 +2740,7 @@
       "has_cli": true,
       "has_tests": false,
       "integration": "integrated",
-      "last_commit_days": 1,
+      "last_commit_days": 2,
       "loc": 726,
       "owning_issue": null,
       "packet": null,
@@ -2906,7 +2910,7 @@
       "has_tests": false,
       "integration": "integrated",
       "last_commit_days": 0,
-      "loc": 355,
+      "loc": 396,
       "owning_issue": null,
       "packet": "I1",
       "purpose": "vector-space + cid contract (lgwks.vector.record.v1).",
@@ -2974,6 +2978,8 @@
       "subsystem": "Ingestion spine (I1\u2013I12)",
       "used_by": [
         "lgwks(dispatcher)",
+        "lgwks_pipeline",
+        "lgwks_session",
         "scripts"
       ]
     },
@@ -3050,7 +3056,7 @@
       "has_cli": true,
       "has_tests": false,
       "integration": "integrated",
-      "last_commit_days": null,
+      "last_commit_days": 0,
       "loc": 345,
       "owning_issue": null,
       "packet": null,
@@ -3127,7 +3133,7 @@
       "orphan": 2,
       "staling": 6
     },
-    "loc": 46506,
+    "loc": 46651,
     "modules": 132
   }
 }

@@ -192,7 +192,7 @@ lowest-RRF first (load-bearing survives the cut).
 
 ## I8 — concurrency, queue, isolation  ·  P3 (P0 before any multi-tenant/network exposure)  ·  depends: I1 (┄)
 
-**Status:** not started; worker-cap formula exists.
+**Status:** ✅ **done** (2026-06-11, PR #79). `lgwks_vector.query_for_tenant()` — `WHERE tenant=? OR tenant='world'`, index-backed. `WORLD_TENANT='world'` sentinel. WAL path confirmed (lgwks_sqlite.connect). 5 tests green (isolation + WAL concurrency). Crypto enforcement / durable queue deferred per SCOPE-DEFERRED.md.
 **Goal:** no 5xx under load; hard tenant isolation.
 **Inputs (exist):** [lgwks_workercap.py](../../lgwks_workercap.py) (worker-cap formula), crawler politeness
 (jittered backoff), `store/projects/` + `store/substrate-global/`.
@@ -207,7 +207,7 @@ randomized A/B queries leak zero cross-tenant cids; a query without a valid capa
 
 ## I9 — CRDT state  ·  P3  ·  depends: I1 (┄)
 
-**Status:** not started.
+**Status:** ✅ **done** (2026-06-11, PR #79). `lgwks_crdt.GSet` + `ORSet` deployed as live node tracker in `lgwks_pipeline.run_pipeline()` Stage 1.5. `crdt_state.json` written per run. Convergence proof in BUILDLOG (session 7).
 **Goal:** concurrent writers converge without conflict.
 **Inputs:** I1 cid; [lgwks_cognition.py](../../lgwks_cognition.py) (hash-chain = logical clock).
 **Design:** world-nodes = **G-Set keyed by cid** (idempotent ⇒ CvRDT for free); tenant edges = **OR-Set**
@@ -220,7 +220,7 @@ all replicas converge to **byte-identical** state; adding the same cid-fact twic
 
 ## I10 — deterministic 3-D viz projection (DECOUPLED from semantic space)  ·  P3  ·  depends: I4 (┄)
 
-**Status:** not started. Never let this run ahead of the spine — it is viz-only.
+**Status:** ✅ **done** (2026-06-11, PR #76 + #79). `lgwks_viz_project.py` — sign-fixed PCA, import-decoupling test green, decoupling proof in BUILDLOG. Vector-store join (live `xyz_map` at serve time) deferred.
 **Goal:** a replayable X/Y/Z coordinate per node for the visualization engine. This is a **viz-only**
 artifact, fully decoupled from the N-dim semantic space and the order-3 scoring (INGESTION-LAYER §7.5):
 derived one-way from the embedding, it **never feeds back** into scoring/retrieval.
@@ -236,7 +236,7 @@ distorted for the picture; the picture is never the semantic truth.
 
 ## I11 — waste ledger (the proof context-optimization works)  ·  P3  ·  depends: I7
 
-**Status:** not started.
+**Status:** ✅ **done** (2026-06-11, PR #79). `lgwks_waste.py` wired into `lgwks_session.session_end()` + `lgwks_pipeline.run_pipeline()` Stage 12 via `LGWKS_TRANSCRIPT_PATH`. Set env var to activate live tracking.
 **Goal:** measure that the score actually reduces tokens (else the whole optimization is asserted, G-13).
 **Inputs:** PRD-04 §04-c; the transcript the daemon tails; I7 packs; `lgwks_cognition.py` store.
 **Output:** per-session ledger: per injected item → `{tokens, used_within_N_turns: bool}` (cited/acted-on,
