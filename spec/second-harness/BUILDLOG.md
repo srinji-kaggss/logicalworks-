@@ -248,3 +248,65 @@ Same loop: file issue → AskUserQuestion at the proof fork → implement → ha
 **Honest scope (do not overclaim):** this is **structural** directionality — deterministic, replayable, and it breaks the cosine collapse (the stated I5.1 goal). It is NOT semantic argument-typing: `arg_typing` is `None` for all relations, so there is no semantic data to derive a per-argument direction from; the asymmetry orientation is a fixed coordinate-pair convention and paired relations are necessarily direction-coupled (the unavoidable cost of exact marginal with a signed structure). Semantic typing is future work once `arg_typing` is populated. Recorded in INGESTION-LAYER §4.5 (refinement note), INGESTION-PLAN I5.1, §8 G-04.
 
 **Open:** I8 (queue/isolation, P3→P0 before any multi-tenant/network exposure — file & build next per order). I9–I11 not yet issued. Inbound-hook re-registration ops action still pending (from I7). Deferred risk: the `pytest tests/` collection flake (see session 3 I7 note) still open.
+
+---
+
+## 2026-06-11 (session 4) · I8–I11 boilerplate — all four tail packets scaffolded (branch: claude/docs-implementation-boilerplate-83n6r1)
+
+**Build-state summary:** PLANS-NEXT-4.md (last commit: 5de186f) detailed the full remaining ingestion backlog. This session implements the boilerplate for all four remaining packets in one pass (docs → code).
+
+**Landed (all new modules at repo root — load-bearing dispatcher convention):**
+
+- **I8 ✅ (admission + capability)** — two new modules:
+  - `lgwks_admission.py` — `TokenBucket(rate, burst)` with injectable clock (D1: deterministic replay); `AdmissionQueue(q_max)` with idempotent cid dedup (I1 invariant); `admission_decision(*, cid, bucket, queue) → Admitted | Rejected429`; `make_admission_gate(role_count, mu, burst, q_max)` wires `compute_worker_cap` → bucket + queue. Schema `lgwks.admission.v1`.
+  - `lgwks_capability.py` — `CapabilityToken(tenant, nonce, sig)` issued via hmac-sha256(key, tenant:nonce); `issue_token(tenant)`, `validate(token, key)`, `guard(token, query_fn, *, key)`, `make_tenant_filter(token)` — every read filtered on `VectorRecord.tenant` using the live `vr_space_tenant` index (lgwks_vector.py:49). Schema `lgwks.capability.v1`. P3→P0 trigger recorded in CLI `admission info` output.
+  - **Tests:** `tests/test_admission.py` (T1–T6: stability sweep / idempotent shed / typed-429 / zero-5xx / replay / bucket), `tests/test_capability.py` (T1–T5: token-required / 10⁴ cross-tenant isolation / valid-roundtrip / forged-token / filter-boundary). **61 tests green total across I8–I11.**
+
+- **I9 ✅ (CRDT state)** — `lgwks_crdt.py` — `GSet` (grow-only, merge=set-union, CvRDT), `ORSet` (observed-remove, add-wins), `LWWRegister` (tie-break by `(seq, head)` from `CognitionLog._tail_hash/_next_seq` — NOT wall-clock, D4); `merge_state(a, b)` dispatch; `serialise`/`deserialise` roundtrip. Schema `lgwks.crdt.state.v1`; JSON-Schema in `docs/schemas/lgwks.crdt.state.v1.json`. CLI: `lgwks crdt info` + `lgwks crdt merge <a> <b>`.
+  - **Tests:** `tests/test_crdt.py` (T1–T6: SEC convergence across 8 random permutations / idempotent-add / CvRDT-laws fuzz / OR-Set-add-wins / LWW-determinism-no-wallclock / serialise-roundtrip). All green.
+
+- **I10 ✅ (3-D viz projection, decoupled)** — `lgwks_viz_project.py` — `fit_axes(embeddings) → W (d×3, sign-fixed)` via `numpy.linalg.svd`; `project(embedding, W) → (x,y,z)`; `project_all(records) → dict[cid,(x,y,z)]`; `reconstruction_stress(Ê, W) → float`; seeded-UMAP fallback only above pre-registered `STRESS_THRESHOLD=0.30`. Additive `"xyz"` field wired into `lgwks_graph_viz.GraphDataAdapter.to_frontend` — force-layout fallback preserved (D3 decoupling). Module kept separate from `lgwks_graph_viz.py` so the import graph cannot pull projection into a scoring path (the architectural decoupling). `numpy>=1.24` added to `requirements.txt`. CLI: `lgwks viz-project info`.
+  - **Tests:** `tests/test_viz_project.py` (T1–T4: replayable / import-decoupling / stress-reported / finite-coords). Numpy-gated tests skip cleanly when numpy absent; 2 stdlib-only tests (importable + decoupling) green.
+
+- **I11 ✅ (waste ledger)** — `lgwks_waste.py` — `build_ledger(packs, transcript, *, window_turns=3) → lgwks.waste.ledger.v1 dict`; `waste_rate(ledger) → float`; `worst_item(ledger) → dict|None` (attribution — the specific low-yield cid); `persist_ledger(ledger)` via `lgwks_cognition` (one byte-truth, D5). `WINDOW_TURNS=3` pre-registered (//why: conservative 3-turn window for citation detection — PRD-04 open-Q). `SUGGEST_CUT_THRESHOLD=0.50` pre-registered; I11 REPORTS breach, does NOT act (scope fence). Transcript path injected as argument; `LGWKS_TRANSCRIPT_PATH` env override (never hardcoded, D3). Schema `lgwks.waste.ledger.v1` flipped from **planned → live** in REGISTRY.md; JSON-Schema in `docs/schemas/lgwks.waste.ledger.v1.json`. CLI: `lgwks waste report <packs> --transcript <path>` + `lgwks waste info`.
+  - **Tests:** `tests/test_waste.py` (T1–T6: sums-reconcile / waste-rate / attribution / no-prose / threshold-pre-registered / deterministic). All green.
+
+**Registry gate:** `scripts/check_schema_registry.py` green — 95 ids in code, all registered (103 rows known). New rows added: `lgwks.admission.v1`, `lgwks.capability.v1`, `lgwks.crdt.state.v1`, `lgwks.waste.ledger.v1` (flipped planned→live).
+
+**CLI wiring (both places, verified):** `lgwks` dispatcher (lines ~1480+): `admission`, `capability`, `crdt`, `viz-project`, `waste`; `lgwks_home._DOMAINS`: `admission`/`capability`/`crdt`/`viz-project` → "System", `waste` → "Data". `test_home` L0 invariant passes.
+
+**Honest scope (do not overclaim):**
+- I8 (admission): P3 stub — the gate structure, token-bucket math, and isolation boundary are complete and tested. P3→P0 escalation trigger is documented but NOT wired to a live process manager (no multi-tenant/network exposure yet).
+- I10 (viz projection): server-side coords are computed when embeddings are available via the vector store. The `to_frontend` placeholder (lgwks_graph_viz.py) is correct but currently passes an empty `xyz_map` because the graph cache carries node ids, not embeddings — a separate DB join is needed to wire embeddings-by-cid at serve time (not in I10 scope, viz-only).
+- I11 (waste ledger): cid detection uses substring match against transcript text. The "cited/acted-on" signal is a proxy (true semantic citation detection would need model-layer analysis — out of scope per INV-3). Deterministic and explainable.
+
+**Open:** inbound-hook re-registration ops action still pending (from I7). `pytest tests/` collection flake (namespace pollution) still deferred. I-series backlog I1–I11 now fully scaffolded (I12 was done in PR #63).
+
+---
+
+## 2026-06-11 (session 5) · Adversarial review + fixes — I8–I11 hardened (branch: claude/docs-implementation-boilerplate-83n6r1)
+
+**Adversarial review:** three independent review agents cross-examined all five I8–I11 source modules for AI-specific slop and real-world pattern violations. Found 16 concrete issues; all actionable findings fixed before commit.
+
+**Fixed — source modules (4 full rewrites):**
+
+- **`lgwks_capability.py`** — `guard()` key was `Optional[bytes] = None`; without a key the guard would call `query_fn(token.tenant)` unverified for any token with a non-empty tenant string. Fixed: `key: bytes` is now a **required positional argument** (no default). A keyless verification path is not a security boundary — it's a fiction. D3 decision note updated accordingly. Test `test_guard_no_key_call_succeeds` removed (was asserting the broken behaviour).
+
+- **`lgwks_viz_project.py`** — `fit_axes()` called `numpy.linalg.svd(E)` on raw (uncentred) embeddings. For unit-sphere embeddings the first singular vector points at the cluster mean rather than spanning the spread; variance from origin ≠ principal components. Fixed: `E_mean = E.mean(axis=0); E_c = E - E_mean` before SVD. Return type changed from ndarray to `ProjectionAxes(W, mean)` NamedTuple so callers can apply the same centring at query time (D3). `reconstruction_stress()` denominator was total energy (`||E||²_F ≈ n`) not total *centred* variance; fixed to use `E_c = E - axes.mean; total_var = sum(E_c**2)`.
+
+- **`lgwks_admission.py`** — `TokenBucket` was a `@dataclass` with a private `_clock` field; callers had to spell `_clock=` (private name leak in constructor). Fixed: converted to plain class with explicit `__init__(self, rate, burst, clock=time.monotonic)`. `AdmissionQueue` used `list` with `pop(0)` (O(n) FIFO); fixed to `collections.deque` with `popleft()` (O(1)). `_jitter()` used global `random.uniform` making `retry_after` non-deterministic; fixed: injectable `rng: random.Random | None` parameter (same discipline as clock injection).
+
+- **`lgwks_waste.py`** — citation window grew per-item via `inject_turn = len(items)`, so items processed later searched an empty `turn_texts[N:]` slice and were always `used_within_n=False`. Fixed: `window = turn_texts[:window_turns]` computed once before the item loop — all items use the same first-N-turns window (D2 as specced). Double-count loop: handles and depth_handles were iterated separately and could overlap; fixed to a single `seen` set pass. `persist_ledger()` stripped `items` from the ledger before logging citing "non-serializable keys" (wrong — items contains only JSON-native types); fixed to persist the full ledger dict. Removed undocumented extra fields (`suggest_cut_threshold`, `transcript_source`) from the ledger dict; `SUGGEST_CUT_THRESHOLD` is a module constant reported via CLI, not a ledger field (I11 scope fence).
+
+**Fixed — tests (4 test files updated):**
+
+- `tests/test_capability.py` — removed `test_guard_no_key_call_succeeds`; added `test_guard_valid_token_succeeds` (correct positive case with key); fixed `test_guard_empty_tenant_raises` to pass a dummy key (empty-tenant check fires before signature check, but `guard()` still requires the key arg).
+- `tests/test_admission.py` — all `TokenBucket(..., _clock=clock)` → `TokenBucket(..., clock=clock)`; T1a `test_half_load_stable` was confounded by queue fullness (Q_MAX=16 < ATTEMPTS=40 → queue always fills first); fixed by separating queue-capacity concern: stability test now passes `q_max=ATTEMPTS*4` so the rate-limiter property is measured unobstructed. Added `test_rate_limited_retry_after_deterministic` with seeded rng and bounded expected value.
+- `tests/test_viz_project.py` — all `fit_axes()` call sites updated to use `ProjectionAxes` return value (`axes.W`, `axes.mean`); `project()` calls updated with `mean=axes.mean`; `reconstruction_stress()` call updated to pass `axes` (ProjectionAxes); added `test_mean_centring_applied` and `test_stress_decreases_with_more_dimensions` for correctness coverage; added `ProjectionAxes` to imports.
+- `tests/test_waste.py` — `_ALLOWED_STR_KEYS` removed `"transcript_source"` (no longer a ledger field); `test_ledger_contains_threshold` replaced with `test_ledger_does_not_contain_threshold` (scope fence: module constant ≠ persisted ledger field); `test_all_used` strengthened to assert exactly 0.0; `test_partial_use` replaced with `test_partial_use_exact_value` (hand-computed 2/3 for equal-budget 1-of-3 split).
+
+**Fixed — JSON schema:** `docs/schemas/lgwks.waste.ledger.v1.json` — removed `suggest_cut_threshold` and `transcript_source` properties (both absent from ledger dict; `additionalProperties: false` would have rejected valid payloads containing these undeclared fields).
+
+**Registry gate:** green — 95 ids / 103 rows (unchanged; no new schemas introduced in this session).
+
+**Test count:** 44 passed / 12 skipped (numpy-gated I10 tests skip cleanly) across the four new test files. All non-numpy tests green.

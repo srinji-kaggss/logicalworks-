@@ -1,0 +1,37 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "lgwks.waste.ledger.v1",
+  "description": "Per-session waste ledger correlating injected items against downstream use. No free-text fields — only cids, ints, bools, floats (PRD-04 §04-c). I11. suggest_cut_threshold is a module constant reported via CLI, never persisted in the ledger (I11 scope fence).",
+  "type": "object",
+  "required": ["schema", "session_id", "window_turns", "items", "totals"],
+  "additionalProperties": false,
+  "properties": {
+    "schema":      { "type": "string", "enum": ["lgwks.waste.ledger.v1"] },
+    "session_id":  { "type": "string" },
+    "window_turns":{ "type": "integer", "minimum": 1 },
+    "items": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["cid", "tokens", "used_within_n", "first_use_turn"],
+        "additionalProperties": false,
+        "properties": {
+          "cid":           { "type": "string" },
+          "tokens":        { "type": "integer", "minimum": 0 },
+          "used_within_n": { "type": "boolean" },
+          "first_use_turn":{ "type": ["integer", "null"], "minimum": 0 }
+        }
+      }
+    },
+    "totals": {
+      "type": "object",
+      "required": ["tokens_injected", "tokens_used", "waste_rate"],
+      "additionalProperties": false,
+      "properties": {
+        "tokens_injected": { "type": "integer", "minimum": 0 },
+        "tokens_used":     { "type": "integer", "minimum": 0 },
+        "waste_rate":      { "type": "number", "minimum": 0, "maximum": 1 }
+      }
+    }
+  }
+}

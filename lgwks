@@ -1479,6 +1479,26 @@ def build_parser() -> argparse.ArgumentParser:
     import lgwks_inbound
     lgwks_inbound.add_parser(sub)
 
+    # admission — token-bucket admission + queue (I8)
+    import lgwks_admission
+    lgwks_admission.add_parser(sub)
+
+    # capability — capability-token tenant isolation (I8)
+    import lgwks_capability
+    lgwks_capability.add_parser(sub)
+
+    # crdt — CRDT state merge: G-Set / OR-Set / LWW (I9)
+    import lgwks_crdt
+    lgwks_crdt.add_parser(sub)
+
+    # viz-project — deterministic 3-D viz projection, decoupled (I10)
+    import lgwks_viz_project
+    lgwks_viz_project.add_parser(sub)
+
+    # waste — waste ledger: proof context-optimisation works (I11)
+    import lgwks_waste
+    lgwks_waste.add_parser(sub)
+
     # route — deterministic intent router (tiny-bert + heuristic fallback)
     import lgwks_intent_router
     lgwks_intent_router.add_parser(sub)
