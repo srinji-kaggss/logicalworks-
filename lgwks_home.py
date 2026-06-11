@@ -409,7 +409,7 @@ def _repo_for_command(verb: str, repo: Path | None) -> list[str]:
 
 _DOMAINS: dict[str, list[str]] = {
     # Primary product — the subconscious loop and operator surface
-    "Subconscious": ["map", "session", "solve", "debug", "intent", "doctor",
+    "Subconscious": ["map", "engine", "session", "solve", "debug", "intent", "doctor",
                      "spawn", "portal", "do", "agent-os"],
     # Research and knowledge work — the conscious-layer tools
     "Research":  ["jarvis", "fetch", "refine", "preview", "extract", "convert",

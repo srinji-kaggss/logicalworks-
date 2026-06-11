@@ -1,8 +1,8 @@
 # NAVMAP — lgwks module atlas (generated; do not hand-edit)
 
-> `scripts/gen_navmap.py` from source — re-run to refresh. **124 modules · 45,028 LOC.** Read/query this FIRST. Strict machine-readable contract: `docs/navmap.json` (`lgwks.navmap.v1`).
+> `scripts/gen_navmap.py` from source — re-run to refresh. **125 modules · 45,246 LOC.** Read/query this FIRST. Strict machine-readable contract: `docs/navmap.json` (`lgwks.navmap.v1`).
 
-**Staleness:** `active` 123 · `orphan` 1
+**Staleness:** `active` 124 · `orphan` 1
 
 Rules — `active`: referenced by another module/dispatcher (static or dynamic), or a tested CLI verb <180d · `scaffolding`: no caller, owned by an open issue · `staling`: no caller anywhere, but built/tested or has a CLI verb, no issue (wire or retire) · `orphan`: no caller, no tests, no CLI, no issue (deletion candidate).
 
@@ -58,7 +58,7 @@ Row legend: `cli` `test` · `←N` imported by N · `→N` imports N · `Nd` day
 
 | module | purpose | loc | stale | rel |
 |---|---|---|---|---|
-| `graphify.cluster` | graphify.cluster — Leiden community detection with no silent fallback. | 215 | active | ←2 0d |
+| `graphify.cluster` | graphify.cluster — Leiden community detection with no silent fallback. | 215 | active | ←2 1d |
 | `lgwks_bot_code_hacker` | U5 build #2: enterprise-grade static security analyzer. | 594 | active | test ←1 →1 1d |
 | `lgwks_bot_optimizer` | U7: deterministic optimization static analyzer. | 420 | active | test ←1 →1 2d |
 | `lgwks_bot_slop_math` | U6: deterministic structural slop-detection bots (S1–S6). | 601 | active | test ←1 →1 2d |
@@ -83,16 +83,16 @@ Row legend: `cli` `test` · `←N` imported by N · `→N` imports N · `Nd` day
 
 | module | purpose | loc | stale | rel |
 |---|---|---|---|---|
-| `graphify.__init__` | — | 4 | active | ←2 0d |
+| `graphify.__init__` | — | 4 | active | ←2 1d |
 | `lgwks_codebase` | semantic codebase database for AI-native code understanding. | 563 | active | cli test ←1 →1 2d |
-| `lgwks_entity_graph` | offline document entity graph builder. | 612 | active | cli test ←6 →3 2d |
+| `lgwks_entity_graph` | offline document entity graph builder. | 612 | active | cli test ←7 →3 2d |
 | `lgwks_graph` | functional, traversable codebase graph with query engine and persistence. | 1570 | active | test ←7 →1 2d |
 | `lgwks_graph_viz` | simple localhost graph visualization. | 1205 | active | test ←4 →3 0d |
 | `lgwks_refactor` | deterministic AST-based refactoring engine. | 337 | active | cli test ←2 →1 2d |
 | `lgwks_repo` | repo lifecycle commands: audit, recover, cleanup, merge, handoff, graph. | 740 | active | cli test ←5 →4 2d |
 | `lgwks_review` | graph-aware, spec-bound code review. | 665 | active | cli test ←3 →9 2d |
 
-## Harness / daemon / orchestration  ·  23 mod · 8,075 LOC
+## Harness / daemon / orchestration  ·  24 mod · 8,286 LOC
 
 | module | purpose | loc | stale | rel |
 |---|---|---|---|---|
@@ -102,9 +102,10 @@ Row legend: `cli` `test` · `←N` imported by N · `→N` imports N · `Nd` day
 | `lgwks_context` | graduated-resolution (LOD) context pack for the next spawn (#9 harness layer). | 187 | active | cli ←2 2d |
 | `lgwks_cycle` | project deploy cycle ledger. | 145 | active | ←4 →1 2d |
 | `lgwks_do` | unified orchestrator: code, research, govern, cleanup, ship. | 512 | active | cli ←2 →6 2d |
+| `lgwks_engine` | U6: Subconscious Engine (deterministic first slice). | 211 | active | cli test ←1 →2 |
 | `lgwks_ground` | fused live grounding for the research loop (#9 / harness layer). | 165 | active | ←2 →4 2d |
 | `lgwks_hooks` | audit-first hook system for lgwks. (hardened v2) | 896 | active | cli test ←1 2d |
-| `lgwks_map` | U1 Capability Map (second-harness PRD §12). | 104 | active | cli ←2 1d |
+| `lgwks_map` | U1 Capability Map (second-harness PRD §12). | 104 | active | cli ←3 0d |
 | `lgwks_portal` | deterministic portal packets for coding-agent re-entry. | 276 | active | cli test ←3 →1 2d |
 | `lgwks_project` | one-prompt project orchestrator front door (re-export shim). | 122 | active | cli ←6 →5 2d |
 | `lgwks_project_deploy` | `lgwks project deploy` verb. | 564 | active | ←3 →7 2d |
@@ -151,14 +152,14 @@ Row legend: `cli` `test` · `←N` imported by N · `→N` imports N · `Nd` day
 | `lgwks_verify` | the Verifier oracle (spec-01), hardened with provenance tracking. | 253 | active | test ←5 2d |
 | `scripts.check_schema_registry` | Registry conformance gate (governance/README.md + docs/schemas/REGISTRY.md rule 4). | 71 | active | ←4 1d |
 
-## CLI / home / membrane surface  ·  5 mod · 3,533 LOC
+## CLI / home / membrane surface  ·  5 mod · 3,540 LOC
 
 | module | purpose | loc | stale | rel |
 |---|---|---|---|---|
 | `lgwks_foundation` | T3 structured extraction via Apple Foundation Models (macOS 26+, on-device). | 200 | active | cli ←3 2d |
 | `lgwks_gh` | GitHub surface: issues, PRs, state maps, hardening, deterministic "what's next". | 880 | active | cli test ←1 →1 2d |
 | `lgwks_home` | the launcher. Type `lgwks` (bare) and the whole thing pops up. | 1043 | active | test ←4 →8 0d |
-| `lgwks_manifest` | the machine-first contract. `lgwks manifest` → one JSON blob an AGENT reads instead | 1293 | active | ←6 →4 2d |
+| `lgwks_manifest` | the machine-first contract. `lgwks manifest` → one JSON blob an AGENT reads instead | 1300 | active | ←6 →4 0d |
 | `lgwks_ui` | our own terminal visual language. Deliberately NOT Claude Code. | 117 | active | ←18 2d |
 
 ## Substrate / storage / schema  ·  15 mod · 3,837 LOC

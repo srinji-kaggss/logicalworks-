@@ -893,6 +893,13 @@ _VERB_META: dict[str, dict] = {
         "output": "ranked verb list with scores; deterministic token-match; <1s",
         "tokens": "none",
     },
+    "engine": {
+        "intent": "produce the §6 subconscious schema for a prompt — C/G/P scores, capability selections, graph retrieval, slop flags (U6)",
+        "args": {"prompt": "director prompt text", "--top": "max capability selections (default 5)",
+                 "--repo": "repo path for last_state lookup"},
+        "output": "lgwks.engine.schema.v1 — coverage_C, gap_G, confidence_P, selections, flags, retrieval, pathways; deterministic <1s",
+        "tokens": "none",
+    },
     "admission info": {
         "intent": "show token-bucket admission gate constants, computed worker cap, and P3→P0 trigger",
         "args": {},

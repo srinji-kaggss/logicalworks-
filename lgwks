@@ -1503,6 +1503,10 @@ def build_parser() -> argparse.ArgumentParser:
     import lgwks_map
     lgwks_map.add_parser(sub)
 
+    # engine — U6 subconscious engine: produce §6 schema for a prompt
+    import lgwks_engine
+    lgwks_engine.add_parser(sub)
+
     # route — deterministic intent router (tiny-bert + heuristic fallback)
     import lgwks_intent_router
     lgwks_intent_router.add_parser(sub)

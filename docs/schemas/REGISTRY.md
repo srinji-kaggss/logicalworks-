@@ -145,6 +145,8 @@ side-database (the external `~/ingestion_results/*.db` stores are exactly the lo
 | `lgwks.capability.v1` | 1 | **live** (**I8**) — capability-token tenant isolation: `tenant`, `nonce`, `sig` (hmac-sha256) | `lgwks_capability.py` (`CapabilityToken`) |
 | `lgwks.crdt.state.v1` | 1 | **live** (**I9**) — CRDT state envelope: `type` (`gset`/`orset`/`lww`) + type-specific fields; SEC proof in `tests/test_crdt.py` | `lgwks_crdt.py`; JSON-Schema: `docs/schemas/lgwks.crdt.state.v1.json` |
 | `lgwks.navmap.v1` | 1 | **live** — generated module atlas for AI navigation: `totals`, `index{by_subsystem,by_staleness,by_issue,by_packet}`, `modules{<name>:{purpose,loc,deps,used_by,subsystem,staleness,integration,owning_issue,packet,last_commit_days,has_cli,has_tests}}`. Regenerate via `scripts/gen_navmap.py`; read `docs/NAVMAP.md` first | `scripts/gen_navmap.py`; output `docs/navmap.json`; JSON-Schema: `docs/schemas/lgwks.navmap.v1.json` |
+| `lgwks.map.v1` | 1 | **live** (**U1**) — capability map result: `schema`, `query`, `query_tokens`, `verb_count`, `matched`, `matches[{verb,intent,args,score}]`, `note`; deterministic token-match, <1s | `lgwks_map.py` (`map_intent`) |
+| `lgwks.engine.schema.v1` | 1 | **live** (**U6**) — §6 subconscious schema: `prompt`, `attention`(null, BERT pending U5), `retrieval[]`, `last_state{}`, `insights{scores{coverage_C,gap_G,confidence_P},selections[],flags[],actions_taken[]}`, `pathways[]`, `meta{verb_count,query_tokens,graph_hits}`; deterministic, <1s, non-generative | `lgwks_engine.py` (`run_engine`) |
 **Repurpose when:** any new capability → wrap as an actor (`ActorSpec` + `lgwks.actor.v1` envelope)
 instead of a bare function with a private dict. Actor-calls-actor is the sanctioned composition path.
 
