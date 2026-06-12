@@ -44,15 +44,15 @@ Row legend: `cli` `test` · `←N` imported by N · `→N` imports N · `Nd` day
 |---|---|---|---|---|
 | `lgwks_auth_runtime` | read-only auth resolver for crawler fetches. | 200 | active | ←3 8d |
 | `lgwks_browser` | bot-resilient, JS-rendering fetch via a real browser (playwright). The eyes for pages | 571 | active | test ←8 →2 2d |
-| `lgwks_crawl` | single-page fetch shim: delegates to lgwks_substrate.build_run(max_pages=1). | 204 | active | cli test ←2 →4 2d |
+| `lgwks_crawl` | single-page fetch shim: delegates to lgwks_substrate.build_run(max_pages=1). | 204 | active | cli test ←2 →4 3d |
 | `lgwks_expression` | - lgwks-expression/1 parser and resolver. | 768 | active | ←1 →1 6d |
 | `lgwks_files` | the `extract` and `convert` verbs: the read-anything port made into CLI surface. | 62 | active | ←2 →1 11d |
 | `lgwks_geoexpr` | deterministic geometric-CLI compiler (SPEC-geometric-cli-translator-v1). | 388 | active | cli ←3 →4 9d |
 | `lgwks_html` | robust, deterministic HTML-to-Markdown and semantic link/table parser. | 318 | active | test ←4 →1 8d |
 | `lgwks_ingest` | the advanced web-crawler workflow, as ONE function an AI agent runs. | 338 | orphan | →8 2d |
 | `lgwks_preview` | the safe sibling of `lgwks x`. Same brace math, no execution, human rendering. | 214 | active | cli ←1 →3 10d |
-| `lgwks_public` | open-license public source layer. | 183 | active | cli ←2 5d |
-| `lgwks_search` | the missing primitive: a zero-key, free web + news search provider. | 522 | active | test ←3 →3 5d |
+| `lgwks_public` | open-license public source layer. | 183 | active | cli ←2 6d |
+| `lgwks_search` | the missing primitive: a zero-key, free web + news search provider. | 522 | active | test ←3 →3 6d |
 | `lgwks_site_profile` | site configuration profile manager. | 88 | active | ←1 8d |
 | `lgwks_sites` | site-aware extractors for high-value platforms. | 195 | active | test ←1 9d |
 | `lgwks_substrate_crawl` | web crawl engine, auth-gate detection, and frontier management. | 430 | active | ←3 →4 2d |
@@ -104,7 +104,7 @@ Row legend: `cli` `test` · `←N` imported by N · `→N` imports N · `Nd` day
 | `lgwks_capabilities` | the resolver that fixes "the tool isn't where it should be." | 268 | active | ←5 6d |
 | `lgwks_context` | graduated-resolution (LOD) context pack for the next spawn (#9 harness layer). | 187 | active | cli ←2 3d |
 | `lgwks_cycle` | project deploy cycle ledger. | 145 | active | ←4 →1 10d |
-| `lgwks_do` | unified orchestrator: code, research, govern, cleanup, ship. | 512 | active | cli ←2 →6 2d |
+| `lgwks_do` | unified orchestrator: code, research, govern, cleanup, ship. | 512 | active | cli ←2 →6 3d |
 | `lgwks_engine` | U6: Subconscious Engine (deterministic first slice). | 438 | active | cli test ←3 →3 0d |
 | `lgwks_ground` | fused live grounding for the research loop (#9 / harness layer). | 165 | active | ←2 →4 8d |
 | `lgwks_hooks` | audit-first hook system for lgwks. (hardened v2) | 896 | active | cli test ←1 4d |
@@ -122,7 +122,7 @@ Row legend: `cli` `test` · `←N` imported by N · `→N` imports N · `Nd` day
 | `lgwks_synthesizer` | U9/U9A: LLM reasoning layer & Apple-native/cloud synthesis seam. | 213 | active | test ←1 →2 4d |
 | `lgwks_tongue` | the Tongue: an optional OpenRouter LLM compiles hypotheses + the elimination | 228 | active | ←2 →1 5d |
 | `lgwks_workercap` | computed worker-slot ceiling from a probed host profile. | 99 | active | ←4 10d |
-| `lgwks_workflows` | unified AI workflow harness. | 1149 | active | cli ←2 →13 2d |
+| `lgwks_workflows` | unified AI workflow harness. | 1149 | active | cli ←2 →13 3d |
 
 ## Membrane / intent / steering  ·  9 mod · 3,084 LOC
 
@@ -145,7 +145,7 @@ Row legend: `cli` `test` · `←N` imported by N · `→N` imports N · `Nd` day
 | `lgwks_aup` | AUP runtime gate with Defense-in-Depth. | 710 | active | cli test ←3 →1 3d |
 | `lgwks_comprehend` | the Comprehension Gate (spec-01). | 199 | active | cli test ←1 →1 9d |
 | `lgwks_embed` | deterministic local folder embedding vault. | 237 | active | cli ←6 →1 10d |
-| `lgwks_gate_arch` | G1 Architecture gate (spec-00). | 263 | active | test ←1 →1 5d |
+| `lgwks_gate_arch` | G1 Architecture gate (spec-00). | 263 | active | test ←1 →1 6d |
 | `lgwks_gate_framework` | G3 Framework-Reality gate (spec-00). | 255 | active | test ←1 →1 3d |
 | `lgwks_gate_idiom` | G2 Idiom gate (spec-00). | 149 | active | test ←1 →2 3d |
 | `lgwks_keyvault` | macOS Keychain-backed secret resolver for runtime API keys (Issue #7). | 132 | active | cli ←7 3d |
