@@ -1,4 +1,4 @@
-# Governance Map (lgwks)
+# Governance Index (lgwks)
 
 Single index for everything governance-shaped in this repo. If a governance
 claim conflicts across files, `principles.md` dictates precedence.
@@ -26,3 +26,7 @@ claim conflicts across files, `principles.md` dictates precedence.
   unratified — treat as opinion.
 - `docs/SPEC-tier-e-machine-model-v1.md` is a historical draft (2026-06-02);
   verify against `spec/second-harness/` before building from it.
+- Load-bearing doc nouns are reserved. `navmap` names the repo-wide module atlas only;
+  `README` is a directory entrypoint; `HANDOFF` is for active transfer/state only;
+  `PRD` is for product requirements only. Reuse the canonical surface, version it,
+  or choose a new noun instead of minting a same-named peer.

@@ -6,8 +6,8 @@ artifact instead of re-grepping ~46k LOC every session. Reproducible (re-run to 
 — generated from source, never hand-maintained, so it cannot rot.
 
 Outputs (repo root):
-  docs/navmap.json   machine-readable, schema `lgwks.navmap.v1` (the queryable contract)
-  docs/NAVMAP.md     terse human/AI atlas grouped by subsystem + per-issue rollup
+  docs/navmap/index.json   machine-readable, schema `lgwks.navmap.v1` (the queryable contract)
+  docs/navmap/README.md    terse human/AI atlas grouped by subsystem + per-issue rollup
 
 Per-module facts (pure AST + git, no model):
   purpose · loc · subsystem · deps · used_by · has_cli · has_tests · owning_issue ·
@@ -270,16 +270,22 @@ def main() -> int:
         },
         "modules": data,
     }
-    (ROOT / "docs" / "navmap.json").write_text(
+    out_dir = ROOT / "docs" / "navmap"
+    out_dir.mkdir(parents=True, exist_ok=True)
+    (out_dir / "index.json").write_text(
         json.dumps(doc, indent=2, sort_keys=True), encoding="utf-8")
 
     # ---- markdown ----
     L: list[str] = []
     L.append("# NAVMAP — lgwks module atlas (generated; do not hand-edit)")
     L.append("")
-    L.append(f"> `scripts/gen_navmap.py` from source — re-run to refresh. "
-             f"**{totals['modules']} modules · {totals['loc']:,} LOC.** Read/query this FIRST. "
-             f"Strict machine-readable contract: `docs/navmap.json` (`{SCHEMA}`).")
+    L.append(
+        f"> `scripts/gen_navmap.py` from source — re-run to refresh. "
+        f"**{totals['modules']} modules · {totals['loc']:,} LOC.** "
+        f"This is the canonical repo map: if someone says \"review the map\" or "
+        f"\"check the navmap\", they mean this file unless another map is explicitly named. "
+        f"Read/query this FIRST. Strict machine-readable contract: `docs/navmap/index.json` (`{SCHEMA}`)."
+    )
     L.append("")
     L.append(f"**Staleness:** " + " · ".join(f"`{k}` {v}" for k, v in totals["by_staleness"].items()))
     L.append("")
@@ -330,9 +336,12 @@ def main() -> int:
             L.append(f"| `{m}` | {purpose} | {d['loc']} | {d['staleness']} | {' '.join(rel)} |")
         L.append("")
 
-    (ROOT / "docs" / "NAVMAP.md").write_text("\n".join(L), encoding="utf-8")
+    (out_dir / "README.md").write_text("\n".join(L), encoding="utf-8")
 
-    print(f"navmap: {totals['modules']} modules, {totals['loc']:,} LOC → docs/NAVMAP.md + docs/navmap.json")
+    print(
+        f"navmap: {totals['modules']} modules, {totals['loc']:,} LOC "
+        f"→ docs/navmap/README.md + docs/navmap/index.json"
+    )
     print("  staleness:", totals["by_staleness"])
     print("  integration:", totals["by_integration"])
     n_unc = len(by_subsystem.get("Unclassified (triage)", []))

@@ -306,7 +306,7 @@ separate packet = I9. Deferred surfaces (network/MCP D2, cross-workspace ACL D3,
 - `INGESTION-LAYER.md` — architecture + proven math (§4 scoring, §7 consumer tail) + §8 gap log.
 - `BUILDLOG.md` — append-only build-state truth.
 - `docs/schemas/REGISTRY.md` — every cross-module contract; check before minting.
-- `docs/NAVMAP.md` + `docs/navmap.json` — generated module atlas (125 modules); refresh with `python3 scripts/gen_navmap.py`.
+- `docs/navmap/README.md` + `docs/navmap/index.json` — generated module atlas (125 modules); refresh with `python3 scripts/gen_navmap.py`.
 - `prd/PRD-04-context-economy.md` — reflex-cap + RRF authority for I7.
 
 ## Session 11 state (2026-06-12, branch claude/i8-l5-promotion-audit, PR pending)

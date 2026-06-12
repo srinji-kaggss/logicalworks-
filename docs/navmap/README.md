@@ -1,6 +1,6 @@
 # NAVMAP — lgwks module atlas (generated; do not hand-edit)
 
-> `scripts/gen_navmap.py` from source — re-run to refresh. **131 modules · 47,893 LOC.** Read/query this FIRST. Strict machine-readable contract: `docs/navmap.json` (`lgwks.navmap.v1`).
+> `scripts/gen_navmap.py` from source — re-run to refresh. **131 modules · 48,025 LOC.** This is the canonical repo map: if someone says "review the map" or "check the navmap", they mean this file unless another map is explicitly named. Read/query this FIRST. Strict machine-readable contract: `docs/navmap/index.json` (`lgwks.navmap.v1`).
 
 **Staleness:** `active` 130 · `orphan` 1
 
@@ -17,25 +17,25 @@ Row legend: `cli` `test` · `←N` imported by N · `→N` imports N · `Nd` day
 | #74 | I10 | `lgwks_viz_project` (active) |
 | #75 | I11 | `lgwks_waste` (active) |
 
-## Ingestion spine (I1–I12)  ·  16 mod · 6,969 LOC
+## Ingestion spine (I1–I12)  ·  16 mod · 6,999 LOC
 
 | module | purpose | loc | stale | rel |
 |---|---|---|---|---|
 | `lgwks_admission` | token-bucket admission + idempotent queue (I8 / I8-hardening L3). | 464 | active | cli test ←3 →3 0d |
 | `lgwks_admission_store` | durable cross-process admission queue (I8-hardening L4). | 315 | active | ←1 →4 0d |
-| `lgwks_capability` | capability-token tenant isolation boundary (I8). | 295 | active | cli test ←8 0d |
-| `lgwks_crdt` | CRDT state: G-Set, OR-Set, LWW-Register (I9). | 383 | active | cli test ←3 0d |
+| `lgwks_capability` | capability-token tenant isolation boundary (I8). | 295 | active | cli test ←7 0d |
+| `lgwks_crdt` | CRDT state: G-Set, OR-Set, LWW-Register (I9). | 409 | active | cli test ←4 0d |
 | `lgwks_embed_port` | embedder runtime (lgwks.embed.port.v1). | 654 | active | test ←2 →2 0d |
 | `lgwks_extract` | ingest every file format → text. The "read anything" port. | 277 | active | test ←4 →4 9d |
-| `lgwks_inbound` | L5 consumer pack: RRF fusion + token-budgeted reflex envelope (I7). | 354 | active | cli test ←4 →2 0d |
+| `lgwks_inbound` | L5 consumer pack: RRF fusion + token-budgeted reflex envelope (I7). | 358 | active | cli test ←4 →3 0d |
 | `lgwks_input` | universal input handler (lgwks.modality.item.v1). | 530 | active | ←1 →1 1d |
 | `lgwks_pipeline` | unified ingestion and ranking spine. | 1492 | active | cli test ←1 →12 0d |
 | `lgwks_promote` | audited tenant→world promotion (ARCH L5, I8-hardening #89). | 146 | active | ←3 →3 0d |
 | `lgwks_rank` | cubic node centrality (Z-eigenpair) + AI-discrepancy δ (I6). | 537 | active | cli test ←3 1d |
 | `lgwks_score` | deterministic schema scoring: RESCAL order-3 · R_k · MDL (I5). | 344 | active | cli test ←3 1d |
 | `lgwks_vector` | vector-space + cid contract (lgwks.vector.record.v1). | 500 | active | ←7 →2 0d |
-| `lgwks_viz_project` | deterministic 3-D viz projection, decoupled from semantic space (I10). | 262 | active | cli test ←3 0d |
-| `lgwks_waste` | waste ledger: the proof context-optimisation works (I11). | 339 | active | cli test ←4 →1 0d |
+| `lgwks_viz_project` | deterministic 3-D viz projection, decoupled from semantic space (I10). | 262 | active | cli test ←3 1d |
+| `lgwks_waste` | waste ledger: the proof context-optimisation works (I11). | 339 | active | cli test ←4 →1 1d |
 | `scripts.build_capability_idf` | freeze the I8 demand-weight table (stdlib only, no AI). | 77 | active | ←5 →2 0d |
 
 ## Research / web acquisition / extract  ·  14 mod · 4,481 LOC
@@ -46,7 +46,7 @@ Row legend: `cli` `test` · `←N` imported by N · `→N` imports N · `Nd` day
 | `lgwks_browser` | bot-resilient, JS-rendering fetch via a real browser (playwright). The eyes for pages | 571 | active | test ←8 →2 2d |
 | `lgwks_crawl` | single-page fetch shim: delegates to lgwks_substrate.build_run(max_pages=1). | 204 | active | cli test ←2 →4 2d |
 | `lgwks_expression` | - lgwks-expression/1 parser and resolver. | 768 | active | ←1 →1 6d |
-| `lgwks_files` | the `extract` and `convert` verbs: the read-anything port made into CLI surface. | 62 | active | ←2 →1 10d |
+| `lgwks_files` | the `extract` and `convert` verbs: the read-anything port made into CLI surface. | 62 | active | ←2 →1 11d |
 | `lgwks_geoexpr` | deterministic geometric-CLI compiler (SPEC-geometric-cli-translator-v1). | 388 | active | cli ←3 →4 9d |
 | `lgwks_html` | robust, deterministic HTML-to-Markdown and semantic link/table parser. | 318 | active | test ←4 →1 8d |
 | `lgwks_ingest` | the advanced web-crawler workflow, as ONE function an AI agent runs. | 338 | orphan | →8 2d |
@@ -82,15 +82,15 @@ Row legend: `cli` `test` · `←N` imported by N · `→N` imports N · `Nd` day
 | `axiom.wire` | Canonical TLV wire — tag-length-value over LEB128 (the WASM section / protobuf TLV shape, but we OWN the | 106 | active | ←12 5d |
 | `lgwks_axiom` | CLI harness over the standalone Axiom byte framework. | 1060 | active | cli ←1 →2 5d |
 
-## Graph / AST / code intelligence  ·  8 mod · 5,696 LOC
+## Graph / AST / code intelligence  ·  8 mod · 5,789 LOC
 
 | module | purpose | loc | stale | rel |
 |---|---|---|---|---|
 | `graphify.__init__` | — | 4 | active | ←2 1d |
 | `lgwks_codebase` | semantic codebase database for AI-native code understanding. | 563 | active | cli test ←1 →1 3d |
-| `lgwks_entity_graph` | offline document entity graph builder. | 612 | active | cli test ←7 →3 6d |
+| `lgwks_entity_graph` | offline document entity graph builder. | 705 | active | cli test ←7 →4 0d |
 | `lgwks_graph` | functional, traversable codebase graph with query engine and persistence. | 1570 | active | test ←7 →1 4d |
-| `lgwks_graph_viz` | simple localhost graph visualization. | 1205 | active | test ←4 →3 0d |
+| `lgwks_graph_viz` | simple localhost graph visualization. | 1205 | active | test ←4 →3 1d |
 | `lgwks_refactor` | deterministic AST-based refactoring engine. | 337 | active | cli test ←2 →1 8d |
 | `lgwks_repo` | repo lifecycle commands: audit, recover, cleanup, merge, handoff, graph. | 740 | active | cli test ←5 →4 7d |
 | `lgwks_review` | graph-aware, spec-bound code review. | 665 | active | cli test ←3 →9 3d |
@@ -196,19 +196,19 @@ Row legend: `cli` `test` · `←N` imported by N · `→N` imports N · `Nd` day
 | `lgwks_multimodal` | image extraction + multimodal embedding seam. | 354 | active | ←4 →1 2d |
 | `lgwks_ollama` | local Ollama provider for the Eye (embeddings), Issue #7. | 108 | active | ←5 4d |
 | `lgwks_openrouter` | cloud Tongue via OpenRouter (Issue #7). | 138 | active | ←4 →1 5d |
-| `lgwks_openrouter_embed` | optional remote embedding seam via OpenRouter. | 67 | active | test ←1 →1 6d |
+| `lgwks_openrouter_embed` | optional remote embedding seam via OpenRouter. | 67 | active | test ←1 →1 7d |
 | `scripts.build_capability_embeddings` | freeze the Qwen verb-embedding matrix (U6.2 #85). | 102 | active | ←5 →2 0d |
 
-## Dev tooling / scripts  ·  2 mod · 545 LOC
+## Dev tooling / scripts  ·  2 mod · 554 LOC
 
 | module | purpose | loc | stale | rel |
 |---|---|---|---|---|
-| `scripts.gen_navmap` | relational + staleness module atlas for AI navigation (stdlib only). | 345 | active | cli ←5 0d |
+| `scripts.gen_navmap` | relational + staleness module atlas for AI navigation (stdlib only). | 354 | active | cli ←5 0d |
 | `scripts.setup_models` | setup_models.py — one-time developer script to download and convert models. | 200 | active | ←5 →1 3d |
 
 ## Unclassified (triage)  ·  2 mod · 1,216 LOC
 
 | module | purpose | loc | stale | rel |
 |---|---|---|---|---|
-| `lgwks_access` | CapabilityPort interface and HMAC impl (#98 / #97 seam). | 459 | active | cli test ←3 →4 0d |
+| `lgwks_access` | CapabilityPort interface and HMAC impl (#98 / #97 seam). | 459 | active | cli test ←4 →4 0d |
 | `lgwks_research` | autonomous deep-research loop (Issue #9, parent #7). | 757 | active | ←2 →5 8d |

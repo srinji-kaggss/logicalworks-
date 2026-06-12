@@ -3,6 +3,15 @@
 > [!IMPORTANT]
 > **Source of Truth Declaration:** This repository (`logicalworks-`) serves as the official, canonical source of truth for all core Logical Works modules, parser engines, utility functions, site profiles, and CLI configurations. All sister repositories, including private work environments like `cl-ideas`, import or symlink directly from this codebase to consume its engines.
 
+> [!IMPORTANT]
+> **Repo map:** the canonical repo map is [docs/navmap/README.md](/Users/srinji/logicalworks-/docs/navmap/README.md). If someone says "review the map" or "check the navmap", this is the file they mean unless another map is explicitly named. Queryable form: [docs/navmap/index.json](/Users/srinji/logicalworks-/docs/navmap/index.json).
+
+> [!IMPORTANT]
+> **System shape:** the best current explanation of how the whole repo fits together is [docs/OPERATING-MODEL.md](/Users/srinji/logicalworks-/docs/OPERATING-MODEL.md). Read this after the navmap if you need the full request-path + daemon-path + security picture.
+
+> [!IMPORTANT]
+> **Execution plan:** the current plan for finishing the daemon core and the first website-research experience is [docs/DAEMON-CORE-PLAN.md](/Users/srinji/logicalworks-/docs/DAEMON-CORE-PLAN.md).
+
 `lgwks` is a local-first, privacy-respecting developer research and code refactoring toolchain. It runs entirely offline under Enterprise Privilege Management (EPM) restrictions, using local CoreML/ANE models and containerized local LLM options to process documents and code without external cloud calls.
 
 ---

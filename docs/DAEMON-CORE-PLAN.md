@@ -1,0 +1,222 @@
+# Daemon Core Plan
+
+Status: active plan · scope: the vendor-neutral daemon core plus the first research experience
+
+This is the cohesive plan after the current architecture cut:
+
+- defer human projection
+- keep ingress headstart
+- use transcript/history tail as the simpler outbound truth
+- treat daemon and ingest as one runtime
+- make clients adapters, not product centers
+
+## 1. Core node to finish
+
+Finish this node first:
+
+```text
+ingress adapter
+-> daemon queue/session
+-> workflow/retrieval runtime
+-> shared state substrate
+-> packet response
+-> transcript tail continues state updates
+```
+
+If this node works, Claude/Codex/Gemini become adapters instead of architecture forks.
+
+## 2. What is done
+
+Built enough to rely on:
+
+- ingress/reflex pieces
+  - `lgwks_map.py`
+  - `lgwks_engine.py`
+  - `lgwks_inbound.py`
+  - `hooks/subconscious_inbound.py`
+
+- ingestion/retrieval substrate
+  - `lgwks_input.py`
+  - `lgwks_lfm2_extract.py`
+  - `lgwks_embed_port.py`
+  - `lgwks_vector.py`
+  - `lgwks_score.py`
+  - `lgwks_rank.py`
+  - `lgwks_entity_graph.py`
+  - `lgwks_substrate_run.py`
+
+- workflow/runtime surfaces
+  - `lgwks_do.py`
+  - `lgwks_workflows.py`
+  - `lgwks_run.py`
+  - `lgwks_repo.py`
+  - `lgwks_spawn.py`
+  - `lgwks_agent_os.py`
+
+- state/security substrate
+  - `lgwks_sqlite.py`
+  - `lgwks_cognition.py`
+  - `lgwks_access.py`
+  - `lgwks_capability.py`
+  - `lgwks_crdt.py`
+  - `lgwks_sign.py`
+
+- research output shape
+  - `lgwks_manifest.py`
+  - `lgwks_ingest.py`
+  - `lgwks_research.py`
+
+## 3. What is left
+
+### P0. Daemon lifecycle and packet API
+
+Need one owned daemon process with:
+
+- single-writer state ownership
+- per-session identity
+- queue/enqueue API
+- read packet API
+- crash-safe restart
+
+Acceptance:
+
+- daemon can be started independently of any client
+- ingress can enqueue work
+- packet can be fetched deterministically by session
+- restart loses no committed state
+
+### P1. Ingress and transcript normalization
+
+Need one normalized event model for:
+
+- inbound human message
+- transcript turn
+- tool call
+- file change
+- workflow event
+
+Acceptance:
+
+- Claude ingress hook produces the same normalized event shape as a later transcript tail event
+- Codex/Gemini adapters can submit equivalent events without special-casing the core
+
+### P2. Daemon-owned git/worktree runtime
+
+Need the daemon to own:
+
+- worktree setup
+- worktree cleanup
+- git alignment
+- CRDT-backed concurrent state behavior
+
+Acceptance:
+
+- daemon can create/update/close a worktree session without manual shell choreography
+- state merges remain auditable
+
+### P3. Research run front door
+
+Need one obvious command/runtime surface for:
+
+- target website
+- crawl/build/map
+- graph artifacts
+- embeddings
+- STEM facts and DB outputs
+- future queryability by the daemon
+
+Acceptance:
+
+- one command or one actor run produces a complete research substrate
+- daemon can index that run and serve later packets from it
+
+### P4. Client adapters
+
+Need thin adapters for:
+
+- Claude
+- Codex
+- Gemini
+
+Acceptance:
+
+- same core packet contract
+- no client-specific business logic in the daemon core
+
+### P5. Archive/export tier
+
+Need:
+
+- verified cloud export
+- retention policy
+- safe local cleanup after export
+
+Acceptance:
+
+- session/run export is content-addressed and auditable
+- local cleanup never occurs before verified export
+
+## 4. First concrete experience: website research
+
+The first thing to get running end to end should be:
+
+> I point it at a website and it comprehensively makes me a graph/map, embeddings, STEM facts, and a reusable substrate for future agent work.
+
+That runtime should be:
+
+```mermaid
+graph TD
+    A[target website] --> B[daemon creates research session]
+    B --> C[crawl/build via substrate runtime]
+    C --> D[chunks + STEM facts + vectors]
+    D --> E[graph db/json/mermaid + manifest]
+    E --> F[daemon indexes run into shared state]
+    F --> G[next agent/human ask hits the same run]
+```
+
+### What already exists for this experience
+
+- crawl/build surfaces in `lgwks_manifest.py`
+- pipeline/runtime in `lgwks_substrate_run.py`
+- end-to-end ingest path in `lgwks_ingest.py`
+- autonomous research loop in `lgwks_research.py`
+- graph output and viz support in `lgwks_graph_viz.py`
+
+### What is missing for this experience
+
+- one canonical research session front door
+- one manifest packet that the daemon always knows how to ingest
+- one daemon index step that registers the run into long-lived state
+- one query surface for later recall
+
+## 5. The next few moves
+
+1. Normalize the daemon event model.
+   Inputs: ingress message, transcript turn, tool call, workflow event.
+   Outcome: one core event schema.
+
+2. Build the daemon lifecycle shell around existing storage/runtime code.
+   Inputs: `lgwks_sqlite`, `lgwks_session`, `lgwks_cognition`, `lgwks_engine`.
+   Outcome: start/stop/status + queue + packet read.
+
+3. Make one research-session front door over existing substrate code.
+   Inputs: `lgwks_substrate_run`, `lgwks_ingest`, `lgwks_manifest`.
+   Outcome: website -> graph/map + embeddings + STEM facts + manifest.
+
+4. Teach the daemon to index a completed research run.
+   Inputs: run manifest + graph artifacts + vectors.
+   Outcome: later packets can cite the run without re-crawling.
+
+5. Add the Claude adapter cleanly.
+   Inputs: ingress headstart hook + JSONL tail.
+   Outcome: headstart now, continuous digestion later, no second architecture.
+
+6. Add Codex and Gemini as thin clients after the daemon contract is stable.
+
+## 6. Decision rules
+
+- Keep `complex math -> ML -> SLM if needed`.
+- Prefer MLX over llama.cpp when practical.
+- Use hooks as adapters, not as the core truth source.
+- Use transcript/history tails as the simplest durable outbound source when the client provides them.
+- Extend built surfaces before minting new ones.

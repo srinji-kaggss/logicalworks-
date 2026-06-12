@@ -29,13 +29,24 @@ Build-state truth lives in `spec/second-harness/BUILDLOG*.md`, not in spec prose
 
 ## Startup read order
 1. This file.
-2. `docs/NAVMAP.md` — **generated module atlas (132 modules / ~46k LOC): what every file is, its
-   subsystem, who calls it, and its staleness.** Read/query this BEFORE grepping the code surface.
-   Machine-readable + queryable: `docs/navmap.json` (`lgwks.navmap.v1`). Refresh: `python3 scripts/gen_navmap.py`.
-3. `governance/README.md` — governance map.
-4. `spec/second-harness/HANDOFF.md` + `INGESTION-PLAN.md` — current work packets.
-5. `docs/ARCHITECTURE.md` — system shape.
-6. Assigned issue(s) — GitHub Issues are the work tracker.
+2. `docs/navmap/README.md` — **the canonical "map" / "navmap" for this repo**: generated module atlas
+   (~46k LOC) showing what every file is, its subsystem, who calls it, and its staleness.
+   If the Director says "review the map", they mean this file unless they explicitly name a different one.
+   Read/query this BEFORE grepping the code surface.
+   Machine-readable + queryable: `docs/navmap/index.json` (`lgwks.navmap.v1`). Refresh: `python3 scripts/gen_navmap.py`.
+3. `docs/OPERATING-MODEL.md` — the comprehensive graph of the request lane, daemon lane, shared substrate, and security membrane.
+4. `docs/DAEMON-CORE-PLAN.md` — the current cohesive plan to finish the daemon core and the first website-research experience.
+5. `governance/README.md` — governance map.
+6. `spec/second-harness/HANDOFF.md` + `INGESTION-PLAN.md` — current work packets.
+7. `docs/ARCHITECTURE.md` — older system-shape doctrine; useful, but not the best entrypoint for the current whole.
+8. Assigned issue(s) — GitHub Issues are the work tracker.
+
+## Reserved load-bearing doc nouns
+- `navmap` = the repo-wide module atlas only. It lives under `docs/navmap/`.
+- `README` = the entrypoint for a directory/package, not a generic synonym for any overview.
+- `HANDOFF` = active transfer/state docs only. Historical one-offs should use a narrower term.
+- `PRD` = product-requirements authority docs only.
+- If a load-bearing noun already has a canonical home, extend that surface, version it (`vN`), or pick a new noun. Do not mint a second peer artifact with the same noun.
 
 ## Search discipline (verify before assert)
 Partial search is the dominant agent failure mode. Before claiming a file,
