@@ -24,8 +24,12 @@ SESSION_QUERY_SCHEMA = "lgwks.daemon.sessions.query.v0"
 WORK_ITEM_SCHEMA = "lgwks.daemon.work_item.v0"
 QUEUE_SCHEMA = "lgwks.daemon.queue.v0"
 PACKET_SCHEMA = "lgwks.daemon.packet.v0"
+WORKTREE_SCHEMA = "lgwks.daemon.worktree.v0"
 
-WORK_KINDS = frozenset({"research_run", "ingest_file", "workflow", "index_run", "custom"})
+WORK_KINDS = frozenset({
+    "research_run", "ingest_file", "workflow", "index_run", "custom",
+    "worktree_open", "worktree_close",
+})
 ITEM_STATUSES = frozenset({"queued", "running", "done", "failed"})
 
 
@@ -114,6 +118,29 @@ _MIGRATIONS = [
         );
         CREATE INDEX IF NOT EXISTS idx_daemon_runs_tenant
             ON daemon_runs (tenant_id, indexed_at DESC);
+        """,
+    ),
+    (
+        4,
+        "daemon_worktrees_v1",
+        """
+        CREATE TABLE IF NOT EXISTS daemon_worktrees (
+            worktree_id   TEXT PRIMARY KEY,
+            tenant_id     TEXT NOT NULL,
+            session_id    TEXT NOT NULL,
+            agent_id      TEXT NOT NULL,
+            repo_path     TEXT NOT NULL,
+            worktree_path TEXT NOT NULL,
+            branch        TEXT NOT NULL,
+            base_sha      TEXT NOT NULL,
+            status        TEXT NOT NULL DEFAULT 'active',
+            created_at    TEXT NOT NULL,
+            closed_at     TEXT
+        );
+        CREATE INDEX IF NOT EXISTS idx_daemon_worktrees_tenant
+            ON daemon_worktrees (tenant_id, status, created_at DESC);
+        CREATE INDEX IF NOT EXISTS idx_daemon_worktrees_session
+            ON daemon_worktrees (tenant_id, session_id, status);
         """,
     ),
 ]
@@ -486,6 +513,115 @@ class DaemonEventStore:
         ).fetchall()
         return [
             {"run_id": r[0], "target": r[1], "run_dir": r[2], "indexed_at": r[3]}
+            for r in rows
+        ]
+
+
+    # ── Worktree registry ─────────────────────────────────────────────────────
+
+    def open_worktree(
+        self,
+        *,
+        worktree_id: str,
+        tenant_id: str,
+        session_id: str,
+        agent_id: str,
+        repo_path: str,
+        worktree_path: str,
+        branch: str,
+        base_sha: str,
+    ) -> bool:
+        """Register a newly created worktree. Idempotent by worktree_id. Returns True if new."""
+        conn = self._conn
+        conn.execute("BEGIN IMMEDIATE")
+        try:
+            cur = conn.execute(
+                """
+                INSERT OR IGNORE INTO daemon_worktrees
+                (worktree_id, tenant_id, session_id, agent_id, repo_path,
+                 worktree_path, branch, base_sha, status, created_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'active', ?)
+                """,
+                (worktree_id, tenant_id, session_id, agent_id, repo_path,
+                 worktree_path, branch, base_sha, _now()),
+            )
+            inserted = cur.rowcount == 1
+            conn.execute("COMMIT")
+            return inserted
+        except Exception:
+            conn.execute("ROLLBACK")
+            raise
+
+    def close_worktree(self, worktree_id: str, *, error: str | None = None) -> None:
+        """Mark a worktree as closed or errored."""
+        status = "error" if error else "closed"
+        conn = self._conn
+        conn.execute("BEGIN IMMEDIATE")
+        try:
+            conn.execute(
+                "UPDATE daemon_worktrees SET status=?, closed_at=? WHERE worktree_id=?",
+                (status, _now(), worktree_id),
+            )
+            conn.execute("COMMIT")
+        except Exception:
+            conn.execute("ROLLBACK")
+            raise
+
+    def get_worktree(self, worktree_id: str) -> dict[str, Any] | None:
+        """Return a single worktree record by id, or None."""
+        row = self._conn.execute(
+            """
+            SELECT worktree_id, tenant_id, session_id, agent_id, repo_path, worktree_path,
+                   branch, base_sha, status, created_at, closed_at
+            FROM daemon_worktrees WHERE worktree_id=?
+            """,
+            (worktree_id,),
+        ).fetchone()
+        if row is None:
+            return None
+        return {
+            "schema": WORKTREE_SCHEMA,
+            "worktree_id": row[0], "tenant_id": row[1], "session_id": row[2],
+            "agent_id": row[3], "repo_path": row[4], "worktree_path": row[5],
+            "branch": row[6], "base_sha": row[7], "status": row[8],
+            "created_at": row[9], "closed_at": row[10],
+        }
+
+    def list_worktrees(
+        self,
+        tenant_id: str,
+        *,
+        active_only: bool = True,
+        limit: int = 50,
+    ) -> list[dict[str, Any]]:
+        where = "tenant_id=?"
+        params: list[Any] = [tenant_id]
+        if active_only:
+            where += " AND status='active'"
+        rows = self._conn.execute(
+            f"""
+            SELECT worktree_id, session_id, agent_id, repo_path, worktree_path,
+                   branch, base_sha, status, created_at, closed_at
+            FROM daemon_worktrees WHERE {where}
+            ORDER BY created_at DESC, rowid DESC LIMIT ?
+            """,
+            params + [max(1, limit)],
+        ).fetchall()
+        return [
+            {
+                "schema": WORKTREE_SCHEMA,
+                "worktree_id": r[0],
+                "tenant_id": tenant_id,
+                "session_id": r[1],
+                "agent_id": r[2],
+                "repo_path": r[3],
+                "worktree_path": r[4],
+                "branch": r[5],
+                "base_sha": r[6],
+                "status": r[7],
+                "created_at": r[8],
+                "closed_at": r[9],
+            }
             for r in rows
         ]
 

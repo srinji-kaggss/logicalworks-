@@ -173,7 +173,127 @@ def _make_substrate_args(payload: dict[str, Any]) -> "argparse.Namespace":
     )
 
 
-def _dispatch_item(store: "DaemonEventStore", item: dict[str, Any]) -> None:
+WORKTREE_SCHEMA = "lgwks.daemon.worktree.v0"
+
+
+class WorktreeManager:
+    """Daemon-owned git worktree lifecycle with CRDT-backed audit trail.
+
+    Referee contract: one active worktree per (tenant, session). A second
+    create for the same session returns the existing record without touching git.
+    All git and store mutations are serialized through the daemon queue.
+    """
+
+    def __init__(self, store: "DaemonEventStore", repo_root: Path):
+        self.store = store
+        self.repo_root = repo_root.resolve()
+
+    def _worktree_base(self) -> Path:
+        base = self.repo_root / "store" / "daemon" / "worktrees"
+        base.mkdir(parents=True, exist_ok=True)
+        return base
+
+    def _git(self, *args: str, cwd: Path | None = None) -> tuple[int, str]:
+        result = subprocess.run(
+            ["git"] + list(args),
+            cwd=str(cwd or self.repo_root),
+            capture_output=True, text=True, timeout=30,
+        )
+        return result.returncode, (result.stdout + result.stderr).strip()
+
+    def _head_sha(self) -> str:
+        rc, out = self._git("rev-parse", "HEAD")
+        return out.strip() if rc == 0 else "unknown"
+
+    def _crdt_path(self, tenant_id: str) -> Path:
+        crdt_dir = self.repo_root / "store" / "daemon" / "crdt"
+        crdt_dir.mkdir(parents=True, exist_ok=True)
+        return crdt_dir / f"{tenant_id.replace(':', '_')}.json"
+
+    def _crdt_add(self, tenant_id: str, worktree_id: str) -> None:
+        try:
+            import lgwks_crdt as _crdt
+            sink = _crdt.JsonFileSink(self._crdt_path(tenant_id))
+            with sink.locked():
+                state = sink.load()
+                active = state.get("active_worktrees") or _crdt.ORSet()
+                if not isinstance(active, _crdt.ORSet):
+                    active = _crdt.ORSet()
+                state["active_worktrees"] = active.add(worktree_id)
+                sink.commit(state)
+        except Exception:
+            pass
+
+    def _crdt_remove(self, tenant_id: str, worktree_id: str) -> None:
+        try:
+            import lgwks_crdt as _crdt
+            sink = _crdt.JsonFileSink(self._crdt_path(tenant_id))
+            with sink.locked():
+                state = sink.load()
+                active = state.get("active_worktrees") or _crdt.ORSet()
+                if not isinstance(active, _crdt.ORSet):
+                    active = _crdt.ORSet()
+                state["active_worktrees"] = active.remove(worktree_id, None)
+                sink.commit(state)
+        except Exception:
+            pass
+
+    def create(self, tenant_id: str, session_id: str, agent_id: str) -> dict[str, Any]:
+        """Create a new worktree for a session, or return the existing one."""
+        active = self.store.list_worktrees(tenant_id, active_only=True)
+        existing = next((w for w in active if w["session_id"] == session_id), None)
+        if existing:
+            return {**existing, "created": False, "reason": "session_already_has_active_worktree"}
+
+        worktree_id = f"wt-{session_id[:8]}-{agent_id[:6]}-{int(time.time())}"
+        branch = f"daemon/{worktree_id}"
+        worktree_path = self._worktree_base() / worktree_id
+        base_sha = self._head_sha()
+
+        rc, out = self._git("worktree", "add", "-b", branch, str(worktree_path))
+        if rc != 0:
+            raise RuntimeError(f"git worktree add failed: {out}")
+
+        self.store.open_worktree(
+            worktree_id=worktree_id, tenant_id=tenant_id, session_id=session_id,
+            agent_id=agent_id, repo_path=str(self.repo_root),
+            worktree_path=str(worktree_path), branch=branch, base_sha=base_sha,
+        )
+        self._crdt_add(tenant_id, worktree_id)
+        return {
+            "schema": WORKTREE_SCHEMA,
+            "worktree_id": worktree_id, "tenant_id": tenant_id,
+            "session_id": session_id, "agent_id": agent_id,
+            "worktree_path": str(worktree_path), "branch": branch,
+            "base_sha": base_sha, "status": "active", "created": True,
+        }
+
+    def close(self, worktree_id: str) -> dict[str, Any]:
+        """Remove a worktree and mark it closed. Safe to call on already-closed."""
+        rec = self.store.get_worktree(worktree_id)
+        if rec is None:
+            raise ValueError(f"worktree not found: {worktree_id}")
+        if rec["status"] != "active":
+            return {**rec, "closed": False, "reason": "already_closed"}
+
+        error: str | None = None
+        wt_path = Path(rec["worktree_path"])
+        rc, out = self._git("worktree", "remove", "--force", str(wt_path))
+        if rc != 0:
+            error = f"git worktree remove failed: {out}"
+        else:
+            # Delete the daemon branch; ignore if already gone
+            self._git("branch", "-D", rec["branch"])
+
+        self.store.close_worktree(worktree_id, error=error)
+        self._crdt_remove(rec["tenant_id"], worktree_id)
+        return {**rec, "status": "error" if error else "closed", "closed": True, "error": error}
+
+    def list(self, tenant_id: str, *, all_: bool = False) -> list[dict[str, Any]]:
+        return self.store.list_worktrees(tenant_id, active_only=not all_)
+
+
+def _dispatch_item(store: "DaemonEventStore", item: dict[str, Any], repo_root: Path | None = None) -> None:
     """Route a dequeued work item to the appropriate handler."""
     try:
         store.append(lgwks_daemon_event.build_event(
@@ -187,6 +307,14 @@ def _dispatch_item(store: "DaemonEventStore", item: dict[str, Any]) -> None:
             manifest = _substrate.build_run(_make_substrate_args(item["payload"]))
             store.register_run(item["tenant_id"], manifest)
             store.complete_item(item["item_id"], result={"run_dir": manifest["artifacts"]["root"]})
+        elif item["kind"] in ("worktree_open", "worktree_close"):
+            root = repo_root or Path(".")
+            mgr = WorktreeManager(store, root)
+            if item["kind"] == "worktree_open":
+                result = mgr.create(item["tenant_id"], item["session_id"], item["agent_id"])
+            else:
+                result = mgr.close(item["payload"].get("worktree_id", ""))
+            store.complete_item(item["item_id"], result=result)
         else:
             store.complete_item(item["item_id"], result={"dispatched": True})
     except Exception as exc:
@@ -345,7 +473,7 @@ class SessionDaemon:
 
                 items = store.dequeue(tenant_id, limit=1)
                 for item in items:
-                    _dispatch_item(store, item)
+                    _dispatch_item(store, item, repo_root=self.paths.repo_root)
 
                 time.sleep(POLL_INTERVAL_S)
             store.append(
@@ -487,6 +615,63 @@ def _packet_command(args: argparse.Namespace) -> int:
     return 0
 
 
+def _worktree_create_command(args: argparse.Namespace) -> int:
+    paths = _paths(Path(args.repo).resolve())
+    tenant_id = f"repo:{paths.repo_root.name}"
+    store = DaemonEventStore(paths.db)
+    try:
+        mgr = WorktreeManager(store, paths.repo_root)
+        result = mgr.create(tenant_id, args.session_id, args.agent_id)
+    finally:
+        store.close()
+    print(json.dumps(result, indent=2))
+    return 0
+
+
+def _worktree_close_command(args: argparse.Namespace) -> int:
+    paths = _paths(Path(args.repo).resolve())
+    store = DaemonEventStore(paths.db)
+    try:
+        mgr = WorktreeManager(store, paths.repo_root)
+        result = mgr.close(args.worktree_id)
+    finally:
+        store.close()
+    print(json.dumps(result, indent=2))
+    return 0
+
+
+def _worktree_list_command(args: argparse.Namespace) -> int:
+    paths = _paths(Path(args.repo).resolve())
+    tenant_id = f"repo:{paths.repo_root.name}"
+    store = DaemonEventStore(paths.db)
+    try:
+        mgr = WorktreeManager(store, paths.repo_root)
+        items = mgr.list(tenant_id, all_=args.all)
+    finally:
+        store.close()
+    print(json.dumps({"tenant_id": tenant_id, "worktrees": items}, indent=2))
+    return 0
+
+
+def _register_worktree_subcommands(ps: Any) -> None:
+    wt = ps.add_parser("worktree", help="manage daemon-owned git worktrees")
+    wt_sub = wt.add_subparsers(dest="worktree_command", required=True)
+
+    wt_create = wt_sub.add_parser("create", help="create a new worktree for a session")
+    wt_create.add_argument("--session-id", required=True)
+    wt_create.add_argument("--agent-id", required=True)
+    wt_create.set_defaults(func=_worktree_create_command)
+
+    wt_close = wt_sub.add_parser("close", help="remove an active worktree")
+    wt_close.add_argument("worktree_id")
+    wt_close.set_defaults(func=_worktree_close_command)
+
+    wt_list = wt_sub.add_parser("list", help="list worktrees for this repo")
+    wt_list.add_argument("--all", dest="all", action="store_true", default=False,
+                         help="include closed/errored worktrees")
+    wt_list.set_defaults(func=_worktree_list_command)
+
+
 def add_parser(sub) -> None:
     p = sub.add_parser("daemon", help="background daemon lifecycle shell for the shared referee runtime")
     p.add_argument("--repo", default=".", help="repo root")
@@ -527,6 +712,8 @@ def add_parser(sub) -> None:
 
     runs_p = ps.add_parser("runs", help="list indexed research runs for this repo")
     runs_p.set_defaults(func=_runs_command)
+
+    _register_worktree_subcommands(ps)
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -573,6 +760,8 @@ def main(argv: list[str] | None = None) -> int:
 
     runs_p = sub.add_parser("runs", help="list indexed research runs")
     runs_p.set_defaults(func=_runs_command)
+
+    _register_worktree_subcommands(sub)
 
     args = parser.parse_args(argv if argv is not None else sys.argv[1:])
     return args.func(args)
