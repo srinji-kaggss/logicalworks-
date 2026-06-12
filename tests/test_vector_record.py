@@ -186,13 +186,13 @@ class TestStore(unittest.TestCase):
     def test_upsert_inserts_new(self):
         conn = self._mem_store()
         r = _make_record()
-        self.assertTrue(upsert_record(conn, r))
+        self.assertTrue(upsert_record(conn, r, admin=vmod.ADMIN))
 
     def test_upsert_idempotent(self):
         conn = self._mem_store()
         r = _make_record()
-        upsert_record(conn, r)
-        second = upsert_record(conn, r)
+        upsert_record(conn, r, admin=vmod.ADMIN)
+        second = upsert_record(conn, r, admin=vmod.ADMIN)
         self.assertFalse(second, "second upsert of same cid must be a no-op")
         count = conn.execute("SELECT COUNT(*) FROM vector_records").fetchone()[0]
         self.assertEqual(count, 1)
@@ -201,9 +201,9 @@ class TestStore(unittest.TestCase):
         conn = self._mem_store()
         r = _make_record()
         conn.commit()
-        upsert_record(conn, r)
+        upsert_record(conn, r, admin=vmod.ADMIN)
         conn.commit()
-        r2 = get_record(conn, r.cid)
+        r2 = get_record(conn, r.cid, admin=vmod.ADMIN)
         self.assertIsNotNone(r2)
         self.assertEqual(r2.cid, r.cid)
         self.assertEqual(r2.embedding, r.embedding)
@@ -212,7 +212,7 @@ class TestStore(unittest.TestCase):
     def test_schema_field_stored(self):
         conn = self._mem_store()
         r = _make_record()
-        upsert_record(conn, r)
+        upsert_record(conn, r, admin=vmod.ADMIN)
         conn.commit()
         schema_val = conn.execute(
             "SELECT schema FROM vector_records WHERE cid = ?", (r.cid,)

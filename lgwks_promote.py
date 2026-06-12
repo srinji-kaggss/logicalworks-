@@ -96,7 +96,8 @@ def promote(
         # Pre-check ownership on an UNSCOPED read: we must see the row's real
         # tenant to verify it is T's own (not world, not another tenant's). The
         # WORLD_PROMOTE scope already authorised this privileged inspection.
-        record = vector.get_record(conn, cid)
+        # WORLD_PROMOTE already authorised this privileged unscoped inspection (D2).
+        record = vector.get_record(conn, cid, admin=vector.ADMIN)
         if record is None or record.tenant != tenant:
             # Same message whether absent or foreign-owned — no existence leak (D3).
             raise PromotionError(_NOT_PROMOTABLE)

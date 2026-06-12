@@ -398,7 +398,7 @@ def test_promote_cli_smoke(mock_keyvault, tmp_path, monkeypatch):
     db = tmp_path / "vec.db"
     conn = vector.create_store(db)
     rec = _make_record("c", "src-cli", "space-1", "cli-tenant", "x")
-    vector.upsert_record(conn, rec)
+    vector.upsert_record(conn, rec, admin=vector.ADMIN)
     conn.commit()
     conn.close()
 
@@ -414,3 +414,129 @@ def test_promote_cli_smoke(mock_keyvault, tmp_path, monkeypatch):
     moved = vector.get_record_for_tenant(vector.create_store(db), rec.cid, capability.WORLD_TENANT)
     assert moved is not None
     assert moved.tenant == capability.WORLD_TENANT
+
+
+# ---------------------------------------------------------------------------
+# Test: #99 mandatory gating — the unscoped primitives are admin-only
+# ---------------------------------------------------------------------------
+
+
+def test_unscoped_primitives_are_admin_only(temp_db, test_tenant):
+    """A tenant-context call to an UNSCOPED primitive (no ADMIN sentinel) is rejected.
+
+    This is #99's load-bearing clause: the bypass is mechanical, not advisory. A
+    direct upsert/get/query without `admin=vector.ADMIN` raises AdminOnlyError; the
+    same call WITH the sentinel (admin/migration context) succeeds.
+    """
+    rec = _make_record("x", "src-admin", "space-1", test_tenant, "x")
+
+    for call in (
+        lambda: vector.upsert_record(temp_db, rec),
+        lambda: vector.get_record(temp_db, rec.cid),
+        lambda: vector.query_by_source(temp_db, "src-admin"),
+    ):
+        with pytest.raises(vector.AdminOnlyError):
+            call()
+
+    # With the sentinel, the admin path works.
+    assert vector.upsert_record(temp_db, rec, admin=vector.ADMIN) is True
+    assert vector.get_record(temp_db, rec.cid, admin=vector.ADMIN) is not None
+    assert len(vector.query_by_source(temp_db, "src-admin", admin=vector.ADMIN)) == 1
+
+
+# ---------------------------------------------------------------------------
+# Test: swap-seam acceptance — TenantStore gates via a FAKE CapabilityPort
+# ---------------------------------------------------------------------------
+
+
+class _FakePort:
+    """A non-HMAC CapabilityPort stand-in. Proves TenantStore's dependency is on the
+    CapabilityPort *interface* (the #97 seam), not the concrete HMAC token — so the
+    future ed25519/Principal impl swaps in here without touching TenantStore."""
+
+    def __init__(self, principal, scopes):
+        self._principal = principal
+        self._scopes = frozenset(scopes)
+
+    def verify(self, handle, key):
+        return access.VerifiedCap(
+            principal=self._principal, cap_ref="fake-ref",
+            scopes=self._scopes, _internal_cap=handle,
+        )
+
+    def require_scope(self, handle, scope, key):
+        v = self.verify(handle, key)
+        if scope not in v.scopes:
+            raise capability.CapabilityError(f"fake-port: lacks {scope!r}")
+        return v
+
+    def resolve(self, principal):  # not exercised here
+        raise NotImplementedError
+
+    def principal_of(self, verified):
+        return verified.principal
+
+    def cap_ref(self, verified):
+        return verified.cap_ref
+
+    def mint_promote(self, principal):
+        raise NotImplementedError
+
+
+def test_tenant_store_gates_through_a_fake_port(temp_db):
+    """TenantStore enforces scopes via whatever CapabilityPort it is handed."""
+    # A read-capable principal can write its own row and read it back.
+    rw = access.TenantStore(
+        _FakePort("tenant-Z", {capability.TENANT_RW, capability.WORLD_R}),
+        handle=None, key=b"", conn=temp_db,
+    )
+    rec = _make_record("z", "src-z", "space-1", "tenant-Z", "z")
+    rw.write(rec)
+    assert rw.read(rec.cid) is not None
+
+    # A principal WITHOUT TENANT_RW is rejected at write — purely via the fake port.
+    ro = access.TenantStore(
+        _FakePort("tenant-Z", {capability.WORLD_R}),
+        handle=None, key=b"", conn=temp_db,
+    )
+    with pytest.raises(capability.CapabilityError):
+        ro.write(_make_record("z2", "src-z2", "space-1", "tenant-Z", "z2"))
+
+
+# ---------------------------------------------------------------------------
+# Test: §1-INV holds THROUGH the router (the A/B sweep, routed via TenantStore)
+# ---------------------------------------------------------------------------
+
+
+def test_router_sweep_zero_cross_tenant_leak(mock_keyvault, temp_db):
+    """Seed A-private / B-private / world rows, then drive reads through the router
+    for tenant-A: A sees own ⊕ world, never B's private rows. §1-INV via TenantStore."""
+    port = access.HmacCapabilityPort()
+    handle, key = port.resolve("tenant-A")
+    store_a = access.TenantStore(port, handle, key, temp_db)
+
+    a_cids, b_cids = [], []
+    world_cid = None
+    for i in range(200):
+        ra = _make_record(f"a{i}", f"srcA{i}", "space-1", "tenant-A", "a")
+        rb = _make_record(f"b{i}", f"srcB{i}", "space-1", "tenant-B", "b")
+        vector.upsert_record(temp_db, ra, admin=vector.ADMIN)
+        vector.upsert_record(temp_db, rb, admin=vector.ADMIN)
+        a_cids.append(ra.cid)
+        b_cids.append(rb.cid)
+    rw = _make_record("w", "srcW", "space-1", capability.WORLD_TENANT, "w")
+    vector.upsert_record(temp_db, rw, admin=vector.ADMIN)
+    world_cid = rw.cid
+    temp_db.commit()
+
+    # query() through the router: only own ⊕ world, zero B rows.
+    seen = {r.cid for r in store_a.query()}
+    assert world_cid in seen
+    assert seen & set(a_cids) == set(a_cids), "A must see all its own rows"
+    assert not (seen & set(b_cids)), "router leaked a cross-tenant row into query()"
+
+    # read() through the router: A resolves its own + world, never B's private cid.
+    assert store_a.read(a_cids[0]) is not None
+    assert store_a.read(world_cid) is not None
+    for bc in b_cids[:50]:
+        assert store_a.read(bc) is None, "router leaked a cross-tenant cid via read()"

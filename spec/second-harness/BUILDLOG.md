@@ -685,3 +685,42 @@ side-channel, audit-failure-rolls-back, cap-identity-not-secret). Registry gate 
   direction (no isolation breach, reconcilable), surfaced by the raised error.
 
 **#89 closes after L5.** L6 (CRDT deploy on the two stores) is a separate packet (= I9).
+
+---
+
+## 2026-06-12 · CIAM convergence A — access-router: mandatory capability gating (#99, branch issue-99-access-router)
+
+Closes the advisory-enforcement gap L1/L5 both shipped with: the gate functions existed
+but nothing structurally forced callers through them (writes via direct `upsert_record`,
+reads convention-gated). Now the boundary is mechanical.
+
+- **Admin sentinel (`lgwks_vector.ADMIN` + `AdminOnlyError`).** The three UNSCOPED
+  primitives (`upsert_record`/`get_record`/`query_by_source`, which bypass §1-INV) are
+  admin-only: a caller must pass `admin=ADMIN`. A tenant-context call without it raises
+  `AdminOnlyError` — accidental bypass is now impossible, not just discouraged.
+- **`lgwks_access.TenantStore` is the single sanctioned tenant door.** `read`/`query`
+  route through the scoped resolvers (`get_record_for_tenant`/`query_for_tenant`, no
+  sentinel — they are isolation-safe); `write` pins `tenant=principal`, gates on TENANT_RW,
+  then calls the privileged primitive with the sentinel ONLY there; `promote` gates on
+  WORLD_PROMOTE and delegates to `lgwks_promote`. Added `TenantStore.query`.
+- **Callers reconciled, not "migrated onto a per-tenant store" where that made no sense.**
+  The real write bypass — `lgwks_embed_port.migrate_json_embeddings` (`:567`) — is a *bulk
+  cross-tenant migration* with no single principal, so it is correctly classified ADMIN
+  (sentinel), not routed through TenantStore. `lgwks_inbound`'s tenant read path already
+  used `get_record_for_tenant`; only its `tenant=None` single-operator fail-open (which
+  this issue keeps) calls the unscoped primitive, now with the sentinel. Same for the
+  internal `lgwks_vector` migration and `lgwks_promote`'s WORLD_PROMOTE inspection.
+- **Tests:** unscoped-primitive-rejected-without-admin; fake-`CapabilityPort` proves
+  TenantStore gates via the interface (the #97 swap seam, not the HMAC impl); §1-INV A/B
+  sweep routed through `TenantStore.read`/`query` shows zero cross-tenant leak.
+
+Deferred (flagged, not silently dropped): refactoring `lgwks_inbound.fuse` to accept a
+resolved `CapabilityPort` handle instead of a raw `tenant` string ("no raw tenant string
+crosses the boundary", maximalist). Its tenant path is already §1-INV-scoped; the residual
+is that it trusts a raw tenant string rather than a verified cap. Tracked on #99/#97.
+
+Pre-existing (NOT introduced here): `tests/test_embed_port.py` injects a stub `lgwks_vector`
+into `sys.modules` only when it imports first; run in a shared process with files that
+import the real module, two `TestEmbedToRecord` cases fail (`.meta`) and cross-file
+collection can error. Order-dependent, present on `main`. CI runs only the schema gate
+(no pytest), so unaffected.

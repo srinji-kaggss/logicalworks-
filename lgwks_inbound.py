@@ -231,7 +231,8 @@ def assemble_inbound(
     def _resolve(cid: str) -> Optional[lgwks_vector.VectorRecord]:
         if tenant is not None:
             return lgwks_vector.get_record_for_tenant(store_conn, cid, tenant)
-        return lgwks_vector.get_record(store_conn, cid)
+        # tenant=None: single-operator fail-open (issue #99 keeps this escape hatch).
+        return lgwks_vector.get_record(store_conn, cid, admin=lgwks_vector.ADMIN)
 
     resolved: list[RankRecord] = []
     records: dict[str, lgwks_vector.VectorRecord] = {}
@@ -323,7 +324,7 @@ def _cmd_run(args) -> int:
             if tenant is not None:
                 query_embedding = lgwks_vector.get_record_for_tenant(conn, qcid, tenant)
             else:
-                query_embedding = lgwks_vector.get_record(conn, qcid)
+                query_embedding = lgwks_vector.get_record(conn, qcid, admin=lgwks_vector.ADMIN)
             if query_embedding is None:
                 print(f"error: query cid {qcid!r} not found in store", file=_sys.stderr)
                 return 1

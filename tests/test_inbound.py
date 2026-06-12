@@ -51,7 +51,7 @@ def _mk_record(conn, source_cid: str, floats: list[float], modality: str = "text
     rec = lgwks_vector.encode_record(
         floats, modality=modality, space_id=SPACE, tenant="t", source_cid=source_cid
     )
-    lgwks_vector.upsert_record(conn, rec)
+    lgwks_vector.upsert_record(conn, rec, admin=lgwks_vector.ADMIN)
     return rec
 
 
@@ -235,10 +235,10 @@ class TestAssembleEndToEnd(unittest.TestCase):
                 pack = assemble_inbound(query, graph, conn)
                 self.assertTrue(pack["handles"], "expected non-empty handles")
                 for cid in pack["handles"]:
-                    self.assertIsNotNone(lgwks_vector.get_record(conn, cid),
+                    self.assertIsNotNone(lgwks_vector.get_record(conn, cid, admin=lgwks_vector.ADMIN),
                                          f"dangling handle: {cid}")
                 for d in pack["depth_handles"]:
-                    self.assertIsNotNone(lgwks_vector.get_record(conn, d["id"]),
+                    self.assertIsNotNone(lgwks_vector.get_record(conn, d["id"], admin=lgwks_vector.ADMIN),
                                          f"dangling depth handle: {d['id']}")
                     self.assertIn(d["kind"], lgwks_vector.MODALITIES)
             finally:
@@ -296,7 +296,7 @@ class TestAssembleEndToEnd(unittest.TestCase):
                 pack = assemble_inbound(None, graph, conn)  # no query → single-list RRF
                 self.assertTrue(pack["handles"])
                 for cid in pack["handles"]:
-                    self.assertIsNotNone(lgwks_vector.get_record(conn, cid))
+                    self.assertIsNotNone(lgwks_vector.get_record(conn, cid, admin=lgwks_vector.ADMIN))
             finally:
                 conn.close()
 
@@ -368,7 +368,7 @@ class TestTenantScopedInbound(unittest.TestCase):
         rec = lgwks_vector.encode_record(
             floats, modality="text", space_id=SPACE, tenant=tenant, source_cid=source_cid
         )
-        lgwks_vector.upsert_record(conn, rec)
+        lgwks_vector.upsert_record(conn, rec, admin=lgwks_vector.ADMIN)
         return rec
 
     def test_cross_tenant_nodes_dropped(self):

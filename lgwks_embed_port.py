@@ -43,6 +43,7 @@ if str(_REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(_REPO_ROOT))
 
 from lgwks_vector import (  # noqa: E402
+    ADMIN as vector_ADMIN,
     SCHEMA as VECTOR_SCHEMA,
     VectorRecord,
     encode_record,
@@ -564,7 +565,7 @@ def migrate_json_embeddings(
                 tenant=row_type or tenant,
                 source_cid=_src_cid(str(row_id)),
             )
-            upsert_record(dst_conn, record)
+            upsert_record(dst_conn, record, admin=vector_ADMIN)  # bulk migration — admin context
             inserted += 1
         except Exception:
             skipped += 1
