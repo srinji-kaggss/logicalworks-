@@ -10,6 +10,12 @@ This is the cohesive plan after the current architecture cut:
 - treat daemon and ingest as one runtime
 - make clients adapters, not product centers
 
+One important correction:
+
+- the daemon is **not already a Rust core**
+- Rust exists today in the crawler and Axiom islands
+- a Rust daemon is a likely target seam once contracts stabilize
+
 ## 1. Core node to finish
 
 Finish this node first:
@@ -85,6 +91,11 @@ Acceptance:
 - packet can be fetched deterministically by session
 - restart loses no committed state
 
+Implementation note:
+
+- do this in Python first unless/until the queue/state contract is stable enough to migrate
+- if/when migrated, Rust should own the single-writer backend, not fork the business rules
+
 ### P1. Ingress and transcript normalization
 
 Need one normalized event model for:
@@ -129,6 +140,13 @@ Acceptance:
 
 - one command or one actor run produces a complete research substrate
 - daemon can index that run and serve later packets from it
+
+Real-world constraints to respect:
+
+- bounded crawl budgets
+- auth wall escalation instead of silent scrape failure
+- explicit storage tiering for large media/vector runs
+- promotion rules for what becomes durable shared knowledge
 
 ### P4. Client adapters
 
@@ -220,3 +238,4 @@ graph TD
 - Use hooks as adapters, not as the core truth source.
 - Use transcript/history tails as the simplest durable outbound source when the client provides them.
 - Extend built surfaces before minting new ones.
+- Bin work explicitly by latency, trust, storage, and compute class before choosing where it runs.

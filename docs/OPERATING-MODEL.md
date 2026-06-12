@@ -388,7 +388,86 @@ Still needing decisions:
 - transcript/telemetry models
 - exact per-task routing split across small models
 
-## 11. Security and retention
+## 11. Runtime split: what is Rust, what is not
+
+Be explicit here so the daemon is not misremembered as already-Rust.
+
+Already in Rust:
+
+- the crawler island under `crawler/`
+- the Axiom byte-framework island under `axiom/rust`
+
+Not yet a real Rust subsystem:
+
+- the daemon lifecycle
+- the session/event queue
+- the packet-serving runtime
+- the git/worktree orchestration loop
+
+So the correct reading is:
+
+- the repo already has Rust seams for deterministic/hot-path islands
+- the daemon is a **target Rust seam**, not an already-landed Rust core
+
+Current best split, consistent with [machine-nervous-system.md](/Users/srinji/logicalworks-/docs/machine-nervous-system.md):
+
+- Python owns contract discovery, model adapters, workflow glue, browser/auth, and fast iteration
+- Rust should absorb the daemon only when the event/state contracts stop moving enough to justify it
+
+The practical near-term stance is:
+
+1. stabilize daemon contracts in Python first
+2. keep Rust as the destination for the long-running single-writer backend if process weight or concurrency pressure justifies it
+3. do not fork business logic across Python and Rust during contract discovery
+
+## 12. Workload bins and real-world constraints
+
+The daemon cannot treat all work the same. The runtime needs explicit bins.
+
+### 12.1 Latency bins
+
+- `inline`
+  ingress-time, bounded, must return fast enough to help the live agent
+- `nearline`
+  work that can continue during the session after the agent keeps going
+- `background`
+  crawl/index/review/archive work that can finish later
+
+### 12.2 Trust bins
+
+- `trusted-local`
+  repo state, signed ledgers, capability-validated state
+- `untrusted-world`
+  crawled pages, transcript free text, imported artifacts
+- `promoted`
+  material that crossed a review/promotion boundary into durable shared knowledge
+
+### 12.3 Storage bins
+
+- `hot local`
+  current session state, queue, packet cache
+- `warm local`
+  recent runs, vectors, graph DBs, manifests
+- `cold export`
+  completed sessions/runs after verified cloud archival
+
+### 12.4 Compute bins
+
+- `math`
+  deterministic ranking, scoring, graph traversal, hashing, CRDT merge
+- `ML`
+  embedding, classification, routing, compression models
+- `SLM if needed`
+  constrained synthesis/reasoning when the math/ML stack cannot finish the task
+
+If these bins are not explicit, the daemon will blur:
+
+- urgent and non-urgent work
+- trusted and untrusted inputs
+- hot and archival storage
+- deterministic and model-dependent decisions
+
+## 13. Security and retention
 
 The daemon must be safe enough to own:
 
@@ -420,7 +499,7 @@ Later tier:
 
 This should be treated as a later tier, not a first-slice blocker.
 
-## 12. What is already built enough to count
+## 14. What is already built enough to count
 
 - the ingestion spine is real
 - vector/graph/rank/score substrate is real
@@ -430,7 +509,7 @@ This should be treated as a later tier, not a first-slice blocker.
 - security/capability/CRDT substrate is real
 - research/substrate outputs are already promised in the manifest layer
 
-## 13. What is still left
+## 15. What is still left
 
 - one owned daemon lifecycle
 - ingress enqueue and transcript normalization
@@ -440,7 +519,7 @@ This should be treated as a later tier, not a first-slice blocker.
 - client adapters for Codex and Gemini
 - cloud archive/cleanup tier
 
-## 14. Read order after this
+## 16. Read order after this
 
 1. [docs/navmap/README.md](/Users/srinji/logicalworks-/docs/navmap/README.md)
 2. this file
