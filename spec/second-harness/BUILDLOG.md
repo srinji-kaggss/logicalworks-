@@ -812,3 +812,57 @@ New targeted coverage:
   losing a branch.
 - entity-graph remove → re-add is visible through the query layer, and an existing sidecar
   with empty visible membership fails closed (`query_edges() == []`) rather than widening.
+
+---
+
+## 2026-06-12 · Daemon core Moves 6–8 (P4 adapters + P2 worktree + P5 export)
+
+This session closed the DAEMON-CORE-PLAN.md work package with three sequential commits.
+
+### Move 6 — Codex + Gemini ingress adapters (`2e8e638`)
+
+`hooks/codex_inbound.py` and `hooks/gemini_inbound.py` are thin ingress adapters that emit
+`human_message` events to the daemon store using the existing `lgwks.daemon.event.v1` contract.
+Gemini handles the multipart `parts[{text}]` format. Both are fail-silent (INV-6) and carry no
+client-specific business logic. Session IDs from `CODEX_SESSION_ID`/`GEMINI_SESSION_ID` env vars,
+falling back to repo name. 5 Codex tests + 7 Gemini tests (including `_extract_prompt` unit tests).
+
+### Move 7 = P2 — WorktreeManager + CRDT audit trail (`12383d2`)
+
+`WorktreeManager` (`lgwks_daemon.py`) is the single entry point for daemon-owned git worktrees:
+
+- `create(tenant_id, session_id, agent_id)` — referee check (returns existing if session already
+  has an active worktree), runs `git worktree add -b daemon/<id>`, registers in `daemon_worktrees`
+  table (migration v4), writes CRDT ORSet snapshot to `store/daemon/crdt/<tenant>.json`
+- `close(worktree_id)` — `git worktree remove --force`, delete daemon branch, update store, remove from ORSet
+- `list(tenant_id)` — reads from store (active_only by default)
+
+Work kinds `worktree_open` and `worktree_close` added to `WORK_KINDS`; `_dispatch_item` routes them.
+CLI: `daemon worktree create/close/list`. Schema: `lgwks.daemon.worktree.v0` registered.
+
+8 registry tests (store layer) + 6 integration tests (real git repo). All 57 daemon suite tests green.
+
+### Move 8 = P5 — Content-addressed export tier (`a816b4d`)
+
+`lgwks_daemon_export.ExportManager`:
+
+- `export_run(run_id, dest_dir)` — archives `run_dir` to `<id>.tar.gz`, computes sha256, records
+  in `daemon_runs.export_hash/export_path/exported_at` (migration v5, `ALTER TABLE`)
+- `verify_export(run_id)` — re-hashes archive, compares to stored sha256; `verified: bool`
+- `cleanup_run(run_id, force)` — blocked (`cleaned=false`) unless `verify_export` passes;
+  `force=true` skips and logs the override; prevents silent data loss
+- `export_session(tenant_id, session_id, dest_dir)` — dumps event stream to `.jsonl` with sha256
+
+CLI: `daemon export run/verify/session`, `daemon cleanup <id>`.
+Schemas registered: `lgwks.daemon.export.v0`, `lgwks.daemon.cleanup.v0`.
+4 export tests + 4 verify tests + 4 cleanup tests + 3 session tests = 17 export tests. 74 total green.
+
+### Governance refresh (`418e888`)
+
+Schema registry: 6 new daemon-family rows added (`work_item.v0`, `queue.v0`, `packet.v0`,
+`worktree.v0`, `export.v0`, `cleanup.v0`).
+OPERATING-MODEL.md: §6 and §7 updated from "intended" to "SHIPPED"; §7.4 (export tier) added.
+HANDOFF: session-14 block added with P0 acceptance receipts and next-seam map.
+
+Verification:
+- `python -m pytest tests/test_daemon_store.py tests/test_daemon_worktree.py tests/test_daemon_export.py tests/test_claude_adapter.py tests/test_codex_adapter.py tests/test_gemini_adapter.py tests/test_daemon_event.py -q` → **74 passed**

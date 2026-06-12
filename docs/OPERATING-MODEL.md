@@ -258,87 +258,83 @@ Built modules:
 - [lgwks_repo.py](/Users/srinji/logicalworks-/lgwks_repo.py)
 - [lgwks_gh.py](/Users/srinji/logicalworks-/lgwks_gh.py)
 
-## 6. Git/worktree/CRDT ownership
+## 6. Git/worktree/CRDT ownership ✅ P2 SHIPPED (2026-06-12, `12383d2`)
 
-The daemon is not just a context observer. It is also intended to become the runtime owner of:
+The daemon owns the full git worktree lifecycle. `WorktreeManager` (`lgwks_daemon.py`) is the
+single entry point for creating, closing, and listing daemon-owned worktrees.
 
-- git alignment
-- worktree creation and cleanup
-- concurrent state merge
-- branchless or low-friction collaboration mechanics
+**Referee contract:** one active worktree per `(tenant, session)`. A second `create` for the same
+session returns the existing record without touching git — no race, no duplicate branch.
+Conflicting actions across sessions are serialized through the work queue (`BEGIN IMMEDIATE`
+dequeue) and the per-session referee check.
 
-Built anchors:
+**CRDT audit trail:** each worktree create/close writes a per-tenant `ORSet` snapshot to
+`store/daemon/crdt/<tenant>.json` via `lgwks_crdt.JsonFileSink`. The SQLite table is the
+operational source of truth; the CRDT snapshot is the auditable merge record for future
+multi-host convergence.
 
-- [lgwks_repo.py](/Users/srinji/logicalworks-/lgwks_repo.py)
-- [lgwks_agent_os.py](/Users/srinji/logicalworks-/lgwks_agent_os.py)
-- [lgwks_spawn.py](/Users/srinji/logicalworks-/lgwks_spawn.py)
-- [lgwks_crdt.py](/Users/srinji/logicalworks-/lgwks_crdt.py)
-- [lgwks_access.py](/Users/srinji/logicalworks-/lgwks_access.py)
-- [lgwks_capability.py](/Users/srinji/logicalworks-/lgwks_capability.py)
+CLI: `daemon worktree create --session-id <s> --agent-id <a>` / `close <wt_id>` / `list`
 
-Interpretation:
+Work kinds `worktree_open` and `worktree_close` are in `WORK_KINDS` so the poll-loop dispatcher
+routes them the same as research runs — fully queued, never ad-hoc.
 
-- the CRDT/capability work was not side noise
-- it is part of daemon-owned state, worktree, and multi-actor runtime control
+Built modules:
 
-This is where the referee role becomes concrete:
+- [lgwks_daemon.py](/Users/srinji/logicalworks-/lgwks_daemon.py) (`WorktreeManager`, `_dispatch_item`)
+- [lgwks_daemon_store.py](/Users/srinji/logicalworks-/lgwks_daemon_store.py) (migration v4, `open_worktree`/`close_worktree`/`list_worktrees`/`get_worktree`)
+- [lgwks_crdt.py](/Users/srinji/logicalworks-/lgwks_crdt.py) (`ORSet`, `JsonFileSink`)
+- [lgwks_repo.py](/Users/srinji/logicalworks-/lgwks_repo.py) (audit/cleanup of external worktrees)
 
-- if three agents want overlapping repo actions, the daemon arbitrates
-- if one agent changes shared state, the others receive updated subconscious packets
-- if two agents produce conflicting candidate state, the daemon resolves through the owned merge path
+Next: worktree merge arbitration (two sessions modified overlapping files → daemon resolves through
+owned merge path). Seam is ready: `WorktreeManager.close()` + `lgwks_crdt.reconverge()`.
 
-## 7. Client adapters: Claude, Codex, Gemini
+## 7. Client adapters: Claude, Codex, Gemini ✅ ALL SHIPPED (2026-06-12)
 
-The daemon is the product core. Clients are adapters.
+The daemon is the product core. Clients are adapters. All three are now wired.
 
-## 7.1 Claude adapter
+## 7.1 Claude adapter ✅ (`fe400a4`)
 
-Current intended shape:
+`hooks/subconscious_inbound.py` — runs the U6 subconscious engine on every prompt, then emits a
+`human_message` event to the daemon store (`client="claude"`, `lane="ingress"`, `scope="agent_local"`).
+Session ID derived from `LGWKS_TRANSCRIPT_PATH` stem; fallback `claude:<repo>`.
+Fail-silent (INV-6): any error → exit 0, no prompt blocked.
 
-- keep the inbound prompt hook because it gives the headstart
-- tail the JSONL transcript as the outbound truth
-- avoid over-investing in exotic Claude-only outbound hook complexity when JSONL already exists
+Shape: `UserPromptSubmit headstart + daemon event + packet return`
 
-So Claude becomes:
+## 7.2 Codex adapter ✅ (`2e8e638`)
 
-`UserPromptSubmit headstart + JSONL tail + packet return`
+`hooks/codex_inbound.py` — thin ingress adapter. Accepts JSON on stdin (keys: `prompt`/`content`/`message`/`text`).
+Emits `human_message` event to daemon store (`client="codex"`). Session ID from `CODEX_SESSION_ID`
+env or `LGWKS_TRANSCRIPT_PATH`; fallback `codex:<repo>`.
+No subconscious engine — the daemon packet handles context. Fail-silent (INV-6).
 
-Not:
+Shape: `hook stdin -> daemon event (client=codex)`
 
-`many hooks as the core product`
+## 7.3 Gemini adapter ✅ (`2e8e638`)
 
-## 7.2 Codex adapter
+`hooks/gemini_inbound.py` — thin ingress adapter. Accepts JSON on stdin including multipart
+`parts[{text}]` format. Emits `human_message` event (`client="gemini"`). Session ID from
+`GEMINI_SESSION_ID` env. Fail-silent (INV-6).
 
-Codex should plug in as:
+Shape: `hook stdin -> daemon event (client=gemini)`
 
-`project-local adapter -> daemon -> packet back to Codex`
+All three adapters use the same `lgwks.daemon.event.v1` contract. No client-specific business logic
+in the daemon core. The three `client` values (`claude`/`codex`/`gemini`) are in `CLIENTS` frozenset
+in `lgwks_daemon_event.py` and flow through to referee arbitration and per-agent packet generation.
 
-Desired surfaces:
+## 7.4 Archive / export tier ✅ P5 SHIPPED (`a816b4d`)
 
-- optional hook for ingress headstart
-- transcript/history tail when available
-- project-local config/instructions to locate the daemon
-- same packet contract as every other client
+`lgwks_daemon_export.py` (`ExportManager`):
 
-Core principle:
+- `export_run(run_id)` — archives `run_dir` to `.tar.gz`, stores sha256 in `daemon_runs` (migration v5)
+- `verify_export(run_id)` — re-hashes archive; returns `verified: bool`
+- `cleanup_run(run_id)` — blocked unless `verify_export` passes (`force=True` logs override)
+- `export_session(tenant_id, session_id)` — exports event stream to JSONL
 
-- Codex support should not require a second daemon architecture
+CLI: `daemon export run <id>` / `export verify <id>` / `export session <id>` / `cleanup <id>`
 
-## 7.3 Gemini adapter
-
-Gemini should plug in as:
-
-`extension/MCP/custom command -> daemon -> packet back to Gemini`
-
-Desired surfaces:
-
-- extension or MCP bridge
-- optional context bootstrap file
-- explicit turn submission when transcript tail is not available
-
-Core principle:
-
-- Gemini support is an adapter problem, not a core-logic rewrite
+Cloud export (S3/GCS): deferred. Extend `ExportManager.export_run()` with a backend parameter —
+the sha256 + store-record contract is already the right seam. No schema change needed.
 
 ## 8. Standalone human runtime
 

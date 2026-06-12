@@ -1,9 +1,10 @@
-# Handoff — lgwks subconscious build · 2026-06-12 (session 12, main @ e4a03e2)
+# Handoff — lgwks subconscious build · 2026-06-12 (session 14, main @ 418e888)
 
 > Session 10–11: opened **I8-hardening** (#89), landed L1+L2+L7/L3/L4/L5 — §1-INV cryptographically enforced; **#89 closed**.
-> Session 12: shipped the **CIAM convergence epic #97** (build order B→A→C): #98 capability lifecycle + operator promote, #99 access-router mandatory gating (`ADMIN` sentinel + `TenantStore`), #100 CRDT live convergence (`reconverge`). **Epic CLOSED.** This SUPERSEDES the old session-11 "next" note — L6/I9 and the L2 access-router are now SHIPPED, not deferred.
-> Session 13: shipped the three additive micro-debts left open from #97 — #104 (inbound→resolved capability handle), #105 (`reconverge` commit critical-section lock), #106 (entity-graph mutable membership through OR-Set sidecars). Canonical next *surface* remains **D2 network/MCP transport** (SCOPE-DEFERRED.md).
-> The dated "Session N state" sections below are append-only history — the **latest** state is the **session-12** block at the bottom.
+> Session 12: shipped the **CIAM convergence epic #97** (build order B→A→C): #98 capability lifecycle + operator promote, #99 access-router mandatory gating (`ADMIN` sentinel + `TenantStore`), #100 CRDT live convergence (`reconverge`). **Epic CLOSED.**
+> Session 13: shipped the three additive micro-debts left open from #97 — #104/#105/#106. Canonical next *surface* remains **D2 network/MCP transport** (SCOPE-DEFERRED.md).
+> Session 14: shipped **daemon core Moves 1–8** (DAEMON-CORE-PLAN.md §5): Codex+Gemini ingress adapters (P4), WorktreeManager + CRDT audit (P2), content-addressed export tier (P5). 74 tests green. Git aligned (12 merged branches deleted, 2 worktrees pruned). Governance refreshed.
+> The dated "Session N state" sections below are append-only history — the **latest** state is the **session-14** block at the bottom.
 
 You are the next agent on the lgwks rebuild. Read this fully before acting. Written
 AI-for-AI; receipts, not essays. Authority ladder: `/CLAUDE.md` → `governance/README.md`
@@ -383,5 +384,52 @@ now safe. Build D2 so it ADDS a transport, never refactors the core:
 - **Out of scope for D2, file separately when triggered:** cross-machine CRDT sync transport (D4),
   cross-workspace ACL (D3), promotion-review UI (D5), per-tenant billing (D6) — all in SCOPE-DEFERRED.md,
   dependencies now satisfied.
+
+---
+
+## Session 14 state — 2026-06-12 · main @ 418e888 · 74 tests green
+
+This session closed the **daemon core work package** (DAEMON-CORE-PLAN.md §5 Moves 1–8):
+
+| Move | What | Commit |
+|------|------|--------|
+| 1–5 | Event model, lifecycle, work queue, research front door, Claude adapter | prior sessions |
+| 6 | Codex + Gemini ingress adapters (`hooks/codex_inbound.py`, `hooks/gemini_inbound.py`) | `2e8e638` |
+| 7 = P2 | `WorktreeManager`: git worktree create/close/list, per-session referee (no duplicate), CRDT ORSet audit trail, migration v4, `worktree_open`/`worktree_close` WORK_KINDS | `12383d2` |
+| 8 = P5 | `ExportManager`: `export_run` (tar.gz + sha256), `verify_export`, `cleanup_run` (blocked without verified export), `export_session` (JSONL), migration v5 | `a816b4d` |
+
+Git alignment: 12 merged local branches deleted, 2 stale worktrees pruned. 4 surviving remote
+feature branches (epic-97, issue-99, issue-100, docs-handoff-refresh-session-12) predate daemon
+work and are preserved for context; they are diverged from current main.
+
+**P0 acceptance** (all met):
+- daemon starts independently ✅
+- restart loses no committed state ✅
+- ingress can enqueue work ✅
+- packet fetched deterministically ✅
+- three concurrent agents don't corrupt state ✅ (BEGIN IMMEDIATE + per-session referee)
+
+### Open seams (next agent's entry points)
+
+**D2 network/MCP transport** (unchanged from session-13 plan — the seam is the public API):
+- inbound credential → `CapabilityPort.resolve` → `TenantStore` → `admission_queue`
+- build `Session`/`RequestContext` in `lgwks_session.py` first so D2 is additive
+
+**Worktree merge arbitration** (next natural P2 extension):
+- `WorktreeManager.close()` triggers `lgwks_crdt.reconverge()` for overlapping file changes
+- seam is ready: `JsonFileSink.locked()` + existing `ORSet` sidecar pattern from #106
+
+**Cloud export tier** (P5 extension, not filed):
+- extend `ExportManager.export_run()` with a backend parameter (S3/GCS)
+- `lgwks.daemon.export.v0` schema is already the right envelope; no schema bump needed
+
+**P1 transcript normalization** (not filed):
+- Codex/Gemini adapters emit `human_message` only; tool calls / transcript turns from those clients
+  still need wiring into the normalized event stream
+- seam: `lgwks_daemon_event.KINDS` already has `transcript_turn` / `tool_call` / `file_change`
+
+**Known pre-existing (NOT regressions):**
+- `test_home.py::test_domain_for_coverage` and `test_browser_navigates_domain_to_command` — pre-existing failures on main before this session (verified with `git stash`)
+- `lgwks_vector` import-order collection quirk — pre-existing; run per-area or `make test-python`
 
 If the Director triggers D2, file it as the next issue and spec against the Session seam above first.
