@@ -1,8 +1,8 @@
 # NAVMAP — lgwks module atlas (generated; do not hand-edit)
 
-> `scripts/gen_navmap.py` from source — re-run to refresh. **128 modules · 46,762 LOC.** Read/query this FIRST. Strict machine-readable contract: `docs/navmap.json` (`lgwks.navmap.v1`).
+> `scripts/gen_navmap.py` from source — re-run to refresh. **129 modules · 47,094 LOC.** Read/query this FIRST. Strict machine-readable contract: `docs/navmap.json` (`lgwks.navmap.v1`).
 
-**Staleness:** `active` 127 · `orphan` 1
+**Staleness:** `active` 128 · `orphan` 1
 
 Rules — `active`: referenced by another module/dispatcher (static or dynamic), or a tested CLI verb <180d · `scaffolding`: no caller, owned by an open issue · `staling`: no caller anywhere, but built/tested or has a CLI verb, no issue (wire or retire) · `orphan`: no caller, no tests, no CLI, no issue (deletion candidate).
 
@@ -17,12 +17,13 @@ Row legend: `cli` `test` · `←N` imported by N · `→N` imports N · `Nd` day
 | #74 | I10 | `lgwks_viz_project` (active) |
 | #75 | I11 | `lgwks_waste` (active) |
 
-## Ingestion spine (I1–I12)  ·  14 mod · 6,346 LOC
+## Ingestion spine (I1–I12)  ·  15 mod · 6,678 LOC
 
 | module | purpose | loc | stale | rel |
 |---|---|---|---|---|
-| `lgwks_admission` | token-bucket admission + idempotent queue (I8 / I8-hardening L3). | 447 | active | cli test ←2 →2 0d |
-| `lgwks_capability` | capability-token tenant isolation boundary (I8). | 295 | active | cli test ←5 0d |
+| `lgwks_admission` | token-bucket admission + idempotent queue (I8 / I8-hardening L3). | 464 | active | cli test ←3 →3 0d |
+| `lgwks_admission_store` | durable cross-process admission queue (I8-hardening L4). | 315 | active | ←1 →4 |
+| `lgwks_capability` | capability-token tenant isolation boundary (I8). | 295 | active | cli test ←6 0d |
 | `lgwks_crdt` | CRDT state: G-Set, OR-Set, LWW-Register (I9). | 304 | active | cli test ←3 0d |
 | `lgwks_embed_port` | embedder runtime (lgwks.embed.port.v1). | 653 | active | test ←2 →2 1d |
 | `lgwks_extract` | ingest every file format → text. The "read anything" port. | 277 | active | test ←4 →4 9d |
@@ -119,7 +120,7 @@ Row legend: `cli` `test` · `←N` imported by N · `→N` imports N · `Nd` day
 | `lgwks_substrate_run` | build, query, and baseline orchestration for substrate runs. | 726 | active | cli ←2 →11 2d |
 | `lgwks_synthesizer` | U9/U9A: LLM reasoning layer & Apple-native/cloud synthesis seam. | 213 | active | test ←1 →2 4d |
 | `lgwks_tongue` | the Tongue: an optional OpenRouter LLM compiles hypotheses + the elimination | 228 | active | ←2 →1 4d |
-| `lgwks_workercap` | computed worker-slot ceiling from a probed host profile. | 99 | active | ←3 10d |
+| `lgwks_workercap` | computed worker-slot ceiling from a probed host profile. | 99 | active | ←4 10d |
 | `lgwks_workflows` | unified AI workflow harness. | 1149 | active | cli ←2 →13 2d |
 
 ## Membrane / intent / steering  ·  9 mod · 3,084 LOC
@@ -175,7 +176,7 @@ Row legend: `cli` `test` · `←N` imported by N · `→N` imports N · `Nd` day
 | `lgwks_memory` | deterministic project memory chain (hardened, build #3). | 277 | active | cli test ←4 →1 3d |
 | `lgwks_project_artifacts` | shared schemas, JSONL writers, record builders, | 1068 | active | ←11 →1 4d |
 | `lgwks_schema` | schema registry for next-agent discovery. | 263 | active | cli test ←8 1d |
-| `lgwks_sqlite` | Shared SQLite connection hardening for lgwks durable stores. | 276 | active | ←6 3d |
+| `lgwks_sqlite` | Shared SQLite connection hardening for lgwks durable stores. | 276 | active | ←7 3d |
 | `lgwks_substrate` | thin facade re-exporting all substrate sub-modules. | 200 | active | test ←7 →12 3d |
 | `lgwks_substrate_config` | constants, paths, regexes, and shared types for substrate runs. | 102 | active | ←7 3d |
 | `lgwks_substrate_db` | SQLite substrate index DB and global fact vector upserts. | 218 | active | ←2 →2 3d |

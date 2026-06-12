@@ -267,6 +267,8 @@ class TenantAdmissionGate:
         per_tenant_rate: float | None = None,
         clock: Callable[[], float] = time.monotonic,
         rng: random.Random | None = None,
+        store_path: Any = None,
+        lease_ttl: float = 30.0,
     ) -> None:
         if not key:
             raise ValueError("TenantAdmissionGate requires a non-empty capability key")
@@ -285,6 +287,18 @@ class TenantAdmissionGate:
         self.cap_info = cap_info
         self._tenants: dict[str, tuple[TokenBucket, AdmissionQueue]] = {}
         self._inflight: dict[str, int] = {}
+        # L4 opt-in: when store_path is set, the per-process token bucket still
+        # rate-limits, but the QUEUE (and the lease COUNT behind fair leasing) move
+        # to a crash-durable, cross-process SQLite table. self.store is the daemon's
+        # handle for durable lease()/complete()/reap(). When None, the L3 in-memory
+        # path is the single-operator P3 default (backward compat).
+        self.store = None
+        if store_path is not None:
+            import lgwks_admission_store  # lazy — avoid an import cycle
+            self.store = lgwks_admission_store.DurableAdmissionQueue(
+                store_path, key=key, role_count=role_count, q_max=q_max,
+                lease_ttl=lease_ttl, clock=clock, rng=rng,
+            )
 
     # -- internal --------------------------------------------------------
     def _lane(self, tenant: str) -> tuple[TokenBucket, AdmissionQueue]:
@@ -331,6 +345,9 @@ class TenantAdmissionGate:
             return Rejected429(
                 cid=cid, reason="rate_limited", retry_after=_jitter(base, rng=self._rng)
             )
+        if self.store is not None:
+            # rate passed (per-process); durable, cross-process queue owns admission.
+            return self.store.enqueue(token, cid=cid, item=item, now=self._clock())
         return queue.submit(item, cid=cid)
 
     # -- fair leasing ≤ c (concurrency) ----------------------------------

@@ -595,3 +595,46 @@ deterministic replay); 73 green across admission/capability/i8/inbound. Registry
   toward more fairness, never less); L4's durable active-set can refine it.
 
 **Next (issue #89 tail):** L4 durable cross-process queue → L5 promotion audit. L6 (CRDT) = I9.
+
+---
+
+## 2026-06-12 · I8-hardening L4 — durable cross-process admission queue (#89, branch feat/89-L4-durable-queue)
+
+ARCH-two-db-multitenant.md build-order step 3. L3 made admission per-tenant + fair but the queue
+and lease counters were **in-memory per-process** (lost on restart, invisible across processes).
+L4 persists them to a WAL SQLite table → crash-durable + cross-process, backpressure not drop.
+
+**Built (`lgwks_admission_store.DurableAdmissionQueue`, new module):**
+- `admission_queue` WAL table over `lgwks_sqlite.connect` (hardened WAL + BUSY retry). PK
+  `(tenant,cid)` → per-tenant idempotent dedup. State machine `queued→leased→done`; `reap`
+  returns a stale lease to `queued`. Mints `lgwks.admission_queue.v1` (registry 99→100).
+- **Capability-FIRST** on every op (`require_scope(TENANT_RW)`) — bad/missing cap raises
+  `CapabilityError` before any row is read/written; only the owning tenant can lease/complete.
+- **Atomic across processes** — enqueue/lease run in `BEGIN IMMEDIATE` (autocommit off), so the
+  check-then-act (dedup + depth, or capacity + claim) can't race two processes past the cap.
+- **Fair leasing ≤ c from the DB COUNT** — `lease()` claims the oldest queued row IFF
+  `COUNT(leased) < c` AND `COUNT(leased WHERE tenant) < ⌈c/active⌉`. Because the count is the
+  table's, fairness now holds **across processes**, not just within one (refines the L3 honest
+  limit). `reap()` reclaims past-deadline leases (`retry_count++`) — a crashed worker's work
+  returns to the queue, never lost.
+- **`item` is an opaque JSON handle**, never raw content (§1-INV scope fence).
+
+**Wiring:** `TenantAdmissionGate(store_path=...)` opt-in — the per-process token bucket still
+rate-limits, but the queue + lease state delegate to the durable store (`gate.store` is the
+daemon's lease handle). `store_path=None` keeps the L3 in-memory single-operator path (backward
+compat). Helper module (not a CLI verb) → no dispatcher/_DOMAINS wiring; keeps `lgwks_admission.py`
+under the 500-line rule.
+
+**Result:** 85 tests green (14 new in `tests/test_i8_durable_queue.py`: crash-durable reopen,
+backpressure-not-drop, idempotent, capability-gated/cross-tenant-denied, fair leasing ≤ c,
+complete-frees-slot, reap stale lease, cross-process shared count, gate delegation). Registry gate
+100/100. Deterministic (injected clock + explicit `now=`).
+
+**Honest limits (not in scope here):**
+- `done` rows are retained (audit trail / idempotent shed by cid); a prune/vacuum sweep is future
+  ops, not L4.
+- `reap` is an unauthenticated daemon maintenance op (resets lease state only, reveals no
+  cross-tenant content) — runs with system authority in the daemon.
+
+**Next (issue #89 tail):** L5 promotion audit (tenant→world hash-chained record on the cognition
+chain, `lgwks_cognition.py`) — the last L-step; then #89 closes.
