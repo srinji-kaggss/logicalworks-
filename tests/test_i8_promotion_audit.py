@@ -62,7 +62,7 @@ class TestPromotionAudit(unittest.TestCase):
         return cognition.CognitionLog(_STREAM, key=_AUDIT_KEY).corpus("promotion")
 
     def _tenant_of(self, cid: str) -> str | None:
-        rec = vmod.get_record(self.conn, cid)
+        rec = vmod.get_record(self.conn, cid, admin=vmod.ADMIN)
         return rec.tenant if rec else None
 
     def _promote_token(self, tenant: str):
@@ -72,7 +72,7 @@ class TestPromotionAudit(unittest.TestCase):
     # -- P1 ----------------------------------------------------------------
     def test_promotion_requires_world_promote_scope(self):
         rec = _make_record(1, "tenant-A")
-        upsert_record(self.conn, rec)
+        upsert_record(self.conn, rec, admin=vmod.ADMIN)
         self.conn.commit()
         token, key = capability.issue_token("tenant-A")  # DEFAULT_SCOPES: no promote
 
@@ -86,7 +86,7 @@ class TestPromotionAudit(unittest.TestCase):
     # -- P2 ----------------------------------------------------------------
     def test_own_row_promotes_and_is_audited(self):
         rec = _make_record(2, "tenant-A")
-        upsert_record(self.conn, rec)
+        upsert_record(self.conn, rec, admin=vmod.ADMIN)
         self.conn.commit()
         token, key = self._promote_token("tenant-A")
 
@@ -110,8 +110,8 @@ class TestPromotionAudit(unittest.TestCase):
     def test_promoted_row_visible_to_all_promotes_only_target(self):
         rec_a = _make_record(3, "tenant-A")
         rec_b = _make_record(4, "tenant-B")
-        upsert_record(self.conn, rec_a)
-        upsert_record(self.conn, rec_b)
+        upsert_record(self.conn, rec_a, admin=vmod.ADMIN)
+        upsert_record(self.conn, rec_b, admin=vmod.ADMIN)
         self.conn.commit()
 
         token, key = self._promote_token("tenant-A")
@@ -129,8 +129,8 @@ class TestPromotionAudit(unittest.TestCase):
     def test_cannot_promote_absent_foreign_or_world_row_no_sidechannel(self):
         rec_b = _make_record(5, "tenant-B")
         rec_w = _make_record(6, WORLD_TENANT)
-        upsert_record(self.conn, rec_b)
-        upsert_record(self.conn, rec_w)
+        upsert_record(self.conn, rec_b, admin=vmod.ADMIN)
+        upsert_record(self.conn, rec_w, admin=vmod.ADMIN)
         self.conn.commit()
 
         token, key = self._promote_token("tenant-A")  # A holds promote, owns nothing here
@@ -149,7 +149,7 @@ class TestPromotionAudit(unittest.TestCase):
     # -- P5 ----------------------------------------------------------------
     def test_audit_failure_rolls_back_the_move(self):
         rec = _make_record(7, "tenant-A")
-        upsert_record(self.conn, rec)
+        upsert_record(self.conn, rec, admin=vmod.ADMIN)
         self.conn.commit()
         token, key = self._promote_token("tenant-A")
 
@@ -172,7 +172,7 @@ class TestPromotionAudit(unittest.TestCase):
     # -- P6 ----------------------------------------------------------------
     def test_audit_records_cap_identity_not_secret(self):
         rec = _make_record(8, "tenant-A")
-        upsert_record(self.conn, rec)
+        upsert_record(self.conn, rec, admin=vmod.ADMIN)
         self.conn.commit()
         token, key = self._promote_token("tenant-A")
 

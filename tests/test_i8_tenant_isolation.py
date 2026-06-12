@@ -59,7 +59,7 @@ class TestTenantIsolation(unittest.TestCase):
         rec_b = _make_record(2, "tenant-B")
         rec_w = _make_record(3, WORLD_TENANT)
         for r in (rec_a, rec_b, rec_w):
-            upsert_record(conn, r)
+            upsert_record(conn, r, admin=vmod.ADMIN)
 
         result = query_for_tenant(conn, "tenant-A")
         cids = {r.cid for r in result}
@@ -72,7 +72,7 @@ class TestTenantIsolation(unittest.TestCase):
         """T3: world rows are returned for every tenant query."""
         conn = _mem_store()
         rec_w = _make_record(10, WORLD_TENANT)
-        upsert_record(conn, rec_w)
+        upsert_record(conn, rec_w, admin=vmod.ADMIN)
 
         for tenant in ("alpha", "beta", "gamma"):
             result = query_for_tenant(conn, tenant)
@@ -86,7 +86,7 @@ class TestTenantIsolation(unittest.TestCase):
         rec_s2 = _make_record(21, "tenant-A", space_id="space2:d4")
         rec_world_s1 = _make_record(22, WORLD_TENANT, space_id="space1:d4")
         for r in (rec_s1, rec_s2, rec_world_s1):
-            upsert_record(conn, r)
+            upsert_record(conn, r, admin=vmod.ADMIN)
 
         result = query_for_tenant(conn, "tenant-A", space_id="space1:d4")
         cids = {r.cid for r in result}
@@ -100,7 +100,7 @@ class TestTenantIsolation(unittest.TestCase):
         rec_named = _make_record(30, "tenant-X")
         rec_world = _make_record(31, WORLD_TENANT)
         for r in (rec_named, rec_world):
-            upsert_record(conn, r)
+            upsert_record(conn, r, admin=vmod.ADMIN)
 
         result = query_for_tenant(conn, "")
         cids = {r.cid for r in result}
@@ -130,7 +130,7 @@ class TestWALConcurrency(unittest.TestCase):
                 try:
                     for i in range(rows_per_thread):
                         rec = _make_record(thread_idx * 100 + i, f"t{thread_idx}")
-                        upsert_record(conn, rec)
+                        upsert_record(conn, rec, admin=vmod.ADMIN)
                     conn.commit()
                 except Exception as exc:
                     errors.append(exc)
@@ -169,7 +169,7 @@ class TestSecureCidResolver(unittest.TestCase):
         rec_b = _make_record(2, "tenant-B")
         rec_w = _make_record(3, WORLD_TENANT)
         for r in (rec_a, rec_b, rec_w):
-            upsert_record(conn, r)
+            upsert_record(conn, r, admin=vmod.ADMIN)
         return conn, rec_a, rec_b, rec_w
 
     def test_resolves_own_and_world(self):
@@ -199,8 +199,8 @@ class TestSecureCidResolver(unittest.TestCase):
             for i in range(50):
                 ra = _make_record(1000 + i, "tenant-A")
                 rb = _make_record(2000 + i, "tenant-B")
-                upsert_record(conn, ra)
-                upsert_record(conn, rb)
+                upsert_record(conn, ra, admin=vmod.ADMIN)
+                upsert_record(conn, rb, admin=vmod.ADMIN)
                 a_cids.append(ra.cid)
                 b_cids.append(rb.cid)
             conn.commit()

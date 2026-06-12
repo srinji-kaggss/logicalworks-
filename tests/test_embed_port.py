@@ -39,6 +39,7 @@ if "lgwks_vector" not in sys.modules:
 
     _stub = types.ModuleType("lgwks_vector")
     _stub.SCHEMA = "lgwks.vector.record.v1"
+    _stub.ADMIN = object()  # mirror the real module's admin sentinel (#99)
 
     class _FakeRecord:
         def __init__(self, floats, **kw):
@@ -60,7 +61,7 @@ if "lgwks_vector" not in sys.modules:
         conn.commit()
         return conn
 
-    def _upsert_record(conn, record):
+    def _upsert_record(conn, record, *, admin=None):
         import hashlib
         cid = hashlib.blake2b(str(record.floats).encode(), digest_size=8).hexdigest()
         conn.execute(

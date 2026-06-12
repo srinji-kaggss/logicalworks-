@@ -291,8 +291,25 @@ class TenantStore:
             record = replace(record, tenant=v.principal)
         elif isinstance(record, dict) and record.get("tenant") != v.principal:
             record = {**record, "tenant": v.principal}
-        vector.upsert_record(self._conn, record)
+        # TenantStore is the sanctioned door: the cap is verified and the row is
+        # pinned to the principal, so the privileged primitive is called with the
+        # admin sentinel here (and ONLY here, for writes).
+        vector.upsert_record(self._conn, record, admin=vector.ADMIN)
         self._conn.commit()
+
+    def query(self, *, space_id: str | None = None, limit: int | None = None) -> list:
+        """List this principal's rows ⊕ world rows under §1-INV, gated by read scope.
+
+        Routes through the scoped resolver (query_for_tenant) — no admin sentinel,
+        because the resolver is itself isolation-safe. This is the router path the
+        §1-INV A/B sweep exercises.
+        """
+        v = self._verified()
+        if capability.TENANT_RW not in v.scopes and capability.WORLD_R not in v.scopes:
+            raise capability.CapabilityError(
+                f"capability lacks read permission (granted: {sorted(v.scopes)})"
+            )
+        return vector.query_for_tenant(self._conn, v.principal, space_id=space_id, limit=limit)
 
     def promote(self, cid: str) -> dict:
         """Promote a cid to world tier, gated by WORLD_PROMOTE scope."""

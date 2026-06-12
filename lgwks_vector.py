@@ -225,11 +225,41 @@ def create_store(path: Path) -> sqlite3.Connection:
     return _connect(path)
 
 
-def upsert_record(conn: sqlite3.Connection, record: VectorRecord) -> bool:
+# --------------------------------------------------------------------------
+# Admin-only guard (#99 — the single authorization locus)
+# --------------------------------------------------------------------------
+# upsert_record / get_record / query_by_source are UNSCOPED: they bypass §1-INV
+# tenant isolation. To make that boundary mechanical rather than advisory, they
+# are admin-only — a caller must pass `admin=ADMIN` to assert an admin /
+# single-operator / migration context. Tenant-facing access goes through
+# lgwks_access.TenantStore, which holds a *verified capability* and passes the
+# sentinel itself only after gating. A tenant-context caller that reaches one of
+# these primitives by accident (no sentinel) is rejected at runtime.
+ADMIN = object()
+
+
+class AdminOnlyError(PermissionError):
+    """Raised when an UNSCOPED store primitive is called without the ADMIN sentinel."""
+
+
+def _require_admin(admin: object, fn: str) -> None:
+    if admin is not ADMIN:
+        raise AdminOnlyError(
+            f"{fn} is admin-only (bypasses §1-INV tenant isolation); route tenant "
+            f"access through lgwks_access.TenantStore, or pass admin=lgwks_vector.ADMIN "
+            f"for an admin / single-operator / migration context"
+        )
+
+
+def upsert_record(conn: sqlite3.Connection, record: VectorRecord, *, admin: object = None) -> bool:
     """Insert record; skip silently if cid already present (idempotent).
 
     Returns True if inserted, False if already present.
+
+    UNSCOPED / admin-only (see _require_admin) — pass `admin=ADMIN`. Tenant writes
+    go through lgwks_access.TenantStore.write, which gates on TENANT_RW first.
     """
+    _require_admin(admin, "upsert_record")
     cur = conn.execute(
         """
         INSERT OR IGNORE INTO vector_records
@@ -245,14 +275,15 @@ def upsert_record(conn: sqlite3.Connection, record: VectorRecord) -> bool:
     return cur.rowcount == 1
 
 
-def get_record(conn: sqlite3.Connection, cid: str) -> Optional[VectorRecord]:
+def get_record(conn: sqlite3.Connection, cid: str, *, admin: object = None) -> Optional[VectorRecord]:
     """Fetch and verify a record by cid. Returns None if not found.
 
-    UNSCOPED — bypasses §1-INV (any cid resolves regardless of tenant). This is the
-    single-operator / admin / migration path. For any multi-tenant read use
-    get_record_for_tenant() — the cryptographically-gated own ⊕ world resolver
-    (ARCH L1). Do NOT call this on a tenant-facing read path.
+    UNSCOPED / admin-only — bypasses §1-INV (any cid resolves regardless of tenant).
+    Single-operator / admin / migration path; pass `admin=ADMIN`. For any
+    multi-tenant read use get_record_for_tenant() — the cryptographically-gated
+    own ⊕ world resolver (ARCH L1) — or lgwks_access.TenantStore.read.
     """
+    _require_admin(admin, "get_record")
     row = conn.execute(
         "SELECT cid, modality, embedding, norm, dim, space_id, tenant, source_cid "
         "FROM vector_records WHERE cid = ?",
@@ -264,14 +295,15 @@ def get_record(conn: sqlite3.Connection, cid: str) -> Optional[VectorRecord]:
 
 
 def query_by_source(
-    conn: sqlite3.Connection, source_cid: str, *, space_id: Optional[str] = None
+    conn: sqlite3.Connection, source_cid: str, *, space_id: Optional[str] = None, admin: object = None
 ) -> list[VectorRecord]:
     """Return all records for a source_cid, optionally filtered by space_id.
 
-    UNSCOPED — bypasses §1-INV (returns rows of every tenant for the source_cid).
-    Single-operator / admin / migration path only. For multi-tenant reads, filter
-    the result through a tenant scope or use query_for_tenant() (ARCH L1).
+    UNSCOPED / admin-only — bypasses §1-INV (returns rows of every tenant for the
+    source_cid). Single-operator / admin / migration path; pass `admin=ADMIN`. For
+    multi-tenant reads use query_for_tenant() (ARCH L1) or TenantStore.query.
     """
+    _require_admin(admin, "query_by_source")
     if space_id:
         rows = conn.execute(
             "SELECT cid, modality, embedding, norm, dim, space_id, tenant, source_cid "
@@ -448,7 +480,7 @@ def migrate_code_embeddings(
             tenant=repo or tenant,
             source_cid=source_cid,
         )
-        upsert_record(dst_conn, record)
+        upsert_record(dst_conn, record, admin=ADMIN)  # bulk migration — admin context
         migrated += 1
 
     dst_conn.commit()

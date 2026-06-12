@@ -64,6 +64,7 @@
         "graphify.__init__",
         "graphify.cluster",
         "hooks.subconscious_inbound",
+        "lgwks_access",
         "lgwks_admission",
         "lgwks_admission_store",
         "lgwks_agent_os",
@@ -343,6 +344,7 @@
         "lgwks_substrate_vector"
       ],
       "Unclassified (triage)": [
+        "lgwks_access",
         "lgwks_research"
       ]
     }
@@ -597,6 +599,29 @@
         "scripts"
       ]
     },
+    "lgwks_access": {
+      "deps": [
+        "lgwks_capability",
+        "lgwks_promote",
+        "lgwks_ui",
+        "lgwks_vector"
+      ],
+      "has_cli": true,
+      "has_tests": true,
+      "integration": "integrated",
+      "last_commit_days": 0,
+      "loc": 459,
+      "owning_issue": null,
+      "packet": null,
+      "purpose": "CapabilityPort interface and HMAC impl (#98 / #97 seam).",
+      "staleness": "active",
+      "subsystem": "Unclassified (triage)",
+      "used_by": [
+        "lgwks(dispatcher)",
+        "lgwks_session",
+        "lgwks_vector"
+      ]
+    },
     "lgwks_admission": {
       "deps": [
         "lgwks_admission_store",
@@ -661,7 +686,7 @@
       "has_cli": false,
       "has_tests": false,
       "integration": "integrated",
-      "last_commit_days": 4,
+      "last_commit_days": 5,
       "loc": 146,
       "owning_issue": null,
       "packet": null,
@@ -898,6 +923,7 @@
       "subsystem": "Ingestion spine (I1\u2013I12)",
       "used_by": [
         "lgwks(dispatcher)",
+        "lgwks_access",
         "lgwks_admission",
         "lgwks_admission_store",
         "lgwks_inbound",
@@ -914,7 +940,7 @@
       "has_cli": true,
       "has_tests": true,
       "integration": "integrated",
-      "last_commit_days": 4,
+      "last_commit_days": 5,
       "loc": 196,
       "owning_issue": null,
       "packet": null,
@@ -951,7 +977,7 @@
       "has_cli": false,
       "has_tests": false,
       "integration": "integrated",
-      "last_commit_days": 10,
+      "last_commit_days": 0,
       "loc": 139,
       "owning_issue": null,
       "packet": null,
@@ -1192,7 +1218,7 @@
       "has_tests": true,
       "integration": "integrated",
       "last_commit_days": 1,
-      "loc": 653,
+      "loc": 654,
       "owning_issue": null,
       "packet": "I4",
       "purpose": "embedder runtime (lgwks.embed.port.v1).",
@@ -1569,7 +1595,7 @@
       "has_tests": true,
       "integration": "integrated",
       "last_commit_days": 0,
-      "loc": 353,
+      "loc": 354,
       "owning_issue": null,
       "packet": "I7",
       "purpose": "L5 consumer pack: RRF fusion + token-budgeted reflex envelope (I7).",
@@ -1577,6 +1603,7 @@
       "subsystem": "Ingestion spine (I1\u2013I12)",
       "used_by": [
         "lgwks(dispatcher)",
+        "lgwks_access",
         "lgwks_waste",
         "scripts"
       ]
@@ -1691,7 +1718,7 @@
       "has_cli": true,
       "has_tests": true,
       "integration": "integrated",
-      "last_commit_days": 4,
+      "last_commit_days": 5,
       "loc": 335,
       "owning_issue": null,
       "packet": null,
@@ -1717,6 +1744,7 @@
       "subsystem": "Governance / gates / refusal / auth",
       "used_by": [
         "lgwks(dispatcher)",
+        "lgwks_access",
         "lgwks_multimodal",
         "lgwks_openrouter",
         "lgwks_openrouter_embed",
@@ -1917,7 +1945,7 @@
       "has_cli": false,
       "has_tests": false,
       "integration": "integrated",
-      "last_commit_days": 4,
+      "last_commit_days": 5,
       "loc": 138,
       "owning_issue": null,
       "packet": null,
@@ -2150,14 +2178,15 @@
       "has_cli": false,
       "has_tests": false,
       "integration": "integrated",
-      "last_commit_days": null,
-      "loc": 145,
+      "last_commit_days": 0,
+      "loc": 146,
       "owning_issue": null,
       "packet": null,
       "purpose": "audited tenant\u2192world promotion (ARCH L5, I8-hardening #89).",
       "staleness": "active",
       "subsystem": "Ingestion spine (I1\u2013I12)",
       "used_by": [
+        "lgwks_access",
         "lgwks_cognition",
         "lgwks_vector"
       ]
@@ -2225,7 +2254,7 @@
       "has_cli": false,
       "has_tests": true,
       "integration": "integrated",
-      "last_commit_days": 2,
+      "last_commit_days": 3,
       "loc": 497,
       "owning_issue": null,
       "packet": null,
@@ -2247,7 +2276,7 @@
       "has_cli": true,
       "has_tests": true,
       "integration": "integrated",
-      "last_commit_days": 6,
+      "last_commit_days": 7,
       "loc": 740,
       "owning_issue": null,
       "packet": null,
@@ -2410,6 +2439,7 @@
     },
     "lgwks_session": {
       "deps": [
+        "lgwks_access",
         "lgwks_repo",
         "lgwks_ui",
         "lgwks_waste"
@@ -2418,14 +2448,15 @@
       "has_tests": true,
       "integration": "integrated",
       "last_commit_days": 0,
-      "loc": 458,
+      "loc": 506,
       "owning_issue": null,
       "packet": null,
       "purpose": "session boundary analyzer (begin / end / summary).",
       "staleness": "active",
       "subsystem": "Harness / daemon / orchestration",
       "used_by": [
-        "lgwks(dispatcher)"
+        "lgwks(dispatcher)",
+        "lgwks_access"
       ]
     },
     "lgwks_sign": {
@@ -2556,7 +2587,7 @@
       "has_cli": false,
       "has_tests": false,
       "integration": "integrated",
-      "last_commit_days": 10,
+      "last_commit_days": 11,
       "loc": 101,
       "owning_issue": null,
       "packet": null,
@@ -2789,7 +2820,7 @@
       "has_cli": false,
       "has_tests": false,
       "integration": "integrated",
-      "last_commit_days": 4,
+      "last_commit_days": 5,
       "loc": 228,
       "owning_issue": null,
       "packet": null,
@@ -2814,6 +2845,7 @@
       "staleness": "active",
       "subsystem": "CLI / home / membrane surface",
       "used_by": [
+        "lgwks_access",
         "lgwks_batch",
         "lgwks_crawl",
         "lgwks_debug",
@@ -2879,13 +2911,14 @@
       "has_tests": false,
       "integration": "integrated",
       "last_commit_days": 0,
-      "loc": 468,
+      "loc": 500,
       "owning_issue": null,
       "packet": "I1",
       "purpose": "vector-space + cid contract (lgwks.vector.record.v1).",
       "staleness": "active",
       "subsystem": "Ingestion spine (I1\u2013I12)",
       "used_by": [
+        "lgwks_access",
         "lgwks_capability",
         "lgwks_embed_port",
         "lgwks_inbound",
@@ -3054,7 +3087,7 @@
       "has_cli": false,
       "has_tests": false,
       "integration": "integrated",
-      "last_commit_days": 1,
+      "last_commit_days": 2,
       "loc": 71,
       "owning_issue": null,
       "packet": null,
@@ -3146,14 +3179,14 @@
   "totals": {
     "by_integration": {
       "cli_only": 0,
-      "integrated": 129,
+      "integrated": 130,
       "unreferenced": 1
     },
     "by_staleness": {
-      "active": 129,
+      "active": 130,
       "orphan": 1
     },
-    "loc": 47267,
-    "modules": 130
+    "loc": 47809,
+    "modules": 131
   }
 }
