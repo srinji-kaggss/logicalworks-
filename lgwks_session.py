@@ -350,6 +350,58 @@ def session_summary(repo: Path, n_commits: int = 20) -> dict[str, Any]:
     return _summarize_activity(repo, activity, history)
 
 
+# ── RequestContext — D2 prep seam (#110) ──
+
+
+@dataclass(frozen=True)
+class RequestContext:
+    """Unified auth + store context shared by CLI paths and future D2 HTTP handlers.
+
+    Construct via make_context() — never build directly. D2 becomes additive:
+    an HTTP/MCP handler that calls make_context() from a request token, then
+    passes the context to the same CLI-level functions.
+
+    The store field is the single sanctioned tenant door (lgwks_access.TenantStore).
+    Token internals (sig, scopes) are never exposed to callers — they're verified
+    inside TenantStore on every operation.
+    """
+    tenant_id: str
+    agent_id: str
+    session_id: str
+    store: Any  # lgwks_access.TenantStore — avoid import at module level
+
+
+def make_context(
+    tenant_id: str,
+    agent_id: str,
+    session_id: str,
+    conn: Any,
+    *,
+    promote: bool = False,
+) -> RequestContext:
+    """Resolve capability + build TenantStore → return an immutable RequestContext.
+
+    conn: open SQLite connection (caller owns lifecycle — use lgwks_sqlite.connect).
+    promote: when True, resolves with WORLD_PROMOTE scope instead of TENANT_RW.
+
+    For the single-operator ADMIN path (no tenant capability needed), pass
+    tenant_id="" and the caller should use the ADMIN sentinel directly via
+    lgwks_vector — RequestContext is for multi-tenant CLI and D2 paths only.
+    """
+    import lgwks_access as _access
+    if promote:
+        port, handle, key = _access.resolve_promote_capability_for_tenant(tenant_id)
+    else:
+        port, handle, key = _access.resolve_capability_for_tenant(tenant_id)
+    store = _access.TenantStore(port, handle, key, conn)
+    return RequestContext(
+        tenant_id=tenant_id,
+        agent_id=agent_id,
+        session_id=session_id,
+        store=store,
+    )
+
+
 # ── CLI surfaces ──
 
 def _render_summary(summary: dict[str, Any]) -> list[str]:
