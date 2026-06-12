@@ -193,5 +193,89 @@ class TestDemandWeighting(unittest.TestCase):
         self.assertIn(s["coverage_mode"], ("lexical", "lexical+demand", "qwen"))
 
 
+class TestCosine(unittest.TestCase):
+    """U6.2 — cosine is pure arithmetic on given vectors; guards on degenerate input."""
+
+    def test_identities(self):
+        self.assertAlmostEqual(eng._cosine([1.0, 0.0, 0.0], [1.0, 0.0, 0.0]), 1.0)
+        self.assertAlmostEqual(eng._cosine([1.0, 0.0, 0.0], [0.0, 1.0, 0.0]), 0.0)
+        self.assertAlmostEqual(eng._cosine([1.0, 0.0], [-1.0, 0.0]), -1.0)
+
+    def test_guards(self):
+        self.assertEqual(eng._cosine([1.0, 0.0], [1.0, 0.0, 0.0]), 0.0)   # shape mismatch
+        self.assertEqual(eng._cosine([0.0, 0.0], [1.0, 0.0]), 0.0)         # zero vector
+        self.assertEqual(eng._cosine([], []), 0.0)                          # empty
+        self.assertEqual(eng._cosine([float("inf"), 0.0], [1.0, 0.0]), 0.0)  # non-finite
+
+    def test_ranking(self):
+        q = [1.0, 1.0, 0.0]
+        near = eng._cosine(q, [1.0, 0.9, 0.0])
+        far = eng._cosine(q, [0.0, 0.0, 1.0])
+        self.assertGreater(near, far)
+
+
+class TestEmbeddingCoverage(unittest.TestCase):
+    """U6.2 — Qwen-cosine coverage path + its availability gate (no model needed:
+    the embed port is stubbed, so this verifies the WIRING deterministically)."""
+
+    @staticmethod
+    def _swap_port(port_cls):
+        import types
+        stub = types.SimpleNamespace(EmbedPort=port_cls)
+        old = sys.modules.get("lgwks_embed_port")
+        sys.modules["lgwks_embed_port"] = stub
+        return old
+
+    @staticmethod
+    def _restore_port(old):
+        if old is not None:
+            sys.modules["lgwks_embed_port"] = old
+        else:
+            sys.modules.pop("lgwks_embed_port", None)
+
+    def test_qwen_coverage_with_stub_port(self):
+        artifact = {"dim": 3, "verbs": [
+            {"verb": "alpha", "intent": "a", "vec": [1.0, 0.0, 0.0]},
+            {"verb": "beta", "intent": "b", "vec": [0.0, 1.0, 0.0]},
+        ]}
+
+        class _Port:
+            def __init__(self, *a, **k):
+                pass
+            def embed_text(self, text, instruction=""):
+                return [1.0, 0.0, 0.0]   # identical to alpha, orthogonal to beta
+            def close(self):
+                pass
+
+        old = self._swap_port(_Port)
+        try:
+            res = eng._embedding_coverage("anything", artifact)
+        finally:
+            self._restore_port(old)
+        self.assertIsNotNone(res)
+        C, sels = res
+        self.assertEqual(C, 1.0)                     # top cosine = identical match
+        self.assertEqual(sels[0]["verb"], "alpha")   # ranked first
+        self.assertAlmostEqual(sels[1]["score"], 0.0, places=3)  # orthogonal -> 0
+
+    def test_unavailable_port_returns_none(self):
+        class _Port:
+            def __init__(self, *a, **k):
+                raise RuntimeError("no model downloaded")  # ~ EmbedUnavailableError
+
+        old = self._swap_port(_Port)
+        try:
+            res = eng._embedding_coverage("x", {"dim": 3, "verbs": [{"verb": "a", "vec": [1.0, 0.0, 0.0]}]})
+        finally:
+            self._restore_port(old)
+        self.assertIsNone(res)   # caller must fall back to the lexical floor
+
+    def test_engine_default_is_lexical_floor(self):
+        # No frozen vector artifact on this machine -> engine uses the lexical
+        # floor, never errors, never claims qwen mode.
+        s = eng.run_engine("refactor the auth module")["insights"]["scores"]
+        self.assertIn(s["coverage_mode"], ("lexical", "lexical+demand"))
+
+
 if __name__ == "__main__":
     unittest.main()

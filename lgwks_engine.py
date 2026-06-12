@@ -127,6 +127,68 @@ def _capability_coverage(
     return round(coverage, 3), [v for _, v in matched[:8]]
 
 
+def _cosine(a: list[float], b: list[float]) -> float:
+    """Cosine similarity, clamped to [-1, 1]. Pure arithmetic on the GIVEN vectors
+    (calculator-derivable); the vectors are the Qwen sensor layer (exempt — see
+    feedback_math_not_bert_scorer). Returns 0.0 on shape/degenerate/non-finite."""
+    if not a or not b or len(a) != len(b):
+        return 0.0
+    dot = sum(x * y for x, y in zip(a, b))
+    na = math.sqrt(sum(x * x for x in a))
+    nb = math.sqrt(sum(y * y for y in b))
+    if na == 0.0 or nb == 0.0:
+        return 0.0
+    sim = dot / (na * nb)
+    if not math.isfinite(sim):
+        return 0.0
+    return max(-1.0, min(1.0, sim))
+
+
+def _load_capability_vectors() -> dict | None:
+    """The frozen Qwen verb-embedding matrix, or None when absent/unreadable
+    (caller degrades to the lexical floor — never a hard dependency)."""
+    try:
+        if _CAP_VEC_ARTIFACT.exists():
+            data = json.loads(_CAP_VEC_ARTIFACT.read_text())
+            if isinstance(data, dict) and data.get("verbs"):
+                return data
+    except Exception:
+        pass
+    return None
+
+
+def _embedding_coverage(prompt: str, artifact: dict, top: int = 8) -> tuple[float, list[dict]] | None:
+    """Qwen-cosine coverage: C = top capability cosine; selections scored by cosine.
+
+    One live model call (the prompt); verb vectors are frozen offline. Returns
+    None when the embed port is unavailable OR errors (EmbedUnavailableError, model
+    not downloaded, worker crash, latency) so the caller falls back to lexical —
+    INV-6/INV-7 preserved (the model path runs only when present + warm).
+    """
+    try:
+        import lgwks_embed_port as ep
+        dim = int(artifact.get("dim") or 0)
+        port = ep.EmbedPort(dim=dim) if dim else ep.EmbedPort()
+        try:
+            q = port.embed_text(prompt)
+        finally:
+            port.close()
+    except Exception:
+        return None
+    sims: list[tuple[float, dict]] = []
+    for rec in artifact.get("verbs", []):
+        vec = rec.get("vec")
+        if vec:
+            sims.append((_cosine(q, vec), rec))
+    if not sims:
+        return None
+    sims.sort(key=lambda x: x[0], reverse=True)
+    coverage = max(0.0, min(1.0, sims[0][0]))  # best capability match strength
+    selections = [{"verb": r.get("verb", ""), "intent": r.get("intent", ""),
+                   "score": round(max(0.0, s), 6)} for s, r in sims[:top]]
+    return round(coverage, 3), selections
+
+
 def _graph_retrieval(query_tokens: list[str], db_path: Path) -> tuple[list[dict], int, bool]:
     """Query entity graph. Returns (hits, grounded_token_count, available).
 
@@ -233,10 +295,22 @@ def run_engine(
         verbs, verb_count = [], 0
 
     qt = _tokens(prompt)
-    # I8: demand weights down-rank filler so padding cannot dilute coverage.
+    # Coverage C — two paths, same axis. PREFERRED: Qwen-cosine over the frozen
+    # verb matrix (semantic; needs the model + artifact). FLOOR: lexical token
+    # overlap with I8 demand weighting (always available). The model path is an
+    # availability-gated enhancement and silently degrades to the floor.
     demand = _load_demand_weights(verbs)
-    cap_coverage, selections = _capability_coverage(qt, verbs, demand=demand)
-    coverage_mode = "lexical+demand" if demand else "lexical"
+    emb = None
+    if qt:
+        cap_vectors = _load_capability_vectors()
+        if cap_vectors:
+            emb = _embedding_coverage(prompt, cap_vectors)
+    if emb is not None:
+        cap_coverage, selections = emb
+        coverage_mode = "qwen"
+    else:
+        cap_coverage, selections = _capability_coverage(qt, verbs, demand=demand)
+        coverage_mode = "lexical+demand" if demand else "lexical"
 
     _db = db_path or _ENTITY_GRAPH_DB
     graph_hits, graph_grounded, graph_available = _graph_retrieval(qt, _db)
