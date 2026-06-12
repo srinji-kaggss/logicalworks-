@@ -229,29 +229,27 @@ graph TD
 
 ## 5. The next few moves
 
-1. Normalize the daemon event model.
-   Inputs: ingress message, transcript turn, tool call, workflow event.
-   Outcome: one core event schema.
-   Status: `lgwks.daemon.event.v1` landed as the shared envelope; scheduler and packet APIs still need to consume it.
+1. ✅ Normalize the daemon event model.
+   Status: DONE — `lgwks.daemon.event.v1` + store append + session heads (2026-06-12, `18f0ecf`/`7bfdd84`)
 
-2. Build the daemon lifecycle shell around existing storage/runtime code.
-   Inputs: `lgwks_sqlite`, `lgwks_session`, `lgwks_cognition`, `lgwks_engine`.
-   Outcome: start/stop/status + queue + packet read.
-   Status: `lgwks_daemon.py` now provides a real background process with lockfile, heartbeat, start/stop/status/doctor over `lgwks_daemon_store.py`; scheduler, queue consumption, and packet serving still pending.
+2. ✅ Build the daemon lifecycle shell + work queue + packet read.
+   Status: DONE — start/stop/status/doctor + poll loop + enqueue/dequeue (IMMEDIATE, no double-claim)
+   + `get_packet()` deterministic snapshot (2026-06-12, `464c470`)
 
-3. Make one research-session front door over existing substrate code.
-   Inputs: `lgwks_substrate_run`, `lgwks_ingest`, `lgwks_manifest`.
-   Outcome: website -> graph/map + embeddings + STEM facts + manifest.
+3. ✅ Research-session front door + run registry.
+   Status: DONE — `daemon research <url>` calls `build_run()`, registers manifest via `register_run()`;
+   `daemon runs` lists indexed runs; `research_run` dispatcher in poll loop (2026-06-12, `bc3b67e`)
 
-4. Teach the daemon to index a completed research run.
-   Inputs: run manifest + graph artifacts + vectors.
-   Outcome: later packets can cite the run without re-crawling.
+4. ✅ Daemon indexes completed research run.
+   Status: DONE — bundled with Move 3. Migration v3 `daemon_runs` table; idempotent by run_id.
 
-5. Add the Claude adapter cleanly.
-   Inputs: ingress headstart hook + JSONL tail.
-   Outcome: headstart now, continuous digestion later, no second architecture.
+5. ✅ Claude adapter.
+   Status: DONE — `hooks/subconscious_inbound.py` emits `human_message` (lane=ingress, client=claude)
+   to daemon store on every prompt; fail-silent (INV-6); session_id from LGWKS_TRANSCRIPT_PATH
+   (2026-06-12, `fe400a4`)
 
 6. Add Codex and Gemini as thin clients after the daemon contract is stable.
+   Status: OPEN — next queue item. Same event contract; thin adapter per client.
 
 ## 6. Decision rules
 
