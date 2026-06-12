@@ -55,6 +55,11 @@ module, or spec does not exist: `git ls-files | grep -i <term>` and
 (e.g. "X is stale"), check the file's own header and `spec/second-harness/BUILDLOG.md`.
 Cite the path you verified, not the path you remember.
 
+## Code Review Graph
+- **Graph Source**: `.code-review-graph/`
+- **Regenerate**: Run `./scripts/generate-graph.sh`
+- **AI Context**: Use the `code-review-graph` MCP server (config in `.mcp.json`) to query the graph for blast radius analysis and architectural mapping.
+
 ## Repo constellation (cross-repo map)
 - `~/logicalworks-` — this repo (lgwks toolchain).
 - `~/logic-os-kernel` — Logic OS kernel (Rust, three pillars, ADR-004);
