@@ -188,6 +188,9 @@
       ],
       "orphan": [
         "lgwks_ingest"
+      ],
+      "staling": [
+        "lgwks_daemon_store"
       ]
     },
     "by_subsystem": {
@@ -252,6 +255,7 @@
         "lgwks_context",
         "lgwks_cycle",
         "lgwks_daemon_event",
+        "lgwks_daemon_store",
         "lgwks_do",
         "lgwks_engine",
         "lgwks_ground",
@@ -1151,13 +1155,32 @@
       "deps": [],
       "has_cli": true,
       "has_tests": true,
-      "integration": "cli_only",
-      "last_commit_days": null,
+      "integration": "integrated",
+      "last_commit_days": 0,
       "loc": 217,
       "owning_issue": null,
       "packet": null,
       "purpose": "normalized daemon event envelope for shared referee runtime.",
       "staleness": "active",
+      "subsystem": "Harness / daemon / orchestration",
+      "used_by": [
+        "lgwks_daemon_store"
+      ]
+    },
+    "lgwks_daemon_store": {
+      "deps": [
+        "lgwks_daemon_event",
+        "lgwks_sqlite"
+      ],
+      "has_cli": false,
+      "has_tests": true,
+      "integration": "unreferenced",
+      "last_commit_days": null,
+      "loc": 306,
+      "owning_issue": null,
+      "packet": null,
+      "purpose": "durable event log for the daemon referee runtime.",
+      "staleness": "staling",
       "subsystem": "Harness / daemon / orchestration",
       "used_by": []
     },
@@ -2398,8 +2421,8 @@
       "has_cli": true,
       "has_tests": true,
       "integration": "integrated",
-      "last_commit_days": 1,
-      "loc": 267,
+      "last_commit_days": 0,
+      "loc": 275,
       "owning_issue": null,
       "packet": null,
       "purpose": "schema registry for next-agent discovery.",
@@ -2593,6 +2616,7 @@
       "used_by": [
         "lgwks(dispatcher)",
         "lgwks_admission_store",
+        "lgwks_daemon_store",
         "lgwks_entity_graph",
         "lgwks_promote",
         "lgwks_substrate",
@@ -3197,15 +3221,16 @@
   },
   "totals": {
     "by_integration": {
-      "cli_only": 1,
-      "integrated": 130,
-      "unreferenced": 1
+      "cli_only": 0,
+      "integrated": 131,
+      "unreferenced": 2
     },
     "by_staleness": {
       "active": 131,
-      "orphan": 1
+      "orphan": 1,
+      "staling": 1
     },
-    "loc": 48246,
-    "modules": 132
+    "loc": 48560,
+    "modules": 133
   }
 }

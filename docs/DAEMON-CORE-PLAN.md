@@ -237,6 +237,7 @@ graph TD
 2. Build the daemon lifecycle shell around existing storage/runtime code.
    Inputs: `lgwks_sqlite`, `lgwks_session`, `lgwks_cognition`, `lgwks_engine`.
    Outcome: start/stop/status + queue + packet read.
+   Status: durable event/state footing has started in `lgwks_daemon_store.py`; lifecycle/lockfile/process control still pending.
 
 3. Make one research-session front door over existing substrate code.
    Inputs: `lgwks_substrate_run`, `lgwks_ingest`, `lgwks_manifest`.

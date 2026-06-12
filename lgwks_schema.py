@@ -163,6 +163,14 @@ def _build_registry() -> dict[str, dict[str, Any]]:
             "description": "Normalized daemon event envelope for ingress, telemetry, workflow, and control lanes",
             "output": "JSON with tenant/session/agent attribution plus lane, kind, scope, refs, payload",
         },
+        "lgwks.daemon.events.query.v0": {
+            "description": "Daemon event-log query result envelope",
+            "output": "JSON with count and stored lgwks.daemon.event.v1 items",
+        },
+        "lgwks.daemon.sessions.query.v0": {
+            "description": "Daemon tenant session-head query result envelope",
+            "output": "JSON with count and per-session daemon head rows",
+        },
     }
 
     for name, ann in annotations.items():
