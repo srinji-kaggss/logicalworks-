@@ -433,3 +433,23 @@ work and are preserved for context; they are diverged from current main.
 - `lgwks_vector` import-order collection quirk — pre-existing; run per-area or `make test-python`
 
 If the Director triggers D2, file it as the next issue and spec against the Session seam above first.
+
+## Session 15 state — 2026-06-12 · PR #113 pending (branch p1-transcript-session-worktree-merge)
+
+Filed and implemented three canonical next issues in one pass. All 22 new tests pass; 114 existing tests unaffected.
+
+| issue | what | status |
+|---|---|---|
+| #109 P1 transcript normalization | `lgwks_transcript.py` tail-reader + `hooks/claude_tool_hook.py` (PostToolUse → `tool_call`) + `hooks/claude_stop_hook.py` (Stop → `transcript_turn` tail) | PR #113 |
+| #110 D2-prep RequestContext | `lgwks_session.RequestContext` frozen dataclass + `make_context()` factory; D2 = additive HTTP handler that calls `make_context()` from a request token | PR #113 |
+| #111 P2 worktree CRDT merge | `WorktreeManager._crdt_reconverge_entity_graph(wt_path)` called BEFORE git remove in `close()`; `rglob("*.crdt.json")` → `reconverge()` into canonical path; FAIL-SILENT | PR #113 |
+
+**Honest limits / next ops actions (unchanged from session 14):**
+1. **Live hook wiring** — `claude_tool_hook.py` and `claude_stop_hook.py` are not registered in `.claude/settings.local.json`. Add `PostToolUse` + `Stop` entries when Director wants live event capture.
+2. **`claude_stop_hook.py` no-stdin path** — Stop hook sends no JSON payload in some Claude Code versions; hook handles this silently but hasn't been live-tested.
+3. **D2 trigger still pending** — `RequestContext` seam is built; D2 (network/MCP handler) needs Director "expose beyond localhost" trigger before filing.
+
+**Next canonical seams after PR #113 lands:**
+- Wire `assemble_inbound()` / `promote()` to accept a `RequestContext` (no behavior change — routes through the seam). Small additive pass.
+- D2 network/MCP transport — Director trigger required.
+- N novelty axis + calibrated P probability (U6.4) — needs Director go (mentioned session 13).

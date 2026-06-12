@@ -857,6 +857,34 @@ CLI: `daemon export run/verify/session`, `daemon cleanup <id>`.
 Schemas registered: `lgwks.daemon.export.v0`, `lgwks.daemon.cleanup.v0`.
 4 export tests + 4 verify tests + 4 cleanup tests + 3 session tests = 17 export tests. 74 total green.
 
+---
+
+## 2026-06-12 · Session 15 — P1 transcript norm + D2-prep + P2 worktree CRDT (PR #113 · branch p1-transcript-session-worktree-merge)
+
+Three issues filed and implemented in one pass (22 new tests, 114 existing unaffected):
+
+**#109 — P1 Transcript Normalization**
+- `lgwks_transcript.py`: stateless JSONL tail-reader. `tail(path, n=20)` → `[{role, content_len, turn_index, turn_id}]`. Handles missing/empty/malformed silently.
+- `hooks/claude_tool_hook.py`: PostToolUse hook → `tool_call` event (actor=agent, lane=telemetry, payload=metadata only per §1-INV). FAIL-SILENT.
+- `hooks/claude_stop_hook.py`: Stop hook → reads transcript tail → `transcript_turn` events. Idempotent via PK dedup.
+- No new schema: `lgwks.daemon.event.v1` already defines all 5 KINDS.
+
+**#110 — D2-prep: RequestContext seam**
+- `lgwks_session.RequestContext`: frozen dataclass `{tenant_id, agent_id, session_id, store: TenantStore}`.
+- `make_context(tenant_id, agent_id, session_id, conn, *, promote=False)` factory: resolves cap via `lgwks_access` → builds `TenantStore` → returns immutable context.
+- D2 HTTP/MCP handler = "build RequestContext from request token" — purely additive, no core refactor.
+
+**#111 — P2 worktree CRDT merge arbitration**
+- `WorktreeManager._crdt_reconverge_entity_graph(wt_path)` helper called BEFORE `git worktree remove`. `rglob("*.crdt.json")` under the worktree, maps each to canonical repo path, calls `lgwks_crdt.reconverge()`. FAIL-SILENT per file.
+- Closes the P2 open seam: entity-graph ORSet changes (node/edge adds) made inside a worktree now survive `close()`.
+
+Verification:
+- `python -m pytest tests/test_p1_session_worktree.py -v` → **22 passed**
+- `python -m pytest tests/test_daemon*.py tests/test_crdt.py tests/test_session*.py tests/test_inbound.py -q` → **114 passed**
+- Schema registry: 0 new schemas minted; gate green.
+
+---
+
 ### Governance refresh (`418e888`)
 
 Schema registry: 6 new daemon-family rows added (`work_item.v0`, `queue.v0`, `packet.v0`,
