@@ -638,3 +638,50 @@ complete-frees-slot, reap stale lease, cross-process shared count, gate delegati
 
 **Next (issue #89 tail):** L5 promotion audit (tenant→world hash-chained record on the cognition
 chain, `lgwks_cognition.py`) — the last L-step; then #89 closes.
+
+## 2026-06-12 · I8-hardening L5 — audited tenant→world promotion (#89, branch claude/i8-l5-promotion-audit)
+
+ARCH-two-db-multitenant.md gap L5 — the LAST L-step of #89. §1 names tenant→world promotion "the only
+cross-tier write" and calls it "audited", but nothing recorded who promoted which cid, when, under which
+cap. L5 closes that: gate the write on `world:promote` (minted in `lgwks.capability.v2`, L7) and log a
+hash-chained provenance record on the cognition chain.
+
+**Key design fact (verified):** the cid is content-addressed over `(source_cid, modality, space_id,
+embedding)` — `tenant` is NOT in the cid (`lgwks_vector._canonical_bytes`). So promotion is a **MOVE**
+(`UPDATE tenant 'world' WHERE cid=? AND tenant=?`), not a copy — a copy would collide on the cid PK. Same
+content-addressed fact, reassigned to the shared tier (the Figma "publish to community" semantic).
+
+**Built:**
+- `lgwks_vector.promote_cid_to_world(conn, cid, tenant)` — pure store move, owning-tenant guard makes it
+  the only-your-own-row primitive (can't move another tenant's row, can't re-promote a world row). Does
+  NOT commit; the caller commits only after the audit lands.
+- `lgwks_promote.promote(conn, cid, token, key, *, stream, cognition_key)` (new module) —
+  `require_scope(WORLD_PROMOTE)` → ownership pre-check → stage move → append `"promotion"` audit
+  `{tenant, cid, source_cid, space_id, scope, nonce}` to the cognition chain → commit.
+- `lgwks_cognition._KINDS` += `"promotion"` (the audit kind; no new `lgwks.*.v*` schema minted — the
+  cognition chain is the contract, so no REGISTRY row).
+
+**Audit-gates-commit (D5):** stage move (no commit) → require exactly one owned row → append audit →
+`conn.commit()`; any exception rolls the staged move back. Verified empirically — `lgwks_sqlite.connect`
+uses the default (non-autocommit) isolation_level, so DML stages until commit and rollback truly discards
+it (test P5 proves it: forced audit-append failure leaves the row private). A committed promotion ALWAYS
+has a durable audit.
+
+**§1-INV / no-side-channel:** absent cid / another tenant's row / an already-world row all raise the SAME
+`PromotionError` and write no audit — a `world:promote` holder cannot probe foreign-tenant existence. No
+raw secret in the audit; the cap is identified by its `nonce`.
+
+**Result:** 52 tests green in the L5+I8+cognition slice (6 new in `tests/test_i8_promotion_audit.py`:
+scope-gated, own-row promotes+audited+chain-verifies, world-visible-to-all-but-isolation-holds, no
+side-channel, audit-failure-rolls-back, cap-identity-not-secret). Registry gate 100/100. NAVMAP regen →
+130 modules; `lgwks_promote` active.
+
+**Honest limits (deferred, consistent with capability D-note + HANDOFF L1 honest-limit):**
+- The operator/daemon CLI surface + capability-key lifecycle that calls `promote()` live is NOT built —
+  that is the L2 access-router / daemon packet ("caller owns the secret lifecycle"). L5 ships the gated
+  primitive + audit + tests; module owned by #89.
+- One orphan-audit window: audit + vector store share no transaction; if `conn.commit()` itself fails
+  after the audit append, an orphan audit remains (logged promotion, world row rolled back). Safe
+  direction (no isolation breach, reconcilable), surfaced by the raised error.
+
+**#89 closes after L5.** L6 (CRDT deploy on the two stores) is a separate packet (= I9).

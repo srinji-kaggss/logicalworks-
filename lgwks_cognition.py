@@ -9,7 +9,8 @@ Append-only, HMAC hash-chained record of AI thinking + intent-commits. Two roles
 
 Boundary (T0): holds AI cognition + intent STRUCTURE (prompts, gaps, ideas, why) — NOT raw user PII
 (that is lgwks_vault) and NOT fetched world data (that is lgwks_cache). Kinds: thought · intent_commit ·
-alignment · gate. Each entry chains on the previous hash; the chain head proves the whole history.
+alignment · gate · note · promotion (the audited tenant→world cross-tier write, L5 of #89; see
+lgwks_promote). Each entry chains on the previous hash; the chain head proves the whole history.
 """
 
 from __future__ import annotations
@@ -25,7 +26,7 @@ import lgwks_sign
 ROOT = Path(__file__).resolve().parent
 _DIR = ROOT / "store" / "cognition"
 _GENESIS = "0" * 64
-_KINDS = {"thought", "intent_commit", "alignment", "gate", "note"}
+_KINDS = {"thought", "intent_commit", "alignment", "gate", "note", "promotion"}
 _STREAM_SAFE = re.compile(r"[^a-z0-9._-]+")
 
 

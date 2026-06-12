@@ -1,8 +1,8 @@
 # NAVMAP — lgwks module atlas (generated; do not hand-edit)
 
-> `scripts/gen_navmap.py` from source — re-run to refresh. **129 modules · 47,094 LOC.** Read/query this FIRST. Strict machine-readable contract: `docs/navmap.json` (`lgwks.navmap.v1`).
+> `scripts/gen_navmap.py` from source — re-run to refresh. **130 modules · 47,267 LOC.** Read/query this FIRST. Strict machine-readable contract: `docs/navmap.json` (`lgwks.navmap.v1`).
 
-**Staleness:** `active` 128 · `orphan` 1
+**Staleness:** `active` 129 · `orphan` 1
 
 Rules — `active`: referenced by another module/dispatcher (static or dynamic), or a tested CLI verb <180d · `scaffolding`: no caller, owned by an open issue · `staling`: no caller anywhere, but built/tested or has a CLI verb, no issue (wire or retire) · `orphan`: no caller, no tests, no CLI, no issue (deletion candidate).
 
@@ -17,22 +17,23 @@ Row legend: `cli` `test` · `←N` imported by N · `→N` imports N · `Nd` day
 | #74 | I10 | `lgwks_viz_project` (active) |
 | #75 | I11 | `lgwks_waste` (active) |
 
-## Ingestion spine (I1–I12)  ·  15 mod · 6,678 LOC
+## Ingestion spine (I1–I12)  ·  16 mod · 6,850 LOC
 
 | module | purpose | loc | stale | rel |
 |---|---|---|---|---|
 | `lgwks_admission` | token-bucket admission + idempotent queue (I8 / I8-hardening L3). | 464 | active | cli test ←3 →3 0d |
-| `lgwks_admission_store` | durable cross-process admission queue (I8-hardening L4). | 315 | active | ←1 →4 |
-| `lgwks_capability` | capability-token tenant isolation boundary (I8). | 295 | active | cli test ←6 0d |
+| `lgwks_admission_store` | durable cross-process admission queue (I8-hardening L4). | 315 | active | ←1 →4 0d |
+| `lgwks_capability` | capability-token tenant isolation boundary (I8). | 295 | active | cli test ←7 0d |
 | `lgwks_crdt` | CRDT state: G-Set, OR-Set, LWW-Register (I9). | 304 | active | cli test ←3 0d |
 | `lgwks_embed_port` | embedder runtime (lgwks.embed.port.v1). | 653 | active | test ←2 →2 1d |
 | `lgwks_extract` | ingest every file format → text. The "read anything" port. | 277 | active | test ←4 →4 9d |
 | `lgwks_inbound` | L5 consumer pack: RRF fusion + token-budgeted reflex envelope (I7). | 353 | active | cli test ←3 →2 0d |
 | `lgwks_input` | universal input handler (lgwks.modality.item.v1). | 530 | active | ←1 →1 1d |
 | `lgwks_pipeline` | unified ingestion and ranking spine. | 1487 | active | cli test ←1 →12 0d |
+| `lgwks_promote` | audited tenant→world promotion (ARCH L5, I8-hardening #89). | 145 | active | ←2 →3 |
 | `lgwks_rank` | cubic node centrality (Z-eigenpair) + AI-discrepancy δ (I6). | 537 | active | cli test ←3 1d |
 | `lgwks_score` | deterministic schema scoring: RESCAL order-3 · R_k · MDL (I5). | 344 | active | cli test ←3 1d |
-| `lgwks_vector` | vector-space + cid contract (lgwks.vector.record.v1). | 441 | active | ←5 →2 0d |
+| `lgwks_vector` | vector-space + cid contract (lgwks.vector.record.v1). | 468 | active | ←6 →2 0d |
 | `lgwks_viz_project` | deterministic 3-D viz projection, decoupled from semantic space (I10). | 262 | active | cli test ←3 0d |
 | `lgwks_waste` | waste ledger: the proof context-optimisation works (I11). | 339 | active | cli test ←4 →1 0d |
 | `scripts.build_capability_idf` | freeze the I8 demand-weight table (stdlib only, no AI). | 77 | active | ←5 →2 0d |
@@ -149,7 +150,7 @@ Row legend: `cli` `test` · `←N` imported by N · `→N` imports N · `Nd` day
 | `lgwks_gate_idiom` | G2 Idiom gate (spec-00). | 149 | active | test ←1 →2 3d |
 | `lgwks_keyvault` | macOS Keychain-backed secret resolver for runtime API keys (Issue #7). | 132 | active | cli ←6 3d |
 | `lgwks_run` | the post-gate execution spine (Issue #7, ADR-001). | 787 | active | cli ←9 →7 2d |
-| `lgwks_sign` | keyed integrity for the run log, the vault chain, and gate verdicts (Issue #7). | 53 | active | ←8 11d |
+| `lgwks_sign` | keyed integrity for the run log, the vault chain, and gate verdicts (Issue #7). | 53 | active | ←9 11d |
 | `lgwks_urlrisk` | G3 scope curator (Issue #7, ADR-001 §5, constitution L9). | 250 | active | ←1 11d |
 | `lgwks_verify` | the Verifier oracle (spec-01), hardened with provenance tracking. | 253 | active | test ←5 3d |
 | `scripts.check_schema_registry` | Registry conformance gate (governance/README.md + docs/schemas/REGISTRY.md rule 4). | 71 | active | ←5 1d |
@@ -164,19 +165,19 @@ Row legend: `cli` `test` · `←N` imported by N · `→N` imports N · `Nd` day
 | `lgwks_manifest` | the machine-first contract. `lgwks manifest` → one JSON blob an AGENT reads instead | 1300 | active | ←6 →4 0d |
 | `lgwks_ui` | our own terminal visual language. Deliberately NOT Claude Code. | 117 | active | ←18 6d |
 
-## Substrate / storage / schema  ·  15 mod · 3,837 LOC
+## Substrate / storage / schema  ·  15 mod · 3,838 LOC
 
 | module | purpose | loc | stale | rel |
 |---|---|---|---|---|
 | `lgwks_batch` | schema-validated batch execution for real shell commands. | 287 | active | cli ←1 →1 9d |
 | `lgwks_cache` | the UNTRUSTED-CACHE store (build #2, z2 evidence / z4 quarantine). | 116 | active | ←3 10d |
 | `lgwks_capture` | unified operator-facing capture compiler over substrate + portal. | 196 | active | cli test ←2 →2 4d |
-| `lgwks_cognition` | the COGNITION-LOG store (build #2, z4 core). | 138 | active | ←6 →1 10d |
+| `lgwks_cognition` | the COGNITION-LOG store (build #2, z4 core). | 139 | active | ←7 →1 10d |
 | `lgwks_lfm2_extract` | lgwks_lfm2_extract — strict schema fill via LFM2-1.2B-Extract (GGUF, llama.cpp). | 209 | active | test ←1 1d |
 | `lgwks_memory` | deterministic project memory chain (hardened, build #3). | 277 | active | cli test ←4 →1 3d |
 | `lgwks_project_artifacts` | shared schemas, JSONL writers, record builders, | 1068 | active | ←11 →1 4d |
 | `lgwks_schema` | schema registry for next-agent discovery. | 263 | active | cli test ←8 1d |
-| `lgwks_sqlite` | Shared SQLite connection hardening for lgwks durable stores. | 276 | active | ←7 3d |
+| `lgwks_sqlite` | Shared SQLite connection hardening for lgwks durable stores. | 276 | active | ←8 3d |
 | `lgwks_substrate` | thin facade re-exporting all substrate sub-modules. | 200 | active | test ←7 →12 3d |
 | `lgwks_substrate_config` | constants, paths, regexes, and shared types for substrate runs. | 102 | active | ←7 3d |
 | `lgwks_substrate_db` | SQLite substrate index DB and global fact vector upserts. | 218 | active | ←2 →2 3d |

@@ -138,6 +138,7 @@
         "lgwks_project_deploy",
         "lgwks_project_plan",
         "lgwks_project_review",
+        "lgwks_promote",
         "lgwks_public",
         "lgwks_rank",
         "lgwks_refactor",
@@ -278,6 +279,7 @@
         "lgwks_inbound",
         "lgwks_input",
         "lgwks_pipeline",
+        "lgwks_promote",
         "lgwks_rank",
         "lgwks_score",
         "lgwks_vector",
@@ -627,7 +629,7 @@
       "has_cli": false,
       "has_tests": false,
       "integration": "integrated",
-      "last_commit_days": null,
+      "last_commit_days": 0,
       "loc": 315,
       "owning_issue": null,
       "packet": null,
@@ -899,6 +901,7 @@
         "lgwks_admission",
         "lgwks_admission_store",
         "lgwks_inbound",
+        "lgwks_promote",
         "lgwks_vector",
         "scripts"
       ]
@@ -949,7 +952,7 @@
       "has_tests": false,
       "integration": "integrated",
       "last_commit_days": 10,
-      "loc": 138,
+      "loc": 139,
       "owning_issue": null,
       "packet": null,
       "purpose": "the COGNITION-LOG store (build #2, z4 core).",
@@ -961,6 +964,7 @@
         "lgwks_cohere",
         "lgwks_crdt",
         "lgwks_machine",
+        "lgwks_promote",
         "lgwks_waste"
       ]
     },
@@ -2137,6 +2141,27 @@
         "lgwks_project"
       ]
     },
+    "lgwks_promote": {
+      "deps": [
+        "lgwks_capability",
+        "lgwks_cognition",
+        "lgwks_vector"
+      ],
+      "has_cli": false,
+      "has_tests": false,
+      "integration": "integrated",
+      "last_commit_days": null,
+      "loc": 145,
+      "owning_issue": null,
+      "packet": null,
+      "purpose": "audited tenant\u2192world promotion (ARCH L5, I8-hardening #89).",
+      "staleness": "active",
+      "subsystem": "Ingestion spine (I1\u2013I12)",
+      "used_by": [
+        "lgwks_cognition",
+        "lgwks_vector"
+      ]
+    },
     "lgwks_public": {
       "deps": [],
       "has_cli": true,
@@ -2420,6 +2445,7 @@
         "lgwks_cycle",
         "lgwks_keyvault",
         "lgwks_memory",
+        "lgwks_promote",
         "lgwks_research",
         "lgwks_run",
         "lgwks_solve",
@@ -2518,6 +2544,7 @@
         "lgwks(dispatcher)",
         "lgwks_admission_store",
         "lgwks_entity_graph",
+        "lgwks_promote",
         "lgwks_substrate",
         "lgwks_substrate_db",
         "lgwks_substrate_run",
@@ -2852,7 +2879,7 @@
       "has_tests": false,
       "integration": "integrated",
       "last_commit_days": 0,
-      "loc": 441,
+      "loc": 468,
       "owning_issue": null,
       "packet": "I1",
       "purpose": "vector-space + cid contract (lgwks.vector.record.v1).",
@@ -2862,6 +2889,7 @@
         "lgwks_capability",
         "lgwks_embed_port",
         "lgwks_inbound",
+        "lgwks_promote",
         "lgwks_viz_project",
         "scripts"
       ]
@@ -3118,14 +3146,14 @@
   "totals": {
     "by_integration": {
       "cli_only": 0,
-      "integrated": 128,
+      "integrated": 129,
       "unreferenced": 1
     },
     "by_staleness": {
-      "active": 128,
+      "active": 129,
       "orphan": 1
     },
-    "loc": 47094,
-    "modules": 129
+    "loc": 47267,
+    "modules": 130
   }
 }

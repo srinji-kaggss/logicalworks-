@@ -1,7 +1,8 @@
 # Handoff — lgwks subconscious build · 2026-06-12 (session 10, main @ 3dbe01f)
 
 > Refreshed session 10: opened the **I8-hardening** track (#89) and landed **L1+L2+L7** — §1-INV is now cryptographically enforced (PR #90).
-> **One open issue: #89** (I8-hardening, L1+L3+L4 done, **L5 only** tail remaining).
+> Session 11: landed **L5** (audited tenant→world promotion) — the last L-step. **#89 is ready to close.**
+> **No open ingestion/hardening issue** once #89 closes. Next surfaces are deferred packets: L6/I9 (CRDT deploy), L2 access-router (mandatory gating + the operator/daemon promote surface), network/MCP — all in ARCH-two-db-multitenant.md + SCOPE-DEFERRED.md.
 > The dated "Current state" / "Session N state" sections below are append-only history — the **latest** state is the session-10 block at the bottom.
 
 You are the next agent on the lgwks rebuild. Read this fully before acting. Written
@@ -286,3 +287,29 @@ separate packet = I9. Deferred surfaces (network/MCP D2, cross-workspace ACL D3,
 - `docs/schemas/REGISTRY.md` — every cross-module contract; check before minting.
 - `docs/NAVMAP.md` + `docs/navmap.json` — generated module atlas (125 modules); refresh with `python3 scripts/gen_navmap.py`.
 - `prd/PRD-04-context-economy.md` — reflex-cap + RRF authority for I7.
+
+## Session 11 state (2026-06-12, branch claude/i8-l5-promotion-audit, PR pending)
+
+**I8-hardening L5 DONE — #89 ready to close.** The tenant→world promotion path is now gated +
+audited (ARCH L5 closed). All L-steps of #89 (L1+L2+L7, L3, L4, L5) have landed.
+
+| piece | what | module |
+|---|---|---|
+| L5 store move | `promote_cid_to_world(conn,cid,tenant)` — `UPDATE tenant→'world'` owning-tenant-guarded; move-not-copy (tenant ∉ cid). No commit; caller commits after audit. | `lgwks_vector.py` |
+| L5 orchestrator | `promote(conn,cid,token,key,…)` — `require_scope(WORLD_PROMOTE)` → ownership pre-check → stage move → append `"promotion"` audit → commit; audit-gates-commit, rollback on any failure. | `lgwks_promote.py` (new) |
+| L5 audit kind | `_KINDS += "promotion"` — hash-chained provenance `{tenant,cid,source_cid,space_id,scope,nonce}`; no raw secret. No new schema minted (cognition chain is the contract). | `lgwks_cognition.py` |
+
+52 tests green (6 new `tests/test_i8_promotion_audit.py`); registry 100/100; NAVMAP regen → 130 modules,
+`lgwks_promote` active.
+
+**Honest limits (deferred — NOT regressions):**
+1. **No live caller of `promote()` yet** — the operator/daemon CLI + capability-key lifecycle that
+   would call it in production is the L2 access-router / daemon packet (capability D-note: "caller owns
+   the secret lifecycle"). L5 ships the gated primitive + audit; wiring it live is the next packet.
+2. **One orphan-audit window** — cognition + vector store share no transaction; audit-before-commit
+   means a committed promotion always has a durable audit, but the rare reverse (audit appended, then
+   `conn.commit()` fails) leaves an orphan audit (world row rolled back). Safe direction, surfaced by raise.
+
+**Next:** close #89. Then the canonical deferred tail: **L6/I9** (CRDT deploy on world + tenant stores)
+→ **L2 access-router** (mandatory gating so every store op routes through `require_scope`, + the live
+promote surface). Network/MCP (D2), cross-workspace ACL (D3) stay parked in SCOPE-DEFERRED.md.

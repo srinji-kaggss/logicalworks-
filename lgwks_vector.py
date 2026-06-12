@@ -362,6 +362,33 @@ def get_record_for_tenant(
     return decode_record(row)
 
 
+def promote_cid_to_world(conn: sqlite3.Connection, cid: str, tenant: str) -> bool:
+    """Move one record from tenant T's private tier to the shared world tier (ARCH L5).
+
+    Pure store op: UPDATE tenant -> 'world' WHERE cid = ? AND tenant = ?. The
+    tenant guard makes this the ONLY-your-own-row primitive — a tenant cannot
+    promote another tenant's row (the WHERE never matches it) nor re-promote a
+    world row (its tenant is already 'world', not T). Does NOT commit; the caller
+    (lgwks_promote.promote) commits only after the audit record is written, so no
+    promotion is ever durable without its cognition-chain audit.
+
+    //why a move, not a copy: the cid is content-addressed over
+    (source_cid, modality, space_id, embedding) — tenant is NOT in the cid
+    (_canonical_bytes). A copy with tenant='world' would collide on the cid PK.
+    Promotion is a tier reassignment of the same content-addressed fact.
+
+    Returns True iff exactly one owned row was moved, False otherwise (cid absent,
+    owned by another tenant, or already world). No exception, no commit.
+    """
+    if not tenant or tenant == WORLD_TENANT:
+        return False
+    cur = conn.execute(
+        "UPDATE vector_records SET tenant = ? WHERE cid = ? AND tenant = ?",
+        (WORLD_TENANT, cid, tenant),
+    )
+    return cur.rowcount == 1
+
+
 def store_count(conn: sqlite3.Connection) -> int:
     return conn.execute("SELECT COUNT(*) FROM vector_records").fetchone()[0]
 
