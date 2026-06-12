@@ -1,7 +1,10 @@
-"""lgwks_admission — token-bucket admission + idempotent queue (I8).
+"""lgwks_admission — token-bucket admission + idempotent queue (I8 / I8-hardening L3).
 
 No compute, no scoring, no model layer — queue/admission/isolation ONLY.
 Controls whether/when a job is admitted and deduplicates by cid.
+
+L3 (issue #89): TenantAdmissionGate adds capability-FIRST, per-tenant admission
+with fair leasing ≤ c on top of the single-operator global path below.
 
 Authority: spec/second-harness/INGESTION-PLAN.md §I8
            spec/second-harness/INGESTION-LAYER.md §6
@@ -25,12 +28,14 @@ Decisions:
 
 from __future__ import annotations
 
+import math
 import random
 import time
 from collections import deque
 from dataclasses import dataclass, field
 from typing import Any, Callable
 
+import lgwks_capability
 import lgwks_workercap
 
 # ---------------------------------------------------------------------------
@@ -221,6 +226,144 @@ def admission_decision(
 
 
 # ---------------------------------------------------------------------------
+# L3 — per-tenant admission (issue #89, ARCH-two-db-multitenant L3)
+# ---------------------------------------------------------------------------
+#
+# The functions above are the single-operator P3 default path (one global bucket
+# + queue) and stay intact. TenantAdmissionGate is the multi-tenant destination:
+#
+#   1. Capability-FIRST ordering (fixes fail-open). require_scope(TENANT_RW) runs
+#      before any token is touched — an uncapped / invalid-sig / wrong-scope
+#      request raises CapabilityError and consumes NOTHING (no token, no queue slot).
+#   2. Per-tenant bucket + queue. Each validated tenant gets its own independent
+#      TokenBucket (rate per_tenant_rate, default c·μ) and bounded AdmissionQueue
+#      (per-tenant q_max). One tenant's flood drains only its own bucket/queue, so
+#      it cannot starve another tenant's admission.
+#   3. Fair leasing ≤ c. lease()/release() bound *concurrent in-flight* work: a
+#      lease is granted only if total in-flight < c AND the tenant's in-flight <
+#      its fair ceiling ⌈c / active_tenants⌉. This is what enforces ≤ c and the
+#      max-min fair split across tenants.
+#
+# Durable WAL backing of the queue + crash-durable lease/reap is L4 (next step);
+# this gate is in-memory but exposes the lease interface L4 will persist.
+
+
+class TenantAdmissionGate:
+    """Multi-tenant admission: capability-gated, per-tenant buckets, fair leasing ≤ c.
+
+    key is the HMAC capability key (REQUIRED — no keyless path, mirrors
+    lgwks_capability.guard's D3). Every admit() validates a CapabilityToken with
+    the TENANT_RW scope BEFORE touching rate/queue state.
+    """
+
+    def __init__(
+        self,
+        *,
+        key: bytes,
+        role_count: int = DEFAULT_ROLE_COUNT,
+        mu: float = DEFAULT_MU,
+        burst: float = DEFAULT_BURST,
+        q_max: int = DEFAULT_Q_MAX,
+        per_tenant_rate: float | None = None,
+        clock: Callable[[], float] = time.monotonic,
+        rng: random.Random | None = None,
+    ) -> None:
+        if not key:
+            raise ValueError("TenantAdmissionGate requires a non-empty capability key")
+        cap_info = lgwks_workercap.compute_worker_cap(role_count)
+        self._key = key
+        self._c = int(cap_info["computed_cap"])
+        self._mu = mu
+        self._burst = burst
+        self._q_max = q_max
+        # //why default per-tenant rate = c·μ: each tenant gets an independent full
+        # service-rate bucket. Aggregate is bounded by the lease ceiling (≤ c), not
+        # by shrinking each bucket — so adding a tenant never throttles existing ones.
+        self._rate = per_tenant_rate if per_tenant_rate is not None else float(self._c) * mu
+        self._clock = clock
+        self._rng = rng
+        self.cap_info = cap_info
+        self._tenants: dict[str, tuple[TokenBucket, AdmissionQueue]] = {}
+        self._inflight: dict[str, int] = {}
+
+    # -- internal --------------------------------------------------------
+    def _lane(self, tenant: str) -> tuple[TokenBucket, AdmissionQueue]:
+        lane = self._tenants.get(tenant)
+        if lane is None:
+            lane = (
+                TokenBucket(rate=self._rate, burst=self._burst, clock=self._clock),
+                AdmissionQueue(q_max=self._q_max, rng=self._rng),
+            )
+            self._tenants[tenant] = lane
+            self._inflight.setdefault(tenant, 0)
+        return lane
+
+    def _verified_tenant(self, token: lgwks_capability.CapabilityToken) -> str:
+        # require_scope raises CapabilityError on bad sig / empty / world / missing
+        # scope, and returns query_fn(tenant) on success. We just echo the tenant.
+        return lgwks_capability.require_scope(
+            token, lgwks_capability.TENANT_RW, lambda t: t, self._key
+        )
+
+    def fair_ceiling(self) -> int:
+        """Per-tenant in-flight ceiling ⌈c / active_tenants⌉ (≥ 1)."""
+        active = max(1, len(self._tenants))
+        return max(1, math.ceil(self._c / active))
+
+    # -- admission (capability-FIRST) ------------------------------------
+    def admit(
+        self,
+        token: lgwks_capability.CapabilityToken,
+        *,
+        cid: str,
+        item: Any = None,
+    ) -> Admitted | Rejected429:
+        """Capability-gate → per-tenant bucket → per-tenant queue.
+
+        Raises CapabilityError (no token consumed, no queue slot) if the token is
+        invalid or lacks tenant:rw. Otherwise returns Admitted | Rejected429 exactly
+        like admission_decision, but scoped to the token's tenant.
+        """
+        tenant = self._verified_tenant(token)   # FIRST — closes fail-open
+        bucket, queue = self._lane(tenant)
+        if not bucket.try_acquire():
+            base = 1.0 / bucket.rate if bucket.rate > 0 else 1.0
+            return Rejected429(
+                cid=cid, reason="rate_limited", retry_after=_jitter(base, rng=self._rng)
+            )
+        return queue.submit(item, cid=cid)
+
+    # -- fair leasing ≤ c (concurrency) ----------------------------------
+    def lease(self, token: lgwks_capability.CapabilityToken) -> bool:
+        """Grant one in-flight worker slot iff total < c AND tenant < fair ceiling.
+
+        Capability-gated (TENANT_RW). Returns False when at capacity — the caller
+        leaves the job queued and retries after a release(). True consumes a slot.
+        """
+        tenant = self._verified_tenant(token)
+        self._lane(tenant)  # ensure the tenant counts toward the active set
+        total = sum(self._inflight.values())
+        if total >= self._c:
+            return False
+        if self._inflight.get(tenant, 0) >= self.fair_ceiling():
+            return False
+        self._inflight[tenant] = self._inflight.get(tenant, 0) + 1
+        return True
+
+    def release(self, token: lgwks_capability.CapabilityToken) -> None:
+        """Release one in-flight slot held by the token's tenant (idempotent floor at 0)."""
+        tenant = self._verified_tenant(token)
+        self._inflight[tenant] = max(0, self._inflight.get(tenant, 0) - 1)
+
+    @property
+    def in_flight(self) -> int:
+        return sum(self._inflight.values())
+
+    def tenant_in_flight(self, tenant: str) -> int:
+        return self._inflight.get(tenant, 0)
+
+
+# ---------------------------------------------------------------------------
 # Factory (wires compute_worker_cap → TokenBucket + Queue)
 # ---------------------------------------------------------------------------
 
@@ -288,6 +431,14 @@ def _cmd_info(args) -> int:
         "q_max": getattr(args, "q_max", DEFAULT_Q_MAX),
         "stability_note": "rho < 1 required; at 2x load all rejects are typed 429 (zero 5xx)",
         "p3_to_p0_trigger": "escalates to P0 before any multi-tenant or network exposure",
+        "multi_tenant_L3": {
+            "gate": "TenantAdmissionGate",
+            "ordering": "capability(tenant:rw) -> per-tenant bucket -> per-tenant queue",
+            "per_tenant_rate_default": rate,
+            "per_tenant_q_max": getattr(args, "q_max", DEFAULT_Q_MAX),
+            "fair_leasing": "in-flight <= c; per-tenant ceiling = ceil(c / active_tenants)",
+            "note": "fail-open closed: invalid/missing cap consumes no token, no queue slot",
+        },
         "host": cap_info["host"],
         "cap_basis": cap_info["cap_basis"],
     }
