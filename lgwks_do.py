@@ -238,7 +238,7 @@ def _do_research(args: argparse.Namespace) -> int:
         import lgwks_substrate
         sub_args = argparse.Namespace(
             target=query,
-            project=slugify(query),
+            project=_slugify(query),
             source_type="auto",
             max_pages=12,
             max_depth=getattr(args, "depth", 1),
@@ -277,7 +277,59 @@ def _do_research(args: argparse.Namespace) -> int:
         except Exception as exc:
             p2 = PhaseResult(name="substrate:research", ok=False, exit_code=2, message=str(exc))
     else:
-        p2 = PhaseResult(name="research", ok=False, exit_code=2, message="akinator research requires the lgwks-akinator binary")
+        # keyword/prompt → resolve top URL via web search, then crawl
+        resolved_url = ""
+        p2 = PhaseResult(name="search:resolve", ok=False, exit_code=2,
+                         message=f"web search for {query!r} returned no results")
+        try:
+            import lgwks_search as _ls
+            hits = _ls.search(query, k=5)
+            resolved_url = hits[0]["url"] if hits else ""
+        except Exception as exc:
+            p2 = PhaseResult(name="search:resolve", ok=False, exit_code=2, message=str(exc))
+        if resolved_url:
+            import lgwks_substrate
+            sub_args = argparse.Namespace(
+                target=resolved_url,
+                project=_slugify(query),
+                source_type="auto",
+                max_pages=12,
+                max_depth=getattr(args, "depth", 1),
+                max_files=250,
+                max_chars=120_000,
+                chunk_words=450,
+                chunk_overlap=70,
+                fact_threshold=0.6,
+                embed_provider="dual",
+                embed_model="",
+                login_if_needed=True,
+                login_url="",
+                success_selector=None,
+                max_auto_bypass_attempts=3,
+                max_auth_handoffs=3,
+                browser_engine="chromium",
+                click_discovery=False,
+                max_clicks_per_page=20,
+                crawl_mode="link-then-click",
+            )
+            try:
+                manifest = lgwks_substrate.build_run(sub_args)
+                root = manifest.get("artifacts", {}).get("root", "")
+                p2 = PhaseResult(
+                    name="substrate:research",
+                    ok=manifest.get("counts", {}).get("documents", 0) > 0,
+                    exit_code=0,
+                    message=f"{manifest.get('counts',{}).get('documents',0)} docs, {manifest.get('counts',{}).get('chunks',0)} chunks",
+                    artifact={
+                        "run_id": manifest.get("run_id", ""),
+                        "run_dir": root,
+                        "resolved_from": query,
+                        "resolved_url": resolved_url,
+                        "counts": manifest.get("counts", {}),
+                    },
+                )
+            except Exception as exc:
+                p2 = PhaseResult(name="substrate:research", ok=False, exit_code=2, message=str(exc))
     run.phases.append(p2)
 
     run.exit_code = max(p.exit_code for p in run.phases)

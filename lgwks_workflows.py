@@ -425,6 +425,31 @@ def _do_research_inline(args: argparse.Namespace) -> int:
             return _emit(run, json_out)
 
     is_url = bool(re.search(r"^https?://", str(source).strip()))
+    is_path = bool(source) and Path(source).exists()
+    if not is_url and not is_path and source:
+        try:
+            import lgwks_search as _ls
+            hits = _ls.search(source, k=5)
+            if hits:
+                source = hits[0]["url"]
+                is_url = True
+            else:
+                run.phases.append(PhaseResult(
+                    name="search:resolve", ok=False, exit_code=2,
+                    message=f"web search for {source!r} returned no results",
+                ))
+                run.exit_code = 2
+                run.verdict = "degraded"
+                run.duration_sec = time.time() - t0
+                run.finished_at = _now()
+                return _emit(run, json_out)
+        except Exception as exc:
+            run.phases.append(PhaseResult(name="search:resolve", ok=False, exit_code=2, message=str(exc)))
+            run.exit_code = 2
+            run.verdict = "degraded"
+            run.duration_sec = time.time() - t0
+            run.finished_at = _now()
+            return _emit(run, json_out)
 
     sub_args = argparse.Namespace(
         target=source or ".",

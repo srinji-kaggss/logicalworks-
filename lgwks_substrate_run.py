@@ -45,7 +45,12 @@ def _source_type(target: str, forced: str) -> str:
         if (path / ".git").exists():
             return "repo"
         return "folder"
-    return "file"
+    if path.exists():
+        return "file"
+    raise ValueError(
+        f"target {target!r} is not a URL, an existing file, or an existing directory. "
+        f"Pass a URL (https://...) or a valid local path."
+    )
 
 
 def _build_from_local(root: Path, source_type: str, max_files: int, max_chars: int) -> list[dict[str, Any]]:

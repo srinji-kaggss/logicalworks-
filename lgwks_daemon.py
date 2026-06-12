@@ -560,11 +560,24 @@ def _serve_command(args: argparse.Namespace) -> int:
 
 def _research_command(args: argparse.Namespace) -> int:
     """Run a substrate research session and index it into the daemon store."""
+    import sys as _sys
     import lgwks_substrate_run as _substrate
     paths = _paths(Path(args.repo).resolve())
     tenant_id = f"repo:{paths.repo_root.name}"
+
+    target = args.target
+    is_url = "://" in target
+    is_path = Path(target).exists()
+    if not is_url and not is_path:
+        import lgwks_search as _search
+        results = _search.search(target, k=5)
+        if not results:
+            print(json.dumps({"error": f"web search for {target!r} returned no results"}), file=_sys.stderr)
+            return 1
+        target = results[0]["url"]
+
     payload: dict[str, Any] = {
-        "target": args.target,
+        "target": target,
         "project": args.project,
         "max_pages": args.max_pages,
         "max_depth": args.max_depth,
@@ -583,6 +596,7 @@ def _research_command(args: argparse.Namespace) -> int:
         "run_id": manifest.get("run_id"),
         "run_dir": manifest["artifacts"]["root"],
         "tenant_id": tenant_id,
+        "resolved_target": target,
     }, indent=2))
     return 0
 
