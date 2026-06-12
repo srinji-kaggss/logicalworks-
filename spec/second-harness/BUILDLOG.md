@@ -907,3 +907,25 @@ HANDOFF: session-14 block added with P0 acceptance receipts and next-seam map.
 
 Verification:
 - `python -m pytest tests/test_daemon_store.py tests/test_daemon_worktree.py tests/test_daemon_export.py tests/test_claude_adapter.py tests/test_codex_adapter.py tests/test_gemini_adapter.py tests/test_daemon_event.py -q` → **74 passed**
+
+---
+
+## 2026-06-12 · Session 16 — RequestContext wiring + daemon emit (commit a0bb658)
+
+**assemble_inbound() ctx kwarg:**
+- `ctx: Optional[Any] = None` added; when set, `tenant_store = ctx.store` and `store_conn=None` is accepted.
+- `_resolve()` inner function hardened: raises `ValueError` if both `tenant_store` and `store_conn` are None.
+- Inbound CLI `_cmd_run`: replaces manual `(port, handle, key)` / `TenantStore` construction with `make_context()`.
+
+**lgwks daemon emit:**
+- New subcommand: `lgwks daemon emit --kind <kind> --session-id <sid> --agent-id <aid> [--tenant T] [--actor A] [--client C] [--lane L] [--scope S]`
+- Reads JSON payload from stdin (optional). Appends a `lgwks.daemon.event.v1` event directly to the daemon store.
+- Enables full pipeline testing without live hooks: `daemon emit` → `daemon packet get` roundtrip verifiable immediately.
+
+**_DOMAINS fix:** `daemon` and `access` added to `lgwks_home._DOMAINS["System"]`. Closes pre-existing `test_domain_for_coverage` failure.
+
+Verification:
+- `pytest tests/test_daemon_e2e.py -v` → **10 passed**
+- `pytest tests/test_inbound.py tests/test_daemon.py tests/test_daemon_store.py tests/test_daemon_event.py tests/test_daemon_worktree.py tests/test_p1_session_worktree.py tests/test_home.py -q` → **114 passed, 1 pre-existing failure** (test_browser_navigates_domain_to_command — confirmed on main before this commit)
+- NAVMAP: 140 modules (unchanged count; no new modules added)
+

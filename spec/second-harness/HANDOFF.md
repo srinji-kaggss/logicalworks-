@@ -454,9 +454,44 @@ NAVMAP regenerated: **140 modules, 50,602 LOC**.
 3. **P1 Codex/Gemini tool-call normalization** — only Claude Code supports PostToolUse hooks; Codex/Gemini still `human_message` only for now.
 
 **Next canonical seams (no Director trigger needed):**
-- Wire `assemble_inbound()` and `promote()` to accept a `RequestContext` (additive — no behavior change; kills raw-string trust at those call sites).
-- N novelty axis + calibrated P probability (U6.4) — needs Director go (deferred from session 13).
+- ~~Wire `assemble_inbound()` and `promote()` to accept a `RequestContext`~~ ✅ Done session 16.
 
 **Next canonical seams (Director trigger required):**
 - D2 network/MCP transport: file issue once Director triggers "expose beyond localhost".
 - Live hook registration (PostToolUse + Stop): Director confirms when to wire.
+- N novelty axis + calibrated P probability (U6.4) — Director go needed.
+
+---
+
+## Session 16 state — 2026-06-12 · main @ `a0bb658`
+
+**RequestContext wiring + daemon emit command (no Director trigger required)**
+
+| change | what | impact |
+|---|---|---|
+| `assemble_inbound(ctx=)` | `ctx: Optional[Any]` kwarg; when set, `tenant_store = ctx.store`; `store_conn=None` accepted | kills raw-string trust at the inbound call site |
+| inbound CLI `_cmd_run` | uses `make_context()` instead of threading `(port, handle, key)` manually | first CLI path through RequestContext |
+| `lgwks daemon emit` | new subcommand; injects any event kind into the daemon store without hooks | **end-to-end testable without live hook wiring** |
+| `_DOMAINS` fix | `daemon` + `access` added to `System` domain | closes pre-existing `test_domain_for_coverage` failure |
+
+10 new tests in `tests/test_daemon_e2e.py` — all pass. 114 existing unaffected.
+
+**End-to-end pipeline now testable without hooks:**
+```
+lgwks daemon start
+lgwks daemon emit --kind human_message --session-id s1 --agent-id claude
+lgwks daemon packet get --session-id s1 --agent-id claude
+lgwks daemon stop
+```
+
+**Honest limits:**
+1. **Hooks still deferred** — Director go required before registering PostToolUse + Stop in `.claude/settings.local.json`.
+2. **`promote()` raw-string path** — `_access_promote_command` already routes through `TenantStore.promote(cid)`; the `lgwks_promote.promote()` function itself takes `(conn, cid, token, key)` — this is the internal primitive, not a caller-facing API. No change needed there.
+
+**Next canonical seams (no Director trigger):**
+- P3 research front door query surface — `daemon research <url>` indexes runs; missing: one query surface to retrieve a prior run's packet on demand.
+- N novelty axis + calibrated P (U6.4) — Director go needed.
+
+**Next canonical seams (Director trigger required):**
+- D2 network/MCP transport: file once Director triggers "expose beyond localhost".
+- Live hook registration: PostToolUse + Stop when Director confirms.
