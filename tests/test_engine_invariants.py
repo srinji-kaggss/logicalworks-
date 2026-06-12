@@ -15,7 +15,9 @@ offline demand-weighting), N novelty (needs the Qwen embedding layer).
 from __future__ import annotations
 
 import json
+import math
 import sys
+import tempfile
 import unittest
 from pathlib import Path
 
@@ -83,6 +85,13 @@ class TestAggregate(unittest.TestCase):
         self.assertEqual(eng._aggregate(1.0, 1.0, 1.0), 1.0)  # perfect -> 1
         self.assertEqual(eng._aggregate(), 0.0)               # nothing available -> 0
 
+    def test_non_finite_dropped_not_maxed(self):
+        # inf/nan must NOT become max confidence (min(1.0, nan) bug) — they drop out.
+        self.assertEqual(eng._aggregate(float("inf"), 0.5), eng._aggregate(0.5))
+        self.assertEqual(eng._aggregate(float("nan"), 0.5), eng._aggregate(0.5))
+        self.assertTrue(math.isfinite(eng._decisiveness([float("inf"), 1.0])))
+        self.assertTrue(math.isfinite(eng._decisiveness([float("nan"), float("nan")])))
+
 
 class TestRunEngineContract(unittest.TestCase):
     PROMPT = "refactor the auth module and check for SQL injection"
@@ -115,6 +124,19 @@ class TestRunEngineContract(unittest.TestCase):
         a = eng.run_engine(self.PROMPT)
         b = eng.run_engine(self.PROMPT)
         self.assertEqual(json.dumps(a, sort_keys=True), json.dumps(b, sort_keys=True))
+
+    def test_corrupt_graph_is_unavailable_not_zero_grounded(self):
+        # A corrupt/unreadable DB must read as grounding *unavailable* (drops out),
+        # NOT as "queried, grounded nothing" (which would silently zero P).
+        with tempfile.NamedTemporaryFile(suffix=".db", delete=False) as f:
+            f.write(b"this is not a sqlite database")
+            bad = Path(f.name)
+        try:
+            s = eng.run_engine(self.PROMPT, db_path=bad)["insights"]["scores"]
+            self.assertEqual(s["grounding_status"], "unavailable")
+            self.assertIsNone(s["gap_G"])
+        finally:
+            bad.unlink(missing_ok=True)
 
     def test_ungrounded_does_not_zero_confidence(self):
         # no graph -> grounding unavailable, but a covered+decisive prompt still

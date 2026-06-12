@@ -14,6 +14,7 @@ error (INV-6 — never block the conscious channel).
 from __future__ import annotations
 
 import json
+import math
 import re
 import sys
 from pathlib import Path
@@ -66,10 +67,16 @@ def _capability_coverage(query_tokens: list[str], verbs: list[dict]) -> tuple[fl
     return round(coverage, 3), [v for _, v in matched[:8]]
 
 
-def _graph_retrieval(query_tokens: list[str], db_path: Path) -> tuple[list[dict], int]:
-    """Query entity graph for query tokens. Returns (hits, grounded_token_count)."""
+def _graph_retrieval(query_tokens: list[str], db_path: Path) -> tuple[list[dict], int, bool]:
+    """Query entity graph. Returns (hits, grounded_token_count, available).
+
+    `available` is False when the graph is absent OR the query errored (corrupt/
+    unreadable DB) — so the caller can treat "couldn't ground" (grounding unknown)
+    distinctly from "queried, resolved nothing" (a real grounding gap). Conflating
+    them silently zeroes confidence on a corrupt DB.
+    """
     if not db_path.exists() or not query_tokens:
-        return [], 0
+        return [], 0, False
     try:
         sys.path.insert(0, str(_REPO))
         import lgwks_entity_graph as eg
@@ -82,9 +89,9 @@ def _graph_retrieval(query_tokens: list[str], db_path: Path) -> tuple[list[dict]
                 hits.append({"node_id": n["node_id"], "label": n["label"], "type": n["type"]})
                 grounded.add(tok)
         db.close()
-        return hits[:20], len(grounded)
+        return hits[:20], len(grounded), True
     except Exception:
-        return [], 0
+        return [], 0, False
 
 
 def _last_state(repo: Path | None) -> dict[str, Any]:
@@ -121,7 +128,7 @@ def _decisiveness(match_scores: list[float]) -> float:
     capability drops out, so adding irrelevant capabilities cannot change it
     (cardinality-invariance). Depends only on scores, not labels (relabel-invariant).
     """
-    scores = [s for s in match_scores if s > 0.0]
+    scores = [s for s in match_scores if s > 0.0 and math.isfinite(s)]
     total = sum(scores)
     if total <= 0.0:
         return 0.0
@@ -136,7 +143,7 @@ def _aggregate(*axes: float | None) -> float:
     Null-collapse: any zero axis -> 0 (no confidence if any faculty is empty).
     None axes (e.g. grounding unavailable) drop out rather than forcing P to 0.
     """
-    vals = [max(0.0, min(1.0, a)) for a in axes if a is not None]
+    vals = [max(0.0, min(1.0, a)) for a in axes if a is not None and math.isfinite(a)]
     if not vals:
         return 0.0
     prod = 1.0
@@ -169,8 +176,7 @@ def run_engine(
     cap_coverage, selections = _capability_coverage(qt, verbs)
 
     _db = db_path or _ENTITY_GRAPH_DB
-    graph_available = _db.exists()
-    graph_hits, graph_grounded = _graph_retrieval(qt, _db)
+    graph_hits, graph_grounded, graph_available = _graph_retrieval(qt, _db)
 
     # Independent, constant-free, calculator-derivable axes (no AI in this layer;
     # see feedback_calculator_test). The Qwen embedding layer is separate/upstream.
