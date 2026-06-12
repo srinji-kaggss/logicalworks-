@@ -171,6 +171,14 @@ def _build_registry() -> dict[str, dict[str, Any]]:
             "description": "Daemon tenant session-head query result envelope",
             "output": "JSON with count and per-session daemon head rows",
         },
+        "lgwks.daemon.status.v0": {
+            "description": "Daemon lifecycle status envelope",
+            "output": "JSON with lock, pid, heartbeat, transcript path, and event store state",
+        },
+        "lgwks.daemon.doctor.v0": {
+            "description": "Daemon readiness/health report",
+            "output": "JSON with root/store/transcript checks and stale-lock reap status",
+        },
     }
 
     for name, ann in annotations.items():
