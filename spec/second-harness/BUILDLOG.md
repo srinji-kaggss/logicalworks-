@@ -761,3 +761,54 @@ for adds).
 Deferred (flagged): routing entity-graph mutable membership through OR-Set add/remove at call
 sites beyond the pipeline's world_nodes/tenant_edges, for when the daemon makes multi-writer
 real. The merge layer + reconverge are ready for it.
+
+---
+
+## 2026-06-12 · CIAM micro-debts hardening pass (#104 / #105 / #106)
+
+This pass follows the same spec → implement → harden loop used for the #97 epic and closes
+the three additive follow-ups that were explicitly left open after the epic landed.
+
+- **#104 inbound / capability seam tightened.**
+  `lgwks_inbound` no longer resolves tenant-scoped reads by threading a bare tenant string
+  through its assembly path. The CLI boundary resolves a capability via
+  `lgwks_access.resolve_capability_for_tenant(...)`, constructs a `TenantStore`, and the
+  tenant-scoped read lane inside `assemble_inbound(...)` routes through
+  `TenantStore.read(...)`. The single-operator `tenant=None` fail-open remains unchanged and
+  still uses the explicit `ADMIN` sentinel path.
+- **#105 reconverge durability hardened.**
+  `lgwks_crdt.JsonFileSink` now owns an explicit `locked()` critical-section seam, and
+  `reconverge(...)` acquires that sink lock across the full load → merge → commit window.
+  This keeps the lock where the file-backed durability concern actually lives, instead of
+  duck-typing private sink internals. Fallback behavior remains safe for non-locking sinks:
+  they execute under a no-op context rather than pretending to have file durability.
+- **#106 entity-graph membership routed through OR-Set sidecars.**
+  `lgwks_entity_graph.GraphDB` now tracks mutable `nodes` / `edges` membership in a CRDT
+  sidecar (`*.crdt.json`) using `ORSet` add/remove through the existing `reconverge(...)`
+  path. Query surfaces (`query_nodes`, `query_edges`, and therefore `neighbors`/`path`) read
+  through the visible OR-Set membership when the sidecar exists. Mutator entry points were
+  hardened in the same pass: `upsert_node`, `upsert_edge`, `remove_node`, and `remove_edge`
+  now reject empty identifiers at the boundary rather than writing degenerate rows and hoping
+  later layers cope.
+
+Defense-in-depth notes:
+- Entry validation was added at the new entity-graph mutator boundary (empty id/relation
+  reject).
+- Business-logic routing now stays on sanctioned seams: `TenantStore` for tenant reads,
+  `JsonFileSink.locked()` for replica durability, CRDT sidecar membership for mutable graph
+  visibility.
+- Environment guard behavior stays explicit: the inbound unscoped path still requires
+  `ADMIN`; CRDT locking is file-sink-specific rather than silently universal.
+- Tests assert the seam, not an impossible internal implementation detail.
+
+Verification (local):
+- `pytest -q tests/test_inbound.py` → `16 passed`
+- `pytest -q tests/test_crdt.py tests/test_entity_graph.py` → `32 passed`
+
+New targeted coverage:
+- inbound tenant path routes through `TenantStore.read(...)` and still drops cross-tenant
+  cids from the reflex pack.
+- reconverge concurrent writers to the same JSON replica converge to the union instead of
+  losing a branch.
+- entity-graph remove → re-add is visible through the query layer, and an existing sidecar
+  with empty visible membership fails closed (`query_edges() == []`) rather than widening.

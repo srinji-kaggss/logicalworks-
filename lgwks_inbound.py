@@ -35,6 +35,7 @@ import json
 import math
 from typing import Any, Optional
 
+import lgwks_access
 import lgwks_rank
 import lgwks_vector
 from lgwks_rank import RankRecord
@@ -206,7 +207,7 @@ def assemble_inbound(
     *,
     limit_tokens: int = DEFAULT_LIMIT_TOKENS,
     k: int = RRF_K,
-    tenant: Optional[str] = None,
+    tenant_store: Optional[lgwks_access.TenantStore] = None,
 ) -> dict[str, Any]:
     """End-to-end: graph cubic rank ⊕ vector cosine rank → fused → token-budgeted pack.
 
@@ -214,24 +215,22 @@ def assemble_inbound(
                       NOT embed here). If None, RRF runs on the graph list alone.
     graph           : graph.json structure (consumed by lgwks_rank.rank_graph).
     store_conn      : open vector store connection (lgwks_vector).
-    tenant          : when set, every cid is resolved under §1-INV (own ⊕ world) via
-                      get_record_for_tenant — a graph node owned by another tenant
-                      simply does not resolve and is dropped from the candidate
-                      universe (ARCH L1). When None, the legacy single-operator
-                      unscoped resolver is used (no multi-tenant boundary). The
-                      tenant string must come from a validated capability token
-                      (lgwks_capability.guard / require_scope), never raw input.
+    tenant_store    : when set, every cid is resolved through a validated
+                      CapabilityPort handle via lgwks_access.TenantStore.read —
+                      own ⊕ world only (ARCH L1/L2). When None, the legacy
+                      single-operator unscoped resolver is used (no multi-tenant
+                      boundary, admin sentinel path).
     Raises lgwks_rank.RankError on non-convergence (no silent failure).
     Raises lgwks_vector.SpaceMismatchError if the query crosses embedding spaces.
     """
     graph_ranks = lgwks_rank.rank_graph(graph)
 
     # Candidate universe = graph cids that resolve in the store (zero-dangling, D2).
-    # Under a tenant scope, "resolve" means own ⊕ world — cross-tenant cids drop out.
+    # Under a tenant scope, "resolve" means own ⊕ world through the access router.
     def _resolve(cid: str) -> Optional[lgwks_vector.VectorRecord]:
-        if tenant is not None:
-            return lgwks_vector.get_record_for_tenant(store_conn, cid, tenant)
-        # tenant=None: single-operator fail-open (issue #99 keeps this escape hatch).
+        if tenant_store is not None:
+            return tenant_store.read(cid)
+        # tenant_store=None: single-operator fail-open (issue #99 keeps this escape hatch).
         return lgwks_vector.get_record(store_conn, cid, admin=lgwks_vector.ADMIN)
 
     resolved: list[RankRecord] = []
@@ -318,11 +317,16 @@ def _cmd_run(args) -> int:
     conn = lgwks_vector.create_store(Path(store_path))
     tenant = getattr(args, "tenant", None)
     try:
+        tenant_store = None
+        if tenant is not None:
+            port, handle, key = lgwks_access.resolve_capability_for_tenant(tenant)
+            tenant_store = lgwks_access.TenantStore(port, handle, key, conn)
+
         query_embedding = None
         qcid = getattr(args, "query_cid", None)
         if qcid:
-            if tenant is not None:
-                query_embedding = lgwks_vector.get_record_for_tenant(conn, qcid, tenant)
+            if tenant_store is not None:
+                query_embedding = tenant_store.read(qcid)
             else:
                 query_embedding = lgwks_vector.get_record(conn, qcid, admin=lgwks_vector.ADMIN)
             if query_embedding is None:
@@ -330,7 +334,7 @@ def _cmd_run(args) -> int:
                 return 1
         try:
             pack = assemble_inbound(query_embedding, graph, conn,
-                                    limit_tokens=args.limit_tokens, tenant=tenant)
+                                    limit_tokens=args.limit_tokens, tenant_store=tenant_store)
         except lgwks_rank.RankError as e:
             print(f"error: graph rank did not converge: {e}", file=_sys.stderr)
             return 1

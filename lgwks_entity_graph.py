@@ -27,6 +27,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
+import lgwks_crdt as crdt
 import lgwks_sqlite
 
 # ── entity taxonomy ───────────────────────────────────────────────────────────
@@ -149,19 +150,78 @@ class GraphDB:
         self._conn = lgwks_sqlite.connect(self.db_path, check_same_thread=False)
         self._conn.executescript(_DDL)
         self._conn.commit()
+        self._crdt_path = self.db_path.with_suffix(self.db_path.suffix + ".crdt.json")
+
+    def _require_nonempty(self, value: str, field: str) -> str:
+        value = value.strip()
+        if not value:
+            raise ValueError(f"{field} must not be empty")
+        return value
+
+    def _edge_id(self, src: str, dst: str, rel: str) -> str:
+        return hashlib.sha256(f"{src}|{dst}|{rel}".encode()).hexdigest()[:16]
+
+    def _membership_sink(self) -> crdt.JsonFileSink:
+        return crdt.JsonFileSink(self._crdt_path)
+
+    def _membership_state(self) -> dict[str, crdt.ORSet] | None:
+        if not self._crdt_path.exists():
+            return None
+        state = self._membership_sink().load()
+        nodes = state.get("nodes")
+        edges = state.get("edges")
+        if nodes is not None and not isinstance(nodes, crdt.ORSet):
+            raise ValueError("entity-graph membership state is corrupt: nodes must be ORSet")
+        if edges is not None and not isinstance(edges, crdt.ORSet):
+            raise ValueError("entity-graph membership state is corrupt: edges must be ORSet")
+        return {
+            "nodes": nodes if isinstance(nodes, crdt.ORSet) else crdt.ORSet(),
+            "edges": edges if isinstance(edges, crdt.ORSet) else crdt.ORSet(),
+        }
+
+    def _visible_members(self, key: str) -> set[str] | None:
+        state = self._membership_state()
+        if state is None:
+            return None
+        return set(state[key].value())
+
+    def _track_node_membership(self, node_id: str) -> None:
+        crdt.reconverge(self._membership_sink(), {"nodes": crdt.ORSet().add(node_id)})
+
+    def _track_edge_membership(self, edge_id: str) -> None:
+        crdt.reconverge(self._membership_sink(), {"edges": crdt.ORSet().add(edge_id)})
+
+    def _remove_member(self, key: str, elem: str) -> None:
+        state_map = self._membership_state()
+        if state_map is None:
+            return
+        state = state_map[key]
+        observed = state._adds.get(elem, frozenset())
+        delta = crdt.ORSet().remove(elem, observed)
+        crdt.reconverge(self._membership_sink(), {key: delta})
 
     def close(self) -> None:
         if self._conn:
             self._conn.close()
 
     def upsert_node(self, node_id: str, node_type: str, label: str, attrs: dict | None = None) -> None:
+        node_id = self._require_nonempty(node_id, "node_id")
+        node_type = self._require_nonempty(node_type, "node_type")
+        label = self._require_nonempty(label, "label")
+        self._track_node_membership(node_id)
         self._conn.execute(
             "INSERT OR REPLACE INTO nodes (node_id, type, label, attrs) VALUES (?, ?, ?, ?)",
             (node_id, node_type, label, json.dumps(attrs or {})),
         )
 
     def upsert_edge(self, src: str, dst: str, rel: str, attrs: dict | None = None) -> None:
-        edge_id = hashlib.sha256(f"{src}|{dst}|{rel}".encode()).hexdigest()[:16]
+        src = self._require_nonempty(src, "src")
+        dst = self._require_nonempty(dst, "dst")
+        rel = self._require_nonempty(rel, "rel")
+        edge_id = self._edge_id(src, dst, rel)
+        self._track_node_membership(src)
+        self._track_node_membership(dst)
+        self._track_edge_membership(edge_id)
         # Ensure referenced nodes exist as UNKNOWN stubs if not yet inserted
         for nid in (src, dst):
             self._conn.execute(
@@ -172,6 +232,25 @@ class GraphDB:
             "INSERT OR REPLACE INTO edges (edge_id, src, dst, rel, attrs) VALUES (?, ?, ?, ?, ?)",
             (edge_id, src, dst, rel, json.dumps(attrs or {})),
         )
+
+    def remove_edge(self, src: str, dst: str, rel: str) -> None:
+        src = self._require_nonempty(src, "src")
+        dst = self._require_nonempty(dst, "dst")
+        rel = self._require_nonempty(rel, "rel")
+        edge_id = self._edge_id(src, dst, rel)
+        self._remove_member("edges", edge_id)
+        self._conn.execute("DELETE FROM edges WHERE edge_id = ?", (edge_id,))
+
+    def remove_node(self, node_id: str) -> None:
+        node_id = self._require_nonempty(node_id, "node_id")
+        edge_rows = self._conn.execute(
+            "SELECT src, dst, rel FROM edges WHERE src = ? OR dst = ?",
+            (node_id, node_id),
+        ).fetchall()
+        for src, dst, rel in edge_rows:
+            self.remove_edge(src, dst, rel)
+        self._remove_member("nodes", node_id)
+        self._conn.execute("DELETE FROM nodes WHERE node_id = ?", (node_id,))
 
     def upsert_chunk(
         self,
@@ -216,9 +295,16 @@ class GraphDB:
         return count
 
     def query_nodes(self, node_type: str | None = None, match: str | None = None, limit: int = 200) -> list[dict]:
+        visible_nodes = self._visible_members("nodes")
         sql = "SELECT node_id, type, label, attrs FROM nodes"
         clauses: list[str] = []
         params: list[Any] = []
+        if visible_nodes is not None:
+            placeholders = ",".join("?" for _ in visible_nodes)
+            if not placeholders:
+                return []
+            clauses.append(f"node_id IN ({placeholders})")
+            params.extend(sorted(visible_nodes))
         if node_type:
             clauses.append("type = ?")
             params.append(node_type)
@@ -237,9 +323,16 @@ class GraphDB:
         ]
 
     def query_edges(self, rel: str | None = None, match: str | None = None, limit: int = 200) -> list[dict]:
+        visible_edges = self._visible_members("edges")
         sql = "SELECT edge_id, src, dst, rel, attrs FROM edges"
         clauses: list[str] = []
         params: list[Any] = []
+        if visible_edges is not None:
+            placeholders = ",".join("?" for _ in visible_edges)
+            if not placeholders:
+                return []
+            clauses.append(f"edge_id IN ({placeholders})")
+            params.extend(sorted(visible_edges))
         if rel:
             clauses.append("rel = ?")
             params.append(rel)

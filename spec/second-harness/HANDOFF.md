@@ -2,7 +2,7 @@
 
 > Session 10–11: opened **I8-hardening** (#89), landed L1+L2+L7/L3/L4/L5 — §1-INV cryptographically enforced; **#89 closed**.
 > Session 12: shipped the **CIAM convergence epic #97** (build order B→A→C): #98 capability lifecycle + operator promote, #99 access-router mandatory gating (`ADMIN` sentinel + `TenantStore`), #100 CRDT live convergence (`reconverge`). **Epic CLOSED.** This SUPERSEDES the old session-11 "next" note — L6/I9 and the L2 access-router are now SHIPPED, not deferred.
-> **Open issues:** #104 (inbound→`CapabilityPort` handle), #105 (CRDT replica file-lock), #106 (entity-graph OR-Set wiring) — micro-debts from the epic. Canonical next *surface* (dependencies now unblocked, NOT yet filed — needs Director trigger): **D2 network/MCP transport** (SCOPE-DEFERRED.md); hardened plan in the session-12 block below.
+> Session 13: shipped the three additive micro-debts left open from #97 — #104 (inbound→resolved capability handle), #105 (`reconverge` commit critical-section lock), #106 (entity-graph mutable membership through OR-Set sidecars). Canonical next *surface* remains **D2 network/MCP transport** (SCOPE-DEFERRED.md).
 > The dated "Session N state" sections below are append-only history — the **latest** state is the **session-12** block at the bottom.
 
 You are the next agent on the lgwks rebuild. Read this fully before acting. Written
@@ -217,6 +217,27 @@ module + CLI + tests do not depend on it.
 **Two open ops/decisions (Director-gated):**
 1. **Live hook wiring** — U7 is verified test-only; the `UserPromptSubmit` hook is NOT registered. Wire it into `/Applications/logicalworks/.claude/settings.json` when the Director wants live interception (it's a `UserPromptSubmit` Claude-Code hook, NOT an `lgwks hooks` bus event).
 2. **Activate qwen mode** — `make download-models` (Qwen3-VL-Embedding-8B not present here) + run the two `scripts/build_capability_*` builders; the engine stays on the lexical floor until then.
+
+## Session 13 state (2026-06-12)
+
+This pass closed the three CIAM micro-debts filed out of #97:
+
+- **#104 inbound → capability handle:** tenant-scoped inbound reads now resolve a capability
+  at the CLI boundary and route through `lgwks_access.TenantStore.read(...)` inside
+  `assemble_inbound(...)`; the unscoped single-operator path remains the explicit
+  `ADMIN`-sentinel fail-open.
+- **#105 reconverge file-lock:** `lgwks_crdt.JsonFileSink` now exposes an explicit `locked()`
+  seam and `reconverge(...)` holds that lock across load → merge → commit. This follows the
+  repo’s existing “guard at the storage seam” pattern rather than smuggling file concerns into
+  callers.
+- **#106 entity-graph OR-Set wiring:** `lgwks_entity_graph.GraphDB` now tracks mutable node
+  and edge membership in a `*.crdt.json` sidecar via `ORSet` add/remove through
+  `lgwks_crdt.reconverge(...)`. Query surfaces filter by visible CRDT membership once the
+  sidecar exists. Mutator entry validation was tightened in the same pass.
+
+Verification receipts:
+- `pytest -q tests/test_inbound.py` → `16 passed`
+- `pytest -q tests/test_crdt.py tests/test_entity_graph.py` → `32 passed`
 
 **Next deferred (need Director go):** N novelty axis + `attention` (Qwen-native); P→probability calibration (outcome log + isotonic fit). U2–U5 parallel tracks still upgrade U6 once landed.
 
