@@ -65,6 +65,7 @@
         "graphify.cluster",
         "hooks.subconscious_inbound",
         "lgwks_admission",
+        "lgwks_admission_store",
         "lgwks_agent_os",
         "lgwks_apple",
         "lgwks_aup",
@@ -269,6 +270,7 @@
       ],
       "Ingestion spine (I1\u2013I12)": [
         "lgwks_admission",
+        "lgwks_admission_store",
         "lgwks_capability",
         "lgwks_crdt",
         "lgwks_embed_port",
@@ -595,6 +597,7 @@
     },
     "lgwks_admission": {
       "deps": [
+        "lgwks_admission_store",
         "lgwks_capability",
         "lgwks_workercap"
       ],
@@ -602,7 +605,7 @@
       "has_tests": true,
       "integration": "integrated",
       "last_commit_days": 0,
-      "loc": 447,
+      "loc": 464,
       "owning_issue": "#72",
       "packet": "I8",
       "purpose": "token-bucket admission + idempotent queue (I8 / I8-hardening L3).",
@@ -610,7 +613,29 @@
       "subsystem": "Ingestion spine (I1\u2013I12)",
       "used_by": [
         "lgwks(dispatcher)",
+        "lgwks_admission_store",
         "scripts"
+      ]
+    },
+    "lgwks_admission_store": {
+      "deps": [
+        "lgwks_admission",
+        "lgwks_capability",
+        "lgwks_sqlite",
+        "lgwks_workercap"
+      ],
+      "has_cli": false,
+      "has_tests": false,
+      "integration": "integrated",
+      "last_commit_days": null,
+      "loc": 315,
+      "owning_issue": null,
+      "packet": null,
+      "purpose": "durable cross-process admission queue (I8-hardening L4).",
+      "staleness": "active",
+      "subsystem": "Ingestion spine (I1\u2013I12)",
+      "used_by": [
+        "lgwks_admission"
       ]
     },
     "lgwks_agent_os": {
@@ -872,6 +897,7 @@
       "used_by": [
         "lgwks(dispatcher)",
         "lgwks_admission",
+        "lgwks_admission_store",
         "lgwks_inbound",
         "lgwks_vector",
         "scripts"
@@ -2490,6 +2516,7 @@
       "subsystem": "Substrate / storage / schema",
       "used_by": [
         "lgwks(dispatcher)",
+        "lgwks_admission_store",
         "lgwks_entity_graph",
         "lgwks_substrate",
         "lgwks_substrate_db",
@@ -2912,6 +2939,7 @@
       "subsystem": "Harness / daemon / orchestration",
       "used_by": [
         "lgwks_admission",
+        "lgwks_admission_store",
         "lgwks_project_artifacts",
         "lgwks_project_plan"
       ]
@@ -3090,14 +3118,14 @@
   "totals": {
     "by_integration": {
       "cli_only": 0,
-      "integrated": 127,
+      "integrated": 128,
       "unreferenced": 1
     },
     "by_staleness": {
-      "active": 127,
+      "active": 128,
       "orphan": 1
     },
-    "loc": 46762,
-    "modules": 128
+    "loc": 47094,
+    "modules": 129
   }
 }
