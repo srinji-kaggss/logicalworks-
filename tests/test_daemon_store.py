@@ -9,7 +9,7 @@ import unittest
 from pathlib import Path
 
 import lgwks_daemon_event as daemon_event
-from lgwks_daemon_store import DaemonEventStore, PACKET_SCHEMA, WORK_ITEM_SCHEMA
+from lgwks_daemon_store import DaemonEventStore, PACKET_SCHEMA, WORK_ITEM_SCHEMA, QUEUE_SCHEMA
 
 
 def _event(*, tenant: str, agent: str, session: str, ts: str, kind: str = "tool_call") -> dict:
@@ -235,6 +235,10 @@ class TestWorkQueue(unittest.TestCase):
         self.assertEqual(len(claimed_ids), len(set(claimed_ids)), "no item double-claimed")
         self.assertLessEqual(len(claimed_ids), 10)
 
+    def test_get_packet_schema(self):
+        depth = self.store.queue_depth("t1")
+        self.assertEqual(depth["schema"], QUEUE_SCHEMA)
+
     def test_get_packet_deterministic(self):
         store = self.store
         ev = _event(tenant="t1", agent="claude", session="s1", ts="2026-06-12T01:00:00+00:00")
@@ -248,3 +252,51 @@ class TestWorkQueue(unittest.TestCase):
         self.assertIsNotNone(p1["session_head"])
         self.assertEqual(p1["queue"]["queued"], 1)
         self.assertEqual(p1, p2)
+
+
+def _manifest(run_id: str = "run-001", target: str = "https://example.com") -> dict:
+    return {
+        "run_id": run_id,
+        "target": target,
+        "source": target,
+        "artifacts": {"root": f"/tmp/runs/{run_id}"},
+    }
+
+
+class TestRunRegistry(unittest.TestCase):
+    def setUp(self):
+        self.tmp = Path(tempfile.mkdtemp())
+        self.db = self.tmp / "daemon-events.db"
+        self.store = DaemonEventStore(self.db)
+
+    def tearDown(self):
+        self.store.close()
+
+    def test_register_and_list(self):
+        m = _manifest()
+        inserted = self.store.register_run("t1", m)
+        self.assertTrue(inserted)
+        runs = self.store.list_runs("t1")
+        self.assertEqual(len(runs), 1)
+        self.assertEqual(runs[0]["run_id"], "run-001")
+        self.assertEqual(runs[0]["target"], "https://example.com")
+
+    def test_register_idempotent(self):
+        m = _manifest()
+        self.assertTrue(self.store.register_run("t1", m))
+        self.assertFalse(self.store.register_run("t1", m))
+        self.assertEqual(len(self.store.list_runs("t1")), 1)
+
+    def test_register_tenant_isolation(self):
+        self.store.register_run("t1", _manifest("r1"))
+        self.store.register_run("t2", _manifest("r2"))
+        self.assertEqual(len(self.store.list_runs("t1")), 1)
+        self.assertEqual(len(self.store.list_runs("t2")), 1)
+        self.assertEqual(self.store.list_runs("t1")[0]["run_id"], "r1")
+
+    def test_multiple_runs_ordered_newest_first(self):
+        self.store.register_run("t1", _manifest("r1"))
+        self.store.register_run("t1", _manifest("r2"))
+        runs = self.store.list_runs("t1")
+        self.assertEqual(len(runs), 2)
+        self.assertEqual(runs[0]["run_id"], "r2")

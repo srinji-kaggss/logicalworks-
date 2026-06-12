@@ -144,23 +144,51 @@ def _build_event(
     )
 
 
+def _make_substrate_args(payload: dict[str, Any]) -> "argparse.Namespace":
+    import argparse as _ap
+    return _ap.Namespace(
+        target=payload["target"],
+        project=payload.get("project", ""),
+        source_type=payload.get("source_type", "auto"),
+        max_pages=int(payload.get("max_pages", 25)),
+        max_depth=int(payload.get("max_depth", 2)),
+        max_files=int(payload.get("max_files", 250)),
+        max_chars=int(payload.get("max_chars", 120_000)),
+        chunk_words=int(payload.get("chunk_words", 320)),
+        chunk_overlap=int(payload.get("chunk_overlap", 48)),
+        fact_threshold=float(payload.get("fact_threshold", 0.6)),
+        embed_provider=payload.get("embed_provider", "auto"),
+        embed_model=payload.get("embed_model", ""),
+        login_if_needed=bool(payload.get("login_if_needed", True)),
+        login_url=payload.get("login_url", ""),
+        success_selector=payload.get("success_selector", None),
+        max_auto_bypass_attempts=int(payload.get("max_auto_bypass_attempts", 3)),
+        max_auth_handoffs=int(payload.get("max_auth_handoffs", 3)),
+        browser_engine=payload.get("browser_engine", "webkit"),
+        click_discovery=bool(payload.get("click_discovery", False)),
+        max_clicks_per_page=int(payload.get("max_clicks_per_page", 20)),
+        crawl_mode=payload.get("crawl_mode", "link-then-click"),
+        embed_screenshots=bool(payload.get("embed_screenshots", False)),
+        json=True,
+    )
+
+
 def _dispatch_item(store: "DaemonEventStore", item: dict[str, Any]) -> None:
-    """Dispatch one dequeued work item. Currently logs and marks done; real routing follows."""
+    """Route a dequeued work item to the appropriate handler."""
     try:
-        store.append(
-            lgwks_daemon_event.build_event(
-                tenant_id=item["tenant_id"],
-                agent_id=item["agent_id"],
-                session_id=item["session_id"],
-                actor="daemon",
-                client="daemon",
-                lane="workflow",
-                kind="workflow_event",
-                scope="shared_referee",
-                payload={"event": "item_dispatched", "item_id": item["item_id"], "kind": item["kind"]},
-            )
-        )
-        store.complete_item(item["item_id"], result={"dispatched": True})
+        store.append(lgwks_daemon_event.build_event(
+            tenant_id=item["tenant_id"], agent_id=item["agent_id"],
+            session_id=item["session_id"], actor="daemon", client="daemon",
+            lane="workflow", kind="workflow_event", scope="shared_referee",
+            payload={"event": "item_dispatched", "item_id": item["item_id"], "kind": item["kind"]},
+        ))
+        if item["kind"] == "research_run":
+            import lgwks_substrate_run as _substrate
+            manifest = _substrate.build_run(_make_substrate_args(item["payload"]))
+            store.register_run(item["tenant_id"], manifest)
+            store.complete_item(item["item_id"], result={"run_dir": manifest["artifacts"]["root"]})
+        else:
+            store.complete_item(item["item_id"], result={"dispatched": True})
     except Exception as exc:
         store.fail_item(item["item_id"], error=str(exc))
 
@@ -373,6 +401,48 @@ def _serve_command(args: argparse.Namespace) -> int:
     return daemon.run_forever(transcript_path=args.transcript_path)
 
 
+def _research_command(args: argparse.Namespace) -> int:
+    """Run a substrate research session and index it into the daemon store."""
+    import lgwks_substrate_run as _substrate
+    paths = _paths(Path(args.repo).resolve())
+    tenant_id = f"repo:{paths.repo_root.name}"
+    payload: dict[str, Any] = {
+        "target": args.target,
+        "project": args.project,
+        "max_pages": args.max_pages,
+        "max_depth": args.max_depth,
+        "embed_provider": args.embed_provider,
+        "login_if_needed": args.login_if_needed,
+    }
+    sub_args = _make_substrate_args(payload)
+    manifest = _substrate.build_run(sub_args)
+    store = DaemonEventStore(paths.db)
+    try:
+        store.register_run(tenant_id, manifest)
+    finally:
+        store.close()
+    print(json.dumps({
+        "ok": True,
+        "run_id": manifest.get("run_id"),
+        "run_dir": manifest["artifacts"]["root"],
+        "tenant_id": tenant_id,
+    }, indent=2))
+    return 0
+
+
+def _runs_command(args: argparse.Namespace) -> int:
+    from lgwks_daemon_store import DaemonEventStore as _Store
+    paths = _paths(Path(args.repo).resolve())
+    tenant_id = f"repo:{paths.repo_root.name}"
+    store = _Store(paths.db)
+    try:
+        runs = store.list_runs(tenant_id)
+    finally:
+        store.close()
+    print(json.dumps({"tenant_id": tenant_id, "runs": runs}, indent=2))
+    return 0
+
+
 def _enqueue_command(args: argparse.Namespace) -> int:
     import sys as _sys
     from lgwks_daemon_store import DaemonEventStore
@@ -446,6 +516,18 @@ def add_parser(sub) -> None:
     packet.add_argument("--agent-id", required=True)
     packet.set_defaults(func=_packet_command)
 
+    research = ps.add_parser("research", help="run substrate crawl and index into daemon store")
+    research.add_argument("target", help="URL or local path to research")
+    research.add_argument("--project", default="")
+    research.add_argument("--max-pages", type=int, default=25)
+    research.add_argument("--max-depth", type=int, default=2)
+    research.add_argument("--embed-provider", default="auto")
+    research.add_argument("--login-if-needed", action=argparse.BooleanOptionalAction, default=True)
+    research.set_defaults(func=_research_command)
+
+    runs_p = ps.add_parser("runs", help="list indexed research runs for this repo")
+    runs_p.set_defaults(func=_runs_command)
+
 
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(prog="lgwks_daemon")
@@ -479,6 +561,18 @@ def main(argv: list[str] | None = None) -> int:
     packet.add_argument("--session-id", required=True)
     packet.add_argument("--agent-id", required=True)
     packet.set_defaults(func=_packet_command)
+
+    research = sub.add_parser("research", help="run substrate crawl and index into daemon store")
+    research.add_argument("target")
+    research.add_argument("--project", default="")
+    research.add_argument("--max-pages", type=int, default=25)
+    research.add_argument("--max-depth", type=int, default=2)
+    research.add_argument("--embed-provider", default="auto")
+    research.add_argument("--login-if-needed", action=argparse.BooleanOptionalAction, default=True)
+    research.set_defaults(func=_research_command)
+
+    runs_p = sub.add_parser("runs", help="list indexed research runs")
+    runs_p.set_defaults(func=_runs_command)
 
     args = parser.parse_args(argv if argv is not None else sys.argv[1:])
     return args.func(args)

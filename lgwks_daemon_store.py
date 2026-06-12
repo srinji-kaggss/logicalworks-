@@ -100,6 +100,22 @@ _MIGRATIONS = [
             ON daemon_work_queue (tenant_id, session_id, status);
         """,
     ),
+    (
+        3,
+        "daemon_runs_v1",
+        """
+        CREATE TABLE IF NOT EXISTS daemon_runs (
+            run_id        TEXT PRIMARY KEY,
+            tenant_id     TEXT NOT NULL,
+            target        TEXT NOT NULL,
+            run_dir       TEXT NOT NULL,
+            manifest_json TEXT NOT NULL,
+            indexed_at    TEXT NOT NULL
+        );
+        CREATE INDEX IF NOT EXISTS idx_daemon_runs_tenant
+            ON daemon_runs (tenant_id, indexed_at DESC);
+        """,
+    ),
 ]
 
 
@@ -431,6 +447,49 @@ class DaemonEventStore:
         }
 
 
+    # ── Run registry ──────────────────────────────────────────────────────────
+
+    def register_run(self, tenant_id: str, manifest: dict[str, Any]) -> bool:
+        """Index a completed substrate run. Idempotent by run_id."""
+        run_id = str(manifest.get("run_id", "")).strip()
+        target = str(manifest.get("target", manifest.get("source", ""))).strip()
+        run_dir = str((manifest.get("artifacts") or {}).get("root", "")).strip()
+        if not all([run_id, target, run_dir]):
+            raise ValueError("manifest missing run_id, target, or artifacts.root")
+        conn = self._conn
+        conn.execute("BEGIN IMMEDIATE")
+        try:
+            cur = conn.execute(
+                """
+                INSERT OR IGNORE INTO daemon_runs
+                (run_id, tenant_id, target, run_dir, manifest_json, indexed_at)
+                VALUES (?, ?, ?, ?, ?, ?)
+                """,
+                (run_id, tenant_id, target, run_dir,
+                 json.dumps(manifest, sort_keys=True), _now()),
+            )
+            inserted = cur.rowcount == 1
+            conn.execute("COMMIT")
+            return inserted
+        except Exception:
+            conn.execute("ROLLBACK")
+            raise
+
+    def list_runs(self, tenant_id: str, *, limit: int = 20) -> list[dict[str, Any]]:
+        rows = self._conn.execute(
+            """
+            SELECT run_id, target, run_dir, indexed_at
+            FROM daemon_runs WHERE tenant_id=?
+            ORDER BY indexed_at DESC, rowid DESC LIMIT ?
+            """,
+            (tenant_id, max(1, limit)),
+        ).fetchall()
+        return [
+            {"run_id": r[0], "target": r[1], "run_dir": r[2], "indexed_at": r[3]}
+            for r in rows
+        ]
+
+
 def _append_command(args: argparse.Namespace) -> int:
     store = DaemonEventStore(args.db)
     try:
@@ -535,6 +594,14 @@ def main(argv: list[str] | None = None) -> int:
     packet.add_argument("--agent-id", required=True)
     packet.add_argument("--limit", type=int, default=20)
     packet.set_defaults(func=_packet_command)
+
+    runs = sub.add_parser("runs", help="list indexed research runs for a tenant")
+    runs.add_argument("--tenant-id", required=True)
+    runs.add_argument("--limit", type=int, default=20)
+    runs.set_defaults(func=lambda a: (
+        print(json.dumps({"runs": DaemonEventStore(a.db).list_runs(a.tenant_id, limit=a.limit)}, indent=2))
+        or 0
+    ))
 
     args = parser.parse_args(argv)
     return args.func(args)
