@@ -28,8 +28,10 @@ Decisions:
 
 from __future__ import annotations
 
+import fcntl
 import json
 import secrets
+from contextlib import contextmanager, nullcontext
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Protocol, runtime_checkable
@@ -293,6 +295,29 @@ class JsonFileSink:
             encoding="utf-8",
         )
 
+    @contextmanager
+    def locked(self):
+        """Hold the replica-wide load→merge→commit critical section for this sink."""
+        lock_path = self._path.with_suffix(self._path.suffix + ".lock")
+        lock_path.parent.mkdir(parents=True, exist_ok=True)
+        with lock_path.open("a+", encoding="utf-8") as fh:
+            fcntl.flock(fh.fileno(), fcntl.LOCK_EX)
+            try:
+                yield
+            finally:
+                fcntl.flock(fh.fileno(), fcntl.LOCK_UN)
+
+
+@contextmanager
+def _sink_lock(sink: ConvergenceSink):
+    locked = getattr(sink, "locked", None)
+    if locked is None:
+        with nullcontext():
+            yield
+        return
+    with locked():
+        yield
+
 
 def reconverge(
     sink: ConvergenceSink,
@@ -307,20 +332,21 @@ def reconverge(
     on only one side is carried through unchanged; a key whose CRDT type differs
     between prior and current raises TypeError (via merge_state).
     """
-    prior = sink.load()
-    merged: dict[str, GSet | ORSet | LWWRegister] = {}
-    for k in set(prior) | set(current):
-        if k in prior and k in current:
-            merged[k] = merge_state(prior[k], current[k])
-        else:
-            # Carry-through (key on one side only): self-merge so the committed bytes
-            # are CANONICAL — identical to the form a later cross-merge produces. Without
-            # this, a first run and a replayed run serialise differently (e.g. OR-Set
-            # merge materialises empty remove-keys), breaking byte-level idempotency.
-            only = current[k] if k in current else prior[k]
-            merged[k] = merge_state(only, only)
-    sink.commit(merged)
-    return merged
+    with _sink_lock(sink):
+        prior = sink.load()
+        merged: dict[str, GSet | ORSet | LWWRegister] = {}
+        for k in set(prior) | set(current):
+            if k in prior and k in current:
+                merged[k] = merge_state(prior[k], current[k])
+            else:
+                # Carry-through (key on one side only): self-merge so the committed bytes
+                # are CANONICAL — identical to the form a later cross-merge produces. Without
+                # this, a first run and a replayed run serialise differently (e.g. OR-Set
+                # merge materialises empty remove-keys), breaking byte-level idempotency.
+                only = current[k] if k in current else prior[k]
+                merged[k] = merge_state(only, only)
+        sink.commit(merged)
+        return merged
 
 
 # ---------------------------------------------------------------------------

@@ -16,6 +16,8 @@ from __future__ import annotations
 
 import itertools
 import json
+import threading
+import time
 import os
 import random
 import sys
@@ -451,6 +453,36 @@ class TestReconvergePersistence(unittest.TestCase):
         merged = reconverge(JsonFileSink(path), {"world": GSet().add("a")})
         self.assertTrue(path.exists())
         self.assertEqual(merged["world"].value(), frozenset({"a"}))
+
+    def test_reconverge_lock_prevents_lost_merge_under_concurrency(self):
+        """Concurrent writers to one replica must converge to the union, not lose one branch."""
+        path = self.tmp / "locked.json"
+        barrier = threading.Barrier(2)
+        errors: list[Exception] = []
+
+        class SlowJsonFileSink(JsonFileSink):
+            def load(self):
+                state = super().load()
+                time.sleep(0.05)
+                return state
+
+        def worker(cid: str) -> None:
+            try:
+                barrier.wait(timeout=1)
+                reconverge(SlowJsonFileSink(path), {"world": GSet().add(cid)})
+            except Exception as exc:
+                errors.append(exc)
+
+        t1 = threading.Thread(target=worker, args=("a",))
+        t2 = threading.Thread(target=worker, args=("b",))
+        t1.start()
+        t2.start()
+        t1.join(timeout=2)
+        t2.join(timeout=2)
+
+        self.assertFalse(errors)
+        merged = JsonFileSink(path).load()
+        self.assertEqual(merged["world"].value(), frozenset({"a", "b"}))
 
 
 if __name__ == "__main__":

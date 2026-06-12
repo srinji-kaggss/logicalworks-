@@ -28,6 +28,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 import lgwks_inbound
 import lgwks_rank
+import lgwks_access
 import lgwks_vector
 from lgwks_inbound import (
     SCHEMA,
@@ -371,6 +372,25 @@ class TestTenantScopedInbound(unittest.TestCase):
         lgwks_vector.upsert_record(conn, rec, admin=lgwks_vector.ADMIN)
         return rec
 
+    class _FakePort:
+        def __init__(self, principal, scopes):
+            self._principal = principal
+            self._scopes = frozenset(scopes)
+
+        def verify(self, handle, key):
+            return lgwks_access.VerifiedCap(
+                principal=self._principal,
+                cap_ref="fake-ref",
+                scopes=self._scopes,
+                _internal_cap=handle,
+            )
+
+        def require_scope(self, handle, scope, key):
+            verified = self.verify(handle, key)
+            if scope not in verified.scopes:
+                raise RuntimeError(f"fake-port missing scope {scope}")
+            return verified
+
     def test_cross_tenant_nodes_dropped(self):
         with TemporaryDirectory() as tmp:
             conn = lgwks_vector.create_store(Path(tmp) / "scoped.db")
@@ -392,7 +412,13 @@ class TestTenantScopedInbound(unittest.TestCase):
             a_cids = {r.cid for r in a}
             w_cids = {r.cid for r in w}
 
-            pack = assemble_inbound(None, graph, conn, tenant="tenant-A")
+            store = lgwks_access.TenantStore(
+                self._FakePort("tenant-A", {"tenant:rw", "world:r"}),
+                handle=None,
+                key=b"",
+                conn=conn,
+            )
+            pack = assemble_inbound(None, graph, conn, tenant_store=store)
             handles = set(pack["handles"]) if "handles" in pack else set()
             # Collect every cid that surfaced anywhere in the pack.
             surfaced = set(handles)
@@ -404,6 +430,32 @@ class TestTenantScopedInbound(unittest.TestCase):
             self.assertTrue(surfaced & a_cids, "tenant-A's own cids should resolve")
             self.assertTrue(surfaced & w_cids, "world cids should resolve for tenant-A")
             conn.close()
+
+    def test_tenant_store_path_avoids_raw_tenant_resolver(self):
+        with TemporaryDirectory() as td:
+            conn = lgwks_vector.create_store(Path(td) / "vec.db")
+            try:
+                records, graph = _build_store_and_graph(conn, n=4)
+                store = lgwks_access.TenantStore(
+                    self._FakePort("t", {"tenant:rw", "world:r"}),
+                    handle=None,
+                    key=b"",
+                    conn=conn,
+                )
+                original = store.read
+                seen: list[str] = []
+                try:
+                    def _tracking_read(cid: str):
+                        seen.append(cid)
+                        return original(cid)
+                    store.read = _tracking_read  # type: ignore[method-assign]
+                    pack = assemble_inbound(records[0], graph, conn, tenant_store=store)
+                finally:
+                    store.read = original  # type: ignore[method-assign]
+                self.assertTrue(pack["handles"])
+                self.assertTrue(seen, "tenant path must route through TenantStore.read")
+            finally:
+                conn.close()
 
 
 if __name__ == "__main__":
