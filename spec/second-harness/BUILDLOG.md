@@ -497,3 +497,24 @@ WHERE (tenant = ? OR tenant = 'world') [AND space_id = ?]
 **Deferred (not built — see #83):** I8 padding/verbosity-invariance (needs offline demand-weighting/IDF); N novelty axis + `attention` (needs Qwen embedding layer); P→probability calibration (needs outcome log + isotonic fit).
 
 **What's next:** Director's call on the embedding-layer wiring (C → Qwen cosine) and the I8 demand-weighting packet (data-provenance decision).
+
+---
+
+## 2026-06-11 — U6.2 Qwen-cosine seam (#85) + U6.3/I8 demand-weighting (#86)
+
+Director authorized model-layer access for U6.2. Both land on `feat/u6-embedding-idf` as two commits.
+
+**U6.3 / engine invariant I8 — padding/verbosity-invariance.** `C` was `|covered tokens| / |all tokens|`, so padding a prompt with polite/filler tokens inflated the denominator and dropped coverage. Now `C = Σ idf(covered) / Σ idf(recognized)`, weighting each query token by smoothed IDF over the **capability vocabulary** (each verb's `verb+intent` text = one doc). Filler that no capability mentions carries **zero demand** → can't enter numerator or denominator → exact padding-invariance.
+- **Provenance decision (Calculator Test):** corpus = the 190 capability specs (human-authored, in-repo), NOT the ingestion graph. *Why the change from the issue draft:* code-label corpora contain no English filler, so IDF there would assign filler MAX weight — backwards. Capability-vocabulary IDF measures "how much does this token discriminate which capability is wanted," which is exactly demand. Pure counting: `idf=log((N+1)/(df+1))+1`.
+- `scripts/build_capability_idf.py` freezes `.lgwks/capability_idf.json` (`lgwks.capability_idf.v1`); `.lgwks/` is gitignored so the runtime recomputes the identical table from the live catalog (no staleness, never a hard dep).
+- Tests: exact padding-invariance + a **contrastive** test proving uniform weights still degrade (demand-weighting is *the* fix).
+
+**U6.2 — Qwen-cosine coverage seam.** `C` + match scores can now come from semantic cosine instead of lexical overlap, as an **availability-gated enhancement over the lexical+demand floor**. One live prompt embedding cosined against a frozen verb-embedding matrix; `C` = top capability match strength; selections scored by cosine (feed `decisiveness_d`). `coverage_mode` ∈ `lexical`/`lexical+demand`/`qwen`.
+- `_cosine` is pure arithmetic on the given vectors (in-bounds); the vectors are the **Qwen sensor layer** (exempt — `feedback_math_not_bert_scorer`).
+- Degrades to the floor on `EmbedUnavailableError`/missing model/worker crash → INV-6/INV-7 preserved.
+- `scripts/build_capability_embeddings.py` freezes `.lgwks/capability_vectors.json` (`lgwks.capability_vectors.v1`) offline (amortized; one-time).
+- **Honest limitation:** the model is NOT downloaded on this machine (`store/models/` empty), so the **live Qwen path is untested end-to-end here**. The wiring/cosine/fallback are verified deterministically via a stubbed embed port; the live path activates after `make download-models` + the builder. The engine defaults to the lexical floor everywhere the model is absent.
+
+**Result:** 37 engine/invariant + 10 hook tests green; registry 99/99; latency 0.22s. The `d=0→P=0` abstain-on-ties consequence from U6.1 is the concrete motivation now addressed by the cosine seam (graded similarity breaks ties) once the model lands.
+
+**What's next:** `make download-models` + run both builders to activate qwen mode end-to-end; then N novelty axis + `attention` (Qwen-native) and P→probability calibration (outcome log + isotonic).

@@ -7,9 +7,9 @@ run_engine is checked for the degeneracy regression and score bounds.
 
 I1 range          I2 determinism      I3 monotonicity     I4 cardinality-invariance
 I6 null-collapse  I7 boundary         relabel-invariance  (regression: G != 1 - C)
+I8 padding/verbosity-invariance (demand-weighted coverage — #86)
 
-Deferred (NOT audited here — see #83): I8 padding/verbosity-invariance (needs
-offline demand-weighting), N novelty (needs the Qwen embedding layer).
+Deferred (NOT audited here): N novelty (needs the Qwen embedding layer).
 """
 
 from __future__ import annotations
@@ -146,6 +146,221 @@ class TestRunEngineContract(unittest.TestCase):
         self.assertIsNone(s["gap_G"])
         if s["coverage_C"] > 0 and s["decisiveness_d"] > 0:
             self.assertGreater(s["confidence_P"], 0.0)
+
+
+class TestDemandWeighting(unittest.TestCase):
+    """I8 — padding/verbosity-invariance via capability-vocabulary demand weights."""
+
+    def test_idf_common_lt_rare(self):
+        # A token in every capability discriminates nothing -> lower weight than a
+        # token specific to one. Smoothed, so every weight stays positive.
+        verbs = [
+            {"verb": "alpha", "intent": "shared everywhere token"},
+            {"verb": "beta", "intent": "shared everywhere token"},
+            {"verb": "gamma", "intent": "shared everywhere rareword"},
+        ]
+        idf = eng._compute_capability_idf(verbs)
+        self.assertLess(idf["shared"], idf["rareword"])
+        self.assertTrue(all(w > 0.0 for w in idf.values()))
+
+    def test_oov_filler_carries_zero_demand(self):
+        demand = eng._compute_capability_idf([{"verb": "refactor", "intent": "rewrite code"}])
+        self.assertEqual(demand.get("zzzqux", 0.0), 0.0)  # absent -> zero demand
+
+    def test_i8_padding_invariance_exact(self):
+        # Padding a prompt with guaranteed-OOV filler leaves C EXACTLY unchanged:
+        # zero-demand tokens enter neither numerator nor denominator.
+        db = Path("/nonexistent/graph.db")
+        base = eng.run_engine("refactor the auth module", db_path=db)
+        padded = eng.run_engine("refactor the auth module zzzqux blargh frobnix wibble", db_path=db)
+        self.assertEqual(base["insights"]["scores"]["coverage_C"],
+                         padded["insights"]["scores"]["coverage_C"])
+
+    def test_i8_demand_weighting_is_the_fix(self):
+        # Contrastive proof: under UNIFORM weights the same OOV padding lowers C
+        # (denominator grows); demand weights are precisely what make it invariant.
+        verbs = [{"verb": "auth", "intent": "manage auth", "score": 2.0}]
+        demand = eng._compute_capability_idf(verbs)
+        c_uni_base, _ = eng._capability_coverage(["auth"], verbs, demand=None)
+        c_uni_pad, _ = eng._capability_coverage(["auth", "zzzqux", "blargh"], verbs, demand=None)
+        c_dem_base, _ = eng._capability_coverage(["auth"], verbs, demand=demand)
+        c_dem_pad, _ = eng._capability_coverage(["auth", "zzzqux", "blargh"], verbs, demand=demand)
+        self.assertGreater(c_uni_base, c_uni_pad)   # uniform: padding hurts
+        self.assertEqual(c_dem_base, c_dem_pad)      # demand: padding-invariant
+
+    def test_coverage_mode_reported(self):
+        s = eng.run_engine("refactor the auth module")["insights"]["scores"]
+        self.assertIn(s["coverage_mode"], ("lexical", "lexical+demand", "qwen"))
+
+
+class TestCosine(unittest.TestCase):
+    """U6.2 — cosine is pure arithmetic on given vectors; guards on degenerate input."""
+
+    def test_identities(self):
+        self.assertAlmostEqual(eng._cosine([1.0, 0.0, 0.0], [1.0, 0.0, 0.0]), 1.0)
+        self.assertAlmostEqual(eng._cosine([1.0, 0.0, 0.0], [0.0, 1.0, 0.0]), 0.0)
+        self.assertAlmostEqual(eng._cosine([1.0, 0.0], [-1.0, 0.0]), -1.0)
+
+    def test_guards(self):
+        self.assertEqual(eng._cosine([1.0, 0.0], [1.0, 0.0, 0.0]), 0.0)   # shape mismatch
+        self.assertEqual(eng._cosine([0.0, 0.0], [1.0, 0.0]), 0.0)         # zero vector
+        self.assertEqual(eng._cosine([], []), 0.0)                          # empty
+        self.assertEqual(eng._cosine([float("inf"), 0.0], [1.0, 0.0]), 0.0)  # non-finite
+
+    def test_ranking(self):
+        q = [1.0, 1.0, 0.0]
+        near = eng._cosine(q, [1.0, 0.9, 0.0])
+        far = eng._cosine(q, [0.0, 0.0, 1.0])
+        self.assertGreater(near, far)
+
+
+class TestEmbeddingCoverage(unittest.TestCase):
+    """U6.2 — Qwen-cosine coverage path + its availability gate (no model needed:
+    the embed port is stubbed, so this verifies the WIRING deterministically)."""
+
+    @staticmethod
+    def _swap_port(port_cls):
+        import types
+        stub = types.SimpleNamespace(EmbedPort=port_cls)
+        old = sys.modules.get("lgwks_embed_port")
+        sys.modules["lgwks_embed_port"] = stub
+        return old
+
+    @staticmethod
+    def _restore_port(old):
+        if old is not None:
+            sys.modules["lgwks_embed_port"] = old
+        else:
+            sys.modules.pop("lgwks_embed_port", None)
+
+    def test_qwen_coverage_with_stub_port(self):
+        artifact = {"dim": 3, "verbs": [
+            {"verb": "alpha", "intent": "a", "vec": [1.0, 0.0, 0.0]},
+            {"verb": "beta", "intent": "b", "vec": [0.0, 1.0, 0.0]},
+        ]}
+
+        class _Port:
+            def __init__(self, *a, **k):
+                pass
+            def embed_text(self, text, instruction=""):
+                return [1.0, 0.0, 0.0]   # identical to alpha, orthogonal to beta
+            def close(self):
+                pass
+
+        old = self._swap_port(_Port)
+        try:
+            res = eng._embedding_coverage("anything", artifact)
+        finally:
+            self._restore_port(old)
+        self.assertIsNotNone(res)
+        C, sels = res
+        self.assertEqual(C, 1.0)                     # top cosine = identical match
+        self.assertEqual(sels[0]["verb"], "alpha")   # ranked first
+        self.assertAlmostEqual(sels[1]["score"], 0.0, places=3)  # orthogonal -> 0
+
+    def test_unavailable_port_returns_none(self):
+        class _Port:
+            def __init__(self, *a, **k):
+                raise RuntimeError("no model downloaded")  # ~ EmbedUnavailableError
+
+        old = self._swap_port(_Port)
+        try:
+            res = eng._embedding_coverage("x", {"dim": 3, "verbs": [{"verb": "a", "vec": [1.0, 0.0, 0.0]}]})
+        finally:
+            self._restore_port(old)
+        self.assertIsNone(res)   # caller must fall back to the lexical floor
+
+    def test_engine_default_is_lexical_floor(self):
+        # No frozen vector artifact on this machine -> engine uses the lexical
+        # floor, never errors, never claims qwen mode.
+        s = eng.run_engine("refactor the auth module")["insights"]["scores"]
+        self.assertIn(s["coverage_mode"], ("lexical", "lexical+demand"))
+
+
+class TestArtifactTampering(unittest.TestCase):
+    """The frozen .lgwks/*.json artifacts are an untrusted input surface. A
+    tampered/corrupt artifact must NEVER raise out of run_engine (INV-6) or push a
+    score out of [0,1] — it must degrade silently to the lexical floor. These
+    regressions cover the three HIGH findings from the 2026-06-11 adversarial pass.
+    """
+
+    def setUp(self):
+        self._tmp = tempfile.TemporaryDirectory()
+        self._idf_orig = eng._CAP_IDF_ARTIFACT
+        self._vec_orig = eng._CAP_VEC_ARTIFACT
+        eng._CAP_IDF_ARTIFACT = Path(self._tmp.name) / "capability_idf.json"
+        eng._CAP_VEC_ARTIFACT = Path(self._tmp.name) / "capability_vectors.json"
+
+    def tearDown(self):
+        eng._CAP_IDF_ARTIFACT = self._idf_orig
+        eng._CAP_VEC_ARTIFACT = self._vec_orig
+        self._tmp.cleanup()
+        sys.modules.pop("lgwks_embed_port", None)
+
+    def _C(self):
+        return eng.run_engine("refactor the auth module",
+                              db_path=Path("/nonexistent/g.db"))["insights"]["scores"]["coverage_C"]
+
+    def test_negative_idf_weight_clamped(self):
+        eng._CAP_IDF_ARTIFACT.write_text('{"idf":{"refactor":100.0,"auth":100.0,"module":-199.9}}')
+        c = self._C()
+        self.assertGreaterEqual(c, 0.0)
+        self.assertLessEqual(c, 1.0)
+
+    def test_nonfinite_idf_weight_dropped(self):
+        for literal in ('{"idf":{"refactor":Infinity,"auth":1.0,"module":1.0}}',
+                        '{"idf":{"refactor":NaN,"auth":1.0,"module":1.0}}'):
+            eng._CAP_IDF_ARTIFACT.write_text(literal)
+            c = self._C()
+            self.assertTrue(math.isfinite(c))
+            self.assertGreaterEqual(c, 0.0)
+            self.assertLessEqual(c, 1.0)
+
+    def test_poisoned_vectors_do_not_raise(self):
+        # str vecs, non-dict records, non-list verbs, lying dim — with a working
+        # stub port — must all fall back to lexical, never raise (HIGH#1).
+        class _Port:
+            def __init__(self, *a, **k):
+                pass
+            def embed_text(self, text, instruction=""):
+                return [1.0, 0.0, 0.0]
+            def close(self):
+                pass
+        import types
+        for poison in ('{"dim":3,"verbs":[{"verb":"a","vec":["x","y","z"]}]}',
+                       '{"dim":3,"verbs":1234}',
+                       '{"dim":3,"verbs":[42]}',
+                       '{"dim":-5,"verbs":[{"verb":"a","vec":[1,0,0]}]}',
+                       '{"verbs":[{"vec":[NaN,0,0]}]}'):
+            eng._CAP_VEC_ARTIFACT.write_text(poison)
+            sys.modules["lgwks_embed_port"] = types.SimpleNamespace(EmbedPort=_Port)
+            try:
+                s = eng.run_engine("refactor the auth module")["insights"]["scores"]
+            except Exception as exc:  # noqa: BLE001
+                self.fail(f"run_engine raised on poisoned vectors {poison[:40]}: {exc!r}")
+            finally:
+                sys.modules.pop("lgwks_embed_port", None)
+            # The invariant is: never raise, and C stays a finite [0,1] axis —
+            # whether it fell back to lexical or salvaged a valid-vec record.
+            self.assertIn(s["coverage_mode"], ("lexical", "lexical+demand", "qwen"))
+            self.assertTrue(math.isfinite(s["coverage_C"]))
+            self.assertGreaterEqual(s["coverage_C"], 0.0)
+            self.assertLessEqual(s["coverage_C"], 1.0)
+
+
+class TestInputBounds(unittest.TestCase):
+    def test_oversized_prompt_capped_and_fast(self):
+        import time
+        big = "a and also b " * 1_500_000  # ~20MB
+        t0 = time.time()
+        s = eng.run_engine(big, db_path=Path("/nonexistent/g.db"))["insights"]["scores"]
+        self.assertLess(time.time() - t0, 1.0)  # INV-7
+        self.assertGreaterEqual(s["coverage_C"], 0.0)
+        self.assertLessEqual(s["coverage_C"], 1.0)
+
+    def test_non_str_verb_tokens_no_raise(self):
+        # the demand recompute path must tolerate non-str verb/intent fields
+        self.assertIsInstance(eng._compute_capability_idf([{"verb": 123, "intent": None}]), dict)
 
 
 if __name__ == "__main__":

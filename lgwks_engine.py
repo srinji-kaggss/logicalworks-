@@ -23,6 +23,18 @@ from typing import Any
 _REPO = Path(__file__).resolve().parent
 _LGWKS = _REPO / "lgwks"
 _ENTITY_GRAPH_DB = _REPO / ".lgwks" / "entity_graph.db"
+# I8 demand-weight table (frozen, optional). Built offline by
+# scripts/build_capability_idf.py from the capability vocabulary; absent -> the
+# weights are recomputed from the live verb catalog (graceful, never a hard dep).
+_CAP_IDF_ARTIFACT = _REPO / ".lgwks" / "capability_idf.json"
+# U6.2 frozen Qwen verb-embedding matrix (optional). Built offline by
+# scripts/build_capability_embeddings.py; absent OR embed port unavailable ->
+# coverage falls back to the lexical floor below.
+_CAP_VEC_ARTIFACT = _REPO / ".lgwks" / "capability_vectors.json"
+# INV-7 guard: a real Director prompt is never multi-KB. Cap the attacker-
+# controlled input so tokenization/mapping over a pathological prompt can't blow
+# the latency budget.
+_MAX_PROMPT_CHARS = 16_000
 
 _SCHEMA = "lgwks.engine.schema.v1"
 
@@ -42,12 +54,72 @@ _HEDGE_RE = re.compile(
 _MULTI_INTENT_RE = re.compile(r"\b(and also|and then|but also|plus|additionally)\b", re.I)
 
 
-def _tokens(text: str) -> list[str]:
-    return [t for t in _TOKEN.findall((text or "").lower()) if t not in _STOP and len(t) > 1]
+def _tokens(text: object) -> list[str]:
+    s = text if isinstance(text, str) else ("" if text is None else str(text))
+    return [t for t in _TOKEN.findall(s.lower()) if t not in _STOP and len(t) > 1]
 
 
-def _capability_coverage(query_tokens: list[str], verbs: list[dict]) -> tuple[float, list[dict]]:
-    """Return (coverage_fraction, matched_verb_records) using U1 capability map."""
+def _compute_capability_idf(verbs: list[dict]) -> dict[str, float]:
+    """Demand weight per token = smoothed IDF over the capability vocabulary.
+
+    Each verb's (name + intent) text is one "document"; df(t) = how many verbs
+    mention t; idf(t) = log((N+1)/(df+1)) + 1. Pure counting over human-authored
+    capability specs — no AI, hand-derivable (feedback_calculator_test). A token
+    common across many capabilities (e.g. "lgwks", "file") carries little
+    discrimination -> low weight; a token specific to few -> high weight.
+    """
+    docs: list[set[str]] = []
+    for v in verbs:
+        toks = set(_tokens(v.get("verb", ""))) | set(_tokens(v.get("intent", "")))
+        if toks:
+            docs.append(toks)
+    n = len(docs)
+    if n == 0:
+        return {}
+    df: dict[str, int] = {}
+    for toks in docs:
+        for t in toks:
+            df[t] = df.get(t, 0) + 1
+    return {t: round(math.log((n + 1) / (c + 1)) + 1.0, 6) for t, c in df.items()}
+
+
+def _load_demand_weights(verbs: list[dict]) -> dict[str, float]:
+    """Frozen IDF artifact if present (declared provenance), else recompute from
+    the live verb catalog. Never a hard dependency on the artifact."""
+    try:
+        if _CAP_IDF_ARTIFACT.exists():
+            data = json.loads(_CAP_IDF_ARTIFACT.read_text())
+            idf = data.get("idf")
+            if isinstance(idf, dict) and idf:
+                # The artifact is an untrusted input surface (tamper/corruption):
+                # keep only finite, non-negative weights. A bad weight is dropped,
+                # not trusted — a negative/inf/nan weight must never reach coverage.
+                clean = {}
+                for k, val in idf.items():
+                    try:
+                        w = float(val)
+                    except (TypeError, ValueError):
+                        continue
+                    if math.isfinite(w) and w >= 0.0:
+                        clean[str(k)] = w
+                if clean:
+                    return clean
+    except Exception:
+        pass
+    return _compute_capability_idf(verbs)
+
+
+def _capability_coverage(
+    query_tokens: list[str], verbs: list[dict], demand: dict[str, float] | None = None
+) -> tuple[float, list[dict]]:
+    """Return (coverage_fraction, matched_verb_records) using U1 capability map.
+
+    I8 padding/verbosity-invariance: when `demand` weights are supplied, coverage
+    is `Σ idf(covered) / Σ idf(recognized)` where "recognized" = query tokens
+    present in the demand table. Filler tokens that no capability mentions carry
+    zero demand, so padding a prompt with them cannot dilute C. Without weights it
+    degrades to the plain token fraction (uniform demand).
+    """
     if not query_tokens:
         return 0.0, []
     qt_set = set(query_tokens)
@@ -63,8 +135,92 @@ def _capability_coverage(query_tokens: list[str], verbs: list[dict]) -> tuple[fl
             if score > 0.0:
                 matched.append((score, v))
     matched.sort(key=lambda x: x[0], reverse=True)
-    coverage = len(verb_tokens_covered) / len(qt_set)
+    if demand:
+        denom = sum(demand.get(t, 0.0) for t in qt_set)
+        numer = sum(demand.get(t, 0.0) for t in verb_tokens_covered)
+        coverage = (numer / denom) if denom > 0.0 else 0.0
+    else:
+        coverage = len(verb_tokens_covered) / len(qt_set)
+    # Range backstop: coverage is a [0,1] axis. Even with sanitized weights, clamp
+    # so no downstream (tampered artifact, float drift) can push C out of range.
+    if not math.isfinite(coverage):
+        coverage = 0.0
+    coverage = max(0.0, min(1.0, coverage))
     return round(coverage, 3), [v for _, v in matched[:8]]
+
+
+def _cosine(a: list[float], b: list[float]) -> float:
+    """Cosine similarity, clamped to [-1, 1]. Pure arithmetic on the GIVEN vectors
+    (calculator-derivable); the vectors are the Qwen sensor layer (exempt — see
+    feedback_math_not_bert_scorer). Returns 0.0 on shape/degenerate/non-finite."""
+    if not a or not b or len(a) != len(b):
+        return 0.0
+    dot = sum(x * y for x, y in zip(a, b))
+    na = math.sqrt(sum(x * x for x in a))
+    nb = math.sqrt(sum(y * y for y in b))
+    if na == 0.0 or nb == 0.0:
+        return 0.0
+    sim = dot / (na * nb)
+    if not math.isfinite(sim):
+        return 0.0
+    return max(-1.0, min(1.0, sim))
+
+
+def _load_capability_vectors() -> dict | None:
+    """The frozen Qwen verb-embedding matrix, or None when absent/unreadable
+    (caller degrades to the lexical floor — never a hard dependency)."""
+    try:
+        if _CAP_VEC_ARTIFACT.exists():
+            data = json.loads(_CAP_VEC_ARTIFACT.read_text())
+            if isinstance(data, dict) and data.get("verbs"):
+                return data
+    except Exception:
+        pass
+    return None
+
+
+def _embedding_coverage(prompt: str, artifact: dict, top: int = 8) -> tuple[float, list[dict]] | None:
+    """Qwen-cosine coverage: C = top capability cosine; selections scored by cosine.
+
+    One live model call (the prompt); verb vectors are frozen offline. Returns
+    None when the embed port is unavailable OR errors (EmbedUnavailableError, model
+    not downloaded, worker crash, latency) so the caller falls back to lexical —
+    INV-6/INV-7 preserved (the model path runs only when present + warm).
+    """
+    # The frozen artifact is an untrusted input surface (tamper/corruption/flaky
+    # embed worker): the ENTIRE body — port call AND the cosine/selection loop —
+    # is guarded, so any malformed record (str vec, non-dict, lying dim) degrades
+    # to the lexical floor (return None) rather than raising out (INV-6).
+    try:
+        import lgwks_embed_port as ep
+        raw_dim = artifact.get("dim")
+        dim = int(raw_dim) if isinstance(raw_dim, int) and raw_dim > 0 else 0
+        port = ep.EmbedPort(dim=dim) if dim else ep.EmbedPort()
+        try:
+            q = port.embed_text(prompt)
+        finally:
+            port.close()
+        verbs = artifact.get("verbs")
+        if not isinstance(verbs, list):
+            return None
+        sims: list[tuple[float, dict]] = []
+        for rec in verbs:
+            if not isinstance(rec, dict):
+                continue
+            vec = rec.get("vec")
+            if isinstance(vec, list) and vec and all(
+                isinstance(x, (int, float)) and math.isfinite(x) for x in vec
+            ):
+                sims.append((_cosine(q, vec), rec))
+        if not sims:
+            return None
+        sims.sort(key=lambda x: x[0], reverse=True)
+        coverage = max(0.0, min(1.0, sims[0][0]))  # best capability match strength
+        selections = [{"verb": str(r.get("verb", "")), "intent": str(r.get("intent", "")),
+                       "score": round(max(0.0, s), 6)} for s, r in sims[:top]]
+        return round(coverage, 3), selections
+    except Exception:
+        return None
 
 
 def _graph_retrieval(query_tokens: list[str], db_path: Path) -> tuple[list[dict], int, bool]:
@@ -163,6 +319,8 @@ def run_engine(
 
     Fails silently on any sub-component error — always returns a valid envelope.
     """
+    if isinstance(prompt, str) and len(prompt) > _MAX_PROMPT_CHARS:
+        prompt = prompt[:_MAX_PROMPT_CHARS]
     try:
         sys.path.insert(0, str(_REPO))
         import lgwks_map
@@ -173,7 +331,22 @@ def run_engine(
         verbs, verb_count = [], 0
 
     qt = _tokens(prompt)
-    cap_coverage, selections = _capability_coverage(qt, verbs)
+    # Coverage C — two paths, same axis. PREFERRED: Qwen-cosine over the frozen
+    # verb matrix (semantic; needs the model + artifact). FLOOR: lexical token
+    # overlap with I8 demand weighting (always available). The model path is an
+    # availability-gated enhancement and silently degrades to the floor.
+    demand = _load_demand_weights(verbs)
+    emb = None
+    if qt:
+        cap_vectors = _load_capability_vectors()
+        if cap_vectors:
+            emb = _embedding_coverage(prompt, cap_vectors)
+    if emb is not None:
+        cap_coverage, selections = emb
+        coverage_mode = "qwen"
+    else:
+        cap_coverage, selections = _capability_coverage(qt, verbs, demand=demand)
+        coverage_mode = "lexical+demand" if demand else "lexical"
 
     _db = db_path or _ENTITY_GRAPH_DB
     graph_hits, graph_grounded, graph_available = _graph_retrieval(qt, _db)
@@ -220,6 +393,7 @@ def run_engine(
                 "decisiveness_d": decisiveness,
                 "confidence_P": P,
                 "grounding_status": grounding_status,
+                "coverage_mode": coverage_mode,
                 "note": "independent axes (capability / graph / margin); P = geometric "
                         "mean over available axes — constant-free index, not a "
                         "probability; Qwen-cosine + novelty + calibration pending",
