@@ -238,6 +238,31 @@ class WorktreeManager:
         except Exception:
             pass
 
+    def _crdt_reconverge_entity_graph(self, worktree_path: Path) -> None:
+        """Merge entity-graph CRDT sidecars from worktree into the main repo.
+
+        Must be called BEFORE git worktree remove so the worktree files are
+        still readable. FAIL-SILENT on any error (same pattern as _crdt_add).
+        """
+        try:
+            import lgwks_crdt as _crdt
+            wt = worktree_path.resolve()
+            if not wt.exists():
+                return
+            for sidecar in wt.rglob("*.crdt.json"):
+                try:
+                    wt_sink = _crdt.JsonFileSink(sidecar)
+                    wt_state = wt_sink.load()
+                    if not wt_state:
+                        continue
+                    rel = sidecar.relative_to(wt)
+                    canonical = self.repo_root / rel
+                    _crdt.reconverge(_crdt.JsonFileSink(canonical), wt_state)
+                except Exception:
+                    pass
+        except Exception:
+            pass
+
     def create(self, tenant_id: str, session_id: str, agent_id: str) -> dict[str, Any]:
         """Create a new worktree for a session, or return the existing one."""
         active = self.store.list_worktrees(tenant_id, active_only=True)
@@ -278,6 +303,10 @@ class WorktreeManager:
 
         error: str | None = None
         wt_path = Path(rec["worktree_path"])
+
+        # Reconverge entity-graph CRDT sidecars BEFORE git removes the worktree files
+        self._crdt_reconverge_entity_graph(wt_path)
+
         rc, out = self._git("worktree", "remove", "--force", str(wt_path))
         if rc != 0:
             error = f"git worktree remove failed: {out}"
