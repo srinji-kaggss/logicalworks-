@@ -1,8 +1,8 @@
-# Handoff — lgwks subconscious build · 2026-06-11 (session 8, main @ 8353036)
+# Handoff — lgwks subconscious build · 2026-06-12 (session 9, main @ dd30d10)
 
-> Refreshed session 8: I-series fully landed (session 7). U1 CLI wired + U6 engine built.
-> **PRD §13 first slice is 2/3 done: U1 ✅ U6 ✅ U7-minimal pending.** No open GH issues.
-> The dated "Current state" sections below are append-only history — the **latest** state is the session-8 block at the bottom.
+> Refreshed session 9: U7 closed + the two U6 follow-ons (Qwen-cosine seam, I8 demand-weighting) landed & hardened.
+> **PRD §13 first slice is DONE: U1 ✅ U6 ✅ U7 ✅.** No open GH issues.
+> The dated "Current state" sections below are append-only history — the **latest** state is the session-9 block at the bottom.
 
 You are the next agent on the lgwks rebuild. Read this fully before acting. Written
 AI-for-AI; receipts, not essays. Authority ladder: `/CLAUDE.md` → `governance/README.md`
@@ -196,6 +196,28 @@ module + CLI + tests do not depend on it.
 **open ops action (carried from I7):** re-register `hooks/subconscious_inbound.py` against the live `/Applications/logicalworks` dir — confirm path with Director before wiring U7.
 
 **Parallel tracks (do not block U7):** U2 (Actor contract), U3 (World-Graph query), U4 (BERT runtime), U5 (Transcript Cortex) all run in parallel per PRD §12 and upgrade U6 once landed. PRD §13 says: U1 + U7-minimal first (deterministic signals), BERT upgrades the `attention` field after.
+
+## Session 9 state (2026-06-12, main @ dd30d10)
+
+**PRD §13 first slice: DONE. U1 ✅ U6 ✅ U7 ✅.** Then the two U6.1 follow-ons landed.
+
+| unit | status | module | commit / PR |
+|---|---|---|---|
+| U7 Inbound hook | ✅ closed (#81) — `run_engine()` wired, §6 schema injected; verified test-only | `hooks/subconscious_inbound.py` | #82 |
+| U6.2 Qwen-cosine seam | ✅ merged (#85) — coverage→cosine, availability-gated over lexical floor | `lgwks_engine.py` + `scripts/build_capability_embeddings.py` | #87 |
+| U6.3 / invariant I8 | ✅ merged (#86) — demand-weighted coverage, padding/verbosity-invariant | `lgwks_engine.py` + `scripts/build_capability_idf.py` | #87 |
+
+**§6 score axes now (post U6.1/U6.2/U6.3):** C coverage (lexical+demand OR Qwen-cosine; `coverage_mode` reports which) · G grounding gap (graph, nullable) · d decisiveness (margin) · P = geometric mean over available axes (constant-free). New artifacts: `lgwks.capability_idf.v1`, `lgwks.capability_vectors.v1` (both optional, runtime degrades gracefully when absent).
+
+**Hardened (adversarial pass):** `.lgwks/*.json` artifacts are an untrusted input surface — sanitized (finite/non-negative weights), C clamped to [0,1], `_embedding_coverage` fully guarded (poison → lexical floor, never raises), prompt capped (`_MAX_PROMPT_CHARS`). 52 engine/invariant/hook tests green.
+
+**Codebase shape (session 9):** 128 modules, 46,444 LOC (NAVMAP regenerated). Governance gate: 99/99 schema IDs registered.
+
+**Two open ops/decisions (Director-gated):**
+1. **Live hook wiring** — U7 is verified test-only; the `UserPromptSubmit` hook is NOT registered. Wire it into `/Applications/logicalworks/.claude/settings.json` when the Director wants live interception (it's a `UserPromptSubmit` Claude-Code hook, NOT an `lgwks hooks` bus event).
+2. **Activate qwen mode** — `make download-models` (Qwen3-VL-Embedding-8B not present here) + run the two `scripts/build_capability_*` builders; the engine stays on the lexical floor until then.
+
+**Next deferred (need Director go):** N novelty axis + `attention` (Qwen-native); P→probability calibration (outcome log + isotonic fit). U2–U5 parallel tracks still upgrade U6 once landed.
 
 ## Doc map
 
