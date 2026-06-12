@@ -910,6 +910,26 @@ Verification:
 
 ---
 
+## 2026-06-12 · Session 17 — P3 research front door query surface (commit 6ba90b3)
+
+**Problem:** `daemon research <url>` indexed runs; `daemon runs` listed them (4-field summary); the full manifest stored in `manifest_json` was never exposed. No way to retrieve a prior run's artifact paths on demand.
+
+**DaemonEventStore.get_run(run_id):**
+- Reads `manifest_json` from `daemon_runs` WHERE `run_id=?`; parses + returns the full manifest dict, or `None` if not found.
+
+**lgwks daemon runs list|get:**
+- `runs` converted from leaf to subparser with two subcommands: `list` (existing behavior, unchanged) and `get <run_id>` (new — returns full manifest JSON).
+- `_runs_get_command`: exits 1 + stderr JSON on unknown run_id; exits 0 + stdout JSON on found.
+
+**Tests:** 4 new tests in `TestRunsGetCommand` (test_daemon_e2e.py): unknown→None, register→get, CLI not-found→1, CLI found→0+manifest.
+
+Verification:
+- `pytest tests/test_daemon_e2e.py -q` → **14 passed**
+- `pytest tests/test_daemon_e2e.py tests/test_daemon_store.py tests/test_daemon_event.py tests/test_home.py tests/test_session.py tests/test_crdt.py tests/test_entity_graph.py tests/test_engine.py tests/test_inbound.py tests/test_capability.py -q` → **162 passed, 1 pre-existing failure** (test_browser_navigates_domain_to_command — pre-existing on main)
+- `lgwks_daemon.py runs --help` → `{list,get}` subcommands confirmed
+
+---
+
 ## 2026-06-12 · Session 16 — RequestContext wiring + daemon emit (commit a0bb658)
 
 **assemble_inbound() ctx kwarg:**

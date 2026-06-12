@@ -1,6 +1,6 @@
 # NAVMAP — lgwks module atlas (generated; do not hand-edit)
 
-> `scripts/gen_navmap.py` from source — re-run to refresh. **140 modules · 50,666 LOC.** This is the canonical repo map: if someone says "review the map" or "check the navmap", they mean this file unless another map is explicitly named. Read/query this FIRST. Strict machine-readable contract: `docs/navmap/index.json` (`lgwks.navmap.v1`).
+> `scripts/gen_navmap.py` from source — re-run to refresh. **140 modules · 50,706 LOC.** This is the canonical repo map: if someone says "review the map" or "check the navmap", they mean this file unless another map is explicitly named. Read/query this FIRST. Strict machine-readable contract: `docs/navmap/index.json` (`lgwks.navmap.v1`).
 
 **Staleness:** `active` 139 · `orphan` 1
 
@@ -73,12 +73,12 @@ Row legend: `cli` `test` · `←N` imported by N · `→N` imports N · `Nd` day
 
 | module | purpose | loc | stale | rel |
 |---|---|---|---|---|
-| `axiom.__init__` | the standalone byte framework for the Axiom machine-first ISA. | 20 | active | ←12 5d |
+| `axiom.__init__` | the standalone byte framework for the Axiom machine-first ISA. | 20 | active | ←12 6d |
 | `axiom.capsule` | The Capsule — one typed, content-addressed record. Claim asserts; Hole abstains. The unit the verifier | 171 | active | ←12 5d |
-| `axiom.cid` | Content identity (CID) — the address of a node over its CANONICAL bytes. | 52 | active | ←12 5d |
+| `axiom.cid` | Content identity (CID) — the address of a node over its CANONICAL bytes. | 52 | active | ←12 6d |
 | `axiom.fabric` | The fabric — immutable content-addressed DAG + hash-chained append-only log + the pending→committed | 144 | active | ←12 5d |
-| `axiom.varint` | LEB128 base-128 varints — the lowest byte-layer primitive (WASM uses these for all lengths/indices). | 92 | active | ←12 5d |
-| `axiom.verify` | The decidable click — the trust core. A capsule attaches IFF this returns ok. Pure, decidable, 0-AI, | 112 | active | ←12 5d |
+| `axiom.varint` | LEB128 base-128 varints — the lowest byte-layer primitive (WASM uses these for all lengths/indices). | 92 | active | ←12 6d |
+| `axiom.verify` | The decidable click — the trust core. A capsule attaches IFF this returns ok. Pure, decidable, 0-AI, | 112 | active | ←12 6d |
 | `axiom.wire` | Canonical TLV wire — tag-length-value over LEB128 (the WASM section / protobuf TLV shape, but we OWN the | 106 | active | ←12 5d |
 | `lgwks_axiom` | CLI harness over the standalone Axiom byte framework. | 1060 | active | cli ←1 →2 5d |
 
@@ -95,7 +95,7 @@ Row legend: `cli` `test` · `←N` imported by N · `→N` imports N · `Nd` day
 | `lgwks_repo` | repo lifecycle commands: audit, recover, cleanup, merge, handoff, graph. | 740 | active | cli test ←5 →4 7d |
 | `lgwks_review` | graph-aware, spec-bound code review. | 665 | active | cli test ←3 →9 3d |
 
-## Harness / daemon / orchestration  ·  32 mod · 11,088 LOC
+## Harness / daemon / orchestration  ·  32 mod · 11,128 LOC
 
 | module | purpose | loc | stale | rel |
 |---|---|---|---|---|
@@ -108,10 +108,10 @@ Row legend: `cli` `test` · `←N` imported by N · `→N` imports N · `Nd` day
 | `lgwks_capabilities` | the resolver that fixes "the tool isn't where it should be." | 268 | active | ←5 6d |
 | `lgwks_context` | graduated-resolution (LOD) context pack for the next spawn (#9 harness layer). | 187 | active | cli ←2 3d |
 | `lgwks_cycle` | project deploy cycle ledger. | 145 | active | ←4 →1 11d |
-| `lgwks_daemon` | minimal background lifecycle shell for the referee runtime. | 932 | active | cli test ←2 →5 0d |
+| `lgwks_daemon` | minimal background lifecycle shell for the referee runtime. | 959 | active | cli test ←2 →5 0d |
 | `lgwks_daemon_event` | normalized daemon event envelope for shared referee runtime. | 217 | active | cli test ←3 0d |
 | `lgwks_daemon_export` | content-addressed archive/export tier for daemon runs. | 164 | active | test ←1 0d |
-| `lgwks_daemon_store` | durable event log + work queue for the daemon referee runtime. | 787 | active | test ←2 →2 0d |
+| `lgwks_daemon_store` | durable event log + work queue for the daemon referee runtime. | 800 | active | test ←2 →2 0d |
 | `lgwks_do` | unified orchestrator: code, research, govern, cleanup, ship. | 512 | active | cli ←2 →6 3d |
 | `lgwks_engine` | U6: Subconscious Engine (deterministic first slice). | 438 | active | cli test ←3 →3 0d |
 | `lgwks_ground` | fused live grounding for the research loop (#9 / harness layer). | 165 | active | ←2 →4 8d |

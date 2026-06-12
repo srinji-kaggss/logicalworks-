@@ -463,6 +463,42 @@ NAVMAP regenerated: **140 modules, 50,602 LOC**.
 
 ---
 
+## Session 17 state — 2026-06-12 · main @ `6ba90b3`
+
+**P3 research front door query surface — complete**
+
+| change | what | impact |
+|--------|------|--------|
+| `DaemonEventStore.get_run(run_id)` | reads `manifest_json` from `daemon_runs`, returns full manifest dict or `None` | exposes artifact paths (graph.json, substrate.db, etc.) to callers |
+| `daemon runs list` | renamed from leaf `runs`; identical behavior | backward-compat path via new subparser |
+| `daemon runs get <run_id>` | new — streams full manifest JSON; exits 1 on unknown | closes P3: a prior indexed run's packet is now retrievable on demand |
+
+14 tests in `test_daemon_e2e.py` — all pass. 162 total pass / 1 pre-existing failure.
+
+**End-to-end research pipeline now fully queryable without hooks:**
+```
+lgwks daemon research <url>      # index a run
+lgwks daemon runs list           # list indexed runs → get run_id
+lgwks daemon runs get <run_id>   # retrieve full manifest → artifact paths
+lgwks daemon emit --kind human_message --session-id s1 --agent-id claude
+lgwks daemon packet get --session-id s1 --agent-id claude
+```
+
+**Honest limits:**
+1. **No inbound packet from a run's vector store** — `runs get` returns the manifest (artifact paths); calling `lgwks inbound run <graph.json> --store <substrate.db>` is still a separate step. A `daemon runs packet <run_id>` convenience that assembles the RRF pack directly is a possible next seam but needs Director go (adds a non-trivial path through assemble_inbound).
+2. **Hooks still deferred** — PostToolUse + Stop hooks NOT in `.claude/settings.local.json`.
+
+**Next canonical seams (no Director trigger):**
+- `daemon runs packet <run_id>` convenience — assembles inbound RRF pack from a prior run's substrate.db + graph.json on demand (needs Director go; touches assemble_inbound).
+- None currently filed; board is clean.
+
+**Next canonical seams (Director trigger required):**
+- D2 network/MCP transport: file once Director triggers "expose beyond localhost".
+- Live hook registration: PostToolUse + Stop when Director confirms.
+- N novelty axis + calibrated P probability (U6.4) — Director go needed.
+
+---
+
 ## Session 16 state — 2026-06-12 · main @ `a0bb658`
 
 **RequestContext wiring + daemon emit command (no Director trigger required)**
