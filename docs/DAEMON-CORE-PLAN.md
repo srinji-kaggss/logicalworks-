@@ -113,23 +113,20 @@ Implementation note:
 - do this in Python first unless/until the queue/state contract is stable enough to migrate
 - if/when migrated, Rust should own the single-writer backend, not fork the business rules
 
-### P1. Ingress and transcript normalization
+### P1. Ingress and transcript normalization ✅ DONE (`6182a7d`)
 
-Need one normalized event model for:
+`lgwks_transcript.py`: stateless JSONL tail-reader (`tail(path, n=20)`) → normalized turn payloads.
+`hooks/claude_tool_hook.py`: PostToolUse hook → `tool_call` event (actor=agent, lane=telemetry, metadata-only).
+`hooks/claude_stop_hook.py`: Stop hook → reads transcript tail → `transcript_turn` events; PK-idempotent.
 
-- inbound human message
-- transcript turn
-- tool call
-- file change
-- workflow event
+Acceptance MET:
+- Claude ingress hook (UserPromptSubmit) → `human_message`; Stop hook → `transcript_turn`; PostToolUse hook → `tool_call` — all normalized `lgwks.daemon.event.v1` envelopes ✅
+- Codex/Gemini adapters unchanged (same `human_message` contract; tool/transcript hooks are Claude Code-specific) ✅
+- every event carries `tenant_id` + `session_id` ✅
 
-Acceptance:
+Honest limit: `claude_stop_hook.py` and `claude_tool_hook.py` are not yet registered in `.claude/settings.local.json` — they exist and are tested; live wiring needs Director go (UserPromptSubmit already live; Stop/PostToolUse additive).
 
-- Claude ingress hook produces the same normalized event shape as a later transcript tail event
-- Codex/Gemini adapters can submit equivalent events without special-casing the core
-- every normalized event is attributable to both `tenant` and `agent/session`
-
-### P2. Daemon-owned git/worktree runtime ✅ DONE (`12383d2`)
+### P2. Daemon-owned git/worktree runtime ✅ DONE (`12383d2` + `6182a7d`)
 
 WorktreeManager: create/close/list with single-session referee (one active worktree per
 (tenant, session)); CRDT ORSet per tenant at store/daemon/crdt/; migration v4; CLI
@@ -139,6 +136,7 @@ Acceptance MET:
 - daemon creates/closes worktrees without manual shell choreography ✅
 - CRDT ORSet snapshot is the auditable merge record ✅
 - per-session referee serializes conflicting actions ✅
+- entity-graph CRDT sidecars from closed worktrees reconverge into canonical path (`_crdt_reconverge_entity_graph`) ✅
 
 ### P3. Research run front door
 

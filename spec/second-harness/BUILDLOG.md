@@ -859,9 +859,21 @@ Schemas registered: `lgwks.daemon.export.v0`, `lgwks.daemon.cleanup.v0`.
 
 ---
 
-## 2026-06-12 · Session 15 — P1 transcript norm + D2-prep + P2 worktree CRDT (PR #113 · branch p1-transcript-session-worktree-merge)
+## 2026-06-12 · PR #112 — code review graph + MCP config (Gemini · `7f6f21a`)
 
-Three issues filed and implemented in one pass (22 new tests, 114 existing unaffected):
+Gemini-authored pass adding static analysis infrastructure:
+- `.code-review-graph/`: SQLite graph DB (`graph.db`), HTML visualization (`graph.html`), and ~130 auto-generated wiki markdown files covering every CLI verb/command.
+- `.mcp.json`: `code-review-graph` MCP server config (`uvx code-review-graph serve`) for blast-radius and architectural queries.
+- `scripts/generate-graph.sh`: regeneration script.
+- `CLAUDE.md`: "Code Review Graph" section added pointing to the above.
+
+Not in scope of the second-harness ingestion plan; added as a separate analysis layer.
+
+---
+
+## 2026-06-12 · Session 15 — P1 transcript norm + D2-prep + P2 worktree CRDT (PR #113 · `6182a7d`)
+
+Three issues filed and implemented in one pass (22 new tests, 114 existing unaffected). **Merged to main @ `6182a7d`.**
 
 **#109 — P1 Transcript Normalization**
 - `lgwks_transcript.py`: stateless JSONL tail-reader. `tail(path, n=20)` → `[{role, content_len, turn_index, turn_id}]`. Handles missing/empty/malformed silently.
@@ -882,6 +894,7 @@ Verification:
 - `python -m pytest tests/test_p1_session_worktree.py -v` → **22 passed**
 - `python -m pytest tests/test_daemon*.py tests/test_crdt.py tests/test_session*.py tests/test_inbound.py -q` → **114 passed**
 - Schema registry: 0 new schemas minted; gate green.
+- NAVMAP regenerated: **140 modules, 50,602 LOC** (up from 130/46k — adds lgwks_transcript + new hooks).
 
 ---
 

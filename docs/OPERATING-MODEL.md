@@ -145,8 +145,8 @@ What is already true:
 
 What is still missing:
 
-- one owned daemon process with single-writer lifecycle
-- transcript normalization across clients
+- one owned daemon process with single-writer lifecycle (**P0 DONE** — session 14)
+- transcript normalization across clients (**P1 DONE** — session 15: claude_tool_hook + claude_stop_hook; hooks shipped, live wiring pending Director go)
 - failure/feed/state DB as a real runtime surface
 
 ## 4. Daemon and ingest are one runtime
@@ -561,14 +561,14 @@ This should be treated as a later tier, not a first-slice blocker.
 
 ## 15. What is still left
 
-- one owned daemon lifecycle
-- ingress enqueue and transcript normalization
-- one canonical packet contract across clients
-- explicit shared-referee vs agent-local runtime boundaries
-- daemon-owned git/worktree runtime wiring
-- research experience unified behind one obvious front door
-- client adapters for Codex and Gemini
-- cloud archive/cleanup tier
+- ~~one owned daemon lifecycle~~ ✅ DONE (session 14 — P0)
+- ~~ingress enqueue and transcript normalization~~ ✅ DONE (session 15 — P1; hooks shipped, live wiring = Director go)
+- ~~daemon-owned git/worktree runtime wiring~~ ✅ DONE (session 14 — P2; CRDT merge arbitration session 15)
+- ~~client adapters for Codex and Gemini~~ ✅ DONE (session 14 — P4; tool-call normalization for non-Claude clients = future)
+- ~~cloud archive/cleanup tier~~ ✅ DONE (session 14 — P5; local tier; cloud extension deferred)
+- one canonical packet contract across clients (D2 — Director trigger required)
+- explicit shared-referee vs agent-local runtime boundaries (wiring RequestContext through CLI call sites — additive)
+- research experience unified behind one obvious front door (P3 — partially done via `daemon research <url>`)
 
 ## 16. Read order after this
 

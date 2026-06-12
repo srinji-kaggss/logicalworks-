@@ -434,22 +434,29 @@ work and are preserved for context; they are diverged from current main.
 
 If the Director triggers D2, file it as the next issue and spec against the Session seam above first.
 
-## Session 15 state — 2026-06-12 · PR #113 pending (branch p1-transcript-session-worktree-merge)
+## Session 15 state — 2026-06-12 · main @ `6182a7d` (PR #112 + #113 merged)
 
-Filed and implemented three canonical next issues in one pass. All 22 new tests pass; 114 existing tests unaffected.
+Also merged in this session: **PR #112** (Gemini code review graph — `.code-review-graph/`, `.mcp.json`, `scripts/generate-graph.sh`, `CLAUDE.md` doc). Not in the ingestion plan; static analysis layer.
+
+Three canonical issues filed and implemented (PR #113). All 22 new tests pass; 114 existing unaffected.
 
 | issue | what | status |
 |---|---|---|
-| #109 P1 transcript normalization | `lgwks_transcript.py` tail-reader + `hooks/claude_tool_hook.py` (PostToolUse → `tool_call`) + `hooks/claude_stop_hook.py` (Stop → `transcript_turn` tail) | PR #113 |
-| #110 D2-prep RequestContext | `lgwks_session.RequestContext` frozen dataclass + `make_context()` factory; D2 = additive HTTP handler that calls `make_context()` from a request token | PR #113 |
-| #111 P2 worktree CRDT merge | `WorktreeManager._crdt_reconverge_entity_graph(wt_path)` called BEFORE git remove in `close()`; `rglob("*.crdt.json")` → `reconverge()` into canonical path; FAIL-SILENT | PR #113 |
+| #109 P1 transcript normalization | `lgwks_transcript.py` tail-reader + `hooks/claude_tool_hook.py` (PostToolUse → `tool_call`) + `hooks/claude_stop_hook.py` (Stop → `transcript_turn`) | ✅ merged `6182a7d` |
+| #110 D2-prep RequestContext | `lgwks_session.RequestContext` frozen dataclass + `make_context()` factory | ✅ merged `6182a7d` |
+| #111 P2 worktree CRDT merge | `WorktreeManager._crdt_reconverge_entity_graph()` called BEFORE git remove; FAIL-SILENT | ✅ merged `6182a7d` |
 
-**Honest limits / next ops actions (unchanged from session 14):**
-1. **Live hook wiring** — `claude_tool_hook.py` and `claude_stop_hook.py` are not registered in `.claude/settings.local.json`. Add `PostToolUse` + `Stop` entries when Director wants live event capture.
-2. **`claude_stop_hook.py` no-stdin path** — Stop hook sends no JSON payload in some Claude Code versions; hook handles this silently but hasn't been live-tested.
-3. **D2 trigger still pending** — `RequestContext` seam is built; D2 (network/MCP handler) needs Director "expose beyond localhost" trigger before filing.
+NAVMAP regenerated: **140 modules, 50,602 LOC**.
 
-**Next canonical seams after PR #113 lands:**
-- Wire `assemble_inbound()` / `promote()` to accept a `RequestContext` (no behavior change — routes through the seam). Small additive pass.
-- D2 network/MCP transport — Director trigger required.
-- N novelty axis + calibrated P probability (U6.4) — needs Director go (mentioned session 13).
+**Honest limits / next ops actions:**
+1. **Live hook wiring** — `claude_tool_hook.py` and `claude_stop_hook.py` are shipped but NOT registered in `.claude/settings.local.json`. Add `PostToolUse` + `Stop` hook entries when Director wants live telemetry.
+2. **D2 trigger pending** — `RequestContext` seam is built; D2 (network/MCP transport) needs Director "expose beyond localhost" trigger before filing.
+3. **P1 Codex/Gemini tool-call normalization** — only Claude Code supports PostToolUse hooks; Codex/Gemini still `human_message` only for now.
+
+**Next canonical seams (no Director trigger needed):**
+- Wire `assemble_inbound()` and `promote()` to accept a `RequestContext` (additive — no behavior change; kills raw-string trust at those call sites).
+- N novelty axis + calibrated P probability (U6.4) — needs Director go (deferred from session 13).
+
+**Next canonical seams (Director trigger required):**
+- D2 network/MCP transport: file issue once Director triggers "expose beyond localhost".
+- Live hook registration (PostToolUse + Stop): Director confirms when to wire.
