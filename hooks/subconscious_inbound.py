@@ -16,9 +16,21 @@ import sys
 from pathlib import Path
 
 
+def _clean(text: object, limit: int = 60) -> str:
+    """Collapse whitespace and drop non-printable chars, then truncate.
+
+    Any interpolated free text (the prompt, verb names, graph labels) is untrusted
+    and could carry newlines / ANSI / control chars. Left raw, a newline splits
+    additionalContext into a line that isn't a labelled score/path — i.e. injects
+    arbitrary (even instruction-shaped) prose into Opus's context. INV-3 demands
+    every line be a header; this keeps it so.
+    """
+    collapsed = " ".join(str(text).split())
+    return "".join(ch for ch in collapsed if ch.isprintable())[:limit]
+
+
 def _format_context(schema: dict) -> str:
     """Render the §6 engine schema into a terse, non-generative read (INV-3)."""
-    prompt = schema.get("prompt", "")
     insights = schema.get("insights", {})
     scores = insights.get("scores", {})
     flags = insights.get("flags", [])
@@ -27,19 +39,20 @@ def _format_context(schema: dict) -> str:
     retrieval = schema.get("retrieval", [])
 
     c = scores.get("coverage_C", 0.0)
-    g = scores.get("gap_G", 0.0)
+    g = scores.get("gap_G")
+    g_disp = g if g is not None else "n/a"  # gap_G is None when grounding unavailable
     p = scores.get("confidence_P", 0.0)
 
     lines = [
-        f'[subconscious · §6] for: "{prompt[:60]}"',
-        f"C={c} G={g} P={p}  flags: {flags}",
+        f'[subconscious · §6] for: "{_clean(schema.get("prompt", ""))}"',
+        f"C={c} G={g_disp} P={p}  flags: {flags}",
     ]
     if selections:
-        lines.append("top verbs: " + " | ".join(s["verb"] for s in selections))
+        lines.append("top verbs: " + " | ".join(_clean(s.get("verb", ""), 40) for s in selections))
     if pathways:
-        lines.append("pathways: " + " → ".join(pathways))
+        lines.append("pathways: " + " → ".join(_clean(v, 40) for v in pathways))
     if retrieval:
-        labels = " | ".join(h.get("label", "") for h in retrieval[:5])
+        labels = " | ".join(_clean(h.get("label", ""), 40) for h in retrieval[:5])
         lines.append(f"graph ({len(retrieval)}): {labels}")
     lines.append("(deterministic — BERT attention pending U5)")
     return "\n".join(lines)
