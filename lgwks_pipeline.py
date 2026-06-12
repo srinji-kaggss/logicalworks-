@@ -1364,10 +1364,15 @@ def run_pipeline(args: argparse.Namespace) -> dict[str, Any]:
         json.dumps(pack, indent=2, ensure_ascii=False), encoding="utf-8"
     )
 
-    _crdt_state = {
-        "world_nodes": _crdt.serialise(world_nodes),
-        "tenant_edges": _crdt.serialise(tenant_edges),
-    }
+    # Reconverge with all prior runs (ARCH L6): load the stable replica, merge this
+    # run's CRDT state into it, commit back. out_dir is per-run, so the replica lives
+    # at the stable store root — else every run would start empty and never converge.
+    _crdt_sink = _crdt.JsonFileSink(PIPELINE_STORE / "crdt_replica.json")
+    _crdt_merged = _crdt.reconverge(
+        _crdt_sink, {"world_nodes": world_nodes, "tenant_edges": tenant_edges}
+    )
+    # The per-run snapshot/artifact reflects the CONVERGED state (prior ⊕ this run).
+    _crdt_state = {k: _crdt.serialise(v) for k, v in _crdt_merged.items()}
     (out_dir / "crdt_state.json").write_text(
         json.dumps(_crdt_state, indent=2, ensure_ascii=False), encoding="utf-8"
     )
