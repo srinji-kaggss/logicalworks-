@@ -1487,6 +1487,10 @@ def build_parser() -> argparse.ArgumentParser:
     import lgwks_capability
     lgwks_capability.add_parser(sub)
 
+    # access — capability-port access router (#98 / #99)
+    import lgwks_access
+    lgwks_access.add_parser(sub)
+
     # crdt — CRDT state merge: G-Set / OR-Set / LWW (I9)
     import lgwks_crdt
     lgwks_crdt.add_parser(sub)

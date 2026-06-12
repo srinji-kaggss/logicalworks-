@@ -436,12 +436,13 @@ def summary_command(args: argparse.Namespace) -> int:
 
 
 def add_parser(sub) -> None:
-    p = sub.add_parser("session", help="session boundary: begin, end, summary")
+    p = sub.add_parser("session", help="session boundary: begin, end, summary, capability")
     ps = p.add_subparsers(dest="session_command", required=True)
 
     beg = ps.add_parser("begin", help="mark session start + summarize since last marker")
     beg.add_argument("--repo", default=".", help="path to repo")
     beg.add_argument("--json", action="store_true", help="structured output")
+    beg.add_argument("--tenant", default=None, help="tenant to bind capability for (optional)")
     beg.set_defaults(func=begin_command)
 
     end = ps.add_parser("end", help="mark session end + summarize what happened")
@@ -455,3 +456,50 @@ def add_parser(sub) -> None:
     summ.add_argument("--commits", type=int, default=20, help="number of commits to include")
     summ.add_argument("--json", action="store_true", help="structured output")
     summ.set_defaults(func=summary_command)
+
+    cap = ps.add_parser("capability", help="resolve/bind capability for session")
+    cap.add_argument("--tenant", required=True, help="tenant to resolve capability for")
+    cap.add_argument("--promote", action="store_true", help="resolve with WORLD_PROMOTE scope")
+    cap.add_argument("--json", action="store_true", help="structured output")
+    cap.set_defaults(func=capability_command)
+
+
+def capability_command(args) -> int:
+    """Resolve capability for tenant — used by session begin or standalone."""
+    import json as _json
+    import lgwks_access as access
+    import lgwks_ui as ui
+
+    on = ui.color_on()
+    tenant = args.tenant
+    promote = getattr(args, "promote", False)
+
+    try:
+        if promote:
+            port, handle, key = access.resolve_promote_capability_for_tenant(tenant)
+        else:
+            port, handle, key = access.resolve_capability_for_tenant(tenant)
+
+        verified = port.verify(handle, key)
+        scopes = sorted(verified.scopes)
+
+        if getattr(args, "json", False):
+            print(_json.dumps({
+                "tenant": tenant,
+                "scopes": scopes,
+                "cap_ref": verified.cap_ref,
+                "promote": promote,
+                "key_source": "keychain",  # key is now in Keychain
+            }, indent=2))
+        else:
+            print(ui.spine(ui.fg(f"capability resolved for tenant {tenant!r}", ui.EMERALD, on=on), on=on))
+            print(ui.twig(f"scopes: {scopes}", 1, "info", on=on))
+            print(ui.twig(f"cap_ref (nonce): {verified.cap_ref}", 1, "info", on=on))
+            print(ui.twig("key stored in Keychain (lgwks:cap:{tenant})", 1, "info", on=on))
+        return 0
+    except Exception as exc:
+        if getattr(args, "json", False):
+            print(_json.dumps({"error": str(exc)}, indent=2))
+        else:
+            print(ui.spine(ui.fg(f"error: {exc}", ui.RUST, on=on), on=on), file=sys.stderr)
+        return 1
