@@ -1,7 +1,7 @@
-# Handoff — lgwks subconscious build · 2026-06-12 (session 10, main @ 8586b11)
+# Handoff — lgwks subconscious build · 2026-06-12 (session 10, main @ caab5f2)
 
 > Refreshed session 10: opened the **I8-hardening** track (#89) and landed **L1+L2+L7** — §1-INV is now cryptographically enforced (PR #90).
-> **One open issue: #89** (I8-hardening, L1 done, L3/L4/L5 tail remaining).
+> **One open issue: #89** (I8-hardening, L1+L3 done, L4/L5 tail remaining).
 > The dated "Current state" / "Session N state" sections below are append-only history — the **latest** state is the session-10 block at the bottom.
 
 You are the next agent on the lgwks rebuild. Read this fully before acting. Written
@@ -245,11 +245,24 @@ v1 superseded). BUILDLOG + NAVMAP updated in-PR.
 2. **`assemble_inbound(tenant=None)` is fail-open** by design (single-operator P3 default) until
    multi-tenant exposure.
 
-**Next (issue #89 tail, ARCH build order):** **L3** per-tenant admission (fix the global fail-open
-token bucket, `lgwks_admission.py`) → **L4** durable cross-process queue (WAL `admission_queue`
-table, no drop, lease/reap crash-durability) → **L5** promotion audit (tenant→world hash-chained
-record on the cognition chain). **L6** (CRDT deploy on the two stores) is a separate packet = I9.
-Deferred surfaces (network/MCP D2, cross-workspace ACL D3, …) stay parked in `SCOPE-DEFERRED.md`.
+**L3 done (PR #92 @ caab5f2) — per-tenant admission, fail-open closed:**
+
+| piece | what | module |
+|---|---|---|
+| capability-first | `TenantAdmissionGate.admit/lease/release` run `require_scope(TENANT_RW)` BEFORE any rate/queue/lease state → invalid/missing cap consumes no token, no slot. Closes the L1-noted "advisory enforcement" gap on the admission path. | `lgwks_admission.py` |
+| per-tenant lanes | each validated tenant gets its own `TokenBucket` + bounded `AdmissionQueue` (per-tenant `q_max`) → one tenant's flood drains only its own lane. | `lgwks_admission.py` |
+| fair leasing ≤ c | in-flight bounded by `c` AND per-tenant ceiling ⌈c/active⌉ via `lease()/release()`. | `lgwks_admission.py` |
+
+Reused `lgwks.admission.v1` (no mint). 73 tests green (12 new in `test_i8_admission_fairness.py`);
+registry 99/99. **Honest limit:** in-memory single-process; durable cross-process backing is L4
+(the `lease()/release()` interface is left for L4 to persist).
+
+**Next (issue #89 tail, ARCH build order):** **L4** durable cross-process queue (WAL
+`admission_queue` table over `lgwks_sqlite.connect`, no drop/backpressure, lease/reap
+crash-durability — persists the L3 lease interface) → **L5** promotion audit (tenant→world
+hash-chained record on the cognition chain, `lgwks_cognition.py`). **L6** (CRDT deploy on the two
+stores) is a separate packet = I9. Deferred surfaces (network/MCP D2, cross-workspace ACL D3, …)
+stay parked in `SCOPE-DEFERRED.md`.
 
 ## Doc map
 
