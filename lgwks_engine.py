@@ -23,6 +23,14 @@ from typing import Any
 _REPO = Path(__file__).resolve().parent
 _LGWKS = _REPO / "lgwks"
 _ENTITY_GRAPH_DB = _REPO / ".lgwks" / "entity_graph.db"
+# I8 demand-weight table (frozen, optional). Built offline by
+# scripts/build_capability_idf.py from the capability vocabulary; absent -> the
+# weights are recomputed from the live verb catalog (graceful, never a hard dep).
+_CAP_IDF_ARTIFACT = _REPO / ".lgwks" / "capability_idf.json"
+# U6.2 frozen Qwen verb-embedding matrix (optional). Built offline by
+# scripts/build_capability_embeddings.py; absent OR embed port unavailable ->
+# coverage falls back to the lexical floor below.
+_CAP_VEC_ARTIFACT = _REPO / ".lgwks" / "capability_vectors.json"
 
 _SCHEMA = "lgwks.engine.schema.v1"
 
@@ -46,8 +54,55 @@ def _tokens(text: str) -> list[str]:
     return [t for t in _TOKEN.findall((text or "").lower()) if t not in _STOP and len(t) > 1]
 
 
-def _capability_coverage(query_tokens: list[str], verbs: list[dict]) -> tuple[float, list[dict]]:
-    """Return (coverage_fraction, matched_verb_records) using U1 capability map."""
+def _compute_capability_idf(verbs: list[dict]) -> dict[str, float]:
+    """Demand weight per token = smoothed IDF over the capability vocabulary.
+
+    Each verb's (name + intent) text is one "document"; df(t) = how many verbs
+    mention t; idf(t) = log((N+1)/(df+1)) + 1. Pure counting over human-authored
+    capability specs — no AI, hand-derivable (feedback_calculator_test). A token
+    common across many capabilities (e.g. "lgwks", "file") carries little
+    discrimination -> low weight; a token specific to few -> high weight.
+    """
+    docs: list[set[str]] = []
+    for v in verbs:
+        toks = set(_tokens(v.get("verb", ""))) | set(_tokens(v.get("intent", "")))
+        if toks:
+            docs.append(toks)
+    n = len(docs)
+    if n == 0:
+        return {}
+    df: dict[str, int] = {}
+    for toks in docs:
+        for t in toks:
+            df[t] = df.get(t, 0) + 1
+    return {t: round(math.log((n + 1) / (c + 1)) + 1.0, 6) for t, c in df.items()}
+
+
+def _load_demand_weights(verbs: list[dict]) -> dict[str, float]:
+    """Frozen IDF artifact if present (declared provenance), else recompute from
+    the live verb catalog. Never a hard dependency on the artifact."""
+    try:
+        if _CAP_IDF_ARTIFACT.exists():
+            data = json.loads(_CAP_IDF_ARTIFACT.read_text())
+            idf = data.get("idf")
+            if isinstance(idf, dict) and idf:
+                return {str(k): float(val) for k, val in idf.items()}
+    except Exception:
+        pass
+    return _compute_capability_idf(verbs)
+
+
+def _capability_coverage(
+    query_tokens: list[str], verbs: list[dict], demand: dict[str, float] | None = None
+) -> tuple[float, list[dict]]:
+    """Return (coverage_fraction, matched_verb_records) using U1 capability map.
+
+    I8 padding/verbosity-invariance: when `demand` weights are supplied, coverage
+    is `Σ idf(covered) / Σ idf(recognized)` where "recognized" = query tokens
+    present in the demand table. Filler tokens that no capability mentions carry
+    zero demand, so padding a prompt with them cannot dilute C. Without weights it
+    degrades to the plain token fraction (uniform demand).
+    """
     if not query_tokens:
         return 0.0, []
     qt_set = set(query_tokens)
@@ -63,7 +118,12 @@ def _capability_coverage(query_tokens: list[str], verbs: list[dict]) -> tuple[fl
             if score > 0.0:
                 matched.append((score, v))
     matched.sort(key=lambda x: x[0], reverse=True)
-    coverage = len(verb_tokens_covered) / len(qt_set)
+    if demand:
+        denom = sum(demand.get(t, 0.0) for t in qt_set)
+        numer = sum(demand.get(t, 0.0) for t in verb_tokens_covered)
+        coverage = (numer / denom) if denom > 0.0 else 0.0
+    else:
+        coverage = len(verb_tokens_covered) / len(qt_set)
     return round(coverage, 3), [v for _, v in matched[:8]]
 
 
@@ -173,7 +233,10 @@ def run_engine(
         verbs, verb_count = [], 0
 
     qt = _tokens(prompt)
-    cap_coverage, selections = _capability_coverage(qt, verbs)
+    # I8: demand weights down-rank filler so padding cannot dilute coverage.
+    demand = _load_demand_weights(verbs)
+    cap_coverage, selections = _capability_coverage(qt, verbs, demand=demand)
+    coverage_mode = "lexical+demand" if demand else "lexical"
 
     _db = db_path or _ENTITY_GRAPH_DB
     graph_hits, graph_grounded, graph_available = _graph_retrieval(qt, _db)
@@ -220,6 +283,7 @@ def run_engine(
                 "decisiveness_d": decisiveness,
                 "confidence_P": P,
                 "grounding_status": grounding_status,
+                "coverage_mode": coverage_mode,
                 "note": "independent axes (capability / graph / margin); P = geometric "
                         "mean over available axes — constant-free index, not a "
                         "probability; Qwen-cosine + novelty + calibration pending",

@@ -7,9 +7,9 @@ run_engine is checked for the degeneracy regression and score bounds.
 
 I1 range          I2 determinism      I3 monotonicity     I4 cardinality-invariance
 I6 null-collapse  I7 boundary         relabel-invariance  (regression: G != 1 - C)
+I8 padding/verbosity-invariance (demand-weighted coverage — #86)
 
-Deferred (NOT audited here — see #83): I8 padding/verbosity-invariance (needs
-offline demand-weighting), N novelty (needs the Qwen embedding layer).
+Deferred (NOT audited here): N novelty (needs the Qwen embedding layer).
 """
 
 from __future__ import annotations
@@ -146,6 +146,51 @@ class TestRunEngineContract(unittest.TestCase):
         self.assertIsNone(s["gap_G"])
         if s["coverage_C"] > 0 and s["decisiveness_d"] > 0:
             self.assertGreater(s["confidence_P"], 0.0)
+
+
+class TestDemandWeighting(unittest.TestCase):
+    """I8 — padding/verbosity-invariance via capability-vocabulary demand weights."""
+
+    def test_idf_common_lt_rare(self):
+        # A token in every capability discriminates nothing -> lower weight than a
+        # token specific to one. Smoothed, so every weight stays positive.
+        verbs = [
+            {"verb": "alpha", "intent": "shared everywhere token"},
+            {"verb": "beta", "intent": "shared everywhere token"},
+            {"verb": "gamma", "intent": "shared everywhere rareword"},
+        ]
+        idf = eng._compute_capability_idf(verbs)
+        self.assertLess(idf["shared"], idf["rareword"])
+        self.assertTrue(all(w > 0.0 for w in idf.values()))
+
+    def test_oov_filler_carries_zero_demand(self):
+        demand = eng._compute_capability_idf([{"verb": "refactor", "intent": "rewrite code"}])
+        self.assertEqual(demand.get("zzzqux", 0.0), 0.0)  # absent -> zero demand
+
+    def test_i8_padding_invariance_exact(self):
+        # Padding a prompt with guaranteed-OOV filler leaves C EXACTLY unchanged:
+        # zero-demand tokens enter neither numerator nor denominator.
+        db = Path("/nonexistent/graph.db")
+        base = eng.run_engine("refactor the auth module", db_path=db)
+        padded = eng.run_engine("refactor the auth module zzzqux blargh frobnix wibble", db_path=db)
+        self.assertEqual(base["insights"]["scores"]["coverage_C"],
+                         padded["insights"]["scores"]["coverage_C"])
+
+    def test_i8_demand_weighting_is_the_fix(self):
+        # Contrastive proof: under UNIFORM weights the same OOV padding lowers C
+        # (denominator grows); demand weights are precisely what make it invariant.
+        verbs = [{"verb": "auth", "intent": "manage auth", "score": 2.0}]
+        demand = eng._compute_capability_idf(verbs)
+        c_uni_base, _ = eng._capability_coverage(["auth"], verbs, demand=None)
+        c_uni_pad, _ = eng._capability_coverage(["auth", "zzzqux", "blargh"], verbs, demand=None)
+        c_dem_base, _ = eng._capability_coverage(["auth"], verbs, demand=demand)
+        c_dem_pad, _ = eng._capability_coverage(["auth", "zzzqux", "blargh"], verbs, demand=demand)
+        self.assertGreater(c_uni_base, c_uni_pad)   # uniform: padding hurts
+        self.assertEqual(c_dem_base, c_dem_pad)      # demand: padding-invariant
+
+    def test_coverage_mode_reported(self):
+        s = eng.run_engine("refactor the auth module")["insights"]["scores"]
+        self.assertIn(s["coverage_mode"], ("lexical", "lexical+demand", "qwen"))
 
 
 if __name__ == "__main__":
