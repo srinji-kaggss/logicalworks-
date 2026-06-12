@@ -553,3 +553,45 @@ added, v1 superseded).
 
 **Next (issue #89 tail):** L3 per-tenant admission (fix fail-open) → L4 durable cross-process
 queue → L5 promotion audit. L6 (CRDT deploy) is I9, separate.
+
+---
+
+## 2026-06-11 · I8-hardening L3 — per-tenant admission + fair leasing (#89, branch feat/89-L3-per-tenant-admission)
+
+ARCH-two-db-multitenant.md build-order step 2. L1 made §1-INV cryptographically
+enforceable on the read path; L3 makes **admission** multi-tenant-safe — closing the two
+starvation/fail-open vectors that one global `TokenBucket` + global `q_max` left open.
+
+**Verified gap at HEAD (9034ee6):** `admission_decision()` drew from ONE global bucket then
+enqueued into ONE queue. Defects: (1) no tenant dimension → one tenant's burst rate-limits all
+(starvation); (2) tokens consumed **before** any capability check (fail-open); (3) global
+`q_max` → one tenant fills the whole queue.
+
+**Built (`lgwks_admission.TenantAdmissionGate`):**
+- **Capability-FIRST ordering.** `admit()`/`lease()`/`release()` each run
+  `require_scope(token, TENANT_RW, …, key)` BEFORE touching any rate/queue/lease state.
+  Invalid sig / empty / `world` tenant / missing `tenant:rw` → `CapabilityError`, **consuming
+  no token and no queue slot**. Fail-open is structurally closed.
+- **Per-tenant bucket + queue.** Each validated tenant gets its own independent `TokenBucket`
+  (rate `per_tenant_rate`, default c·μ) and bounded `AdmissionQueue` (per-tenant `q_max`). A
+  tenant's flood drains only its own lane → cannot starve another's admission.
+- **Fair leasing ≤ c.** `lease()`/`release()` bound concurrent in-flight work: a slot is granted
+  only if total in-flight < c AND the tenant's in-flight < its fair ceiling ⌈c / active_tenants⌉.
+  This is what enforces ≤ c and the max-min fair split.
+
+**Governance:** reuses `lgwks.admission.v1` (Admitted/Rejected429 envelope unchanged) — no new
+id, no mint (repurpose > extend > mint). The single-operator global path
+(`admission_decision`/`make_admission_gate`) stays intact; existing `test_admission.py` green.
+
+**Result:** 58 L3+I8 tests green (12 new in `tests/test_i8_admission_fairness.py`: fail-open
+closed, no-starvation, fair leasing ≤ c, per-tenant ceiling, per-tenant q_max, idempotent shed,
+deterministic replay); 73 green across admission/capability/i8/inbound. Registry gate 99/99.
+
+**Honest limits (deferred to L4, NOT closed here):**
+- In-memory only — single-process (GIL); no cross-process durability or locking. Durable
+  cross-process `admission_queue` WAL table + crash-durable lease/reap is **L4** (next step).
+  L3 leaves the `lease()/release()` interface L4 will persist.
+- `fair_ceiling()` counts every tenant ever seen as "active" (monotone) — conservative (errs
+  toward more fairness, never less); L4's durable active-set can refine it.
+
+**Next (issue #89 tail):** L4 durable cross-process queue → L5 promotion audit. L6 (CRDT) = I9.
