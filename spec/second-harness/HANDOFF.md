@@ -1,7 +1,7 @@
-# Handoff — lgwks subconscious build · 2026-06-12 (session 10, main @ caab5f2)
+# Handoff — lgwks subconscious build · 2026-06-12 (session 10, main @ 3dbe01f)
 
 > Refreshed session 10: opened the **I8-hardening** track (#89) and landed **L1+L2+L7** — §1-INV is now cryptographically enforced (PR #90).
-> **One open issue: #89** (I8-hardening, L1+L3 done, L4/L5 tail remaining).
+> **One open issue: #89** (I8-hardening, L1+L3+L4 done, **L5 only** tail remaining).
 > The dated "Current state" / "Session N state" sections below are append-only history — the **latest** state is the session-10 block at the bottom.
 
 You are the next agent on the lgwks rebuild. Read this fully before acting. Written
@@ -257,12 +257,25 @@ Reused `lgwks.admission.v1` (no mint). 73 tests green (12 new in `test_i8_admiss
 registry 99/99. **Honest limit:** in-memory single-process; durable cross-process backing is L4
 (the `lease()/release()` interface is left for L4 to persist).
 
-**Next (issue #89 tail, ARCH build order):** **L4** durable cross-process queue (WAL
-`admission_queue` table over `lgwks_sqlite.connect`, no drop/backpressure, lease/reap
-crash-durability — persists the L3 lease interface) → **L5** promotion audit (tenant→world
-hash-chained record on the cognition chain, `lgwks_cognition.py`). **L6** (CRDT deploy on the two
-stores) is a separate packet = I9. Deferred surfaces (network/MCP D2, cross-workspace ACL D3, …)
-stay parked in `SCOPE-DEFERRED.md`.
+**L4 done (PR #94 @ 3dbe01f) — durable cross-process queue:**
+
+| piece | what | module |
+|---|---|---|
+| durable queue | `admission_queue` WAL table over `lgwks_sqlite.connect`; PK `(tenant,cid)` idempotent; state `queued→leased→done`; rows survive process restart. Mints `lgwks.admission_queue.v1`. | `lgwks_admission_store.py` (new) |
+| cross-process fairness | enqueue/lease in `BEGIN IMMEDIATE` (atomic across processes); fair leasing ≤ c from the DB COUNT → holds across processes (refines L3 in-memory limit). | `lgwks_admission_store.py` |
+| crash-durable lease/reap | `reap()` reclaims past-deadline leases → `queued`, `retry_count++`; a crashed worker's work is never lost. backpressure not drop. | `lgwks_admission_store.py` |
+| wiring | `TenantAdmissionGate(store_path=...)` opt-in delegates the queue to the durable store (`gate.store` = daemon handle); `store_path=None` keeps the L3 in-memory P3 default. | `lgwks_admission.py` |
+
+85 tests green (14 new in `test_i8_durable_queue.py`); registry **100/100**. `item` is an opaque
+JSON handle, never raw content (§1-INV). **Honest limits:** `done` rows retained (prune = future
+ops); `reap` is an unauthenticated daemon maintenance op (lease-state only, no content).
+
+**Next (issue #89 tail — LAST step):** **L5** promotion audit — the tenant→world write is the only
+cross-tier path; log who/what/when/under-which-cap as a **hash-chained record on the cognition
+chain** (`lgwks_cognition.py`), gated by the `world:promote` scope (already minted in
+`lgwks.capability.v2`). After L5, **#89 closes**. **L6** (CRDT deploy on the two stores) is a
+separate packet = I9. Deferred surfaces (network/MCP D2, cross-workspace ACL D3, …) stay parked in
+`SCOPE-DEFERRED.md`.
 
 ## Doc map
 
