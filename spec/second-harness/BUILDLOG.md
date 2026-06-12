@@ -724,3 +724,40 @@ into `sys.modules` only when it imports first; run in a shared process with file
 import the real module, two `TestEmbedToRecord` cases fail (`.meta`) and cross-file
 collection can error. Order-dependent, present on `main`. CI runs only the schema gate
 (no pytest), so unaffected.
+
+---
+
+## 2026-06-12 · CIAM convergence C — CRDT as the live convergence path (#100, branch issue-100-crdt-live-convergence)
+
+`lgwks_crdt`'s merge algebra (G-Set/OR-Set/LWW) was solid and proven (test_crdt T1–T6) but
+only instantiated as a single-run in-memory tracker at `lgwks_pipeline.py:1182` that
+serialised to a per-run `crdt_state.json` and never reloaded/merged → ARCH L6 (concurrent
+writers reconverge) was genuinely unbuilt.
+
+- **`ConvergenceSink` seam + `JsonFileSink` + `reconverge(sink, current)`** (`lgwks_crdt`).
+  `reconverge` loads prior replica state, merges it per-key with the current run (CvRDT
+  merge), commits the converged result back, returns it — so a run RECONVERGES instead of
+  resetting. Carry-through keys (present on one side) are self-merged so committed bytes are
+  CANONICAL (identical to the cross-merge form — without this, first-run vs replayed-run
+  serialise differently because OR-Set merge materialises empty remove-keys; caught by the
+  idempotent-replay test). The seam is the #97 contract: default = local JSON file; a future
+  kernel-tape sink is a sibling impl behind the SAME interface; merge functions take no kernel
+  type and need no kernel checkout.
+- **Pipeline wired** to reconverge into the STABLE `PIPELINE_STORE/crdt_replica.json` (NOT the
+  per-run `out_dir = PIPELINE_STORE/<run_id>`, which would start empty every run). The per-run
+  `crdt_state.json` artifact + manifest now reflect the CONVERGED state (prior ⊕ this run).
+- **Tests (test_crdt T7):** reconverge-across-restart accumulates; divergent two-replica merge
+  is byte-identical regardless of order; replay is idempotent; OR-Set add-wins survives the
+  sink; LWW scalar converges to the dominant (seq, head) order-independently; absent file
+  starts empty then persists.
+
+Honest limit: `reconverge` load→commit is not file-locked, so two *processes* writing the same
+replica concurrently can lose a merge (last file write wins). Per #100's dependency note, real
+multi-process concurrency is the daemon's job (#98); C is correctness-of-merge, proven by
+tests. Out of scope (explicit): network sync; CRDT-wrapping the immutable vector-row add path
+(`upsert_record` is `INSERT OR IGNORE` on the content-addressed cid PK — already a G-Set union
+for adds).
+
+Deferred (flagged): routing entity-graph mutable membership through OR-Set add/remove at call
+sites beyond the pipeline's world_nodes/tenant_edges, for when the daemon makes multi-writer
+real. The merge layer + reconverge are ready for it.

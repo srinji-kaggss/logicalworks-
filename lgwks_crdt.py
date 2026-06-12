@@ -28,9 +28,11 @@ Decisions:
 
 from __future__ import annotations
 
+import json
 import secrets
 from dataclasses import dataclass, field
-from typing import Any
+from pathlib import Path
+from typing import Any, Protocol, runtime_checkable
 
 # ---------------------------------------------------------------------------
 # Schema identifier (auto-scanned by lgwks_schema._scan_schemas)
@@ -242,6 +244,83 @@ def deserialise(d: dict) -> GSet | ORSet | LWWRegister:
     if t == "lww":
         return LWWRegister(d.get("value"), d.get("head", ""), d.get("seq", -1))
     raise ValueError(f"unknown CRDT type in payload: {t!r}")
+
+
+# ---------------------------------------------------------------------------
+# Convergence sink + reconverge (ARCH L6 — the live convergence path, #100)
+# ---------------------------------------------------------------------------
+# The merge algebra above is pure and stateless. To make a RUN reconverge with
+# prior runs (rather than start empty and overwrite), replica state is loaded
+# from and committed to a ConvergenceSink. This is the #97 swap seam: the default
+# is a local JSON file; a future kernel-tape sink is a sibling impl behind the
+# SAME interface — the merge functions never change and take no kernel type.
+
+
+@runtime_checkable
+class ConvergenceSink(Protocol):
+    """Where converged CRDT replica state is loaded from and committed to.
+
+    `load()` returns the prior replica state keyed by name ({} on first run).
+    `commit(state)` durably persists the converged state. Zero kernel dependency.
+    """
+
+    def load(self) -> dict[str, GSet | ORSet | LWWRegister]: ...
+
+    def commit(self, state: dict[str, GSet | ORSet | LWWRegister]) -> None: ...
+
+
+class JsonFileSink:
+    """Default ConvergenceSink — a flat {key: lgwks.crdt.state.v1} JSON file.
+
+    Pure-Python, local-first, no kernel import. Output is sorted for byte-stable
+    serialisation (SEC: same converged state → identical bytes).
+    """
+
+    def __init__(self, path: str | Path) -> None:
+        self._path = Path(path)
+
+    def load(self) -> dict[str, GSet | ORSet | LWWRegister]:
+        if not self._path.exists():
+            return {}
+        raw = json.loads(self._path.read_text(encoding="utf-8"))
+        return {k: deserialise(v) for k, v in raw.items()}
+
+    def commit(self, state: dict[str, GSet | ORSet | LWWRegister]) -> None:
+        payload = {k: serialise(v) for k, v in state.items()}
+        self._path.parent.mkdir(parents=True, exist_ok=True)
+        self._path.write_text(
+            json.dumps(payload, indent=2, ensure_ascii=False, sort_keys=True),
+            encoding="utf-8",
+        )
+
+
+def reconverge(
+    sink: ConvergenceSink,
+    current: dict[str, GSet | ORSet | LWWRegister],
+) -> dict[str, GSet | ORSet | LWWRegister]:
+    """Load prior replica state from `sink`, merge it per-key with `current`, commit
+    the converged result, and return it. This is the live convergence path (ARCH L6).
+
+    Each per-key merge is a CvRDT merge (commutative ∧ associative ∧ idempotent), so
+    the committed state is independent of the order runs execute in and of how many
+    times any run is replayed — a run RECONVERGES instead of resetting. A key present
+    on only one side is carried through unchanged; a key whose CRDT type differs
+    between prior and current raises TypeError (via merge_state).
+    """
+    prior = sink.load()
+    merged: dict[str, GSet | ORSet | LWWRegister] = {}
+    for k in set(prior) | set(current):
+        if k in prior and k in current:
+            merged[k] = merge_state(prior[k], current[k])
+        else:
+            # Carry-through (key on one side only): self-merge so the committed bytes
+            # are CANONICAL — identical to the form a later cross-merge produces. Without
+            # this, a first run and a replayed run serialise differently (e.g. OR-Set
+            # merge materialises empty remove-keys), breaking byte-level idempotency.
+            only = current[k] if k in current else prior[k]
+            merged[k] = merge_state(only, only)
+    sink.commit(merged)
+    return merged
 
 
 # ---------------------------------------------------------------------------

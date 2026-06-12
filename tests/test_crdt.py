@@ -336,5 +336,122 @@ class TestSerialiseRoundtrip(unittest.TestCase):
             merge_state(GSet(), ORSet())
 
 
+# ---------------------------------------------------------------------------
+# T7 — reconverging persistence (the LIVE convergence path, #100 / ARCH L6)
+# ---------------------------------------------------------------------------
+
+import tempfile  # noqa: E402
+from pathlib import Path  # noqa: E402
+
+from lgwks_crdt import JsonFileSink, reconverge  # noqa: E402
+
+
+class TestReconvergePersistence(unittest.TestCase):
+    """T7: load+merge+commit through a ConvergenceSink reconverges across runs and
+    restarts — divergent concurrent writers converge byte-identically regardless of
+    order. This is what #100 adds on top of the (already-proven) merge algebra: a run
+    RECONVERGES instead of serialising a single run and overwriting.
+    """
+
+    def setUp(self):
+        self.tmp = Path(tempfile.mkdtemp())
+
+    def _replica_bytes(self, path: Path) -> str:
+        return path.read_text(encoding="utf-8")
+
+    def test_reconverge_across_restart_accumulates(self):
+        """Run A then a fresh sink (= process restart) for run B → replica = union."""
+        path = self.tmp / "replica.json"
+
+        # Run A: world {a,b}; a fresh sink each run simulates an independent process.
+        reconverge(JsonFileSink(path), {
+            "world": GSet().add("a").add("b"),
+            "edges": ORSet().add("e1"),
+        })
+        # Run B (restart): loads A's committed replica, merges its own {b,c} + e2.
+        merged = reconverge(JsonFileSink(path), {
+            "world": GSet().add("b").add("c"),
+            "edges": ORSet().add("e2"),
+        })
+
+        self.assertEqual(merged["world"].value(), frozenset({"a", "b", "c"}),
+                         "G-Set must accumulate across runs, not reset")
+        self.assertEqual(merged["edges"].value(), frozenset({"e1", "e2"}))
+        # And it is durable: a third sink reads back the converged state.
+        reloaded = JsonFileSink(path).load()
+        self.assertEqual(reloaded["world"].value(), frozenset({"a", "b", "c"}))
+
+    def test_divergent_replicas_converge_byte_identical_regardless_of_order(self):
+        """Two replicas diverge; merging A←B vs B←A yields byte-identical committed state."""
+        # Replica A's history and replica B's history (concurrent, divergent).
+        a_state = {
+            "world": GSet().add("a").add("shared"),
+            "edges": ORSet().add("x", tag="ta"),
+        }
+        b_state = {
+            "world": GSet().add("b").add("shared"),
+            "edges": ORSet().add("y", tag="tb"),
+        }
+
+        # Order 1: start empty, apply A then B.
+        p1 = self.tmp / "order1.json"
+        reconverge(JsonFileSink(p1), a_state)
+        reconverge(JsonFileSink(p1), b_state)
+
+        # Order 2: start empty, apply B then A.
+        p2 = self.tmp / "order2.json"
+        reconverge(JsonFileSink(p2), b_state)
+        reconverge(JsonFileSink(p2), a_state)
+
+        self.assertEqual(self._replica_bytes(p1), self._replica_bytes(p2),
+                         "T7: divergent replicas must converge to BYTE-IDENTICAL state "
+                         "regardless of merge order (SEC)")
+
+    def test_reconverge_is_idempotent_on_replay(self):
+        """Replaying the same run twice does not double-count or change the bytes."""
+        path = self.tmp / "replay.json"
+        run = {"world": GSet().add("a").add("b"), "edges": ORSet().add("e1", tag="t1")}
+        reconverge(JsonFileSink(path), run)
+        once = self._replica_bytes(path)
+        reconverge(JsonFileSink(path), run)  # replay identical run
+        twice = self._replica_bytes(path)
+        self.assertEqual(once, twice, "T7: replaying a run must be idempotent")
+
+    def test_orset_remove_survives_concurrent_add_through_sink(self):
+        """OR-Set add-wins holds through the persistence layer (concurrent add+remove)."""
+        path = self.tmp / "orset.json"
+        # Run 1 adds x with tag t1, then a later run observes+removes t1 but a
+        # concurrent run re-adds x with a NEW tag t2 → x must remain visible.
+        reconverge(JsonFileSink(path), {"edges": ORSet().add("x", tag="t1")})
+        reconverge(JsonFileSink(path), {"edges": ORSet().add("x", tag="t1").remove("x")})
+        merged = reconverge(JsonFileSink(path), {"edges": ORSet().add("x", tag="t2")})
+        self.assertIn("x", merged["edges"].value(), "T7: add-wins must survive the sink")
+
+    def test_lww_scalar_converges_to_dominant_clock_through_sink(self):
+        """LWW scalar field reconverges to the higher (seq, head) regardless of order."""
+        low = LWWRegister().set("old", head="aa", seq=1)
+        high = LWWRegister().set("new", head="bb", seq=2)
+
+        p1 = self.tmp / "lww1.json"
+        reconverge(JsonFileSink(p1), {"scalar": low})
+        m1 = reconverge(JsonFileSink(p1), {"scalar": high})
+
+        p2 = self.tmp / "lww2.json"
+        reconverge(JsonFileSink(p2), {"scalar": high})
+        m2 = reconverge(JsonFileSink(p2), {"scalar": low})
+
+        self.assertEqual(m1["scalar"].value(), "new")
+        self.assertEqual(m2["scalar"].value(), "new", "T7: LWW winner is order-independent")
+        self.assertEqual(self._replica_bytes(p1), self._replica_bytes(p2))
+
+    def test_first_run_starts_empty_then_persists(self):
+        """An absent replica file loads as {} (no crash) and is created on commit."""
+        path = self.tmp / "nested" / "fresh.json"
+        self.assertFalse(path.exists())
+        merged = reconverge(JsonFileSink(path), {"world": GSet().add("a")})
+        self.assertTrue(path.exists())
+        self.assertEqual(merged["world"].value(), frozenset({"a"}))
+
+
 if __name__ == "__main__":
     unittest.main()
