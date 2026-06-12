@@ -203,26 +203,33 @@ def build_pack(
 def assemble_inbound(
     query_embedding: Optional[lgwks_vector.VectorRecord],
     graph: dict[str, Any],
-    store_conn,
+    store_conn=None,
     *,
     limit_tokens: int = DEFAULT_LIMIT_TOKENS,
     k: int = RRF_K,
     tenant_store: Optional[lgwks_access.TenantStore] = None,
+    ctx: Optional[Any] = None,
 ) -> dict[str, Any]:
     """End-to-end: graph cubic rank ⊕ vector cosine rank → fused → token-budgeted pack.
 
     query_embedding : an ALREADY-embedded query vector (model layer out of scope — we do
                       NOT embed here). If None, RRF runs on the graph list alone.
     graph           : graph.json structure (consumed by lgwks_rank.rank_graph).
-    store_conn      : open vector store connection (lgwks_vector).
+    store_conn      : open vector store connection (lgwks_vector). Required when ctx is None.
     tenant_store    : when set, every cid is resolved through a validated
                       CapabilityPort handle via lgwks_access.TenantStore.read —
                       own ⊕ world only (ARCH L1/L2). When None, the legacy
                       single-operator unscoped resolver is used (no multi-tenant
                       boundary, admin sentinel path).
+    ctx             : lgwks_session.RequestContext — when provided, supersedes
+                      store_conn + tenant_store. store_conn may be None when ctx is set.
     Raises lgwks_rank.RankError on non-convergence (no silent failure).
     Raises lgwks_vector.SpaceMismatchError if the query crosses embedding spaces.
     """
+    if ctx is not None:
+        tenant_store = ctx.store
+    elif store_conn is None:
+        raise ValueError("store_conn is required when ctx is None")
     graph_ranks = lgwks_rank.rank_graph(graph)
 
     # Candidate universe = graph cids that resolve in the store (zero-dangling, D2).
@@ -231,6 +238,8 @@ def assemble_inbound(
         if tenant_store is not None:
             return tenant_store.read(cid)
         # tenant_store=None: single-operator fail-open (issue #99 keeps this escape hatch).
+        if store_conn is None:
+            raise ValueError("store_conn required when tenant_store is None")
         return lgwks_vector.get_record(store_conn, cid, admin=lgwks_vector.ADMIN)
 
     resolved: list[RankRecord] = []
@@ -317,24 +326,28 @@ def _cmd_run(args) -> int:
     conn = lgwks_vector.create_store(Path(store_path))
     tenant = getattr(args, "tenant", None)
     try:
-        tenant_store = None
+        ctx = None
         if tenant is not None:
-            port, handle, key = lgwks_access.resolve_capability_for_tenant(tenant)
-            tenant_store = lgwks_access.TenantStore(port, handle, key, conn)
+            import lgwks_session as _session
+            ctx = _session.make_context(tenant, "cli", "inbound-cli", conn)
 
         query_embedding = None
         qcid = getattr(args, "query_cid", None)
         if qcid:
-            if tenant_store is not None:
-                query_embedding = tenant_store.read(qcid)
+            if ctx is not None:
+                query_embedding = ctx.store.read(qcid)
             else:
                 query_embedding = lgwks_vector.get_record(conn, qcid, admin=lgwks_vector.ADMIN)
             if query_embedding is None:
                 print(f"error: query cid {qcid!r} not found in store", file=_sys.stderr)
                 return 1
         try:
-            pack = assemble_inbound(query_embedding, graph, conn,
-                                    limit_tokens=args.limit_tokens, tenant_store=tenant_store)
+            pack = assemble_inbound(
+                query_embedding, graph,
+                None if ctx is not None else conn,
+                limit_tokens=args.limit_tokens,
+                ctx=ctx,
+            )
         except lgwks_rank.RankError as e:
             print(f"error: graph rank did not converge: {e}", file=_sys.stderr)
             return 1

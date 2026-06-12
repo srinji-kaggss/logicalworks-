@@ -419,7 +419,7 @@ _DOMAINS: dict[str, list[str]] = {
     "GitHub":    ["gh"],
     "DevOps":    ["repo", "review", "project", "batch", "refactor", "hooks"],
     "System":    ["repl", "initialize", "auth", "keyvault", "foundation",
-                  "aup", "schema", "route", "codebase"],
+                  "aup", "schema", "route", "codebase", "access", "daemon"],
     # L0 substrate — ingestion, vector store, contracts (foundational, not the product)
     "Substrate": ["store", "memory", "embed", "axiom", "pipeline", "waste",
                   "entity-graph", "graph", "substrate", "score", "rank", "inbound",

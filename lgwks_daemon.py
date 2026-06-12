@@ -627,6 +627,43 @@ def _queue_command(args: argparse.Namespace) -> int:
     return 0
 
 
+def _emit_command(args: argparse.Namespace) -> int:
+    """Inject an event into the daemon store without a live hook (for end-to-end testing)."""
+    import sys as _sys
+    from lgwks_daemon_store import DaemonEventStore
+
+    paths = _paths(Path(args.repo).resolve())
+    tenant_id = getattr(args, "tenant", None) or f"repo:{paths.repo_root.name}"
+
+    payload: dict[str, Any] = {}
+    if not _sys.stdin.isatty():
+        try:
+            payload = json.loads(_sys.stdin.read())
+        except (json.JSONDecodeError, ValueError):
+            payload = {}
+
+    event = lgwks_daemon_event.build_event(
+        tenant_id=tenant_id,
+        agent_id=args.agent_id,
+        session_id=args.session_id,
+        actor=args.actor,
+        client=args.client,
+        lane=args.lane,
+        kind=args.kind,
+        scope=args.scope,
+        payload=payload,
+    )
+
+    store = DaemonEventStore(paths.db)
+    try:
+        inserted = store.append(event)
+    finally:
+        store.close()
+
+    print(json.dumps({"ok": True, "inserted": inserted, "event_id": event.get("event_id")}, indent=2))
+    return 0
+
+
 def _packet_command(args: argparse.Namespace) -> int:
     from lgwks_daemon_store import DaemonEventStore
     paths = _paths(Path(args.repo).resolve())
@@ -799,6 +836,20 @@ def add_parser(sub) -> None:
 
     enqueue = ps.add_parser("enqueue", help="enqueue a work item from stdin JSON")
     enqueue.set_defaults(func=_enqueue_command)
+
+    emit = ps.add_parser(
+        "emit",
+        help="inject an event into the daemon store without a live hook (end-to-end testing)",
+    )
+    emit.add_argument("--kind", required=True, choices=sorted(lgwks_daemon_event.KINDS))
+    emit.add_argument("--session-id", dest="session_id", required=True)
+    emit.add_argument("--agent-id", dest="agent_id", required=True)
+    emit.add_argument("--tenant")
+    emit.add_argument("--actor", default="human", choices=sorted(lgwks_daemon_event.ACTORS))
+    emit.add_argument("--client", default="human", choices=sorted(lgwks_daemon_event.CLIENTS))
+    emit.add_argument("--lane", default="ingress", choices=sorted(lgwks_daemon_event.LANES))
+    emit.add_argument("--scope", default="agent_local", choices=sorted(lgwks_daemon_event.SCOPES))
+    emit.set_defaults(func=_emit_command)
 
     queue = ps.add_parser("queue", help="show queue depth for this repo")
     queue.set_defaults(func=_queue_command)
