@@ -31,6 +31,7 @@ from lgwks_daemon_store import DaemonEventStore
 STATUS_SCHEMA = "lgwks.daemon.status.v0"
 DOCTOR_SCHEMA = "lgwks.daemon.doctor.v0"
 HEARTBEAT_INTERVAL_S = 1.0
+POLL_INTERVAL_S = 0.5
 START_TIMEOUT_S = 5.0
 STOP_TIMEOUT_S = 5.0
 
@@ -141,6 +142,27 @@ def _build_event(
         scope="shared_referee",
         payload={"repo_root": str(repo_root), "transcript_path": transcript_path, **payload},
     )
+
+
+def _dispatch_item(store: "DaemonEventStore", item: dict[str, Any]) -> None:
+    """Dispatch one dequeued work item. Currently logs and marks done; real routing follows."""
+    try:
+        store.append(
+            lgwks_daemon_event.build_event(
+                tenant_id=item["tenant_id"],
+                agent_id=item["agent_id"],
+                session_id=item["session_id"],
+                actor="daemon",
+                client="daemon",
+                lane="workflow",
+                kind="workflow_event",
+                scope="shared_referee",
+                payload={"event": "item_dispatched", "item_id": item["item_id"], "kind": item["kind"]},
+            )
+        )
+        store.complete_item(item["item_id"], result={"dispatched": True})
+    except Exception as exc:
+        store.fail_item(item["item_id"], error=str(exc))
 
 
 class SessionDaemon:
@@ -258,6 +280,7 @@ class SessionDaemon:
         _write_json(self.paths.lock, _lock_payload(pid=pid, repo_root=self.paths.repo_root, transcript_path=transcript))
 
         running = True
+        tenant_id = f"repo:{self.paths.repo_root.name}"
 
         def _stop(_signum, _frame) -> None:
             nonlocal running
@@ -276,18 +299,27 @@ class SessionDaemon:
                     payload={"event": "daemon_started", "pid": pid},
                 )
             )
+            heartbeat_due = time.time()
             while running:
-                _write_json(
-                    self.paths.state,
-                    _state_payload(
-                        pid=pid,
-                        repo_root=self.paths.repo_root,
-                        transcript_path=transcript,
-                        db_path=self.paths.db,
-                        status="running",
-                    ),
-                )
-                time.sleep(HEARTBEAT_INTERVAL_S)
+                now = time.time()
+                if now >= heartbeat_due:
+                    _write_json(
+                        self.paths.state,
+                        _state_payload(
+                            pid=pid,
+                            repo_root=self.paths.repo_root,
+                            transcript_path=transcript,
+                            db_path=self.paths.db,
+                            status="running",
+                        ),
+                    )
+                    heartbeat_due = now + HEARTBEAT_INTERVAL_S
+
+                items = store.dequeue(tenant_id, limit=1)
+                for item in items:
+                    _dispatch_item(store, item)
+
+                time.sleep(POLL_INTERVAL_S)
             store.append(
                 _build_event(
                     repo_root=self.paths.repo_root,
@@ -341,6 +373,50 @@ def _serve_command(args: argparse.Namespace) -> int:
     return daemon.run_forever(transcript_path=args.transcript_path)
 
 
+def _enqueue_command(args: argparse.Namespace) -> int:
+    import sys as _sys
+    from lgwks_daemon_store import DaemonEventStore
+    paths = _paths(Path(args.repo).resolve())
+    store = DaemonEventStore(paths.db)
+    try:
+        item = json.load(_sys.stdin)
+        inserted = store.enqueue(item)
+    finally:
+        store.close()
+    print(json.dumps({"ok": True, "inserted": inserted}, indent=2))
+    return 0
+
+
+def _queue_command(args: argparse.Namespace) -> int:
+    from lgwks_daemon_store import DaemonEventStore
+    paths = _paths(Path(args.repo).resolve())
+    tenant_id = f"repo:{paths.repo_root.name}"
+    store = DaemonEventStore(paths.db)
+    try:
+        depth = store.queue_depth(tenant_id)
+    finally:
+        store.close()
+    print(json.dumps(depth, indent=2))
+    return 0
+
+
+def _packet_command(args: argparse.Namespace) -> int:
+    from lgwks_daemon_store import DaemonEventStore
+    paths = _paths(Path(args.repo).resolve())
+    tenant_id = f"repo:{paths.repo_root.name}"
+    store = DaemonEventStore(paths.db)
+    try:
+        packet = store.get_packet(
+            tenant_id=tenant_id,
+            session_id=args.session_id,
+            agent_id=args.agent_id,
+        )
+    finally:
+        store.close()
+    print(json.dumps(packet, indent=2))
+    return 0
+
+
 def add_parser(sub) -> None:
     p = sub.add_parser("daemon", help="background daemon lifecycle shell for the shared referee runtime")
     p.add_argument("--repo", default=".", help="repo root")
@@ -358,6 +434,17 @@ def add_parser(sub) -> None:
 
     doctor = ps.add_parser("doctor", help="verify daemon runtime prerequisites")
     doctor.set_defaults(func=_doctor_command)
+
+    enqueue = ps.add_parser("enqueue", help="enqueue a work item from stdin JSON")
+    enqueue.set_defaults(func=_enqueue_command)
+
+    queue = ps.add_parser("queue", help="show queue depth for this repo")
+    queue.set_defaults(func=_queue_command)
+
+    packet = ps.add_parser("packet", help="fetch deterministic session packet")
+    packet.add_argument("--session-id", required=True)
+    packet.add_argument("--agent-id", required=True)
+    packet.set_defaults(func=_packet_command)
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -381,6 +468,17 @@ def main(argv: list[str] | None = None) -> int:
     serve = sub.add_parser("_serve", help=argparse.SUPPRESS)
     serve.add_argument("--transcript-path", default="")
     serve.set_defaults(func=_serve_command)
+
+    enqueue = sub.add_parser("enqueue", help="enqueue a work item from stdin JSON")
+    enqueue.set_defaults(func=_enqueue_command)
+
+    queue = sub.add_parser("queue", help="show queue depth for this repo")
+    queue.set_defaults(func=_queue_command)
+
+    packet = sub.add_parser("packet", help="fetch deterministic session packet")
+    packet.add_argument("--session-id", required=True)
+    packet.add_argument("--agent-id", required=True)
+    packet.set_defaults(func=_packet_command)
 
     args = parser.parse_args(argv if argv is not None else sys.argv[1:])
     return args.func(args)

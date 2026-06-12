@@ -1,8 +1,9 @@
-"""lgwks_daemon_store — durable event log for the daemon referee runtime.
+"""lgwks_daemon_store — durable event log + work queue for the daemon referee runtime.
 
-This is the first executable state surface behind `lgwks.daemon.event.v1`.
-It gives the daemon one WAL-backed append/read store with idempotent event
-ingest and session-head maintenance across concurrent agent workloads.
+Provides:
+- WAL-backed append/read event store with idempotent ingest and session-head maintenance.
+- Work queue with atomic dequeue, priority ordering, and per-tenant isolation.
+- Deterministic session packet projection (recent events + queue state + head).
 """
 
 from __future__ import annotations
@@ -11,6 +12,7 @@ import argparse
 import json
 import sqlite3
 import sys
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
@@ -19,11 +21,22 @@ import lgwks_sqlite
 
 EVENT_QUERY_SCHEMA = "lgwks.daemon.events.query.v0"
 SESSION_QUERY_SCHEMA = "lgwks.daemon.sessions.query.v0"
+WORK_ITEM_SCHEMA = "lgwks.daemon.work_item.v0"
+QUEUE_SCHEMA = "lgwks.daemon.queue.v0"
+PACKET_SCHEMA = "lgwks.daemon.packet.v0"
+
+WORK_KINDS = frozenset({"research_run", "ingest_file", "workflow", "index_run", "custom"})
+ITEM_STATUSES = frozenset({"queued", "running", "done", "failed"})
+
+
+def _now() -> str:
+    return datetime.now(timezone.utc).replace(microsecond=0).isoformat()
 
 _MIGRATIONS = [
     (
         1,
         "daemon_event_store_v1",
+
         """
         CREATE TABLE IF NOT EXISTS daemon_events (
             event_id    TEXT PRIMARY KEY,
@@ -61,7 +74,32 @@ _MIGRATIONS = [
             PRIMARY KEY (tenant_id, agent_id, session_id)
         );
         """,
-    )
+    ),
+    (
+        2,
+        "daemon_work_queue_v1",
+        """
+        CREATE TABLE IF NOT EXISTS daemon_work_queue (
+            item_id      TEXT PRIMARY KEY,
+            tenant_id    TEXT NOT NULL,
+            session_id   TEXT NOT NULL,
+            agent_id     TEXT NOT NULL,
+            kind         TEXT NOT NULL,
+            priority     INTEGER NOT NULL DEFAULT 0,
+            status       TEXT NOT NULL DEFAULT 'queued',
+            payload_json TEXT NOT NULL,
+            enqueued_at  TEXT NOT NULL,
+            started_at   TEXT,
+            done_at      TEXT,
+            result_json  TEXT,
+            error        TEXT
+        );
+        CREATE INDEX IF NOT EXISTS idx_daemon_queue_pop
+            ON daemon_work_queue (tenant_id, status, priority DESC, enqueued_at ASC);
+        CREATE INDEX IF NOT EXISTS idx_daemon_queue_session
+            ON daemon_work_queue (tenant_id, session_id, status);
+        """,
+    ),
 ]
 
 
@@ -241,6 +279,157 @@ class DaemonEventStore:
             for row in rows
         ]
 
+    # ── Work queue ────────────────────────────────────────────────────────────
+
+    def enqueue(self, item: dict[str, Any]) -> bool:
+        """Idempotent enqueue. Returns False if item_id already exists."""
+        item_id = str(item.get("item_id", "")).strip()
+        tenant_id = str(item.get("tenant_id", "")).strip()
+        session_id = str(item.get("session_id", "")).strip()
+        agent_id = str(item.get("agent_id", "")).strip()
+        kind = str(item.get("kind", "")).strip()
+        if not all([item_id, tenant_id, session_id, agent_id, kind]):
+            raise ValueError("item_id, tenant_id, session_id, agent_id, kind required")
+        if kind not in WORK_KINDS:
+            raise ValueError(f"kind must be one of {sorted(WORK_KINDS)}")
+        priority = int(item.get("priority", 0))
+        payload_json = json.dumps(item.get("payload", {}), sort_keys=True)
+        enqueued_at = item.get("enqueued_at") or _now()
+
+        conn = self._conn
+        conn.execute("BEGIN IMMEDIATE")
+        try:
+            cur = conn.execute(
+                """
+                INSERT OR IGNORE INTO daemon_work_queue
+                (item_id, tenant_id, session_id, agent_id, kind, priority,
+                 status, payload_json, enqueued_at)
+                VALUES (?, ?, ?, ?, ?, ?, 'queued', ?, ?)
+                """,
+                (item_id, tenant_id, session_id, agent_id, kind, priority,
+                 payload_json, enqueued_at),
+            )
+            inserted = cur.rowcount == 1
+            conn.execute("COMMIT")
+            return inserted
+        except Exception:
+            conn.execute("ROLLBACK")
+            raise
+
+    def dequeue(self, tenant_id: str, *, limit: int = 1) -> list[dict[str, Any]]:
+        """Atomically claim the next queued item(s). Only one caller wins per item."""
+        conn = self._conn
+        conn.execute("BEGIN IMMEDIATE")
+        try:
+            rows = conn.execute(
+                """
+                SELECT item_id, session_id, agent_id, kind, priority, payload_json, enqueued_at
+                FROM daemon_work_queue
+                WHERE tenant_id=? AND status='queued'
+                ORDER BY priority DESC, enqueued_at ASC
+                LIMIT ?
+                """,
+                (tenant_id, max(1, limit)),
+            ).fetchall()
+            now = _now()
+            items: list[dict[str, Any]] = []
+            for row in rows:
+                conn.execute(
+                    "UPDATE daemon_work_queue SET status='running', started_at=? WHERE item_id=?",
+                    (now, row[0]),
+                )
+                items.append({
+                    "schema": WORK_ITEM_SCHEMA,
+                    "item_id": row[0],
+                    "tenant_id": tenant_id,
+                    "session_id": row[1],
+                    "agent_id": row[2],
+                    "kind": row[3],
+                    "priority": row[4],
+                    "payload": json.loads(row[5]),
+                    "enqueued_at": row[6],
+                    "started_at": now,
+                    "status": "running",
+                })
+            conn.execute("COMMIT")
+            return items
+        except Exception:
+            conn.execute("ROLLBACK")
+            raise
+
+    def complete_item(self, item_id: str, *, result: dict[str, Any] | None = None) -> None:
+        conn = self._conn
+        conn.execute("BEGIN IMMEDIATE")
+        try:
+            conn.execute(
+                "UPDATE daemon_work_queue SET status='done', done_at=?, result_json=? WHERE item_id=?",
+                (_now(), json.dumps(result or {}, sort_keys=True), item_id),
+            )
+            conn.execute("COMMIT")
+        except Exception:
+            conn.execute("ROLLBACK")
+            raise
+
+    def fail_item(self, item_id: str, *, error: str) -> None:
+        conn = self._conn
+        conn.execute("BEGIN IMMEDIATE")
+        try:
+            conn.execute(
+                "UPDATE daemon_work_queue SET status='failed', done_at=?, error=? WHERE item_id=?",
+                (_now(), error[:1024], item_id),
+            )
+            conn.execute("COMMIT")
+        except Exception:
+            conn.execute("ROLLBACK")
+            raise
+
+    def queue_depth(self, tenant_id: str) -> dict[str, Any]:
+        rows = self._conn.execute(
+            "SELECT status, COUNT(*) FROM daemon_work_queue WHERE tenant_id=? GROUP BY status",
+            (tenant_id,),
+        ).fetchall()
+        counts: dict[str, int] = {s: 0 for s in ITEM_STATUSES}
+        for status, count in rows:
+            counts[status] = count
+        return {
+            "schema": QUEUE_SCHEMA,
+            "tenant_id": tenant_id,
+            "queued": counts["queued"],
+            "running": counts["running"],
+            "done": counts["done"],
+            "failed": counts["failed"],
+            "total": sum(counts.values()),
+        }
+
+    def get_packet(
+        self,
+        *,
+        tenant_id: str,
+        session_id: str,
+        agent_id: str,
+        event_limit: int = 20,
+    ) -> dict[str, Any]:
+        """Deterministic snapshot: recent events + queue depth + session head."""
+        events = self.list_events(
+            tenant_id=tenant_id, session_id=session_id, agent_id=agent_id, limit=event_limit
+        )
+        heads = self.list_session_heads(tenant_id=tenant_id)
+        head = next(
+            (h for h in heads if h["session_id"] == session_id and h["agent_id"] == agent_id),
+            None,
+        )
+        depth = self.queue_depth(tenant_id)
+        return {
+            "schema": PACKET_SCHEMA,
+            "tenant_id": tenant_id,
+            "session_id": session_id,
+            "agent_id": agent_id,
+            "session_head": head,
+            "queue": depth,
+            "recent_events": events,
+            "event_count": len(events),
+        }
+
 
 def _append_command(args: argparse.Namespace) -> int:
     store = DaemonEventStore(args.db)
@@ -278,6 +467,42 @@ def _sessions_command(args: argparse.Namespace) -> int:
     return 0
 
 
+def _enqueue_command(args: argparse.Namespace) -> int:
+    store = DaemonEventStore(args.db)
+    try:
+        item = json.load(sys.stdin)
+        inserted = store.enqueue(item)
+    finally:
+        store.close()
+    print(json.dumps({"ok": True, "inserted": inserted}, indent=2))
+    return 0
+
+
+def _queue_command(args: argparse.Namespace) -> int:
+    store = DaemonEventStore(args.db)
+    try:
+        depth = store.queue_depth(args.tenant_id)
+    finally:
+        store.close()
+    print(json.dumps(depth, indent=2))
+    return 0
+
+
+def _packet_command(args: argparse.Namespace) -> int:
+    store = DaemonEventStore(args.db)
+    try:
+        packet = store.get_packet(
+            tenant_id=args.tenant_id,
+            session_id=args.session_id,
+            agent_id=args.agent_id,
+            event_limit=args.limit,
+        )
+    finally:
+        store.close()
+    print(json.dumps(packet, indent=2))
+    return 0
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(prog="lgwks_daemon_store")
     parser.add_argument("--db", default=".lgwks/daemon-events.db", help="sqlite path")
@@ -296,6 +521,20 @@ def main(argv: list[str] | None = None) -> int:
     sessions = sub.add_parser("sessions", help="list tenant session heads")
     sessions.add_argument("--tenant-id", required=True)
     sessions.set_defaults(func=_sessions_command)
+
+    enqueue = sub.add_parser("enqueue", help="enqueue a work item from stdin JSON")
+    enqueue.set_defaults(func=_enqueue_command)
+
+    queue = sub.add_parser("queue", help="show queue depth for a tenant")
+    queue.add_argument("--tenant-id", required=True)
+    queue.set_defaults(func=_queue_command)
+
+    packet = sub.add_parser("packet", help="fetch deterministic session packet")
+    packet.add_argument("--tenant-id", required=True)
+    packet.add_argument("--session-id", required=True)
+    packet.add_argument("--agent-id", required=True)
+    packet.add_argument("--limit", type=int, default=20)
+    packet.set_defaults(func=_packet_command)
 
     args = parser.parse_args(argv)
     return args.func(args)
