@@ -1,9 +1,9 @@
-# Handoff — lgwks subconscious build · 2026-06-12 (session 10, main @ 3dbe01f)
+# Handoff — lgwks subconscious build · 2026-06-12 (session 12, main @ e4a03e2)
 
-> Refreshed session 10: opened the **I8-hardening** track (#89) and landed **L1+L2+L7** — §1-INV is now cryptographically enforced (PR #90).
-> Session 11: landed **L5** (audited tenant→world promotion) — the last L-step. **#89 is ready to close.**
-> **No open ingestion/hardening issue** once #89 closes. Next surfaces are deferred packets: L6/I9 (CRDT deploy), L2 access-router (mandatory gating + the operator/daemon promote surface), network/MCP — all in ARCH-two-db-multitenant.md + SCOPE-DEFERRED.md.
-> The dated "Current state" / "Session N state" sections below are append-only history — the **latest** state is the session-10 block at the bottom.
+> Session 10–11: opened **I8-hardening** (#89), landed L1+L2+L7/L3/L4/L5 — §1-INV cryptographically enforced; **#89 closed**.
+> Session 12: shipped the **CIAM convergence epic #97** (build order B→A→C): #98 capability lifecycle + operator promote, #99 access-router mandatory gating (`ADMIN` sentinel + `TenantStore`), #100 CRDT live convergence (`reconverge`). **Epic CLOSED.** This SUPERSEDES the old session-11 "next" note — L6/I9 and the L2 access-router are now SHIPPED, not deferred.
+> **Open issues:** #104 (inbound→`CapabilityPort` handle), #105 (CRDT replica file-lock), #106 (entity-graph OR-Set wiring) — micro-debts from the epic. Canonical next *surface* (dependencies now unblocked, NOT yet filed — needs Director trigger): **D2 network/MCP transport** (SCOPE-DEFERRED.md); hardened plan in the session-12 block below.
+> The dated "Session N state" sections below are append-only history — the **latest** state is the **session-12** block at the bottom.
 
 You are the next agent on the lgwks rebuild. Read this fully before acting. Written
 AI-for-AI; receipts, not essays. Authority ladder: `/CLAUDE.md` → `governance/README.md`
@@ -313,3 +313,54 @@ audited (ARCH L5 closed). All L-steps of #89 (L1+L2+L7, L3, L4, L5) have landed.
 **Next:** close #89. Then the canonical deferred tail: **L6/I9** (CRDT deploy on world + tenant stores)
 → **L2 access-router** (mandatory gating so every store op routes through `require_scope`, + the live
 promote surface). Network/MCP (D2), cross-workspace ACL (D3) stay parked in SCOPE-DEFERRED.md.
+
+## Session 12 state (2026-06-12, main @ e4a03e2) — CIAM convergence epic #97 CLOSED
+
+#89 closed. The **CIAM convergence epic #97** shipped end-to-end (build order B→A→C). The three
+kernel-shaped seams now exist, each with ONE local impl, kernel swap-in additive (no rewrite):
+
+| sub | what landed | seam (final interface, local impl) | PR |
+|---|---|---|---|
+| #98 B | capability lifecycle + operator `lgwks access promote`/`resolve`; per-principal key persisted to Keychain (`lgwks:cap:<principal>`) | `lgwks_access.CapabilityPort` ← `HmacCapabilityPort` | #101 |
+| #99 A | `ADMIN` sentinel + `AdminOnlyError` guard the 3 UNSCOPED vector primitives; `TenantStore` is the single sanctioned tenant door — §1-INV is now MECHANICAL | `lgwks_access.TenantStore` (kernel `Port::invoke` analogue) | #102 |
+| #100 C | `reconverge(sink, current)` = load prior replica → per-key CvRDT merge → commit; pipeline reconverges into stable `PIPELINE_STORE/crdt_replica.json` | `lgwks_crdt.ConvergenceSink` ← `JsonFileSink` | #103 |
+
+Hardening receipts: #101 shipped with 4 real defects the green suite hid (broken Keychain
+persistence — read via keyvault registry, write direct; dead promote CLI; `sys` NameError) —
+all fixed pre-merge. #99/#100 each caught a real bug in review (embed_port stub `ImportError`;
+OR-Set byte-idempotency). Schema gate green throughout (no new payload schema). NAVMAP regen.
+
+**Open micro-debts (filed, scoped):** #104 `lgwks_inbound.fuse` → take a `CapabilityPort` handle
+not a raw tenant string (its read path is already §1-INV-scoped; this kills the raw-string trust).
+#105 file-lock / daemon-own the `reconverge` replica commit (concurrent *processes* can lose a
+merge — load→commit isn't locked). #106 route entity-graph mutable membership through OR-Set
+beyond the pipeline's world_nodes/tenant_edges. All three are ADDITIVE behind existing seams.
+
+**Known pre-existing (NOT a regression):** `tests/test_embed_port.py` stubs `lgwks_vector` only if
+it imports first → 2 order-dependent `.meta` fails / collection error in shared-process runs (on
+`main`; see `reference_lgwks_full_suite_collection_quirk`). CI runs only the schema gate (no pytest).
+
+### HARDENED next-surface plan — D2: network/MCP/HTTP transport (NOT filed; needs Director trigger "expose beyond localhost")
+
+The whole I8/I9 sequence existed to make the local core concurrency- and isolation-safe FIRST so the
+remote surface is a **thin adapter over an already-safe core** (ARCH §"hardest surface"). That core is
+now safe. Build D2 so it ADDS a transport, never refactors the core:
+
+- **The seam is already the core's public API — do not invent a parallel one.** A request handler maps:
+  inbound credential → `CapabilityPort.resolve(principal)` → opaque handle; one request verb → exactly
+  one `TenantStore` method (`read`/`query`/`write`/`promote`); apply the admission queue (#89 L3/L4) at
+  the edge for backpressure + the **D1 429/Retry-After** contract. The `ADMIN` guard already makes it
+  impossible for a handler to touch `vector_records` directly — lean on that, don't re-check.
+- **Build NOW (even before D2) the object both the CLI and the future handler construct:** a
+  `Session`/`RequestContext` that pairs `{resolved CapabilityPort handle, TenantStore, admission lease}`.
+  `lgwks_session.py` is the natural home (it already does begin/end/capability). If the local CLI paths
+  route through that one object today, D2 becomes "an HTTP/MCP handler that builds a Session from a
+  request" — additive — instead of threading auth+store+admission through new call sites (a refactor).
+- **Keep transport opaque to the engine:** the adapter imports the core; the core never imports
+  transport. Token stays opaque (no handler reads `.sig/.scopes`). This preserves the #97 standalone
+  invariant and the future kernel `KernelBridge`/HTTP-syscall swap (see `project_lgwks_kernel_ciam_convergence`).
+- **Out of scope for D2, file separately when triggered:** cross-machine CRDT sync transport (D4),
+  cross-workspace ACL (D3), promotion-review UI (D5), per-tenant billing (D6) — all in SCOPE-DEFERRED.md,
+  dependencies now satisfied.
+
+If the Director triggers D2, file it as the next issue and spec against the Session seam above first.
