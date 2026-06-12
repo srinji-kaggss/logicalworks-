@@ -90,10 +90,13 @@ class TestEngineSchema(unittest.TestCase):
             s = r["insights"]["scores"]
             self.assertGreaterEqual(s["coverage_C"], 0.0)
             self.assertLessEqual(s["coverage_C"], 1.0)
-            self.assertGreaterEqual(s["gap_G"], 0.0)
-            self.assertLessEqual(s["gap_G"], 1.0)
-            self.assertGreaterEqual(s["confidence_P"], 0.30)
-            self.assertLessEqual(s["confidence_P"], 0.90)
+            # gap_G is None when the graph is absent (grounding unavailable)
+            if s["gap_G"] is not None:
+                self.assertGreaterEqual(s["gap_G"], 0.0)
+                self.assertLessEqual(s["gap_G"], 1.0)
+            # P is now a constant-free index over [0, 1] (was magic-bounded [0.30, 0.90])
+            self.assertGreaterEqual(s["confidence_P"], 0.0)
+            self.assertLessEqual(s["confidence_P"], 1.0)
 
     def test_t8_pathways_match_selections(self):
         r = eng.run_engine(_PROMPT)
