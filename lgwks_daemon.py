@@ -653,6 +653,84 @@ def _worktree_list_command(args: argparse.Namespace) -> int:
     return 0
 
 
+def _export_run_command(args: argparse.Namespace) -> int:
+    from lgwks_daemon_export import ExportManager
+    paths = _paths(Path(args.repo).resolve())
+    store = DaemonEventStore(paths.db)
+    try:
+        dest = Path(args.dest) if args.dest else None
+        result = ExportManager(store, paths.repo_root).export_run(args.run_id, dest_dir=dest)
+    finally:
+        store.close()
+    print(json.dumps(result, indent=2))
+    return 0
+
+
+def _export_verify_command(args: argparse.Namespace) -> int:
+    from lgwks_daemon_export import ExportManager
+    paths = _paths(Path(args.repo).resolve())
+    store = DaemonEventStore(paths.db)
+    try:
+        result = ExportManager(store, paths.repo_root).verify_export(args.run_id)
+    finally:
+        store.close()
+    print(json.dumps(result, indent=2))
+    return int(not result["verified"])
+
+
+def _cleanup_run_command(args: argparse.Namespace) -> int:
+    from lgwks_daemon_export import ExportManager
+    paths = _paths(Path(args.repo).resolve())
+    store = DaemonEventStore(paths.db)
+    try:
+        result = ExportManager(store, paths.repo_root).cleanup_run(args.run_id, force=args.force)
+    finally:
+        store.close()
+    print(json.dumps(result, indent=2))
+    return 0 if result["cleaned"] else 1
+
+
+def _export_session_command(args: argparse.Namespace) -> int:
+    from lgwks_daemon_export import ExportManager
+    paths = _paths(Path(args.repo).resolve())
+    tenant_id = f"repo:{paths.repo_root.name}"
+    store = DaemonEventStore(paths.db)
+    try:
+        dest = Path(args.dest) if args.dest else None
+        result = ExportManager(store, paths.repo_root).export_session(
+            tenant_id, args.session_id, dest_dir=dest
+        )
+    finally:
+        store.close()
+    print(json.dumps(result, indent=2))
+    return 0
+
+
+def _register_export_subcommands(ps: Any) -> None:
+    exp = ps.add_parser("export", help="content-addressed archive export for runs and sessions")
+    exp_sub = exp.add_subparsers(dest="export_command", required=True)
+
+    exp_run = exp_sub.add_parser("run", help="export a research run to a .tar.gz archive")
+    exp_run.add_argument("run_id")
+    exp_run.add_argument("--dest", default="", help="destination directory (default: store/daemon/exports/)")
+    exp_run.set_defaults(func=_export_run_command)
+
+    exp_verify = exp_sub.add_parser("verify", help="verify export archive hash matches stored hash")
+    exp_verify.add_argument("run_id")
+    exp_verify.set_defaults(func=_export_verify_command)
+
+    exp_session = exp_sub.add_parser("session", help="export all session events to JSONL")
+    exp_session.add_argument("session_id")
+    exp_session.add_argument("--dest", default="")
+    exp_session.set_defaults(func=_export_session_command)
+
+    cleanup = ps.add_parser("cleanup", help="safely delete local run data after verified export")
+    cleanup.add_argument("run_id")
+    cleanup.add_argument("--force", action="store_true", default=False,
+                         help="delete even without verified export (logs override)")
+    cleanup.set_defaults(func=_cleanup_run_command)
+
+
 def _register_worktree_subcommands(ps: Any) -> None:
     wt = ps.add_parser("worktree", help="manage daemon-owned git worktrees")
     wt_sub = wt.add_subparsers(dest="worktree_command", required=True)
@@ -713,6 +791,7 @@ def add_parser(sub) -> None:
     runs_p = ps.add_parser("runs", help="list indexed research runs for this repo")
     runs_p.set_defaults(func=_runs_command)
 
+    _register_export_subcommands(ps)
     _register_worktree_subcommands(ps)
 
 
@@ -761,6 +840,7 @@ def main(argv: list[str] | None = None) -> int:
     runs_p = sub.add_parser("runs", help="list indexed research runs")
     runs_p.set_defaults(func=_runs_command)
 
+    _register_export_subcommands(sub)
     _register_worktree_subcommands(sub)
 
     args = parser.parse_args(argv if argv is not None else sys.argv[1:])

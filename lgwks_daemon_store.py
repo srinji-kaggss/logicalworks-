@@ -143,6 +143,15 @@ _MIGRATIONS = [
             ON daemon_worktrees (tenant_id, session_id, status);
         """,
     ),
+    (
+        5,
+        "daemon_runs_export_v1",
+        """
+        ALTER TABLE daemon_runs ADD COLUMN exported_at TEXT;
+        ALTER TABLE daemon_runs ADD COLUMN export_path TEXT;
+        ALTER TABLE daemon_runs ADD COLUMN export_hash TEXT;
+        """,
+    ),
 ]
 
 
@@ -516,6 +525,36 @@ class DaemonEventStore:
             for r in rows
         ]
 
+
+    def mark_run_exported(
+        self, run_id: str, *, export_path: str, export_hash: str
+    ) -> None:
+        """Record a verified export for a research run."""
+        conn = self._conn
+        conn.execute("BEGIN IMMEDIATE")
+        try:
+            conn.execute(
+                "UPDATE daemon_runs SET exported_at=?, export_path=?, export_hash=? WHERE run_id=?",
+                (_now(), export_path, export_hash, run_id),
+            )
+            conn.execute("COMMIT")
+        except Exception:
+            conn.execute("ROLLBACK")
+            raise
+
+    def get_run_export_state(self, run_id: str) -> dict[str, Any] | None:
+        """Return export state fields for a run, or None if run not found."""
+        row = self._conn.execute(
+            "SELECT run_id, tenant_id, run_dir, exported_at, export_path, export_hash "
+            "FROM daemon_runs WHERE run_id=?",
+            (run_id,),
+        ).fetchone()
+        if row is None:
+            return None
+        return {
+            "run_id": row[0], "tenant_id": row[1], "run_dir": row[2],
+            "exported_at": row[3], "export_path": row[4], "export_hash": row[5],
+        }
 
     # ── Worktree registry ─────────────────────────────────────────────────────
 
