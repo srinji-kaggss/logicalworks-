@@ -24,6 +24,8 @@ Everything else is an adapter or projection.
 
 For now, defer the human projection. Keep the input headstart hook. Treat outbound transcript tailing as the simpler truth source.
 
+Within one tenant, this daemon is also the referee across concurrent frontier agents. It does not replace their individual subconscious views; it coordinates them.
+
 ## 2. The canonical runtime graph
 
 ```mermaid
@@ -54,6 +56,26 @@ This is the full digestion system:
 - the daemon and ingest largely share one runtime
 - transcript telemetry keeps feeding the same state after the explicit request
 - the output is a bounded packet, not free prose
+
+## 2.1 Referee + individual subconsciouses
+
+The daemon has two roles at once:
+
+1. `shared referee`
+   Tenant-wide arbitration over queueing, state ownership, worktree/git actions,
+   retrieval freshness, and concurrent side effects.
+2. `agent-local subconscious`
+   Each active agent still gets its own bounded context packet, tuned to its turn,
+   history, and task position.
+
+So the target shape is:
+
+- one shared referee/runtime
+- many per-agent subconscious packets derived from the same substrate
+
+Not:
+
+- one giant shared brain that every agent reads identically
 
 ## 3. The two active lanes
 
@@ -103,6 +125,12 @@ Desired behavior:
 
 For Claude, the simplest outbound architecture is the JSONL tail, not a special stop-hook.
 
+Day-1 concurrency requirement:
+
+- one tenant may have multiple active frontier agents at once
+- the daemon must referee them from the start
+- the initial bar is at least `Claude + Codex + Gemini` concurrently within one tenant
+
 Built anchors:
 
 - [lgwks_session.py](/Users/srinji/logicalworks-/lgwks_session.py)
@@ -144,6 +172,13 @@ daemon runtime
   + state updates
   + packet serving
 ```
+
+Inside that runtime there are two scheduling domains:
+
+- `shared-referee`
+  tenant queue, git/worktree ownership, CRDT/state merge, crawl/index jobs, promotion rules
+- `agent-local`
+  per-agent context synthesis, task-local retrieval, task-local deltas, turn-aware suggestions
 
 Built anchors:
 
@@ -245,6 +280,12 @@ Interpretation:
 
 - the CRDT/capability work was not side noise
 - it is part of daemon-owned state, worktree, and multi-actor runtime control
+
+This is where the referee role becomes concrete:
+
+- if three agents want overlapping repo actions, the daemon arbitrates
+- if one agent changes shared state, the others receive updated subconscious packets
+- if two agents produce conflicting candidate state, the daemon resolves through the owned merge path
 
 ## 7. Client adapters: Claude, Codex, Gemini
 
@@ -467,6 +508,15 @@ If these bins are not explicit, the daemon will blur:
 - hot and archival storage
 - deterministic and model-dependent decisions
 
+### 12.5 Coordination bins
+
+- `shared-referee`
+  single-writer or arbitrated tenant-wide work
+- `agent-local`
+  per-agent packeting, local context deltas, local intent progression
+
+If this bin is missing, the system either over-centralizes and loses agent specificity, or over-fragments and loses tenant-wide coordination.
+
 ## 13. Security and retention
 
 The daemon must be safe enough to own:
@@ -482,6 +532,10 @@ The clean security shape is:
 ```text
 capability -> gate -> execution -> audit -> retention/export
 ```
+
+For concurrency, add:
+
+`referee arbitration -> capability/gate -> execution -> audit`
 
 Built anchors:
 
@@ -514,6 +568,7 @@ This should be treated as a later tier, not a first-slice blocker.
 - one owned daemon lifecycle
 - ingress enqueue and transcript normalization
 - one canonical packet contract across clients
+- explicit shared-referee vs agent-local runtime boundaries
 - daemon-owned git/worktree runtime wiring
 - research experience unified behind one obvious front door
 - client adapters for Codex and Gemini

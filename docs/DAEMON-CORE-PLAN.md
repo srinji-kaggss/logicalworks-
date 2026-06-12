@@ -9,6 +9,7 @@ This is the cohesive plan after the current architecture cut:
 - use transcript/history tail as the simpler outbound truth
 - treat daemon and ingest as one runtime
 - make clients adapters, not product centers
+- build concurrency and referee behavior in from day 1
 
 One important correction:
 
@@ -30,6 +31,18 @@ ingress adapter
 ```
 
 If this node works, Claude/Codex/Gemini become adapters instead of architecture forks.
+
+Additional hard requirement:
+
+> one tenant may run multiple frontier agents concurrently, and the daemon is the referee across them
+
+The day-1 bar is at least:
+
+- Claude
+- Codex
+- Gemini
+
+running at the same time within one tenant.
 
 ## 2. What is done
 
@@ -83,6 +96,8 @@ Need one owned daemon process with:
 - queue/enqueue API
 - read packet API
 - crash-safe restart
+- shared-referee scheduling across concurrent agent workloads
+- per-agent subconscious packet generation over shared tenant state
 
 Acceptance:
 
@@ -90,6 +105,8 @@ Acceptance:
 - ingress can enqueue work
 - packet can be fetched deterministically by session
 - restart loses no committed state
+- three concurrent agent sessions in one tenant do not corrupt state or lose updates
+- shared jobs are arbitrated once; agent-local packets remain distinct
 
 Implementation note:
 
@@ -110,6 +127,7 @@ Acceptance:
 
 - Claude ingress hook produces the same normalized event shape as a later transcript tail event
 - Codex/Gemini adapters can submit equivalent events without special-casing the core
+- every normalized event is attributable to both `tenant` and `agent/session`
 
 ### P2. Daemon-owned git/worktree runtime
 
@@ -124,6 +142,7 @@ Acceptance:
 
 - daemon can create/update/close a worktree session without manual shell choreography
 - state merges remain auditable
+- conflicting repo actions across concurrent agents are serialized or rejected by referee policy, never raced
 
 ### P3. Research run front door
 
@@ -160,6 +179,7 @@ Acceptance:
 
 - same core packet contract
 - no client-specific business logic in the daemon core
+- adapters identify the caller cleanly enough for per-agent subconscious state and referee arbitration
 
 ### P5. Archive/export tier
 
@@ -239,3 +259,4 @@ graph TD
 - Use transcript/history tails as the simplest durable outbound source when the client provides them.
 - Extend built surfaces before minting new ones.
 - Bin work explicitly by latency, trust, storage, and compute class before choosing where it runs.
+- Distinguish `shared-referee` work from `agent-local subconscious` work in every runtime decision.
