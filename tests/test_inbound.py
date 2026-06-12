@@ -357,5 +357,54 @@ class TestRealGraph(unittest.TestCase):
         self.assertEqual(f1, f2, "RRF over the real graph is not byte-deterministic")
 
 
+class TestTenantScopedInbound(unittest.TestCase):
+    """§1-INV at the consumer path (ARCH L1/L2): when assemble_inbound is given a
+    tenant, a graph node owned by another tenant does not resolve and is dropped —
+    no cross-tenant cid ever reaches the reflex pack handles.
+    """
+
+    def _mk(self, conn, source_cid, tenant, seed):
+        floats = [float((seed + 1) * (j + 1) % 7) + 0.5 for j in range(DIM)]
+        rec = lgwks_vector.encode_record(
+            floats, modality="text", space_id=SPACE, tenant=tenant, source_cid=source_cid
+        )
+        lgwks_vector.upsert_record(conn, rec)
+        return rec
+
+    def test_cross_tenant_nodes_dropped(self):
+        with TemporaryDirectory() as tmp:
+            conn = lgwks_vector.create_store(Path(tmp) / "scoped.db")
+            a = [self._mk(conn, f"a-{i}", "tenant-A", i) for i in range(3)]
+            b = [self._mk(conn, f"b-{i}", "tenant-B", 10 + i) for i in range(3)]
+            w = [self._mk(conn, f"w-{i}", lgwks_vector.WORLD_TENANT, 20 + i) for i in range(2)]
+            conn.commit()
+
+            all_recs = a + b + w
+            cids = [r.cid for r in all_recs]
+            rels = lgwks_rank.RELATIONS
+            nodes = [{"id": c} for c in cids]
+            links = [{"source": cids[i], "target": cids[(i + 1) % len(cids)],
+                      "relation": rels[i % len(rels)],
+                      "confidence_score": 0.9, "weight": 1.0} for i in range(len(cids))]
+            graph = {"nodes": nodes, "links": links}
+
+            b_cids = {r.cid for r in b}
+            a_cids = {r.cid for r in a}
+            w_cids = {r.cid for r in w}
+
+            pack = assemble_inbound(None, graph, conn, tenant="tenant-A")
+            handles = set(pack["handles"]) if "handles" in pack else set()
+            # Collect every cid that surfaced anywhere in the pack.
+            surfaced = set(handles)
+            for dh in pack.get("depth_handles", []):
+                surfaced.add(dh["id"])
+
+            self.assertEqual(surfaced & b_cids, set(),
+                             "§1-INV: tenant-B cids must never reach tenant-A's pack")
+            self.assertTrue(surfaced & a_cids, "tenant-A's own cids should resolve")
+            self.assertTrue(surfaced & w_cids, "world cids should resolve for tenant-A")
+            conn.close()
+
+
 if __name__ == "__main__":
     unittest.main()

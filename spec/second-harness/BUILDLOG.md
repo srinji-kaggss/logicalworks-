@@ -518,3 +518,38 @@ Director authorized model-layer access for U6.2. Both land on `feat/u6-embedding
 **Result:** 37 engine/invariant + 10 hook tests green; registry 99/99; latency 0.22s. The `d=0→P=0` abstain-on-ties consequence from U6.1 is the concrete motivation now addressed by the cosine seam (graded similarity breaks ties) once the model lands.
 
 **What's next:** `make download-models` + run both builders to activate qwen mode end-to-end; then N novelty axis + `attention` (Qwen-native) and P→probability calibration (outcome log + isotonic).
+
+---
+
+## 2026-06-11 · I8-hardening L1 — §1-INV crypto + tier-scoped capability (#89, branch feat/i8-hardening-l1-invariant-89)
+
+Promoted the deferred half of I8 (ARCH-two-db-multitenant.md) into work. Director scoped
+the full packet (L1–L5); this is the **load-bearing first step (L1+L2+L7)** — ARCH's
+"hardest surface": the §1-INV holding under a verified, tier-scoped capability.
+
+**Built:**
+- `lgwks_capability` v1→v2 — tier scopes (`tenant:rw`/`world:r`/`world:promote`) folded into
+  the HMAC payload (`tenant:nonce:scopes`), so scope escalation OR narrowing breaks the
+  signature (no client-side privilege change). `require_scope()` gates each tier op.
+- `lgwks_vector.get_record_for_tenant()` — secure cid resolver: a cid resolves IFF own ⊕
+  world, else `None`. Cross-tenant cid == nonexistent cid (closes the existence side-channel).
+  `get_record`/`query_by_source` marked UNSCOPED/admin-only.
+- `lgwks_inbound.assemble_inbound(tenant=...)` + `inbound run --tenant` — threads §1-INV
+  through the I7 consumer read path; cross-tenant graph nodes drop out of the reflex pack.
+
+**Harden pass (in-thread, Director-approved):** reserved the `world` sentinel as non-issuable
+(a tenant named `world` would publish private rows) + rejected at guard; `make_tenant_filter`
+made world-aware (own ⊕ world, not own-only).
+
+**Result:** 81 tests green (incl. §1-INV 10⁴ A/B against a live on-disk store, scope-tamper
+rejection, tenant-scoped inbound drop, reserved-world). Registry gate 99/99 (108 rows; v2 row
+added, v1 superseded).
+
+**Honest limits (deferred to L2/L3 access-router, NOT closed here):**
+- Enforcement is advisory — the scoped read fns trust the tenant string; nothing structurally
+  forces every caller through `guard`/`require_scope`. Mandatory gating = L2 (access router).
+- `assemble_inbound(tenant=None)` keeps the legacy unscoped path (single-operator P3 default,
+  fail-open by design until multi-tenant exposure).
+
+**Next (issue #89 tail):** L3 per-tenant admission (fix fail-open) → L4 durable cross-process
+queue → L5 promotion audit. L6 (CRDT deploy) is I9, separate.

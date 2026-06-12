@@ -206,6 +206,7 @@ def assemble_inbound(
     *,
     limit_tokens: int = DEFAULT_LIMIT_TOKENS,
     k: int = RRF_K,
+    tenant: Optional[str] = None,
 ) -> dict[str, Any]:
     """End-to-end: graph cubic rank ⊕ vector cosine rank → fused → token-budgeted pack.
 
@@ -213,16 +214,29 @@ def assemble_inbound(
                       NOT embed here). If None, RRF runs on the graph list alone.
     graph           : graph.json structure (consumed by lgwks_rank.rank_graph).
     store_conn      : open vector store connection (lgwks_vector).
+    tenant          : when set, every cid is resolved under §1-INV (own ⊕ world) via
+                      get_record_for_tenant — a graph node owned by another tenant
+                      simply does not resolve and is dropped from the candidate
+                      universe (ARCH L1). When None, the legacy single-operator
+                      unscoped resolver is used (no multi-tenant boundary). The
+                      tenant string must come from a validated capability token
+                      (lgwks_capability.guard / require_scope), never raw input.
     Raises lgwks_rank.RankError on non-convergence (no silent failure).
     Raises lgwks_vector.SpaceMismatchError if the query crosses embedding spaces.
     """
     graph_ranks = lgwks_rank.rank_graph(graph)
 
     # Candidate universe = graph cids that resolve in the store (zero-dangling, D2).
+    # Under a tenant scope, "resolve" means own ⊕ world — cross-tenant cids drop out.
+    def _resolve(cid: str) -> Optional[lgwks_vector.VectorRecord]:
+        if tenant is not None:
+            return lgwks_vector.get_record_for_tenant(store_conn, cid, tenant)
+        return lgwks_vector.get_record(store_conn, cid)
+
     resolved: list[RankRecord] = []
     records: dict[str, lgwks_vector.VectorRecord] = {}
     for r in graph_ranks:
-        rec = lgwks_vector.get_record(store_conn, r.node_cid)
+        rec = _resolve(r.node_cid)
         if rec is not None:
             resolved.append(r)
             records[r.node_cid] = rec
@@ -267,6 +281,10 @@ def add_parser(sub) -> None:
                             "(enables the vector cosine lane)")
     run_p.add_argument("--limit-tokens", type=int, default=DEFAULT_LIMIT_TOKENS,
                        metavar="N", help=f"reflex cap (default: {DEFAULT_LIMIT_TOKENS})")
+    run_p.add_argument("--tenant", metavar="T",
+                       help="resolve cids under §1-INV (own ⊕ world) for tenant T; "
+                            "cross-tenant nodes are dropped (ARCH L1). Omit for the "
+                            "single-operator unscoped read.")
     run_p.set_defaults(func=_cmd_run)
 
     info_p = sp.add_parser("info", help="show module constants (RRF_K, cap, schema)")
@@ -297,17 +315,21 @@ def _cmd_run(args) -> int:
         return 0
 
     conn = lgwks_vector.create_store(Path(store_path))
+    tenant = getattr(args, "tenant", None)
     try:
         query_embedding = None
         qcid = getattr(args, "query_cid", None)
         if qcid:
-            query_embedding = lgwks_vector.get_record(conn, qcid)
+            if tenant is not None:
+                query_embedding = lgwks_vector.get_record_for_tenant(conn, qcid, tenant)
+            else:
+                query_embedding = lgwks_vector.get_record(conn, qcid)
             if query_embedding is None:
                 print(f"error: query cid {qcid!r} not found in store", file=_sys.stderr)
                 return 1
         try:
             pack = assemble_inbound(query_embedding, graph, conn,
-                                    limit_tokens=args.limit_tokens)
+                                    limit_tokens=args.limit_tokens, tenant=tenant)
         except lgwks_rank.RankError as e:
             print(f"error: graph rank did not converge: {e}", file=_sys.stderr)
             return 1

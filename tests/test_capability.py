@@ -26,9 +26,14 @@ from lgwks_capability import (
     SCHEMA,
     CapabilityToken,
     CapabilityError,
+    DEFAULT_SCOPES,
+    TENANT_RW,
+    WORLD_R,
+    WORLD_PROMOTE,
     issue_token,
     validate,
     guard,
+    require_scope,
     make_tenant_filter,
 )
 
@@ -189,6 +194,114 @@ class TestFilterBoundary(unittest.TestCase):
         f = make_tenant_filter(token)
         result = f(_make_store("bob", 10))
         self.assertEqual(result, [], "T5: no matching tenant → empty result (zero leak)")
+
+
+# ---------------------------------------------------------------------------
+# T6 — tier scopes (ARCH L7): a token grants only what it was issued
+# ---------------------------------------------------------------------------
+
+class TestTierScopes(unittest.TestCase):
+    """T6: scopes are tier-aware and enforced; default grant = own rw + world r."""
+
+    def test_default_grant(self):
+        token, _ = issue_token("alice")
+        self.assertEqual(token.scopes, DEFAULT_SCOPES)
+        self.assertIn(TENANT_RW, token.scopes)
+        self.assertIn(WORLD_R, token.scopes)
+        self.assertNotIn(WORLD_PROMOTE, token.scopes,
+                         "T6: promotion must NOT be in the default grant")
+
+    def test_require_scope_present_succeeds(self):
+        token, key = issue_token("alice")
+        result = require_scope(token, WORLD_R, lambda t: f"read-{t}", key)
+        self.assertEqual(result, "read-alice")
+
+    def test_require_scope_absent_rejected(self):
+        token, key = issue_token("alice")  # no WORLD_PROMOTE
+        with self.assertRaises(CapabilityError, msg="T6: missing scope must be rejected"):
+            require_scope(token, WORLD_PROMOTE, lambda t: "promoted", key)
+
+    def test_explicit_promote_grant(self):
+        token, key = issue_token("curator", scopes={TENANT_RW, WORLD_R, WORLD_PROMOTE})
+        result = require_scope(token, WORLD_PROMOTE, lambda t: f"promote-{t}", key)
+        self.assertEqual(result, "promote-curator")
+
+    def test_unknown_scope_rejected_at_issue(self):
+        with self.assertRaises(ValueError, msg="T6: unknown scope must not be issuable"):
+            issue_token("alice", scopes={"world:delete"})
+
+
+# ---------------------------------------------------------------------------
+# T7 — scope escalation is signed-out (ARCH L7 / D4)
+# ---------------------------------------------------------------------------
+
+class TestScopeEscalation(unittest.TestCase):
+    """T7: a client cannot widen its grant by mutating token.scopes — sig covers scopes."""
+
+    def test_widened_scopes_fail_validation(self):
+        token, key = issue_token("alice")  # {tenant:rw, world:r}
+        escalated = CapabilityToken(
+            tenant=token.tenant, nonce=token.nonce, sig=token.sig,
+            scopes=frozenset({TENANT_RW, WORLD_R, WORLD_PROMOTE}),
+        )
+        self.assertFalse(validate(escalated, key),
+                         "T7: widening scopes must invalidate the signature")
+
+    def test_escalated_token_rejected_by_require_scope(self):
+        token, key = issue_token("alice")
+        escalated = CapabilityToken(
+            tenant=token.tenant, nonce=token.nonce, sig=token.sig,
+            scopes=frozenset({TENANT_RW, WORLD_R, WORLD_PROMOTE}),
+        )
+        with self.assertRaises(CapabilityError, msg="T7: escalated token must be rejected"):
+            require_scope(escalated, WORLD_PROMOTE, lambda t: "promoted", key)
+
+    def test_dropped_scopes_also_fail_validation(self):
+        # Narrowing is also a mutation; the signed payload no longer matches.
+        token, key = issue_token("alice", scopes={TENANT_RW, WORLD_R, WORLD_PROMOTE})
+        narrowed = CapabilityToken(
+            tenant=token.tenant, nonce=token.nonce, sig=token.sig,
+            scopes=frozenset({TENANT_RW}),
+        )
+        self.assertFalse(validate(narrowed, key),
+                         "T7: any scope mutation breaks the signature")
+
+
+# ---------------------------------------------------------------------------
+# T8 — harden pass (in-thread, #89): reserved 'world' tenant + world-aware filter
+# ---------------------------------------------------------------------------
+
+class TestReservedWorldTenant(unittest.TestCase):
+    """T8a: 'world' is the shared-tier sentinel — never issuable, rejected at guard."""
+
+    def test_issue_world_tenant_rejected(self):
+        with self.assertRaises(ValueError, msg="T8: 'world' tenant must not be issuable"):
+            issue_token(lgwks_capability.WORLD_TENANT)
+
+    def test_guard_world_tenant_rejected(self):
+        # A hand-built token naming the reserved tier must be rejected before query.
+        dummy_key = secrets.token_bytes(32)
+        token = CapabilityToken(tenant=lgwks_capability.WORLD_TENANT, nonce="aa", sig="bb")
+        with self.assertRaises(CapabilityError, msg="T8: guard must reject reserved tier"):
+            guard(token, lambda t: t, dummy_key)
+        with self.assertRaises(CapabilityError, msg="T8: require_scope must reject reserved tier"):
+            require_scope(token, WORLD_R, lambda t: t, dummy_key)
+
+
+class TestWorldAwareFilter(unittest.TestCase):
+    """T8b: make_tenant_filter keeps own ⊕ world, drops only other tenants' rows."""
+
+    def test_filter_keeps_world(self):
+        token, _ = issue_token("alice")
+        f = make_tenant_filter(token)
+        mixed = (_make_store("alice", 3)
+                 + _make_store("bob", 3)
+                 + _make_store(lgwks_capability.WORLD_TENANT, 2))
+        result = f(mixed)
+        tenants = {r.tenant for r in result}
+        self.assertEqual(tenants, {"alice", lgwks_capability.WORLD_TENANT},
+                         "T8: filter keeps own ⊕ world, drops bob")
+        self.assertEqual(len(result), 5)
 
 
 if __name__ == "__main__":
