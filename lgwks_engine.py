@@ -114,6 +114,37 @@ def _detect_flags(prompt: str) -> list[str]:
     return flags
 
 
+def _decisiveness(match_scores: list[float]) -> float:
+    """Top-1 minus top-2 over the normalized match distribution. [0,1], no constants.
+
+    High only when one capability clearly dominates. A zero-score (non-matching)
+    capability drops out, so adding irrelevant capabilities cannot change it
+    (cardinality-invariance). Depends only on scores, not labels (relabel-invariant).
+    """
+    scores = [s for s in match_scores if s > 0.0]
+    total = sum(scores)
+    if total <= 0.0:
+        return 0.0
+    probs = sorted((s / total for s in scores), reverse=True)
+    p2 = probs[1] if len(probs) > 1 else 0.0
+    return round(probs[0] - p2, 3)
+
+
+def _aggregate(*axes: float | None) -> float:
+    """Geometric mean over the available (non-None) axes. Constant-free.
+
+    Null-collapse: any zero axis -> 0 (no confidence if any faculty is empty).
+    None axes (e.g. grounding unavailable) drop out rather than forcing P to 0.
+    """
+    vals = [max(0.0, min(1.0, a)) for a in axes if a is not None]
+    if not vals:
+        return 0.0
+    prod = 1.0
+    for v in vals:
+        prod *= v
+    return round(prod ** (1.0 / len(vals)), 3)
+
+
 def run_engine(
     prompt: str,
     *,
@@ -138,22 +169,34 @@ def run_engine(
     cap_coverage, selections = _capability_coverage(qt, verbs)
 
     _db = db_path or _ENTITY_GRAPH_DB
+    graph_available = _db.exists()
     graph_hits, graph_grounded = _graph_retrieval(qt, _db)
 
-    # Deterministic C/G/P
-    # C: fraction of query tokens covered by capabilities OR graph
-    if qt:
-        graph_token_coverage = graph_grounded / len(qt)
-        # blend capability coverage with graph coverage (graph adds at most 0.3)
-        C = round(min(1.0, cap_coverage + 0.3 * graph_token_coverage), 3)
+    # Independent, constant-free, calculator-derivable axes (no AI in this layer;
+    # see feedback_calculator_test). The Qwen embedding layer is separate/upstream.
+    #
+    # C — coverage: capability coverage ONLY (no graph blend), so C stays independent
+    #     of grounding. Upgrade seam (separate Qwen layer, NOT here): match -> cosine.
+    C = round(cap_coverage, 3) if qt else 0.0
+
+    # G — grounding gap: from the world graph, an INDEPENDENT source/denominator.
+    #     None when the graph is absent: grounding *unavailable* != grounding *failed*.
+    if qt and graph_available:
+        grounding_rate = round(graph_grounded / len(qt), 3)
+        gap_G = round(1.0 - grounding_rate, 3)
+        grounding_status = "grounded" if graph_grounded > 0 else "unresolved"
     else:
-        C = 0.0
+        grounding_rate = None
+        gap_G = None
+        grounding_status = "unavailable"
 
-    # G: simple inverse heuristic (BERT replaces this in U5)
-    G = round(max(0.0, 1.0 - C), 3)
+    # d — decisiveness: p1 - p2 over the match distribution. Constant-free.
+    decisiveness = _decisiveness([v.get("score", 0.0) for v in selections])
 
-    # P: conservative estimate; bounded [0.30, 0.88] so we're never overconfident
-    P = round(0.30 + 0.58 * C * (1.0 - 0.2 * G), 3)
+    # P — confidence index: geometric mean over the AVAILABLE axes (None drops out).
+    #     No magic constants; null-collapse. An index, not a probability (calibration
+    #     is a future packet).
+    P = _aggregate(C, grounding_rate, decisiveness)
 
     flags = _detect_flags(prompt)
     state = _last_state(repo)
@@ -167,9 +210,13 @@ def run_engine(
         "insights": {
             "scores": {
                 "coverage_C": C,
-                "gap_G": G,
+                "gap_G": gap_G,
+                "decisiveness_d": decisiveness,
                 "confidence_P": P,
-                "note": "deterministic token/graph coverage — BERT replaces in U5",
+                "grounding_status": grounding_status,
+                "note": "independent axes (capability / graph / margin); P = geometric "
+                        "mean over available axes — constant-free index, not a "
+                        "probability; Qwen-cosine + novelty + calibration pending",
             },
             "selections": [{"verb": v["verb"], "intent": v["intent"], "score": v["score"]}
                            for v in selections[:top]],

@@ -475,3 +475,25 @@ WHERE (tenant = ? OR tenant = 'world') [AND space_id = ?]
 **NAVMAP:** 125 modules (was 124), `lgwks_engine` active, 0 staling.
 
 **What's next:** U7-minimal — upgrade `hooks/subconscious_inbound.py` to call `lgwks_engine.run_engine()` instead of `lgwks_map.map_intent()`. Closes the first working subconscious loop (prompt → hook → §6 schema in Opus context). Director confirmed: get standalone working first, then hook. Standalone is green.
+
+---
+
+## 2026-06-11 — U6.1 engine hardening (issue #83)
+
+**Killed the score degeneracy.** The U6 scores were mathematically hollow: `gap_G = 1 − coverage_C` (zero independent info) and `confidence_P = 0.30 + 0.58·C·(1 − 0.2·G)` (a closed form in C alone, magic constants). Three "axes" carried one number.
+
+**Now: independent, constant-free, calculator-derivable axes** (math layer only — the Qwen embedding layer is separate/upstream and untouched):
+- **C** coverage = capability coverage only (graph blend removed → C independent of grounding).
+- **G** gap = `1 − grounding_rate` from the entity graph (independent source); `None` when graph absent (`grounding_status`: grounded / unresolved / unavailable). Distinguishes grounding *unavailable* from *failed*.
+- **d** decisiveness = `p1 − p2` over the normalized match distribution (new field). Constant-free; high only when one capability dominates; ties → 0.
+- **P** = geometric mean over the *available* axes (None drops out). No magic constants; null-collapse (any 0 ⇒ 0). An index, not a probability — calibration deferred.
+
+**New pure operators** `_decisiveness`, `_aggregate` — testable in isolation.
+
+**Audit (acceptance):** `tests/test_engine_invariants.py` — I1 range, I2 determinism, I3 monotonicity, I4 cardinality-invariance, I6 null-collapse, I7 boundary, relabel-invariance, + degeneracy regression (`gap_G` no longer `1−C`). `test_engine.py` T7 bounds updated (P ∈ [0,1]; gap_G nullable). **24 tests green.** Registry gate 97/97. Schema id kept `v1` (additive fields), REGISTRY row updated.
+
+**Honest consequence:** with coarse lexical matching, top capabilities frequently tie → `d=0` → `P=0` (abstain). This is the math reporting input quality, not a bug — it's *why* the Qwen embedding layer (tie-breaking) and the graph (grounding) matter.
+
+**Deferred (not built — see #83):** I8 padding/verbosity-invariance (needs offline demand-weighting/IDF); N novelty axis + `attention` (needs Qwen embedding layer); P→probability calibration (needs outcome log + isotonic fit).
+
+**What's next:** Director's call on the embedding-layer wiring (C → Qwen cosine) and the I8 demand-weighting packet (data-provenance decision).
