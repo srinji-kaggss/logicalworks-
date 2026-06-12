@@ -525,6 +525,19 @@ class DaemonEventStore:
             for r in rows
         ]
 
+    def get_run(self, run_id: str) -> dict[str, Any] | None:
+        """Return the full registered manifest for a run, or None if not found."""
+        row = self._conn.execute(
+            "SELECT manifest_json FROM daemon_runs WHERE run_id=?",
+            (run_id,),
+        ).fetchone()
+        if row is None:
+            return None
+        try:
+            return json.loads(row[0])
+        except (json.JSONDecodeError, ValueError):
+            return None
+
 
     def mark_run_exported(
         self, run_id: str, *, export_path: str, export_hash: str

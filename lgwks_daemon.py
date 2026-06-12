@@ -600,6 +600,23 @@ def _runs_command(args: argparse.Namespace) -> int:
     return 0
 
 
+def _runs_get_command(args: argparse.Namespace) -> int:
+    """Return the full manifest for an indexed research run."""
+    import sys as _sys
+    from lgwks_daemon_store import DaemonEventStore as _Store
+    paths = _paths(Path(args.repo).resolve())
+    store = _Store(paths.db)
+    try:
+        manifest = store.get_run(args.run_id)
+    finally:
+        store.close()
+    if manifest is None:
+        print(json.dumps({"error": "run not found", "run_id": args.run_id}), file=_sys.stderr)
+        return 1
+    print(json.dumps(manifest, indent=2))
+    return 0
+
+
 def _enqueue_command(args: argparse.Namespace) -> int:
     import sys as _sys
     from lgwks_daemon_store import DaemonEventStore
@@ -868,8 +885,13 @@ def add_parser(sub) -> None:
     research.add_argument("--login-if-needed", action=argparse.BooleanOptionalAction, default=True)
     research.set_defaults(func=_research_command)
 
-    runs_p = ps.add_parser("runs", help="list indexed research runs for this repo")
-    runs_p.set_defaults(func=_runs_command)
+    runs_p = ps.add_parser("runs", help="list or retrieve indexed research runs")
+    runs_sub = runs_p.add_subparsers(dest="runs_cmd", required=True)
+    runs_list = runs_sub.add_parser("list", help="list indexed runs for this repo")
+    runs_list.set_defaults(func=_runs_command)
+    runs_get = runs_sub.add_parser("get", help="retrieve full manifest for a run")
+    runs_get.add_argument("run_id", help="run ID (from 'runs list')")
+    runs_get.set_defaults(func=_runs_get_command)
 
     _register_export_subcommands(ps)
     _register_worktree_subcommands(ps)
@@ -917,8 +939,13 @@ def main(argv: list[str] | None = None) -> int:
     research.add_argument("--login-if-needed", action=argparse.BooleanOptionalAction, default=True)
     research.set_defaults(func=_research_command)
 
-    runs_p = sub.add_parser("runs", help="list indexed research runs")
-    runs_p.set_defaults(func=_runs_command)
+    runs_p = sub.add_parser("runs", help="list or retrieve indexed research runs")
+    runs_sub = runs_p.add_subparsers(dest="runs_cmd", required=True)
+    runs_list = runs_sub.add_parser("list", help="list indexed runs for this repo")
+    runs_list.set_defaults(func=_runs_command)
+    runs_get = runs_sub.add_parser("get", help="retrieve full manifest for a run")
+    runs_get.add_argument("run_id", help="run ID (from 'runs list')")
+    runs_get.set_defaults(func=_runs_get_command)
 
     _register_export_subcommands(sub)
     _register_worktree_subcommands(sub)

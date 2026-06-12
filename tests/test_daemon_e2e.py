@@ -247,5 +247,76 @@ class TestDomainCoverage(unittest.TestCase):
         self.assertIn("access", all_verbs)
 
 
+class TestRunsGetCommand(unittest.TestCase):
+    """get_run() store method and _runs_get_command CLI function."""
+
+    def setUp(self):
+        self.tmp = Path(tempfile.mkdtemp())
+        (self.tmp / "store").mkdir()
+
+    def _minimal_manifest(self, run_id: str = "run-001") -> dict:
+        return {
+            "run_id": run_id,
+            "target": "https://example.com",
+            "source": "https://example.com",
+            "artifacts": {"root": str(self.tmp)},
+        }
+
+    def test_get_run_unknown_returns_none(self):
+        store = _make_store(self.tmp)
+        try:
+            self.assertIsNone(store.get_run("no-such-run"))
+        finally:
+            store.close()
+
+    def test_get_run_returns_full_manifest(self):
+        store = _make_store(self.tmp)
+        manifest = self._minimal_manifest("run-abc")
+        try:
+            store.register_run("tenant-A", manifest)
+            result = store.get_run("run-abc")
+        finally:
+            store.close()
+        self.assertIsNotNone(result)
+        self.assertEqual(result["run_id"], "run-abc")
+        self.assertEqual(result["target"], "https://example.com")
+
+    def test_runs_get_command_not_found_returns_1(self):
+        import io
+        import sys
+        args = argparse.Namespace(repo=str(self.tmp), run_id="missing-run")
+        buf = io.StringIO()
+        old = sys.stderr
+        sys.stderr = buf
+        try:
+            rc = daemon_mod._runs_get_command(args)
+        finally:
+            sys.stderr = old
+        self.assertEqual(rc, 1)
+
+    def test_runs_get_command_found_returns_manifest(self):
+        import io
+        import sys
+        paths = daemon_mod._paths(Path(self.tmp).resolve())
+        store = DaemonEventStore(paths.db)
+        manifest = self._minimal_manifest("cli-run-789")
+        try:
+            store.register_run(f"repo:{self.tmp.name}", manifest)
+        finally:
+            store.close()
+
+        args = argparse.Namespace(repo=str(self.tmp), run_id="cli-run-789")
+        buf = io.StringIO()
+        old = sys.stdout
+        sys.stdout = buf
+        try:
+            rc = daemon_mod._runs_get_command(args)
+        finally:
+            sys.stdout = old
+        self.assertEqual(rc, 0)
+        out = json.loads(buf.getvalue())
+        self.assertEqual(out["run_id"], "cli-run-789")
+
+
 if __name__ == "__main__":
     unittest.main()
