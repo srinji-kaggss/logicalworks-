@@ -246,7 +246,13 @@ def upsert_record(conn: sqlite3.Connection, record: VectorRecord) -> bool:
 
 
 def get_record(conn: sqlite3.Connection, cid: str) -> Optional[VectorRecord]:
-    """Fetch and verify a record by cid. Returns None if not found."""
+    """Fetch and verify a record by cid. Returns None if not found.
+
+    UNSCOPED — bypasses §1-INV (any cid resolves regardless of tenant). This is the
+    single-operator / admin / migration path. For any multi-tenant read use
+    get_record_for_tenant() — the cryptographically-gated own ⊕ world resolver
+    (ARCH L1). Do NOT call this on a tenant-facing read path.
+    """
     row = conn.execute(
         "SELECT cid, modality, embedding, norm, dim, space_id, tenant, source_cid "
         "FROM vector_records WHERE cid = ?",
@@ -260,7 +266,12 @@ def get_record(conn: sqlite3.Connection, cid: str) -> Optional[VectorRecord]:
 def query_by_source(
     conn: sqlite3.Connection, source_cid: str, *, space_id: Optional[str] = None
 ) -> list[VectorRecord]:
-    """Return all records for a source_cid, optionally filtered by space_id."""
+    """Return all records for a source_cid, optionally filtered by space_id.
+
+    UNSCOPED — bypasses §1-INV (returns rows of every tenant for the source_cid).
+    Single-operator / admin / migration path only. For multi-tenant reads, filter
+    the result through a tenant scope or use query_for_tenant() (ARCH L1).
+    """
     if space_id:
         rows = conn.execute(
             "SELECT cid, modality, embedding, norm, dim, space_id, tenant, source_cid "
@@ -315,6 +326,40 @@ def query_for_tenant(
         params = params + (limit,)
     rows = conn.execute(sql, params).fetchall()
     return [decode_record(r) for r in rows]
+
+
+def get_record_for_tenant(
+    conn: sqlite3.Connection,
+    cid: str,
+    tenant: str,
+    *,
+    space_id: Optional[str] = None,
+) -> Optional[VectorRecord]:
+    """Resolve a single cid for `tenant` under §1-INV: returns the record IFF its
+    row is own-tenant or world; otherwise None (ARCH L1 — the secure cid resolver).
+
+    //why None, not raise, for a cross-tenant cid: a cid that belongs to another
+    tenant is indistinguishable from a cid that does not exist. Returning None for
+    both closes the existence side-channel — tenant A cannot probe whether a cid
+    exists in tenant B's private tier. The tenant arm is fed by a validated
+    capability (lgwks_capability.guard / require_scope), never a raw caller string.
+    """
+    if space_id:
+        row = conn.execute(
+            "SELECT cid, modality, embedding, norm, dim, space_id, tenant, source_cid "
+            "FROM vector_records "
+            "WHERE cid = ? AND (tenant = ? OR tenant = ?) AND space_id = ?",
+            (cid, tenant, WORLD_TENANT, space_id),
+        ).fetchone()
+    else:
+        row = conn.execute(
+            "SELECT cid, modality, embedding, norm, dim, space_id, tenant, source_cid "
+            "FROM vector_records WHERE cid = ? AND (tenant = ? OR tenant = ?)",
+            (cid, tenant, WORLD_TENANT),
+        ).fetchone()
+    if row is None:
+        return None
+    return decode_record(row)
 
 
 def store_count(conn: sqlite3.Connection) -> int:

@@ -10,6 +10,7 @@ Covers the 'basically working' scope from PLANS-NEXT-5.md:
 from __future__ import annotations
 
 import math
+import random
 import sqlite3
 import sys
 import tempfile
@@ -24,6 +25,7 @@ from lgwks_vector import (
     WORLD_TENANT,
     create_store,
     encode_record,
+    get_record_for_tenant,
     query_for_tenant,
     store_count,
     upsert_record,
@@ -151,6 +153,73 @@ class TestWALConcurrency(unittest.TestCase):
                 2 * rows_per_thread,
                 f"expected {2 * rows_per_thread} rows, got {total} (data loss under concurrency)",
             )
+
+
+class TestSecureCidResolver(unittest.TestCase):
+    """§1-INV (ARCH L1): get_record_for_tenant resolves own ⊕ world, never cross-tenant.
+
+    This is the load-bearing acceptance clause from issue #89 — the secure cid
+    resolver against a LIVE on-disk store (not a fake), incl. the 10⁴ A/B proof
+    and the no-existence-leak guarantee.
+    """
+
+    def _seeded_store(self):
+        conn = _mem_store()
+        rec_a = _make_record(1, "tenant-A")
+        rec_b = _make_record(2, "tenant-B")
+        rec_w = _make_record(3, WORLD_TENANT)
+        for r in (rec_a, rec_b, rec_w):
+            upsert_record(conn, r)
+        return conn, rec_a, rec_b, rec_w
+
+    def test_resolves_own_and_world(self):
+        conn, rec_a, _rec_b, rec_w = self._seeded_store()
+        self.assertIsNotNone(get_record_for_tenant(conn, rec_a.cid, "tenant-A"))
+        self.assertIsNotNone(get_record_for_tenant(conn, rec_w.cid, "tenant-A"),
+                             "world cid must resolve for any tenant")
+
+    def test_cross_tenant_cid_returns_none(self):
+        """A B-owned cid resolves to None for A — indistinguishable from missing."""
+        conn, _rec_a, rec_b, _rec_w = self._seeded_store()
+        self.assertIsNone(get_record_for_tenant(conn, rec_b.cid, "tenant-A"),
+                          "§1-INV: tenant-A must NOT resolve tenant-B's cid")
+
+    def test_no_existence_side_channel(self):
+        """A real cross-tenant cid and a fabricated cid both return None — no probe."""
+        conn, _rec_a, rec_b, _rec_w = self._seeded_store()
+        real_cross = get_record_for_tenant(conn, rec_b.cid, "tenant-A")
+        fake = get_record_for_tenant(conn, "cid-does-not-exist", "tenant-A")
+        self.assertEqual(real_cross, fake, "existence of B's cid must not leak to A")
+
+    def test_10k_randomized_ab_zero_leak(self):
+        """10⁴ randomized A/B resolves against a live store → zero cross-tenant cid."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            conn = create_store(Path(tmpdir) / "iso.db")
+            a_cids, b_cids = [], []
+            for i in range(50):
+                ra = _make_record(1000 + i, "tenant-A")
+                rb = _make_record(2000 + i, "tenant-B")
+                upsert_record(conn, ra)
+                upsert_record(conn, rb)
+                a_cids.append(ra.cid)
+                b_cids.append(rb.cid)
+            conn.commit()
+
+            rng = random.Random(1729)
+            leaks = 0
+            for _ in range(10_000):
+                if rng.random() < 0.5:
+                    # A asks for a random B cid → must be None.
+                    cid = rng.choice(b_cids)
+                    if get_record_for_tenant(conn, cid, "tenant-A") is not None:
+                        leaks += 1
+                else:
+                    # B asks for a random A cid → must be None.
+                    cid = rng.choice(a_cids)
+                    if get_record_for_tenant(conn, cid, "tenant-B") is not None:
+                        leaks += 1
+            conn.close()
+            self.assertEqual(leaks, 0, f"§1-INV breached: {leaks} cross-tenant resolutions")
 
 
 if __name__ == "__main__":
