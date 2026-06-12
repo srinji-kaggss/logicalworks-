@@ -1,0 +1,79 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "lgwks.daemon.event.v1",
+  "description": "Normalized daemon event envelope for ingress, telemetry, workflow, and control lanes. Shared referee and per-agent subconscious paths use the same outer contract.",
+  "type": "object",
+  "required": [
+    "schema",
+    "event_id",
+    "ts",
+    "tenant_id",
+    "agent_id",
+    "session_id",
+    "actor",
+    "client",
+    "lane",
+    "kind",
+    "scope",
+    "payload"
+  ],
+  "additionalProperties": false,
+  "properties": {
+    "schema": {
+      "type": "string",
+      "enum": ["lgwks.daemon.event.v1"]
+    },
+    "event_id": {
+      "type": "string",
+      "pattern": "^[A-Za-z0-9._:/@-]{1,128}$"
+    },
+    "ts": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "tenant_id": {
+      "type": "string",
+      "pattern": "^[A-Za-z0-9._:/@-]{1,128}$"
+    },
+    "agent_id": {
+      "type": "string",
+      "pattern": "^[A-Za-z0-9._:/@-]{1,128}$"
+    },
+    "session_id": {
+      "type": "string",
+      "pattern": "^[A-Za-z0-9._:/@-]{1,128}$"
+    },
+    "causal_parent_id": {
+      "type": "string",
+      "pattern": "^[A-Za-z0-9._:/@-]{1,128}$"
+    },
+    "actor": {
+      "type": "string",
+      "enum": ["human", "agent", "daemon", "system"]
+    },
+    "client": {
+      "type": "string",
+      "enum": ["claude", "codex", "gemini", "human", "daemon", "system", "unknown"]
+    },
+    "lane": {
+      "type": "string",
+      "enum": ["ingress", "telemetry", "workflow", "control"]
+    },
+    "kind": {
+      "type": "string",
+      "enum": ["human_message", "transcript_turn", "tool_call", "file_change", "workflow_event"]
+    },
+    "scope": {
+      "type": "string",
+      "enum": ["agent_local", "shared_referee"]
+    },
+    "refs": {
+      "type": "object",
+      "additionalProperties": true
+    },
+    "payload": {
+      "type": "object",
+      "additionalProperties": true
+    }
+  }
+}

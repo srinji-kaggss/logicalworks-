@@ -159,6 +159,10 @@ def _build_registry() -> dict[str, dict[str, Any]]:
             "description": "Scored triple output: RESCAL score + MDL conformance + content CID (I5)",
             "output": "JSON with triple, score, score_mdl, cid, schema_id, s_ai",
         },
+        "lgwks.daemon.event.v1": {
+            "description": "Normalized daemon event envelope for ingress, telemetry, workflow, and control lanes",
+            "output": "JSON with tenant/session/agent attribution plus lane, kind, scope, refs, payload",
+        },
     }
 
     for name, ann in annotations.items():

@@ -232,6 +232,7 @@ graph TD
 1. Normalize the daemon event model.
    Inputs: ingress message, transcript turn, tool call, workflow event.
    Outcome: one core event schema.
+   Status: `lgwks.daemon.event.v1` landed as the shared envelope; scheduler and packet APIs still need to consume it.
 
 2. Build the daemon lifecycle shell around existing storage/runtime code.
    Inputs: `lgwks_sqlite`, `lgwks_session`, `lgwks_cognition`, `lgwks_engine`.

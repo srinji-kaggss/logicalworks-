@@ -92,6 +92,7 @@
         "lgwks_crawl",
         "lgwks_crdt",
         "lgwks_cycle",
+        "lgwks_daemon_event",
         "lgwks_debug",
         "lgwks_do",
         "lgwks_embed",
@@ -250,6 +251,7 @@
         "lgwks_capabilities",
         "lgwks_context",
         "lgwks_cycle",
+        "lgwks_daemon_event",
         "lgwks_do",
         "lgwks_engine",
         "lgwks_ground",
@@ -1039,7 +1041,7 @@
       "has_cli": false,
       "has_tests": true,
       "integration": "integrated",
-      "last_commit_days": 2,
+      "last_commit_days": 3,
       "loc": 624,
       "owning_issue": null,
       "packet": null,
@@ -1144,6 +1146,20 @@
         "lgwks_project_deploy",
         "lgwks_project_review"
       ]
+    },
+    "lgwks_daemon_event": {
+      "deps": [],
+      "has_cli": true,
+      "has_tests": true,
+      "integration": "cli_only",
+      "last_commit_days": null,
+      "loc": 217,
+      "owning_issue": null,
+      "packet": null,
+      "purpose": "normalized daemon event envelope for shared referee runtime.",
+      "staleness": "active",
+      "subsystem": "Harness / daemon / orchestration",
+      "used_by": []
     },
     "lgwks_debug": {
       "deps": [
@@ -2383,7 +2399,7 @@
       "has_tests": true,
       "integration": "integrated",
       "last_commit_days": 1,
-      "loc": 263,
+      "loc": 267,
       "owning_issue": null,
       "packet": null,
       "purpose": "schema registry for next-agent discovery.",
@@ -3181,15 +3197,15 @@
   },
   "totals": {
     "by_integration": {
-      "cli_only": 0,
+      "cli_only": 1,
       "integrated": 130,
       "unreferenced": 1
     },
     "by_staleness": {
-      "active": 130,
+      "active": 131,
       "orphan": 1
     },
-    "loc": 48025,
-    "modules": 131
+    "loc": 48246,
+    "modules": 132
   }
 }
