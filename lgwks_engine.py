@@ -31,6 +31,10 @@ _CAP_IDF_ARTIFACT = _REPO / ".lgwks" / "capability_idf.json"
 # scripts/build_capability_embeddings.py; absent OR embed port unavailable ->
 # coverage falls back to the lexical floor below.
 _CAP_VEC_ARTIFACT = _REPO / ".lgwks" / "capability_vectors.json"
+# INV-7 guard: a real Director prompt is never multi-KB. Cap the attacker-
+# controlled input so tokenization/mapping over a pathological prompt can't blow
+# the latency budget.
+_MAX_PROMPT_CHARS = 16_000
 
 _SCHEMA = "lgwks.engine.schema.v1"
 
@@ -50,8 +54,9 @@ _HEDGE_RE = re.compile(
 _MULTI_INTENT_RE = re.compile(r"\b(and also|and then|but also|plus|additionally)\b", re.I)
 
 
-def _tokens(text: str) -> list[str]:
-    return [t for t in _TOKEN.findall((text or "").lower()) if t not in _STOP and len(t) > 1]
+def _tokens(text: object) -> list[str]:
+    s = text if isinstance(text, str) else ("" if text is None else str(text))
+    return [t for t in _TOKEN.findall(s.lower()) if t not in _STOP and len(t) > 1]
 
 
 def _compute_capability_idf(verbs: list[dict]) -> dict[str, float]:
@@ -86,7 +91,19 @@ def _load_demand_weights(verbs: list[dict]) -> dict[str, float]:
             data = json.loads(_CAP_IDF_ARTIFACT.read_text())
             idf = data.get("idf")
             if isinstance(idf, dict) and idf:
-                return {str(k): float(val) for k, val in idf.items()}
+                # The artifact is an untrusted input surface (tamper/corruption):
+                # keep only finite, non-negative weights. A bad weight is dropped,
+                # not trusted — a negative/inf/nan weight must never reach coverage.
+                clean = {}
+                for k, val in idf.items():
+                    try:
+                        w = float(val)
+                    except (TypeError, ValueError):
+                        continue
+                    if math.isfinite(w) and w >= 0.0:
+                        clean[str(k)] = w
+                if clean:
+                    return clean
     except Exception:
         pass
     return _compute_capability_idf(verbs)
@@ -124,6 +141,11 @@ def _capability_coverage(
         coverage = (numer / denom) if denom > 0.0 else 0.0
     else:
         coverage = len(verb_tokens_covered) / len(qt_set)
+    # Range backstop: coverage is a [0,1] axis. Even with sanitized weights, clamp
+    # so no downstream (tampered artifact, float drift) can push C out of range.
+    if not math.isfinite(coverage):
+        coverage = 0.0
+    coverage = max(0.0, min(1.0, coverage))
     return round(coverage, 3), [v for _, v in matched[:8]]
 
 
@@ -165,28 +187,40 @@ def _embedding_coverage(prompt: str, artifact: dict, top: int = 8) -> tuple[floa
     not downloaded, worker crash, latency) so the caller falls back to lexical —
     INV-6/INV-7 preserved (the model path runs only when present + warm).
     """
+    # The frozen artifact is an untrusted input surface (tamper/corruption/flaky
+    # embed worker): the ENTIRE body — port call AND the cosine/selection loop —
+    # is guarded, so any malformed record (str vec, non-dict, lying dim) degrades
+    # to the lexical floor (return None) rather than raising out (INV-6).
     try:
         import lgwks_embed_port as ep
-        dim = int(artifact.get("dim") or 0)
+        raw_dim = artifact.get("dim")
+        dim = int(raw_dim) if isinstance(raw_dim, int) and raw_dim > 0 else 0
         port = ep.EmbedPort(dim=dim) if dim else ep.EmbedPort()
         try:
             q = port.embed_text(prompt)
         finally:
             port.close()
+        verbs = artifact.get("verbs")
+        if not isinstance(verbs, list):
+            return None
+        sims: list[tuple[float, dict]] = []
+        for rec in verbs:
+            if not isinstance(rec, dict):
+                continue
+            vec = rec.get("vec")
+            if isinstance(vec, list) and vec and all(
+                isinstance(x, (int, float)) and math.isfinite(x) for x in vec
+            ):
+                sims.append((_cosine(q, vec), rec))
+        if not sims:
+            return None
+        sims.sort(key=lambda x: x[0], reverse=True)
+        coverage = max(0.0, min(1.0, sims[0][0]))  # best capability match strength
+        selections = [{"verb": str(r.get("verb", "")), "intent": str(r.get("intent", "")),
+                       "score": round(max(0.0, s), 6)} for s, r in sims[:top]]
+        return round(coverage, 3), selections
     except Exception:
         return None
-    sims: list[tuple[float, dict]] = []
-    for rec in artifact.get("verbs", []):
-        vec = rec.get("vec")
-        if vec:
-            sims.append((_cosine(q, vec), rec))
-    if not sims:
-        return None
-    sims.sort(key=lambda x: x[0], reverse=True)
-    coverage = max(0.0, min(1.0, sims[0][0]))  # best capability match strength
-    selections = [{"verb": r.get("verb", ""), "intent": r.get("intent", ""),
-                   "score": round(max(0.0, s), 6)} for s, r in sims[:top]]
-    return round(coverage, 3), selections
 
 
 def _graph_retrieval(query_tokens: list[str], db_path: Path) -> tuple[list[dict], int, bool]:
@@ -285,6 +319,8 @@ def run_engine(
 
     Fails silently on any sub-component error — always returns a valid envelope.
     """
+    if isinstance(prompt, str) and len(prompt) > _MAX_PROMPT_CHARS:
+        prompt = prompt[:_MAX_PROMPT_CHARS]
     try:
         sys.path.insert(0, str(_REPO))
         import lgwks_map

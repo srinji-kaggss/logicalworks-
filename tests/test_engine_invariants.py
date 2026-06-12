@@ -277,5 +277,91 @@ class TestEmbeddingCoverage(unittest.TestCase):
         self.assertIn(s["coverage_mode"], ("lexical", "lexical+demand"))
 
 
+class TestArtifactTampering(unittest.TestCase):
+    """The frozen .lgwks/*.json artifacts are an untrusted input surface. A
+    tampered/corrupt artifact must NEVER raise out of run_engine (INV-6) or push a
+    score out of [0,1] — it must degrade silently to the lexical floor. These
+    regressions cover the three HIGH findings from the 2026-06-11 adversarial pass.
+    """
+
+    def setUp(self):
+        self._tmp = tempfile.TemporaryDirectory()
+        self._idf_orig = eng._CAP_IDF_ARTIFACT
+        self._vec_orig = eng._CAP_VEC_ARTIFACT
+        eng._CAP_IDF_ARTIFACT = Path(self._tmp.name) / "capability_idf.json"
+        eng._CAP_VEC_ARTIFACT = Path(self._tmp.name) / "capability_vectors.json"
+
+    def tearDown(self):
+        eng._CAP_IDF_ARTIFACT = self._idf_orig
+        eng._CAP_VEC_ARTIFACT = self._vec_orig
+        self._tmp.cleanup()
+        sys.modules.pop("lgwks_embed_port", None)
+
+    def _C(self):
+        return eng.run_engine("refactor the auth module",
+                              db_path=Path("/nonexistent/g.db"))["insights"]["scores"]["coverage_C"]
+
+    def test_negative_idf_weight_clamped(self):
+        eng._CAP_IDF_ARTIFACT.write_text('{"idf":{"refactor":100.0,"auth":100.0,"module":-199.9}}')
+        c = self._C()
+        self.assertGreaterEqual(c, 0.0)
+        self.assertLessEqual(c, 1.0)
+
+    def test_nonfinite_idf_weight_dropped(self):
+        for literal in ('{"idf":{"refactor":Infinity,"auth":1.0,"module":1.0}}',
+                        '{"idf":{"refactor":NaN,"auth":1.0,"module":1.0}}'):
+            eng._CAP_IDF_ARTIFACT.write_text(literal)
+            c = self._C()
+            self.assertTrue(math.isfinite(c))
+            self.assertGreaterEqual(c, 0.0)
+            self.assertLessEqual(c, 1.0)
+
+    def test_poisoned_vectors_do_not_raise(self):
+        # str vecs, non-dict records, non-list verbs, lying dim — with a working
+        # stub port — must all fall back to lexical, never raise (HIGH#1).
+        class _Port:
+            def __init__(self, *a, **k):
+                pass
+            def embed_text(self, text, instruction=""):
+                return [1.0, 0.0, 0.0]
+            def close(self):
+                pass
+        import types
+        for poison in ('{"dim":3,"verbs":[{"verb":"a","vec":["x","y","z"]}]}',
+                       '{"dim":3,"verbs":1234}',
+                       '{"dim":3,"verbs":[42]}',
+                       '{"dim":-5,"verbs":[{"verb":"a","vec":[1,0,0]}]}',
+                       '{"verbs":[{"vec":[NaN,0,0]}]}'):
+            eng._CAP_VEC_ARTIFACT.write_text(poison)
+            sys.modules["lgwks_embed_port"] = types.SimpleNamespace(EmbedPort=_Port)
+            try:
+                s = eng.run_engine("refactor the auth module")["insights"]["scores"]
+            except Exception as exc:  # noqa: BLE001
+                self.fail(f"run_engine raised on poisoned vectors {poison[:40]}: {exc!r}")
+            finally:
+                sys.modules.pop("lgwks_embed_port", None)
+            # The invariant is: never raise, and C stays a finite [0,1] axis —
+            # whether it fell back to lexical or salvaged a valid-vec record.
+            self.assertIn(s["coverage_mode"], ("lexical", "lexical+demand", "qwen"))
+            self.assertTrue(math.isfinite(s["coverage_C"]))
+            self.assertGreaterEqual(s["coverage_C"], 0.0)
+            self.assertLessEqual(s["coverage_C"], 1.0)
+
+
+class TestInputBounds(unittest.TestCase):
+    def test_oversized_prompt_capped_and_fast(self):
+        import time
+        big = "a and also b " * 1_500_000  # ~20MB
+        t0 = time.time()
+        s = eng.run_engine(big, db_path=Path("/nonexistent/g.db"))["insights"]["scores"]
+        self.assertLess(time.time() - t0, 1.0)  # INV-7
+        self.assertGreaterEqual(s["coverage_C"], 0.0)
+        self.assertLessEqual(s["coverage_C"], 1.0)
+
+    def test_non_str_verb_tokens_no_raise(self):
+        # the demand recompute path must tolerate non-str verb/intent fields
+        self.assertIsInstance(eng._compute_capability_idf([{"verb": 123, "intent": None}]), dict)
+
+
 if __name__ == "__main__":
     unittest.main()

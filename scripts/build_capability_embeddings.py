@@ -61,7 +61,20 @@ def main() -> int:
             if not text:
                 continue
             vec = port.embed_text(text)
+            # Refuse to freeze a malformed/degenerate vector — a flaky or
+            # compromised embed worker must not bake a runtime-crashing artifact.
+            import math as _math
+            if (not isinstance(vec, list) or not vec
+                    or not all(isinstance(x, (int, float)) and _math.isfinite(x) for x in vec)):
+                print(f"ERROR: bad vector for verb {verb!r} — aborting (no partial artifact)",
+                      file=sys.stderr)
+                return 1
             records.append({"verb": verb, "intent": intent, "vec": vec})
+        # All vectors must share one dimension (the space contract).
+        dims = {len(r["vec"]) for r in records}
+        if len(dims) > 1:
+            print(f"ERROR: inconsistent embedding dims {sorted(dims)} — aborting", file=sys.stderr)
+            return 1
         space_id = port.space_id()
         dim = len(records[0]["vec"]) if records else 0
     finally:
