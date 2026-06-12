@@ -129,20 +129,16 @@ Acceptance:
 - Codex/Gemini adapters can submit equivalent events without special-casing the core
 - every normalized event is attributable to both `tenant` and `agent/session`
 
-### P2. Daemon-owned git/worktree runtime
+### P2. Daemon-owned git/worktree runtime ✅ DONE (`12383d2`)
 
-Need the daemon to own:
+WorktreeManager: create/close/list with single-session referee (one active worktree per
+(tenant, session)); CRDT ORSet per tenant at store/daemon/crdt/; migration v4; CLI
+`daemon worktree create/close/list`; worktree_open/close in WORK_KINDS + dispatcher.
 
-- worktree setup
-- worktree cleanup
-- git alignment
-- CRDT-backed concurrent state behavior
-
-Acceptance:
-
-- daemon can create/update/close a worktree session without manual shell choreography
-- state merges remain auditable
-- conflicting repo actions across concurrent agents are serialized or rejected by referee policy, never raced
+Acceptance MET:
+- daemon creates/closes worktrees without manual shell choreography ✅
+- CRDT ORSet snapshot is the auditable merge record ✅
+- per-session referee serializes conflicting actions ✅
 
 ### P3. Research run front door
 
@@ -181,18 +177,17 @@ Acceptance:
 - no client-specific business logic in the daemon core
 - adapters identify the caller cleanly enough for per-agent subconscious state and referee arbitration
 
-### P5. Archive/export tier
+### P5. Archive/export tier ✅ DONE (`a816b4d`)
 
-Need:
+ExportManager: export_run (tar.gz + sha256), verify_export (re-hash check),
+cleanup_run (blocked without verified export; --force logs override), export_session
+(JSONL + sha256). Migration v5 adds exported_at/export_path/export_hash to daemon_runs.
+CLI: `daemon export run/verify/session`, `daemon cleanup <run_id>`.
 
-- verified cloud export
-- retention policy
-- safe local cleanup after export
-
-Acceptance:
-
-- session/run export is content-addressed and auditable
-- local cleanup never occurs before verified export
+Acceptance MET:
+- export is content-addressed (sha256) and recorded in store ✅
+- cleanup_run refuses unless verify_export passes ✅
+- cloud export: deferred; local archive is the first tier — pluggable by extending ExportManager
 
 ## 4. First concrete experience: website research
 
@@ -248,8 +243,19 @@ graph TD
    to daemon store on every prompt; fail-silent (INV-6); session_id from LGWKS_TRANSCRIPT_PATH
    (2026-06-12, `fe400a4`)
 
-6. Add Codex and Gemini as thin clients after the daemon contract is stable.
-   Status: OPEN — next queue item. Same event contract; thin adapter per client.
+6. ✅ Codex + Gemini adapters.
+   Status: DONE — hooks/codex_inbound.py, hooks/gemini_inbound.py; same event contract;
+   Gemini handles multipart parts[] format; all fail-silent (INV-6) (2026-06-12, `2e8e638`)
+
+7. ✅ Daemon-owned worktree runtime (P2).
+   Status: DONE — WorktreeManager: create/close/list with per-session referee (one active
+   worktree per session), CRDT ORSet audit trail per tenant, migration v4 daemon_worktrees
+   table; worktree_open/close in WORK_KINDS + dispatcher (2026-06-12, `12383d2`)
+
+8. ✅ Content-addressed export + safe cleanup gate (P5).
+   Status: DONE — ExportManager: export_run (tar.gz + sha256), verify_export (re-hash),
+   cleanup_run (blocks unless verified), export_session (JSONL); migration v5 export columns
+   on daemon_runs; CLI daemon export/cleanup (2026-06-12, `a816b4d`)
 
 ## 6. Decision rules
 
