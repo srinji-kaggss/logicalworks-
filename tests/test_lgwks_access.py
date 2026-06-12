@@ -50,49 +50,35 @@ def test_tenant():
 
 @pytest.fixture
 def mock_keyvault():
-    """Mock keyvault for tests that don't want Keychain access."""
+    """Mock the macOS Keychain backend symmetrically — both write and read.
+
+    This patches ONLY `security` (add/find-generic-password) against an in-memory
+    dict, so the port exercises its REAL resolution path. It does NOT mock
+    lgwks_keyvault: an earlier version patched away the SECRETS registry gate,
+    which masked F1 (read went through keyvault.get_secret's fixed registry while
+    the write went direct → every resolve re-issued). Mocking only the backend
+    means a read/write asymmetry surfaces as a test failure, not a green lie.
+    """
     store = {}
+    original_run = subprocess.run
 
-    # Single shared instance for SECRETS patch and mock_get_secret
-    class SecretsWithFallback(dict):
-        def get(self, key, default=None):
-            # Allow any lgwks:cap:* service through
-            if key.startswith("lgwks:cap:"):
-                return (key, "LGWKS_CAP")  # dummy spec, just needs to be truthy
-            return super().get(key, default)
-        def __contains__(self, key):
-            if key.startswith("lgwks:cap:"):
-                return True
-            return super().__contains__(key)
+    def _service_of(cmd):
+        return cmd[cmd.index("-s") + 1] if "-s" in cmd else None
 
-    secrets_mock = SecretsWithFallback()
+    def mock_run(cmd, **kwargs):
+        if cmd[:1] == ["security"]:
+            if "add-generic-password" in cmd:
+                store[_service_of(cmd)] = kwargs.get("input", "")
+                return mock.Mock(returncode=0, stdout="", stderr="")
+            if "find-generic-password" in cmd:
+                val = store.get(_service_of(cmd))
+                if val:
+                    return mock.Mock(returncode=0, stdout=val, stderr="")
+                return mock.Mock(returncode=44, stdout="", stderr="not found")
+        return original_run(cmd, **kwargs)
 
-    def mock_get_secret(name):
-        # Check SECRETS first (mimics real get_secret behavior)
-        spec = secrets_mock.get(name)
-        if not spec:
-            return (None, "none")
-        secret = store.get(name)
-        return (secret, "keychain") if secret else (None, "none")
-
-    with mock.patch.object(access.keyvault, "get_secret", mock_get_secret):
-        with mock.patch.object(access.keyvault, "SECRETS", secrets_mock):
-            # Patch the subprocess call for store_key
-            original_run = subprocess.run
-
-            def mock_run(cmd, **kwargs):
-                if cmd[0] == "security" and "add-generic-password" in cmd:
-                    # Extract service name and key from command
-                    service_idx = cmd.index("-s") + 1
-                    service = cmd[service_idx]
-                    # Get key from stdin (input kwarg)
-                    key_hex = kwargs.get("input", "")
-                    store[service] = key_hex
-                    return mock.Mock(returncode=0, stderr="")
-                return original_run(cmd, **kwargs)
-
-            with mock.patch.object(subprocess, "run", mock_run):
-                yield store
+    with mock.patch.object(subprocess, "run", mock_run):
+        yield store
 
 
 # ---------------------------------------------------------------------------
@@ -389,3 +375,42 @@ def test_resolve_promote_capability_for_tenant(mock_keyvault):
     # Verify has WORLD_PROMOTE
     verified = port.verify(handle, key)
     assert capability.WORLD_PROMOTE in verified.scopes
+
+
+# ---------------------------------------------------------------------------
+# Test: operator promote CLI wired end-to-end (guards F4)
+# ---------------------------------------------------------------------------
+
+
+def test_promote_cli_smoke(mock_keyvault, tmp_path, monkeypatch):
+    """`lgwks access promote` wires parser → --store → create_store → promote.
+
+    Guards F4 (the CLI called sqlite.connect() with no path → TypeError on every
+    invocation) and exercises the CLI error/print paths that referenced an
+    unimported `sys`. The API-level tests never touched the command path, so both
+    defects shipped green.
+    """
+    import argparse
+
+    import lgwks_cognition as cognition
+    monkeypatch.setattr(cognition, "_DIR", tmp_path / "cognition")
+
+    db = tmp_path / "vec.db"
+    conn = vector.create_store(db)
+    rec = _make_record("c", "src-cli", "space-1", "cli-tenant", "x")
+    vector.upsert_record(conn, rec)
+    conn.commit()
+    conn.close()
+
+    parser = argparse.ArgumentParser()
+    sub = parser.add_subparsers()
+    access.add_parser(sub)
+    args = parser.parse_args(
+        ["access", "promote", rec.cid, "--tenant", "cli-tenant", "--store", str(db), "--json"]
+    )
+
+    assert args.func(args) == 0
+
+    moved = vector.get_record_for_tenant(vector.create_store(db), rec.cid, capability.WORLD_TENANT)
+    assert moved is not None
+    assert moved.tenant == capability.WORLD_TENANT

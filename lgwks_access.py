@@ -10,15 +10,13 @@ locus, identity is principal-shaped, no kernel import.
 
 from __future__ import annotations
 
-import hashlib
 import secrets
-from abc import ABC, abstractmethod
+import subprocess
+import sys
 from dataclasses import dataclass
-from pathlib import Path
-from typing import Any, Callable, Protocol
+from typing import Any, Protocol
 
 import lgwks_capability as capability
-import lgwks_keyvault as keyvault
 import lgwks_vector as vector
 
 # ---------------------------------------------------------------------------
@@ -60,7 +58,8 @@ class CapabilityPort(Protocol):
         """Resolve a capability for principal.
 
         Returns (handle, key) where handle is opaque to callers and key is the
-        signing key for require_scope. On first-run, issues and persists via keyvault.
+        signing key for require_scope. On first-run, issues and persists the key
+        to the macOS Keychain.
         """
         ...
 
@@ -116,7 +115,9 @@ class HmacCapabilityPort:
 
     Keychain persistence: per-principal capability keys live in Keychain
     under `lgwks:cap:<principal>`. This matches the #98 scope:
-    - Persistence via lgwks_keyvault
+    - Persistence via the macOS Keychain (`security` generic-password), read and
+      write symmetric. NOT lgwks_keyvault.get_secret — that gates on a fixed
+      registry and can't address dynamic per-principal names (see _load_key).
     - Resolution loads or first-run issues + persists
     - Session binding via lgwks_session begin/end
     - Operator CLI for promote
@@ -129,22 +130,32 @@ class HmacCapabilityPort:
         return f"{self._keyvault_service}:{principal}"
 
     def _load_key(self, principal: str) -> bytes | None:
-        """Load key from Keychain for principal, or None if absent."""
-        # keyvault.get_secret returns (secret, source)
-        secret, source = keyvault.get_secret(self._item_name(principal))
-        if secret and source == "keychain":
-            # keyvault returns hex string for HMAC keys
-            try:
-                return bytes.fromhex(secret)
-            except ValueError:
-                # Fallback: treat as raw bytes
-                return secret.encode("utf-8")
-        return None
+        """Load the principal's capability key from the macOS Keychain, or None.
+
+        Symmetric with _store_key: same `security` generic-password backend, same
+        dynamic service name, same `-a lgwks` account. We deliberately do NOT route
+        this through lgwks_keyvault.get_secret — that resolves a FIXED registry
+        (keyvault.SECRETS) and returns None for any name not pre-registered, so it
+        cannot address per-principal service names like `lgwks:cap:<principal>`.
+        Routing the read through it (while the write went direct) made every
+        resolve() miss and re-issue a fresh key. Convergence (#97): a future
+        keyvault generic by-service accessor would fold both paths into one locus.
+        """
+        proc = subprocess.run(
+            ["security", "find-generic-password", "-a", "lgwks",
+             "-s", self._item_name(principal), "-w"],
+            text=True, capture_output=True, timeout=10,
+        )
+        out = proc.stdout.strip()
+        if proc.returncode != 0 or not out:
+            return None
+        try:
+            return bytes.fromhex(out)
+        except ValueError:
+            return None
 
     def _store_key(self, principal: str, key: bytes) -> None:
-        """Persist key to Keychain for principal."""
-        # keyvault expects hex for binary secrets
-        import subprocess
+        """Persist key to Keychain for principal (hex-encoded, value off the argv)."""
         service = self._item_name(principal)
         key_hex = key.hex()
         # Use security add-generic-password with -w for the value
@@ -344,6 +355,7 @@ def add_parser(sub) -> None:
     promote_cmd = ps.add_parser("promote", help="promote a cid to world tier")
     promote_cmd.add_argument("cid", help="content id to promote")
     promote_cmd.add_argument("--tenant", required=True, help="tenant promoting the cid")
+    promote_cmd.add_argument("--store", required=True, help="path to the vector store (.db)")
     promote_cmd.add_argument("--json", action="store_true", help="structured output")
     promote_cmd.set_defaults(func=_access_promote_command)
 
@@ -391,7 +403,8 @@ def _access_resolve_command(args) -> int:
 def _access_promote_command(args) -> int:
     """Promote a cid to world tier."""
     import json as _json
-    import lgwks_sqlite as sqlite
+    from pathlib import Path
+
     import lgwks_ui as ui
 
     on = ui.color_on()
@@ -402,8 +415,9 @@ def _access_promote_command(args) -> int:
         # Resolve promote capability
         port, handle, key = resolve_promote_capability_for_tenant(tenant)
 
-        # Open vector store connection
-        conn = sqlite.connect()
+        # Open the vector store at the operator-supplied path (no implicit default;
+        # mirrors lgwks_inbound's --store contract).
+        conn = vector.create_store(Path(args.store))
 
         # Create TenantStore and call promote
         store = TenantStore(port, handle, key, conn)
