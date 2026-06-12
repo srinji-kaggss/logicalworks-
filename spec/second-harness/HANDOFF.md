@@ -1,8 +1,8 @@
-# Handoff — lgwks subconscious build · 2026-06-12 (session 9, main @ dd30d10)
+# Handoff — lgwks subconscious build · 2026-06-12 (session 10, main @ 8586b11)
 
-> Refreshed session 9: U7 closed + the two U6 follow-ons (Qwen-cosine seam, I8 demand-weighting) landed & hardened.
-> **PRD §13 first slice is DONE: U1 ✅ U6 ✅ U7 ✅.** No open GH issues.
-> The dated "Current state" sections below are append-only history — the **latest** state is the session-9 block at the bottom.
+> Refreshed session 10: opened the **I8-hardening** track (#89) and landed **L1+L2+L7** — §1-INV is now cryptographically enforced (PR #90).
+> **One open issue: #89** (I8-hardening, L1 done, L3/L4/L5 tail remaining).
+> The dated "Current state" / "Session N state" sections below are append-only history — the **latest** state is the session-10 block at the bottom.
 
 You are the next agent on the lgwks rebuild. Read this fully before acting. Written
 AI-for-AI; receipts, not essays. Authority ladder: `/CLAUDE.md` → `governance/README.md`
@@ -218,6 +218,38 @@ module + CLI + tests do not depend on it.
 2. **Activate qwen mode** — `make download-models` (Qwen3-VL-Embedding-8B not present here) + run the two `scripts/build_capability_*` builders; the engine stays on the lexical floor until then.
 
 **Next deferred (need Director go):** N novelty axis + `attention` (Qwen-native); P→probability calibration (outcome log + isotonic fit). U2–U5 parallel tracks still upgrade U6 once landed.
+
+## Session 10 state (2026-06-12, main @ 8586b11, PR #90)
+
+**I8-hardening track opened (#89) — L1 landed.** The deferred half of I8 (the full multi-tenant
+destination in `ARCH-two-db-multitenant.md`, gaps L1–L7) was promoted out of the SCOPE-DEFERRED
+ledger into issue **#89**. Director scoped the full packet (L1–L5); built the load-bearing first
+step this session.
+
+**L1+L2+L7 done (PR #90 @ 8586b11) — §1-INV now cryptographically enforced:**
+
+| piece | what | module |
+|---|---|---|
+| L7 tier-scoped caps | `lgwks.capability.v1→v2`: scopes (`tenant:rw`/`world:r`/`world:promote`) signed into the HMAC payload → escalation/narrowing breaks the sig. `require_scope()` gates each tier op. | `lgwks_capability.py` |
+| L1 secure cid read | `get_record_for_tenant()` — resolves own ⊕ world only; cross-tenant cid → `None` (no existence side-channel). `get_record`/`query_by_source` marked UNSCOPED/admin-only. | `lgwks_vector.py` |
+| L2 seam on read path | `assemble_inbound(tenant=...)` + `inbound run --tenant` — cross-tenant graph nodes drop from the reflex pack. | `lgwks_inbound.py` |
+| harden (in-thread) | `world` reserved as non-issuable + guard-rejected; `make_tenant_filter` world-aware. | `lgwks_capability.py` |
+
+81 tests green (incl. §1-INV **10⁴ A/B against a live on-disk store**); registry 99/99 (v2 row,
+v1 superseded). BUILDLOG + NAVMAP updated in-PR.
+
+**Honest limits (NOT closed — deferred to the L2/L3 access router; documented in BUILDLOG):**
+1. **Enforcement is advisory** — `query_for_tenant`/`get_record_for_tenant` trust the tenant
+   string; nothing structurally forces every caller through `guard`/`require_scope`. Mandatory
+   gating is the L2 access-router work.
+2. **`assemble_inbound(tenant=None)` is fail-open** by design (single-operator P3 default) until
+   multi-tenant exposure.
+
+**Next (issue #89 tail, ARCH build order):** **L3** per-tenant admission (fix the global fail-open
+token bucket, `lgwks_admission.py`) → **L4** durable cross-process queue (WAL `admission_queue`
+table, no drop, lease/reap crash-durability) → **L5** promotion audit (tenant→world hash-chained
+record on the cognition chain). **L6** (CRDT deploy on the two stores) is a separate packet = I9.
+Deferred surfaces (network/MCP D2, cross-workspace ACL D3, …) stay parked in `SCOPE-DEFERRED.md`.
 
 ## Doc map
 
