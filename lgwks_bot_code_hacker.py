@@ -156,11 +156,17 @@ class TaintTracker:
             self.sources[name] = Source(name=name, lineno=lineno, kind=kind)
 
     def is_tainted(self, node: ast.AST) -> bool:
-        """Returns True if the node represents or contains a tainted value."""
+        """Returns True if the node represents or contains a tainted value.
+
+        //why no blanket f-string/BinOp rule: a JoinedStr or BinOp is tainted only
+        when it *interpolates* a tainted source — `f"https://api/v1"` (all-constant)
+        is not. ast.walk already recurses into the children of an f-string or a
+        concatenation, so a tainted Name or source call nested inside is caught by
+        the checks below. Treating every f-string/BinOp as tainted flagged constant
+        URLs/SQL as injections — the dominant false-positive source.
+        """
         for child in ast.walk(node):
             if isinstance(child, ast.Name) and child.id in self.sources:
-                return True
-            if isinstance(child, (ast.JoinedStr, ast.BinOp)):
                 return True
             # Recognize source functions directly
             if isinstance(child, ast.Call):
@@ -411,11 +417,20 @@ class _Visitor(ast.NodeVisitor):
             if is_shell:
                 self._add("dangerous_shell_exec", f"subprocess.{attr}(shell=True) at line {ln}",
                           "critical", 1.0, [], ["exec", "shell", "h1"], ln)
-            elif node.args:
-                # If first arg is a tainted string (not a list), it's a risk even with shell=False
-                if self.taint.is_tainted(node.args[0]) and not isinstance(node.args[0], (ast.List, ast.Tuple)):
-                    self._add("dangerous_shell_exec", f"subprocess.{attr}() with dynamic string command at line {ln}",
+            elif node.args and not isinstance(node.args[0], (ast.List, ast.Tuple)):
+                arg0 = node.args[0]
+                # A tainted string command is a confirmed injection path.
+                if self.taint.is_tainted(arg0):
+                    self._add("dangerous_shell_exec", f"subprocess.{attr}() with tainted string command at line {ln}",
                               "high", 0.8, [], ["exec", "h1"], ln)
+                # //why flag constant-built strings here but NOT for URL/SQL/path sinks:
+                # the safe form of subprocess is a token LIST; building the command as a
+                # single string (f-string/concat) is itself the smell, taint aside. The
+                # same f-string is normal for an HTTP URL or SQL text, so H5/H6/H7 gate
+                # strictly on taint instead.
+                elif isinstance(arg0, (ast.JoinedStr, ast.BinOp)):
+                    self._add("dangerous_shell_exec", f"subprocess.{attr}() with string-built command at line {ln}",
+                              "high", 0.7, [], ["exec", "h1"], ln)
 
         if attr in _EXEC_ATTRS:
             # os.system and os.popen are inherently dangerous (deprecated for security)
@@ -722,9 +737,13 @@ def run(
         rels = [f for f in changed_files if f.endswith(".py")]
     else:
         py_files = sorted(repo.glob("**/*.py"))
-        # Defense-in-depth: ignore large 3rd-party libs and hidden folders
+        # Defense-in-depth: ignore 3rd-party libs, caches, AND in-repo copies of
+        # source (agent worktrees + archived modules). Scanning .worktrees/.claude
+        # re-reports every finding once per checkout — the bulk of the noise.
         py_files = [p for p in py_files if not any(
-            (part.startswith(".venv") or part in {".git", "__pycache__", "venv", "node_modules"})
+            (part.startswith(".venv")
+             or part in {".git", "__pycache__", "venv", "node_modules",
+                         ".worktrees", ".claude", "archive"})
             for part in p.parts
         )]
         targets = py_files

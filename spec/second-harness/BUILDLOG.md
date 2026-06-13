@@ -949,3 +949,65 @@ Verification:
 - `pytest tests/test_inbound.py tests/test_daemon.py tests/test_daemon_store.py tests/test_daemon_event.py tests/test_daemon_worktree.py tests/test_p1_session_worktree.py tests/test_home.py -q` → **114 passed, 1 pre-existing failure** (test_browser_navigates_domain_to_command — confirmed on main before this commit)
 - NAVMAP: 140 modules (unchanged count; no new modules added)
 
+---
+
+## 2026-06-12 · U5 SAST program (builds #3–#5) + reconciliation pass
+
+**What the U5 builds landed** (7 commits made directly to local `main`, not via PR —
+see reconciliation below):
+- **D4 Storage Gate** (`lgwks_storage.py`): two-DB substrate — local `CausalTape`
+  (source of record) + content-addressed `GlobalFactList` (dedup moat), remotable
+  transport for a future R2/D1 backend. Wired into `lgwks_substrate_run.build_run`.
+- **OWASP hardening pass**: SSRF (loopback/link-local/metadata + decimal/hex IP +
+  wildcard-DNS rebinding + non-http schemes), Path Traversal (out-of-tree symlinks),
+  SQLi (parameterized queries) — guards in `lgwks_browser` / `lgwks_substrate_crawl` /
+  `lgwks_substrate_io` / `lgwks_storage`.
+- **SCG agnostic SAST** + **Math-ML-LLM pipeline** + **Liquid Brain** (`lgwks_audit_graph.py`,
+  `lgwks_bot_code_hacker.py` H5–H8): graph-theoretic + AST taint detection.
+  Architecture: ADR-sast-001/002/003 (see below).
+
+**Reconciliation (this pass) — the U5 commits shipped with slop + governance debt:**
+1. **SAST false-positive root cause FIXED** — `TaintTracker.is_tainted` treated *every*
+   f-string/BinOp as tainted, so constant `requests.get(f"…/v1")` fired `ssrf_risk`,
+   and `visit_Assign` propagated it (taint explosion). Now taint requires an actual
+   source (Name in `sources`, `input()`, `getenv`). The string-built-command smell is
+   kept for subprocess sinks only (where a token-list is the safe form), NOT for
+   URL/SQL/path sinks. **Self-scan: 3792 → 202 findings; worktree/archive noise → 0.**
+   All 37 `test_bot_code_hacker` cases green (true positives preserved).
+2. **Scan exclusions** — `.worktrees`, `.claude`, `archive` added to the ignore set
+   (the engine was re-reporting every finding once per checkout copy).
+3. **Atomic dedup** — `GlobalFactList.register_fact` now a single `ON CONFLICT` UPSERT
+   (was a TOCTOU read-then-write costing 2 round-trips/fact on the hot path).
+4. **Dead code** — removed unused imports (`os`/`Optional`/`field`/`io`) and a dead
+   `pre = engine.preanalysis()` binding in `lgwks_audit_graph.py`.
+5. **Generated artifact purged** — `findings_final.json` (130k-line self-scan, the old
+   false-positive dump) and the `.worktrees/gemini` gitlink untracked + gitignored.
+6. **Root scratch → real tests** — 5 root print-scripts (`ssrf_test.py`, `lfi_test.py`,
+   `sqli_test.py`, `ssrf_redirect_test.py`, `command_inj_test.py`) folded into
+   `tests/test_owasp_hardening.py` (assertions, 10 SSRF subtests). `command_inj_test.py`
+   tested a synthetic bad function (no repo-code value) → dropped; engine coverage is in
+   `test_bot_code_hacker`.
+7. **ADR namespace fixed** — the SAST ADRs were misfiled in the *kernel* as
+   `laws/design/adr-080/081/082-*-sast.md`, COLLIDING with existing kernel governance
+   ADRs of the same number (attestation / grant-axes / egress-gate). Relocated to the
+   lgwks namespace as `docs/ADR-sast-001/002/003-*.md`; in-code refs updated. Kernel
+   copies removed via a separate kernel PR (SAST is a lgwks concern; separate ADR
+   namespaces). Commit subjects' `(#114)–(#119)` PR refs are NOT real PRs (these were
+   direct-to-main commits) — reworded in this pass.
+
+**Open debts (filed as issues):**
+- `CausalTape.append` selects the chain tail by 1-second-resolution `timestamp`; under
+  sub-second append rates (a real crawl) the tail is ambiguous → fork risk. Needs a
+  monotonic sequence column.
+- `audit_graph` Tier-1/2 detection uses naive substring matching on callee names
+  (`"get" in name` matches `widget`/`target`); FP-prone. Tighten to word/exact match.
+- `audit_graph` Tier-3 escalation is a no-op seam that emits a marker `escalated_reasoning`
+  finding; documented in ADR-sast-003, but the marker should not read as analysis.
+- `LocalSQLiteTransport.execute` opens a fresh connection per call (hot-path cost).
+
+Verification:
+- `pytest tests/test_bot_code_hacker.py -q` → **37 passed**
+- `pytest tests/test_owasp_hardening.py -v` → **4 passed (10 subtests)**
+- `pytest tests/test_substrate.py tests/test_score.py tests/test_embed_port.py -q` → **102 passed, 16 skipped** (skips are model-runtime / `lgwks_vector`)
+- hardened engine self-scan: `lgwks_bot_code_hacker.run(".")` → **202 findings, 0 from worktree/archive/claude**
+

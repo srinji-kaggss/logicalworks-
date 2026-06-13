@@ -722,7 +722,7 @@ def add_parser(sub) -> None:
     audit.set_defaults(func=audit_command)
 
     # Agnostic Graph Audit (SCG)
-    audit_graph = ps.add_parser("audit-graph", help="agnostic graph-theoretic security audit (ADR-080)")
+    audit_graph = ps.add_parser("audit-graph", help="agnostic graph-theoretic security audit (ADR-sast-001)")
     audit_graph.add_argument("--repo", default=".", help="path to repo")
     audit_graph.add_argument("--lang", default="python", help="target language (default: python)")
     audit_graph.add_argument("--json", action="store_true", help="structured output")

@@ -26,6 +26,12 @@ governance/*.db
 
 # Claude Code local settings + worktrees — never source of truth
 .claude/
+.worktrees/
+
+# Generated SAST / audit output — never source of truth (regenerate via the bot).
+findings_final.json
+*.findings.json
+.lgwks/code-hacker.sarif
 
 # local model runtime venv (3.11 — torch/transformers for T-TORCH)
 .venv-models/

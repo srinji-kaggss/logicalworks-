@@ -108,20 +108,24 @@ class GlobalFactList:
         """)
 
     def register_fact(self, fact_hash: str, text: str, modality: str, score: float = 0.0):
-        """Register a fact in the global list. If it exists, increment seen_count."""
-        # In a remote scenario, this would be an atomic UPSERT call or a D1 transaction
-        existing = self.transport.execute("SELECT seen_count FROM global_facts WHERE fact_hash = ?", (fact_hash,))
-        if existing:
-            count = existing[0]["seen_count"] + 1
-            self.transport.execute(
-                "UPDATE global_facts SET seen_count = ?, last_seen = strftime('%s', 'now') WHERE fact_hash = ?",
-                (count, fact_hash)
-            )
-        else:
-            self.transport.execute(
-                "INSERT INTO global_facts (fact_hash, fact_text, modality, importance_score) VALUES (?,?,?,?)",
-                (fact_hash, text, modality, score)
-            )
+        """Register a fact in the global list. If it exists, increment seen_count.
+
+        //why single UPSERT not read-then-write: the SELECT-then-INSERT/UPDATE form
+        is a TOCTOU race (two ingests of the same fact can both read seen_count=N and
+        both write N+1, losing a count) and costs two round-trips per fact on the hot
+        ingestion path. SQLite's ON CONFLICT does the increment atomically; this is
+        also the shape a remote D1/R2 backend would expose.
+        """
+        self.transport.execute(
+            """
+            INSERT INTO global_facts (fact_hash, fact_text, modality, importance_score)
+            VALUES (?,?,?,?)
+            ON CONFLICT(fact_hash) DO UPDATE SET
+                seen_count = seen_count + 1,
+                last_seen = strftime('%s', 'now')
+            """,
+            (fact_hash, text, modality, score),
+        )
 
     def lookup(self, fact_hash: str) -> dict[str, Any] | None:
         """Lookup a global fact by its CID."""

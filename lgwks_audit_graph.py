@@ -1,4 +1,4 @@
-"""lgwks_audit_graph — U5 Build #5: The Liquid Brain (ADR-082).
+"""lgwks_audit_graph — U5 Build #5: The Liquid Brain (ADR-sast-003).
 
 Evolves from graph analysis to biological-flow modeling (MATH-ML-LLM):
 1. Math Substrate (The Reflex): Z-eigenpair centrality over tubule nodes.
@@ -12,15 +12,12 @@ Strict 0-trust isolation: LLM never sees raw primitives; Math owns the gates.
 from __future__ import annotations
 
 import json
-import os
 import sys
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Optional
 
 import trailmark.query.api as tm
 import lgwks_rank
-import lgwks_substrate_io as io
 
 _SCHEMA = "lgwks.audit.graph.v2"
 
@@ -41,7 +38,7 @@ def run_audit(repo_path: Path, language: str = "python", escalated: bool = False
     
     # 2. Pre-analysis (The 'Sodium Ion Channels' — Taint and Boundaries)
     print(f"[liquid-brain] establishing membrane potential (pre-analysis)...", file=sys.stderr)
-    pre = engine.preanalysis()
+    engine.preanalysis()  # side effect: establishes taint/boundary state on the engine
     tm_json = json.loads(engine.to_json())
     tm_nodes = tm_json["nodes"]
     tm_edges = tm_json.get("edges", [])
