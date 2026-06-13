@@ -80,7 +80,7 @@ def run_audit(repo_path: Path, language: str = "python") -> AuditResult:
     # 5. Agnostic Vulnerability Detection (Taint Traversals)
     # We use graph queries to find paths from entrypoints to dangerous sinks.
     
-    # Pass 5.1: SSRF / Command Injection
+    # Pass 5.1: SSRF / Command Injection / wget-style sinks
     tainted_subgraph = engine.subgraph("tainted")
     if tainted_subgraph:
         for node_id in tainted_subgraph:
@@ -89,8 +89,8 @@ def run_audit(repo_path: Path, language: str = "python") -> AuditResult:
             
             callees = engine.callees_of(node_id)
             
-            # SSRF check: network sinks
-            if any(any(s in c.lower() for s in ["get", "post", "urlopen", "request"]) for c in callees):
+            # SSRF/wget check: network sinks
+            if any(any(s in c.lower() for s in ["get", "post", "urlopen", "request", "wget", "curl"]) for c in callees):
                 # Look for missing guards in the execution path
                 callers = engine.callers_of(node_id)
                 if not any("_remote_allowed" in c for c in callers):
@@ -128,6 +128,7 @@ def run_audit(repo_path: Path, language: str = "python") -> AuditResult:
 
     # Pass 5.3: Manual Memory Management Anomaly (Human Signature)
     # Detect 'malloc' calls without a reachable 'free' in the same module/scope
+    # //why human signature: AI rarely misses local cleanup; humans often forget it in complex branches.
     if language in {"c", "cpp", "rust"}:
         for node_id in [n["id"] for n in tm_json["nodes"]]:
             callees = engine.callees_of(node_id)
@@ -140,21 +141,38 @@ def run_audit(repo_path: Path, language: str = "python") -> AuditResult:
                     "confidence": 0.7
                 })
 
+    # Pass 5.4: Unchecked Privilege Path (Auth Bypass)
+    # Finds paths from public entrypoints to privileged sinks that don't cross an AuthGate.
+    for node in tm_json.get("nodes", []):
+        node_id = node["id"]
+        if any(p in node_id.lower() for p in ["admin", "secret", "vault", "private"]):
+            # This is a privileged node. Look for callers.
+            callers = engine.callers_of(node_id)
+            if callers and not any("auth" in c.lower() or "permission" in c.lower() for c in callers):
+                findings.append({
+                    "kind": "auth_gate_missing",
+                    "node": node_id,
+                    "summary": "Privileged function reachable without evidence of an 'auth' or 'permission' gate in the call stack.",
+                    "severity": "critical",
+                    "confidence": 0.8
+                })
+
     # 6. Human vs AI Signature Detection (Anomaly detection)
     for r in rankings:
         # High Discrepancy (Delta) suggests structural mismatch between logic and boilerplate
         if r.lane == "human":
-             # If node is large but has very low centrality, it's likely AI boilerplate "noise"
-             # (This is a simplified heuristic for the demo; real version uses Z-score deviation)
              node = next((n for n in tm_json["nodes"] if n["id"] == r.node_cid), None)
-             if node and len(node.get("text", "")) > 1000 and r.centrality < 0.001:
-                 findings.append({
-                     "kind": "ai_boilerplate_anomaly",
-                     "node": r.node_cid,
-                     "summary": "Low-centrality large node detected. Potentially non-functional AI boilerplate masking logic.",
-                     "severity": "info",
-                     "confidence": 0.6
-                 })
+             if node:
+                 # AI Signature: "Hollow Centrality"
+                 # High verbosity (text size) but very low centrality contribution to the system graph.
+                 if len(node.get("text", "")) > 1000 and r.centrality < 0.0001:
+                     findings.append({
+                         "kind": "ai_hollow_centrality",
+                         "node": r.node_cid,
+                         "summary": "AI Signature: High-verbosity node with exceptionally low centrality. Likely non-functional boilerplate.",
+                         "severity": "info",
+                         "confidence": 0.75
+                     })
 
     return AuditResult(
         findings=findings,
@@ -162,7 +180,7 @@ def run_audit(repo_path: Path, language: str = "python") -> AuditResult:
         summary={
             "nodes": len(tm_json["nodes"]),
             "edges": len(tm_json["edges"]),
-            "critical_findings": len([f for f in findings if f["severity"] == "high"]),
+            "critical_findings": len([f for f in findings if f["severity"] in {"high", "critical"}]),
             "discrepancy_nodes": len([r for r in rankings if r.lane == "human"])
         }
     )

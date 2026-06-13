@@ -319,6 +319,18 @@ def run_engine(
 
     Fails silently on any sub-component error — always returns a valid envelope.
     """
+    # ── Layer 1 Math Gate: Injection Guard ────────────────────────────────────
+    import lgwks_jailbreak
+    if not lgwks_jailbreak.is_clean(prompt):
+        return {
+            "schema": _SCHEMA,
+            "prompt": "[REDACTED: INJECTION_DETECTED]",
+            "insights": {"flags": ["llm_injection_attempt"], "scores": {"confidence_P": 0.0}},
+            "meta": {"status": "denied"}
+        }
+    prompt = lgwks_jailbreak.sanitize(prompt)
+    # ─────────────────────────────────────────────────────────────────────────
+
     if isinstance(prompt, str) and len(prompt) > _MAX_PROMPT_CHARS:
         prompt = prompt[:_MAX_PROMPT_CHARS]
     try:
