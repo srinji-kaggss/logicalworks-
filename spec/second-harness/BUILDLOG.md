@@ -1002,15 +1002,11 @@ see reconciliation below):
    namespaces). Commit subjects' `(#114)–(#119)` PR refs are NOT real PRs (these were
    direct-to-main commits) — reworded in this pass.
 
-**Open debts (filed as issues):**
-- `CausalTape.append` selects the chain tail by 1-second-resolution `timestamp`; under
-  sub-second append rates (a real crawl) the tail is ambiguous → fork risk. Needs a
-  monotonic sequence column.
-- `audit_graph` Tier-1/2 detection uses naive substring matching on callee names
-  (`"get" in name` matches `widget`/`target`); FP-prone. Tighten to word/exact match.
-- `audit_graph` Tier-3 escalation is a no-op seam that emits a marker `escalated_reasoning`
-  finding; documented in ADR-sast-003, but the marker should not read as analysis.
-- DB 2 local fact-list port opened a fresh connection per call (hot-path cost).
+**Follow-up debts filed from this pass (now resolved below):**
+- #114: `CausalTape.append` selected the chain tail by 1-second-resolution `timestamp`,
+  and DB 2 opened a fresh local fact-list connection per call.
+- #115: `audit_graph` Tier-1/2 detection used naive substring matching on callee names,
+  and Tier 3 emitted a marker finding without real adapter analysis.
 
 Verification:
 - `pytest tests/test_bot_code_hacker.py -q` → **37 passed**
@@ -1038,3 +1034,24 @@ Closed the two D4 Storage Gate debts filed from the U5 reconciliation pass:
 Verification:
 - `pytest tests/test_storage.py tests/test_owasp_hardening.py -q` → **8 passed, 10 subtests passed**
 - `pytest tests/test_substrate.py tests/test_score.py tests/test_embed_port.py -q` → **118 passed**
+
+---
+
+## 2026-06-13 · #115 audit_graph SAST quality — exact sink matching + honest Tier 3 seam
+
+Closed the two audit-graph debts filed from the U5 reconciliation pass:
+
+- Tier-1/Tier-2 callable detection now matches exact callee leaf names (`requests.get` → `get`)
+  instead of bare substrings, preventing `forget`/`widget`/`rerun`/`subsystem` false positives.
+- `lgwks_audit_graph` reuses the production SAST sink sets from `lgwks_bot_code_hacker`
+  where applicable.
+- Tier 3 no longer emits an `escalated_reasoning` marker finding. Until a Host Adapter exists,
+  `--escalate` records `summary.tier3_status="adapter_not_configured"` and emits no analysis finding.
+- A human-lane rank alone no longer forces escalation; escalation is now tied to actual aversions
+  or anomaly findings.
+- `trailmark` is now an optional import at module load; `run_audit()` fails explicitly if called
+  without it, while tests can patch the parser seam.
+
+Verification:
+- `pytest tests/test_audit_graph.py -q` → **5 passed**
+- `pytest tests/test_bot_code_hacker.py tests/test_owasp_hardening.py -q` → **41 passed, 10 subtests passed**

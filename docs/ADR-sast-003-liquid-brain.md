@@ -31,7 +31,7 @@ We will implement the "Liquid Brain" architecture, strictly separating determini
     3.  **Injection Guard:** Prompt injection is neutralized because the LLM is "blind" to the system's actual execution handles.
 *   **Role:** The final escalation. It only wakes up when Tier 1/2 are "Uncertain" (high Delta-discrepancy).
 
-> **Implementation status (2026-06-13):** Tier 1 (Math Gate) and Tier 2 (ML Reflex) are wired in `lgwks_audit_graph.py`. Tier 3 escalation is a SEAM only — when triggered it emits an `escalated_reasoning` marker finding; the actual LLM call is deferred to the Host Adapter to preserve isolation. Do not read the marker as analysis output.
+> **Implementation status (2026-06-13):** Tier 1 (Math Gate) and Tier 2 (ML Reflex) are wired in `lgwks_audit_graph.py`. Tier 3 escalation is a SEAM only — when requested it reports `summary.tier3_status="adapter_not_configured"` until a Host Adapter exists. It does not emit an analysis finding unless real analysis occurred.
 
 ## 3. Specific Implementation: wget and Auth Sinks
 *   **wget/curl:** These are "External Slime Trails" (stigmergy). They must be strictly tagged as `UNTRUSTED` at the Math layer. Any data flowing back from a `wget` sink must be re-journaled into the **Causal Tape** with an `INBOUND_RISK` tag.

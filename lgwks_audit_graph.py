@@ -15,11 +15,20 @@ import json
 import sys
 from dataclasses import dataclass
 from pathlib import Path
+from typing import Any
 
-import trailmark.query.api as tm
 import lgwks_rank
+from lgwks_bot_code_hacker import _NET_SINK_ATTRS, _SUBPROCESS_ATTRS, _EXEC_ATTRS
+
+try:
+    import trailmark.query.api as tm
+except ImportError:
+    tm: Any = None
 
 _SCHEMA = "lgwks.audit.graph.v2"
+_NET_COMMANDS = frozenset({"wget", "curl"})
+_SAFE_GUARDS = frozenset({"_remote_allowed"})
+_ESCAPE_FUNCS = frozenset({"quote"})
 
 @dataclass
 class AuditResult:
@@ -29,8 +38,34 @@ class AuditResult:
     escalation_required: bool = False
     schema: str = _SCHEMA
 
+
+def _callee_leaf(name: str) -> str:
+    """Return the callable leaf from a Trailmark callee name.
+
+    Trailmark can surface names as `requests.get`, `subprocess.run`, or bare
+    symbols. Matching on the final segment preserves dotted-attribute support
+    without substring false positives like `forget` -> `get`.
+    """
+    return name.rsplit(".", 1)[-1].lower()
+
+
+def _has_callee(callee_names: list[str], names: set[str] | frozenset[str]) -> bool:
+    wanted = {name.lower() for name in names}
+    return any(_callee_leaf(name) in wanted for name in callee_names)
+
+
+def _has_guard(caller_names: list[str]) -> bool:
+    return _has_callee(caller_names, _SAFE_GUARDS)
+
+
+def _has_escape(callee_names: list[str]) -> bool:
+    return _has_callee(callee_names, _ESCAPE_FUNCS)
+
+
 def run_audit(repo_path: Path, language: str = "python", escalated: bool = False) -> AuditResult:
     """Run the agnostic Liquid Brain audit on a repository."""
+    if tm is None:
+        raise RuntimeError("trailmark is required for lgwks_audit_graph.run_audit")
     
     # 1. Universal Parsing (Trailmark)
     print(f"[liquid-brain] thickening tubules in {repo_path} ({language})...", file=sys.stderr)
@@ -69,10 +104,10 @@ def run_audit(repo_path: Path, language: str = "python", escalated: bool = False
             callee_names = [c.get("name", "").lower() for c in callees]
             
             # Aversion 1: Sodium Leak (Unchecked Network/wget/curl)
-            if any(any(s in name for s in ["get", "post", "urlopen", "request", "wget", "curl"]) for name in callee_names):
+            if _has_callee(callee_names, _NET_SINK_ATTRS | _NET_COMMANDS):
                 callers = engine.callers_of(node_id)
                 caller_names = [c.get("name", "") for c in callers]
-                if not any("_remote_allowed" in name for name in caller_names):
+                if not _has_guard(caller_names):
                     findings.append({
                         "kind": "aversion_sodium_leak",
                         "node": node_id,
@@ -81,8 +116,8 @@ def run_audit(repo_path: Path, language: str = "python", escalated: bool = False
                     })
 
             # Aversion 2: Command Detonation
-            if any(any(s in name for s in ["system", "popen", "spawn", "run"]) for name in callee_names):
-                if not any("quote" in name for name in callee_names):
+            if _has_callee(callee_names, _EXEC_ATTRS | _SUBPROCESS_ATTRS):
+                if not _has_escape(callee_names):
                     findings.append({
                         "kind": "aversion_cmd_detonation",
                         "node": node_id,
@@ -112,7 +147,7 @@ def run_audit(repo_path: Path, language: str = "python", escalated: bool = False
         for node_id in tm_nodes.keys():
             callees = engine.callees_of(node_id)
             callee_names = [c.get("name", "") for c in callees]
-            if any("malloc" in name for name in callee_names) and not any("free" in name for name in callee_names):
+            if _has_callee(callee_names, {"malloc"}) and not _has_callee(callee_names, {"free"}):
                 findings.append({
                     "kind": "anomaly_tagging_mismatch",
                     "node": node_id,
@@ -123,19 +158,17 @@ def run_audit(repo_path: Path, language: str = "python", escalated: bool = False
     # ── Tier 3: The LLM Subconscious (Anti-Thinker Escalation) ─────────────
     # Only invoked if Tier 1/2 indicate high uncertainty (Delta discrepancy)
     risk_potential = sum(f["confidence"] for f in findings if f["severity"] in {"high", "critical"})
-    needs_escalation = (risk_potential > 0 or len([r for r in rankings if r.lane == "human"]) > 0)
+    anomaly_potential = len([f for f in findings if "anomaly" in f["kind"]])
+    needs_escalation = risk_potential > 0 or anomaly_potential > 0
+    tier3_status = "not_required"
     
     if needs_escalation and escalated:
-        # //why: Day -1 protocol. The LLM is isolated. We pass only the 
-        # graph summary and findings to the Anti-Thinker.
-        print(f"[liquid-brain] escalating to subconscious reasoning...", file=sys.stderr)
-        # (Actual LLM call logic deferred to Host Adapter to maintain isolation)
-        findings.append({
-            "kind": "escalated_reasoning",
-            "node": "subconscious",
-            "summary": "Anti-Thinker: Analyzing high-delta nodes for cross-modality exfiltration paths.",
-            "severity": "info", "confidence": 0.5
-        })
+        # Tier 3 is a seam until a Host Adapter exists. Do not emit a finding:
+        # no analysis occurred, so a finding would be fabricated evidence.
+        print("[liquid-brain] Tier 3 requested; Host Adapter not configured.", file=sys.stderr)
+        tier3_status = "adapter_not_configured"
+    elif needs_escalation:
+        tier3_status = "not_requested"
 
     return AuditResult(
         findings=findings,
@@ -145,7 +178,8 @@ def run_audit(repo_path: Path, language: str = "python", escalated: bool = False
             "edges": len(tm_edges),
             "critical_aversions": len([f for f in findings if f["severity"] in {"high", "critical"}]),
             "anomalies": len([f for f in findings if "anomaly" in f["kind"]]),
-            "risk_potential": risk_potential
+            "risk_potential": risk_potential,
+            "tier3_status": tier3_status
         },
         escalation_required=needs_escalation
     )
@@ -172,7 +206,9 @@ def main():
             print(f"  {f['summary']}\n")
         
         if result.escalation_required and not args.escalate:
-            print("⚠ ESCALATION REQUIRED: High-delta nodes or aversions detected. Run with --escalate for Tier 3 reasoning.")
+            print("ESCALATION REQUIRED: aversions or anomalies detected. Run with --escalate to request Tier 3.")
+        elif result.summary.get("tier3_status") == "adapter_not_configured":
+            print("Tier 3 requested, but no Host Adapter is configured; no escalated finding was emitted.")
 
 if __name__ == "__main__":
     main()
