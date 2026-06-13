@@ -141,24 +141,40 @@ def _remote_allowed(url: str) -> bool:
     host = parsed.hostname.lower().rstrip(".")
     if host in {"localhost", "metadata.google.internal"} or host.endswith(".localhost"):
         return False
-    candidates = [host]
+    
+    # Defense-in-depth: resolve the host to ensure it doesn't point to internal networks (DNS rebinding / xip.io)
+    resolved_ips = []
     try:
-        candidates.extend(info[4][0] for info in socket.getaddrinfo(host, None))
-    except Exception:
-        pass
-    for candidate in set(candidates):
+        # Try to parse as direct IP first
+        ipaddress.ip_address(host)
+        resolved_ips.append(host)
+    except ValueError:
+        # If it's a hostname, resolve it
         try:
-            ip = ipaddress.ip_address(candidate)
+            for info in socket.getaddrinfo(host, None):
+                resolved_ips.append(info[4][0])
+        except Exception:
+            # If it doesn't resolve, we can't trust it
+            return False
+
+    if not resolved_ips:
+        return False
+
+    for ip_str in set(resolved_ips):
+        try:
+            ip = ipaddress.ip_address(ip_str)
         except ValueError:
             continue
-        # //why: IPv4-mapped IPv6 addresses (e.g. ::ffff:127.0.0.1) must resolve to their IPv4 counterpart
+        # IPv4-mapped IPv6 addresses (e.g. ::ffff:127.0.0.1) must resolve to their IPv4 counterpart
         if hasattr(ip, "ipv4_mapped") and ip.ipv4_mapped is not None:
             ip = ip.ipv4_mapped
         if any((ip.is_private, ip.is_loopback, ip.is_link_local, ip.is_multicast,
                 ip.is_reserved, ip.is_unspecified)):
             return False
-        if str(ip) == "169.254.169.254":
+        # Specific cloud metadata endpoints that might bypass 'private' checks depending on IP version
+        if str(ip) in {"169.254.169.254", "100.100.100.200"}:
             return False
+            
     return True
 
 
@@ -171,10 +187,19 @@ def _headers(url: str) -> dict[str, str]:
 
 
 def _route_handler(lock_host: str, auth_headers: dict[str, str]):
-    """Return a Playwright route handler that injects auth_headers ONLY when the request host
-    matches the lock host. Cross-origin subresources and redirects to other domains get no creds."""
+    """Return a Playwright route handler that:
+    1. Blocks SSRF targets on EVERY request (including redirects/subresources).
+    2. Injects auth_headers ONLY when the request host matches the lock host.
+    """
     def handler(route, request):
-        req_host = urllib.parse.urlparse(request.url).hostname or ""
+        url = request.url
+        # SSRF validation on every single request made by the browser
+        if not _remote_allowed(url):
+            logger.warning("blocking SSRF attempt in browser: %s", url)
+            route.abort("blockedbyclient")
+            return
+
+        req_host = urllib.parse.urlparse(url).hostname or ""
         if lock_host.lower() == req_host.lower():
             merged = dict(request.headers)
             merged.update(auth_headers)
@@ -251,9 +276,11 @@ def render(url: str, max_chars: int = 8000, *, use_session: bool = False,
             if extra_headers:
                 ctx_kwargs["extra_http_headers"] = extra_headers
             ctx = browser.new_context(**ctx_kwargs)
-            if auth_headers:
-                ctx.route("**/*", _route_handler(lock_host, auth_headers))
+            # Defense-in-depth: always route via handler to block SSRF subresources/redirects
+            ctx.route("**/*", _route_handler(lock_host, auth_headers))
+
             page = ctx.new_page()
+
             page.goto(url, wait_until="domcontentloaded", timeout=30000)
             page.wait_for_timeout(wait_ms)                   # let client JS render
             html = page.content()

@@ -67,11 +67,21 @@ def _iter_text_files(root: Path, max_files: int) -> list[Path]:
     from lgwks_substrate_config import SKIP_DIRS, TEXT_EXT
 
     out: list[Path] = []
+    root_resolved = root.resolve()
     for p in root.rglob("*"):
         if len(out) >= max_files:
             break
         if any(part in SKIP_DIRS for part in p.relative_to(root).parts[:-1]):
             continue
+        
+        # Defense-in-depth: Prevent Symlink Path Traversal (LFI)
+        try:
+            p_resolved = p.resolve()
+            if not p_resolved.is_relative_to(root_resolved):
+                continue
+        except Exception:
+            continue
+
         if p.is_file() and p.suffix.lower() in TEXT_EXT and p.stat().st_size <= 2_000_000:
             out.append(p)
     return sorted(out)
