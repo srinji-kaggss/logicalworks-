@@ -76,6 +76,8 @@ def _emit_daemon_event(repo_root: Path, prompt: str, session_id: str) -> None:
             kind="human_message",
             scope="agent_local",
             payload={"prompt_len": len(prompt), "prompt_head": prompt[:120]},
+            source="text",
+            trust="human_confirmed",
         )
         store = DaemonEventStore(db)
         try:
