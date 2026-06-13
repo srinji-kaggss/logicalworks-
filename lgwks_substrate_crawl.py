@@ -23,7 +23,7 @@ from lgwks_substrate_config import (
 from lgwks_substrate_io import _sha
 
 
-def _html_to_markdown(html: str, url: str) -> tuple[str, str, list[dict[str, str]]]:
+def _html_to_markdown(html: str, url: str) -> tuple[str, str, list[dict[str, str]], list[dict[str, str]]]:
     """Late-binding wrapper so test patches on lgwks_substrate.html_to_markdown propagate here."""
     import sys
     facade = sys.modules.get("lgwks_substrate")
@@ -108,7 +108,8 @@ def _crawl_site(
     auth_handoffs = 0
 
     def append_doc(*, source: str, title: str, text: str, html_len: int, depth: int,
-                   discovered_by: str, screenshot_b64: str = "", screenshot_mime: str = "image/png") -> bool:
+                   discovered_by: str, screenshot_b64: str = "", screenshot_mime: str = "image/png",
+                   media: list[dict[str, str]] | None = None) -> bool:
         clean_source = _canonicalize_crawl_url(source) or source
         fingerprint = (clean_source, _sha(text or ""))
         if fingerprint in doc_fingerprints:
@@ -126,6 +127,7 @@ def _crawl_site(
             # string otherwise (no capture, no cost). //why orphaned-pipe fix.
             "screenshot_b64": screenshot_b64 or "",
             "screenshot_mime": screenshot_mime or "image/png",
+            "media": media or [],
         })
         return True
 
@@ -168,7 +170,7 @@ def _crawl_site(
                 "discovered_by": discovered_by,
             })
             continue
-        markdown, title, links = _html_to_markdown(rendered["html"], clean)
+        markdown, title, links, media = _html_to_markdown(rendered["html"], clean)
         if login_if_needed and _looks_like_login_gate(title or "", markdown or rendered.get("text", ""), clean):
             if blocker_retries_used < max_auto_bypass_attempts:
                 blocker_retries_used += 1
@@ -220,7 +222,7 @@ def _crawl_site(
                 browser_engine=browser_engine,
             )
             if verify.get("ok") and verify.get("html"):
-                v_md, v_title, _ = _html_to_markdown(verify["html"], clean)
+                v_md, v_title, _, v_media = _html_to_markdown(verify["html"], clean)
                 if not _looks_like_login_gate(v_title or "", v_md or verify.get("text", ""), clean):
                     seen.discard(clean)
                     queue.appendleft((clean, depth, discovered_by))
@@ -253,6 +255,7 @@ def _crawl_site(
             discovered_by=discovered_by,
             screenshot_b64=rendered.get("screenshot_b64") or "",
             screenshot_mime=rendered.get("screenshot_mime") or "image/png",
+            media=media,
         )
         frontier.append({
             "url": clean, "depth": depth, "status": "ok", "links_found": len(links),
@@ -349,7 +352,7 @@ def _crawl_site(
                 })
                 if status != "ok" or not row.get("html"):
                     continue
-                c_md, c_title, c_links = _html_to_markdown(row["html"], final_url or clean)
+                c_md, c_title, c_links, c_media = _html_to_markdown(row["html"], final_url or clean)
                 if login_if_needed and _looks_like_login_gate(c_title or "", c_md or row.get("text", ""), final_url or clean):
                     frontier.append({
                         "url": final_url or clean,
@@ -367,6 +370,7 @@ def _crawl_site(
                     html_len=row.get("html_len", 0),
                     depth=depth + 1,
                     discovered_by=clean,
+                    media=c_media,
                 )
                 final_host = urllib.parse.urlparse(final_url).hostname or ""
                 if final_url and final_host == base_host and final_url not in seen:

@@ -42,6 +42,7 @@ class HTMLToMarkdownParser(HTMLParser):
         
         self.title_parts: list[str] = []
         self.links_found: list[dict[str, str]] = []
+        self.media_found: list[dict[str, str]] = []
         
         # Load profile settings
         if profile and "dom" in profile:
@@ -117,6 +118,30 @@ class HTMLToMarkdownParser(HTMLParser):
                 self.current_href = href
                 self.in_link = True
                 self.link_text_parts = []
+        elif tag == "img":
+            src = attrs_dict.get("src", "")
+            if src and not src.startswith("data:"):
+                if self.base_url:
+                    src = urljoin(self.base_url, src)
+                alt = attrs_dict.get("alt", "").strip()
+                title = attrs_dict.get("title", "").strip()
+                self.media_found.append({"url": src, "label": alt or title, "modality": "image"})
+        elif tag == "video":
+            src = attrs_dict.get("src", "")
+            if src:
+                if self.base_url:
+                    src = urljoin(self.base_url, src)
+                self.media_found.append({"url": src, "label": "", "modality": "video"})
+        elif tag == "source":
+            src = attrs_dict.get("src", "")
+            if src:
+                if self.base_url:
+                    src = urljoin(self.base_url, src)
+                # Infer modality from type attribute or parent tag
+                m_type = attrs_dict.get("type", "").lower()
+                modality = "video" if "video" in m_type else "image" if "image" in m_type else "unknown"
+                if modality != "unknown":
+                    self.media_found.append({"url": src, "label": "", "modality": modality})
         elif tag == "table":
             self.in_table = True
             self.table_rows = []
@@ -279,8 +304,8 @@ class HTMLToMarkdownParser(HTMLParser):
         return "\n".join(lines)
 
 
-def html_to_markdown(html_str: str, base_url: str = "") -> tuple[str, str, list[dict[str, str]]]:
-    """Convert HTML string to clean Markdown text, extracting the title and unique links."""
+def html_to_markdown(html_str: str, base_url: str = "") -> tuple[str, str, list[dict[str, str]], list[dict[str, str]]]:
+    """Convert HTML string to clean Markdown text, extracting the title, unique links, and media."""
     from lgwks_site_profile import load_profile
     profile = load_profile(base_url) if base_url else None
     parser = HTMLToMarkdownParser(base_url, profile=profile)
@@ -302,15 +327,24 @@ def html_to_markdown(html_str: str, base_url: str = "") -> tuple[str, str, list[
     markdown = markdown.strip()
     
     # 3. Links: deduplicate by href
-    seen = set()
+    seen_links = set()
     links = []
     for link in parser.links_found:
         href = link["href"]
-        if href not in seen:
-            seen.add(href)
+        if href not in seen_links:
+            seen_links.add(href)
             links.append(link)
+
+    # 4. Media: deduplicate by url
+    seen_media = set()
+    media = []
+    for item in parser.media_found:
+        m_url = item["url"]
+        if m_url not in seen_media:
+            seen_media.add(m_url)
+            media.append(item)
             
-    return markdown, title, links
+    return markdown, title, links, media
 
 
 

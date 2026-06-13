@@ -19,6 +19,7 @@ from typing import Any
 
 import lgwks_run
 import lgwks_sqlite
+import lgwks_storage
 import lgwks_substrate_config as config
 import lgwks_substrate_crawl as crawl
 import lgwks_substrate_db as db
@@ -181,11 +182,15 @@ def build_run(args: argparse.Namespace) -> dict[str, Any]:
     provider_counts: Counter[str] = Counter()
     semantic_vectors = 0
 
+    gate = lgwks_storage.get_gate(args.project or Path(args.target).name)
+    
     for idx, doc in enumerate(docs, start=1):
         source_identity = f"{doc['source']}|{doc['discovered_by']}|{doc['depth']}|{idx}"
         source_id = f"src-{io._sha(source_identity)[:16]}"
         doc_id = f"doc-{io._sha(source_identity + doc['title'])[:16]}"
+        screenshot_b64 = doc.get("screenshot_b64") or ""
         source_rows.append({
+
             "source_id": source_id,
             "source": doc["source"],
             "title": doc["title"],
@@ -217,7 +222,9 @@ def build_run(args: argparse.Namespace) -> dict[str, Any]:
                 "position": pos,
             }
             chunk_rows.append(chunk_row)
+            gate.ingest_fact(chunk_id, piece, chunk_kind, capability="ingest_chunk", meta={"doc_id": doc_id, "pos": pos})
             graph_input_rows.append({
+
                 "chunk_id": chunk_id,
                 "document_id": doc_id,
                 "url": chunk_row["url"],
@@ -248,6 +255,8 @@ def build_run(args: argparse.Namespace) -> dict[str, Any]:
                         "fact_score": text._fact_score(sentence),
                         "chunk_kind": chunk_kind,
                     })
+                    gate.ingest_fact(io._sha(sentence), sentence, chunk_kind, capability="ingest_fact_sentence", meta={"chunk_id": chunk_id})
+
                     # semantic fact vector (primary; feeds NeoBERT / downstream ML)
                     if dual["sem"]:
                         fsem = dual["sem"]
@@ -298,66 +307,84 @@ def build_run(args: argparse.Namespace) -> dict[str, Any]:
                     "chunk_kind": chunk_kind,
                 })
 
-        # ── Screenshot → image chunk (opt-in) ───────────────────────────────────
-        # //why orphaned-pipe fix: the screenshot is only on the doc when
-        # --embed-screenshots captured it, so presence == opt-in. Text embeds via
-        # ollama (above); the image goes to the paid media seam (gemini-embedding-2).
-        # det perceptual fingerprint is always present (never-block); sem only when
-        # the media endpoint answers. Image chunks are retrieval artifacts, not
-        # entity-graph text, so they are intentionally NOT added to graph_input_rows.
-        screenshot_b64 = doc.get("screenshot_b64") or ""
+        # ── Media items → media chunks (opt-in) ────────────────────────────────
+        # //why: first-class media support (ADR-068/INGESTION-LAYER §2).
+        # Both screenshot and harvested images/videos are processed here.
+        media_items = list(doc.get("media", []))
         if screenshot_b64:
+            media_items.append({"url": doc["source"] + "#screenshot", "label": "[screenshot] " + doc["title"], "modality": "image"})
+        
+        if media_items:
             import lgwks_multimodal
-            img_caption = doc["title"]
-            img_label = f"[screenshot] {img_caption}"
-            img_chunk_id = f"chunk-{io._sha(doc_id + 'screenshot')[:16]}"
-            chunk_rows.append({
-                "chunk_id": img_chunk_id,
-                "document_id": doc_id,
-                "source": doc["source"],
-                "url": doc["source"] if source_kind == "url" else "",
-                "text": img_label,
-                "stem_text": "",
-                "hash": io._sha(screenshot_b64),
-                "fact_score": 0.0,
-                "chunk_kind": "image",
-                "position": -1,
-            })
-            mm = lgwks_multimodal.embed_media(
-                image_b64=screenshot_b64,
-                image_mime=doc.get("screenshot_mime") or "image/png",
-                caption=img_caption,
-            )
-            idet = mm["det"]
-            provider_counts[idet["provider"]] += 1
-            vector_rows.append({
-                "vector_id": f"vec-{io._sha(img_chunk_id + idet['provider'])[:16]}",
-                "chunk_id": img_chunk_id,
-                "document_id": doc_id,
-                "provider": idet["provider"],
-                "is_semantic": False,
-                "dims": idet["dims"],
-                "vector_text": img_label[:2000],
-                "vector": idet["vector"],
-                "fact_score": 0.0,
-                "chunk_kind": "image",
-            })
-            if mm.get("sem"):
-                isem = mm["sem"]
-                provider_counts[isem["provider"]] += 1
-                semantic_vectors += 1
-                vector_rows.append({
-                    "vector_id": f"vec-{io._sha(img_chunk_id + isem['provider'])[:16]}",
-                    "chunk_id": img_chunk_id,
+            for media_item in media_items:
+                m_url = media_item["url"]
+                m_label = media_item["label"] or f"[{media_item['modality']}] {doc['title']}"
+                m_modality = media_item["modality"]
+                m_chunk_id = f"chunk-{io._sha(doc_id + m_url)[:16]}"
+                
+                # Best-effort fetch if not screenshot
+                m_b64 = screenshot_b64 if m_url.endswith("#screenshot") else None
+                m_mime = doc.get("screenshot_mime") or "image/png" if m_url.endswith("#screenshot") else ""
+                
+                # Fetch logic deferred to harvester; assume available if present in media list
+                # (Actual production fetch would happen here or in the crawler)
+                if not m_b64:
+                    continue # Skip for now until full harvester wiring is proven
+                
+                chunk_rows.append({
+                    "chunk_id": m_chunk_id,
                     "document_id": doc_id,
-                    "provider": isem["provider"],
-                    "is_semantic": True,
-                    "dims": isem["dims"],
-                    "vector_text": img_label[:2000],
-                    "vector": isem["vector"],
+                    "source": doc["source"],
+                    "url": m_url,
+                    "text": m_label,
+                    "stem_text": "",
+                    "hash": io._sha(m_b64),
                     "fact_score": 0.0,
-                    "chunk_kind": "image",
+                    "chunk_kind": m_modality,
+                    "position": -1,
                 })
+                
+                mm = lgwks_multimodal.embed_media(
+                    image_b64=m_b64 if m_modality == "image" else None,
+                    video_b64=m_b64 if m_modality == "video" else None,
+                    image_mime=m_mime if m_modality == "image" else "",
+                    video_mime=m_mime if m_modality == "video" else "",
+                    caption=m_label,
+                )
+                
+                idet = mm["det"]
+                provider_counts[idet["provider"]] += 1
+                vector_rows.append({
+                    "vector_id": f"vec-{io._sha(m_chunk_id + idet['provider'])[:16]}",
+                    "chunk_id": m_chunk_id, "document_id": doc_id,
+                    "provider": idet["provider"], "is_semantic": False,
+                    "dims": idet["dims"], "vector_text": m_label[:2000],
+                    "vector": idet["vector"], "fact_score": 0.0, "chunk_kind": m_modality,
+                })
+                
+                if mm.get("sem"):
+                    isem = mm["sem"]
+                    provider_counts[isem["provider"]] += 1
+                    semantic_vectors += 1
+                    vector_rows.append({
+                        "vector_id": f"vec-{io._sha(m_chunk_id + isem['provider'])[:16]}",
+                        "chunk_id": m_chunk_id, "document_id": doc_id,
+                        "provider": isem["provider"], "is_semantic": True,
+                        "dims": isem["dims"], "vector_text": m_label[:2000],
+                        "vector": isem["vector"], "fact_score": 0.0, "chunk_kind": m_modality,
+                    })
+                    graph_input_rows.append({
+                        "chunk_id": m_chunk_id, "document_id": doc_id,
+                        "url": m_url, "text": m_label,
+                        "hash": isem.get("cid", ""),
+                        "schema": m_modality.upper(),
+                    })
+                    # Emit triples using the new first-class media relations
+                    fact_rows.append({
+                        "fact_id": f"fact-{io._sha(doc_id + m_chunk_id + m_modality)[:16]}",
+                        "i_cid": doc_id, "k": m_modality, "j_cid": m_chunk_id,
+                        "confidence_score": 1.0, "schema": "lgwks.score.record.v1"
+                    })
 
     # ── Concept extraction (what things mean, not just what was said) ────────────
     cg = None

@@ -243,7 +243,7 @@ def ingest(url: str, *, project: str = "", run_root: str = "store/ingest",
         resource_rows.append({"url": url + "#screenshot", "kind": "image", "via": "page-screenshot"})
         _embed_media_resource(url + "#screenshot", page["screenshot_b64"],
                               page.get("screenshot_mime", "image/png"), title or url,
-                              doc_id, vector_rows, counts)
+                              doc_id, vector_rows, fact_rows, counts)
 
     # ── 4. HARVEST resources (wget-style) -> classify -> route ───────────────────
     harvester = _ResourceHarvester(url)
@@ -263,7 +263,8 @@ def ingest(url: str, *, project: str = "", run_root: str = "store/ingest",
                     elif embed_media:
                         b64 = base64.b64encode(resp.content).decode("ascii")
                         mime = resp.headers.get("content-type", "").split(";")[0] or f"{kind}/*"
-                        _embed_media_resource(res_url, b64, mime, title or url, doc_id, vector_rows, counts,
+                        _embed_media_resource(res_url, b64, mime, title or url, doc_id,
+                                              vector_rows, fact_rows, counts,
                                               video=(kind == "video"))
                         row["status"] = "embedded"
                     else:
@@ -292,7 +293,7 @@ def ingest(url: str, *, project: str = "", run_root: str = "store/ingest",
 
 
 def _embed_media_resource(res_url: str, b64: str, mime: str, caption: str, doc_id: str,
-                          vector_rows: list, counts: dict, *, video: bool = False) -> None:
+                          vector_rows: list, fact_rows: list, counts: dict, *, video: bool = False) -> None:
     chunk_id = f"chunk-{_sha(doc_id + res_url)[:16]}"
     if video:
         res = mm.embed_media(video_b64=b64, video_mime=mime, caption=caption)
@@ -300,7 +301,16 @@ def _embed_media_resource(res_url: str, b64: str, mime: str, caption: str, doc_i
     else:
         res = mm.embed_media(image_b64=b64, image_mime=mime, caption=caption)
         counts["images"] += 1
-    vector_rows.extend(_vrows(chunk_id, doc_id, res, "video" if video else "image", res_url, counts))
+    
+    # Emit triples for media evidence
+    rel = "video" if video else "image"
+    fact_rows.append({
+        "fact_id": f"fact-{_sha(doc_id + chunk_id + rel)[:16]}",
+        "i_cid": doc_id, "k": rel, "j_cid": chunk_id,
+        "confidence_score": 1.0, "schema": "lgwks.score.record.v1"
+    })
+    
+    vector_rows.extend(_vrows(chunk_id, doc_id, res, rel, res_url, counts))
 
 
 def _vrows(chunk_id: str, doc_id: str, emb: dict, kind: str, vtext: str, counts: dict) -> list[dict]:

@@ -34,63 +34,10 @@ if str(_WORKTREE) not in sys.path:
 
 # ── stub lgwks_vector so tests run without the full repo on PYTHONPATH ───────
 # (the real module lives in the primary worktree; in CI the worktree may be isolated)
-if "lgwks_vector" not in sys.modules:
-    import struct
-
-    _stub = types.ModuleType("lgwks_vector")
-    _stub.SCHEMA = "lgwks.vector.record.v1"
-    _stub.ADMIN = object()  # mirror the real module's admin sentinel (#99)
-
-    class _FakeRecord:
-        def __init__(self, floats, **kw):
-            self.floats = floats
-            self.meta = kw
-
-    _stub.VectorRecord = _FakeRecord
-
-    def _encode_record(floats, *, modality, space_id, tenant, source_cid):
-        return _FakeRecord(floats, modality=modality, space_id=space_id,
-                           tenant=tenant, source_cid=source_cid)
-
-    def _create_store(path):
-        conn = sqlite3.connect(str(path))
-        conn.execute(
-            "CREATE TABLE IF NOT EXISTS vector_records "
-            "(cid TEXT PRIMARY KEY, data BLOB)"
-        )
-        conn.commit()
-        return conn
-
-    def _upsert_record(conn, record, *, admin=None):
-        import hashlib
-        cid = hashlib.blake2b(str(record.floats).encode(), digest_size=8).hexdigest()
-        conn.execute(
-            "INSERT OR REPLACE INTO vector_records (cid, data) VALUES (?,?)",
-            (cid, str(record.floats).encode()),
-        )
-
-    def _store_count(conn):
-        return conn.execute("SELECT COUNT(*) FROM vector_records").fetchone()[0]
-
-    _stub.encode_record = _encode_record
-    _stub.create_store = _create_store
-    _stub.upsert_record = _upsert_record
-    _stub.store_count = _store_count
-    sys.modules["lgwks_vector"] = _stub
+# Removed for hygiene pass (#112)
 
 # ── also stub axiom.cid used by migrate_json_embeddings ─────────────────────
-if "axiom" not in sys.modules:
-    _axiom = types.ModuleType("axiom")
-    _axiom_cid = types.ModuleType("axiom.cid")
-
-    def _compute_cid(data: bytes) -> str:
-        import hashlib
-        return "b2b256:" + hashlib.blake2b(data, digest_size=32).hexdigest()
-
-    _axiom_cid.compute_cid = _compute_cid
-    _axiom.cid = _axiom_cid
-    sys.modules["axiom"] = _axiom
-    sys.modules["axiom.cid"] = _axiom_cid
+# Removed for hygiene pass (#112)
 
 import lgwks_embed_port as ep
 from lgwks_embed_port import (
@@ -505,21 +452,21 @@ class TestEmbedFromItem(unittest.TestCase):
 
 class TestEmbedToRecord(unittest.TestCase):
     def test_produces_vector_record(self):
-        port = _make_port(dim=256)
-        floats = _unit_vec(256)
+        port = _make_port(dim=4096)
+        floats = _unit_vec(4096)
         record = port.embed_to_record(floats, modality="text",
                                        source_cid="b2b256:abc", tenant="lgwks")
         self.assertIsNotNone(record)
-        self.assertEqual(record.meta["space_id"], "qwen3-vl-embedding-8b:d256")
-        self.assertEqual(record.meta["modality"], "text")
-        self.assertEqual(record.meta["tenant"], "lgwks")
-        self.assertEqual(record.meta["source_cid"], "b2b256:abc")
+        self.assertEqual(record.space_id, "qwen3-vl-embedding-8b:d4096")
+        self.assertEqual(record.modality, "text")
+        self.assertEqual(record.tenant, "lgwks")
+        self.assertEqual(record.source_cid, "b2b256:abc")
 
     def test_space_id_in_record_matches_port(self):
-        port = _make_port(dim=1024)
-        record = port.embed_to_record(_unit_vec(1024), modality="image",
+        port = _make_port(dim=4096)
+        record = port.embed_to_record(_unit_vec(4096), modality="image",
                                        source_cid="b2b256:xyz", tenant="t")
-        self.assertEqual(record.meta["space_id"], port.space_id())
+        self.assertEqual(record.space_id, port.space_id())
 
 
 # ═══════════════════════════════════════════════════════════════════════════════

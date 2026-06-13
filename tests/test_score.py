@@ -280,6 +280,13 @@ class TestDirectionalActivation(unittest.TestCase):
 class TestCrossModelCid(unittest.TestCase):
     """Same logical content, different dict ordering → identical canonical bytes and cid."""
 
+    @classmethod
+    def setUpClass(cls):
+        try:
+            import cbor2  # noqa: F401
+        except ImportError as e:
+            raise unittest.SkipTest(f"T3 requires cbor2: {e}")
+
     def test_key_order_independent(self):
         a = {"i_cid": "x", "k": "calls", "j_cid": "y", "weight": 1.0, "confidence_score": 0.9}
         b = {"confidence_score": 0.9, "weight": 1.0, "j_cid": "y", "k": "calls", "i_cid": "x"}
@@ -385,6 +392,13 @@ class TestMdlSeparation(unittest.TestCase):
 class TestReplayDeterminism(unittest.TestCase):
     """Same schema file → byte-identical operators. Same instance → byte-identical cid + scores."""
 
+    @classmethod
+    def setUpClass(cls):
+        try:
+            import cbor2  # noqa: F401
+        except ImportError as e:
+            raise unittest.SkipTest(f"T5 requires cbor2: {e}")
+
     DIM = 16
 
     def test_operators_deterministic_across_builds(self):
@@ -416,6 +430,13 @@ class TestReplayDeterminism(unittest.TestCase):
 
 class TestHardening(unittest.TestCase):
     """Harden pass: cross-model type-normalization (§4.4) + operator-length guards."""
+
+    @classmethod
+    def setUpClass(cls):
+        try:
+            import cbor2  # noqa: F401
+        except ImportError as e:
+            raise unittest.SkipTest(f"Hardening requires cbor2: {e}")
 
     def test_int_float_cid_equal(self):
         # Two extractors emit the same fact, one as int, one as float → same cid.
@@ -455,9 +476,10 @@ class TestSchemaConstants(unittest.TestCase):
         self.assertRegex(SCHEMA, r"^lgwks\..+\.v\d+$")
         self.assertRegex(RELATIONS_SCHEMA, r"^lgwks\..+\.v\d+$")
 
-    def test_all_eight_relations_present(self):
+    def test_all_ten_relations_present(self):
         expected = {"calls", "contains", "method", "inherits",
-                    "uses", "rationale_for", "imports_from", "case_of"}
+                    "uses", "rationale_for", "imports_from", "case_of",
+                    "image", "video"}
         self.assertEqual(set(RELATIONS.keys()), expected)
 
     def test_all_relations_directed_v1(self):

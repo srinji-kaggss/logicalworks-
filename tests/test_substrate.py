@@ -128,8 +128,8 @@ class TestSubstrateBuild(unittest.TestCase):
 
         def fake_html_to_markdown(html, url):
             if "Sign in" in html:
-                return "Sign in with passkey", "Sign in", []
-            return "Transfer threshold is $500.", "Overview", []
+                return "Sign in with passkey", "Sign in", [], []
+            return "Transfer threshold is $500.", "Overview", [], []
 
         def fake_save_session(_url, **_kwargs):
             state["saved"] = True
@@ -169,8 +169,8 @@ class TestSubstrateBuild(unittest.TestCase):
 
         def fake_html_to_markdown(html, url):
             if "Sign in" in html:
-                return "Sign in with passkey", "Sign in", []
-            return "Transfer threshold is $500.", "Overview", []
+                return "Sign in with passkey", "Sign in", [], []
+            return "Transfer threshold is $500.", "Overview", [], []
 
         def fake_save_session(_url, **_kwargs):
             return {"ok": True, "path": "/tmp/session.json", "reason": "session saved (manual)"}
@@ -223,10 +223,10 @@ class TestClickDiscovery(unittest.TestCase):
 
         def fake_html_to_markdown(html, url):
             if "API no access" in html:
-                return "You do not have access to API.", "API", []
+                return "You do not have access to API.", "API", [], []
             if "Standards content" in html:
-                return "Standards content requires form T2033.", "Standards", []
-            return "Fundserv Applications", "Fundserv Connect", []
+                return "Standards content requires form T2033.", "Standards", [], []
+            return "Fundserv Applications", "Fundserv Connect", [], []
 
         def fake_clicks(url, **_kwargs):
             return [
@@ -276,7 +276,7 @@ class TestClickDiscovery(unittest.TestCase):
             return {"ok": True, "html": "<html>Portal home</html>", "text": "Portal home"}
 
         def fake_html_to_markdown(html, url):
-            return "Portal home", "Fundserv Connect", []
+            return "Portal home", "Fundserv Connect", [], []
 
         def fake_clicks(url, **_kwargs):
             return [{
@@ -433,7 +433,7 @@ class TestAuthHandoff(unittest.TestCase):
             return {"ok": True, "html": "<html>Sign in</html>", "text": "Sign in"}
 
         def fake_html_to_markdown(html, url):
-            return "Sign in", "Sign in", []
+            return "Sign in", "Sign in", [], []
 
         def fake_save_session(url, **kwargs):
             captured["kwargs"] = kwargs
@@ -846,8 +846,8 @@ class TestVectorSpaceIdentity(unittest.TestCase):
 
             def fake_html_to_markdown(html, url):
                 if "Click state" in html:
-                    return "Click state requires form T2033.", "Click State", []
-                return "Portal home requires login.", "Portal", []
+                    return "Click state requires form T2033.", "Click State", [], []
+                return "Portal home requires login.", "Portal", [], []
 
             def fake_clicks(url, **_kwargs):
                 return [{
@@ -905,7 +905,7 @@ class TestVectorSpaceIdentity(unittest.TestCase):
                 {"href": "https://portal.example.com/page2", "text": "p2"},
                 {"href": "https://portal.example.com/page3", "text": "p3"},
             ]
-            return "Portal home.", "Portal", links
+            return "Portal home.", "Portal", links, []
 
         def fake_clicks(url, **_kwargs):
             return [

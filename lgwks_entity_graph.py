@@ -44,6 +44,8 @@ ENTITY_TYPES = (
     "SETTLEMENT",    # settlement record
     "AMOUNT",        # dollar/unit quantity extracted from text
     "DATE",          # date mention
+    "IMAGE",         # visual evidence (PNG, JPG, etc.)
+    "VIDEO",         # video evidence (MP4, etc.)
     "UNKNOWN",       # classifier fallback
 )
 

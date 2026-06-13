@@ -53,6 +53,7 @@ class RankError(RuntimeError):
 RELATIONS: tuple[str, ...] = (
     "calls", "contains", "method", "inherits",
     "uses", "rationale_for", "imports_from", "case_of",
+    "image", "video",
 )
 
 # Schema-declared relation weights w_k (§4.3). NON-UNIFORM by design: this is exactly what
@@ -70,6 +71,8 @@ RELATION_WEIGHTS: dict[str, float] = {
     "contains": 0.5,
     "rationale_for": 0.4,
     "case_of": 0.4,
+    "image": 0.3,
+    "video": 0.3,
 }
 
 # Relation-BLIND weights — the order-2 / AI analog (§4.3 "relation-collapsed special case").

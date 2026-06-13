@@ -39,6 +39,8 @@ RELATIONS: dict[str, dict[str, Any]] = {
     "rationale_for": {"direction": "directed", "arg_typing": None, "dim_mask": None},
     "imports_from":  {"direction": "directed", "arg_typing": None, "dim_mask": None},
     "case_of":       {"direction": "directed", "arg_typing": None, "dim_mask": None},
+    "image":         {"direction": "directed", "arg_typing": None, "dim_mask": None},
+    "video":         {"direction": "directed", "arg_typing": None, "dim_mask": None},
 }
 
 # ---------------------------------------------------------------------------
