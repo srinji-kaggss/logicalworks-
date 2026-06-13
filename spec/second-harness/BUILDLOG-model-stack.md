@@ -94,3 +94,23 @@ Each entry: what · why deferred · where it must land · current rank.
 | Code specialist (Qwen2.5-Coder-3B) | new model; orthogonal to this slice | L6 code branch | P3 |
 | MIV/MCS full Shapley | extends `lgwks_verify` L-coefficient; needs provenance DAG first | model-influence, after algorithms | P2 |
 | CoreML/ANE export of L1 | Python 3.14 blocks coremltools; needs 3.11 export venv | L1 speed upgrade (eye→ANE) | P3 |
+
+---
+
+## 2026-06-13 - Runtime/model finalization note
+
+Logged the broader daemon model stance in
+[`MODEL-RUNTIME-FINALIZATION-2026-06-13.md`](MODEL-RUNTIME-FINALIZATION-2026-06-13.md).
+
+Decision summary:
+- The model is already part of the daemon graph; the missing unit is the model mesh, not a single
+  future monolith.
+- "Logic AI" should ship first as a runtime plus model pack: event schemas, daemon, capability gates,
+  local model workers, model cards, checksums, evals, and adapters.
+- MLX is first-class for Apple Silicon local inference; CoreML/ANE is an optimization/packaging lane,
+  not a blocker for v1.
+- The "Siri" equivalent is the voice ingress plus Tongue compiler: ASR -> daemon event -> typed
+  intent/capability proposal -> gate -> action/packet.
+- A future "LogicGPT-1" is possible only after the daemon produces enough event/capability/outcome
+  traces to train or distill next-intent, routing, context, risk, and packet models. It should still
+  propose; the daemon executes.
