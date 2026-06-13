@@ -1,0 +1,52 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "lgwks.model.mesh.v1",
+  "description": "Model law rendered as a single queryable manifest (#119). Records the model-stack inventory (spec MODEL-RUNTIME-FINALIZATION §3.1 current law + §3.2 open slots); it does NOT change inventory, select models, or load weights. `role`, `trust_class`, `input_schema`, `output_schema`, and `eval_gate` are the locked public join keys read by #120 (authority by trust) and #122 (allowed capabilities); the future LogicGPT-1 promotion path (spec §5) plugs into `eval_gate`. `health` is populated by the doctor at runtime; everything else is descriptive.",
+  "type": "object",
+  "required": ["schema", "generated_at", "models"],
+  "additionalProperties": false,
+  "properties": {
+    "schema": {"type": "string", "enum": ["lgwks.model.mesh.v1"]},
+    "generated_at": {"type": ["string", "null"], "format": "date-time"},
+    "models": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "required": ["name", "runtime", "locality", "role", "input_schema", "output_schema", "trust_class", "fallback", "health", "eval_gate", "status"],
+        "additionalProperties": true,
+        "properties": {
+          "name": {"type": ["string", "null"], "description": "repo-pinned model id, or null for open slots / provider seams"},
+          "runtime": {"type": ["string", "null"], "enum": ["mlx", "transformers", "ollama", "coreml", "llama_cpp", "provider_seam", null]},
+          "locality": {"type": ["string", "null"], "enum": ["local", "cloud", null]},
+          "role": {"type": "string", "enum": ["embed", "intent", "classify", "extract", "salience", "rerank", "asr", "proposal", "code"]},
+          "input_schema": {"type": ["string", "null"], "description": "schema-id ref, not an inline shape"},
+          "output_schema": {"type": ["string", "null"], "description": "schema-id ref, not an inline shape"},
+          "trust_class": {"type": ["string", "null"], "enum": ["deterministic", "sensor", "generative", null]},
+          "fallback": {"type": ["string", "null"], "description": "model name to degrade to, or null"},
+          "health": {
+            "type": "object",
+            "required": ["status"],
+            "additionalProperties": true,
+            "properties": {
+              "status": {"type": "string", "enum": ["unknown", "ok", "degraded", "down"]},
+              "latency_ms_p50": {"type": ["number", "null"]},
+              "last_checked": {"type": ["string", "null"]}
+            }
+          },
+          "eval_gate": {
+            "type": ["object", "null"],
+            "additionalProperties": true,
+            "properties": {
+              "eval_id": {"type": ["string", "null"]},
+              "threshold": {"type": ["number", "null"]},
+              "status": {"type": "string", "enum": ["passed", "pending", "none"]}
+            }
+          },
+          "status": {"type": "string", "enum": ["current_law", "open_slot", "candidate_reference"]},
+          "notes": {"type": "string"}
+        }
+      }
+    }
+  }
+}
