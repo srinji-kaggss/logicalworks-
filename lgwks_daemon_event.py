@@ -138,6 +138,11 @@ def validate_event(record: dict[str, Any]) -> dict[str, Any]:
     if "trust" in record:
         _require_choice("trust", record["trust"], TRUST_CLASSES)
     if "payload_cid" in record:
+        # SHAPE only — the envelope cannot re-derive a CID for out-of-band bytes it
+        # does not hold. Integrity (bytes actually hash to this CID) MUST be
+        # re-checked with axiom.cid.require_cid at the store/resolve boundary that
+        # has the bytes (AUDIT F-01: verify, don't trust). A valid-shaped CID here
+        # is NOT proof the payload matches.
         cid = record["payload_cid"]
         if not isinstance(cid, str) or not _CID_RE.fullmatch(cid):
             raise ValueError(f"payload_cid must match {_CID_RE.pattern}")
@@ -253,8 +258,13 @@ def upgrade_v1_to_v2(record: dict[str, Any]) -> dict[str, Any]:
 
     upgraded = dict(record)
     upgraded["schema"] = SCHEMA
-    upgraded.setdefault("source", _SOURCE_FROM_KIND.get(str(record.get("kind") or ""), "text"))
-    upgraded.setdefault("trust", "deterministic")
+    kind = str(record.get("kind") or "")
+    upgraded.setdefault("source", _SOURCE_FROM_KIND.get(kind, "text"))
+    # Default trust by kind to the WEAKEST appropriate class — NEVER blanket
+    # "deterministic" for model-origin events (model output is untrusted until
+    # typed). An existing trust value is preserved (setdefault); only legacy v1
+    # records that lacked the field are labelled, and conservatively.
+    upgraded.setdefault("trust", _TRUST_FROM_KIND.get(kind, "model_proposed"))
     replay = dict(upgraded.get("replay") or {})
     replay.setdefault("schema_from", SCHEMA_V1)
     replay.setdefault("deterministic", True)
@@ -269,6 +279,22 @@ _SOURCE_FROM_KIND = {
     "tool_call": "model",
     "file_change": "repo",
     "workflow_event": "workflow",
+}
+
+# Conservative trust default per kind for the lazy v1→v2 upgrade. Model-origin
+# kinds default to model_proposed (never deterministic); only system/repo-derived
+# kinds are deterministic; human messages are human_confirmed.
+_TRUST_FROM_KIND = {
+    "human_message": "human_confirmed",
+    "transcript_turn": "model_proposed",
+    "tool_call": "model_proposed",
+    "model_output": "model_proposed",
+    "browser_action": "model_proposed",
+    "file_change": "deterministic",
+    "repo_diff": "deterministic",
+    "terminal_output": "deterministic",
+    "workflow_event": "deterministic",
+    "artifact_emit": "deterministic",
 }
 
 

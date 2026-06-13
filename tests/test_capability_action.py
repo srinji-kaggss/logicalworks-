@@ -83,6 +83,32 @@ class TestGateRejections(unittest.TestCase):
             ca.build_action(**_valid_kwargs(
                 effect_class="external_publish", reversibility="irreversible", confirmed=False))
 
+    def test_weak_trust_dangerous_effect_requires_confirmation(self):
+        # Harden: untrusted/model_proposed provenance + delete (dangerous) needs confirmed.
+        with self.assertRaises(ca.ActionRejected):
+            ca.build_action(**_valid_kwargs(
+                verb="do ship", effect_class="delete", reversibility="reversible",
+                provenance={"trust": "untrusted"}, confirmed=False))
+        ok = ca.build_action(**_valid_kwargs(
+            verb="do ship", effect_class="delete", reversibility="reversible",
+            provenance={"trust": "untrusted"}, confirmed=True))
+        self.assertEqual(ok["effect_class"], "delete")
+
+    def test_human_confirmed_trust_not_blocked(self):
+        # A human-confirmed dangerous effect does not need the weak-trust gate.
+        ok = ca.build_action(**_valid_kwargs(
+            verb="do ship", effect_class="delete", reversibility="reversible",
+            provenance={"trust": "human_confirmed"}, confirmed=False))
+        self.assertEqual(ok["provenance"]["trust"], "human_confirmed")
+
+    def test_catalog_load_failure_fails_closed(self):
+        # Harden: if the live verb catalog can't load, refuse (ActionRejected), never admit.
+        import unittest.mock as mock
+        action = ca.build_action(**_valid_kwargs())  # built with hermetic known_verbs
+        with mock.patch.object(ca, "_live_verbs", side_effect=RuntimeError("subprocess down")):
+            with self.assertRaises(ca.ActionRejected):
+                ca.validate_action(action)  # known_verbs=None → live catalog → fails closed
+
 
 class TestChokepoint(unittest.TestCase):
     """Acceptance 3: model text cannot mutate state without a validated action."""

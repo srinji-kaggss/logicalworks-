@@ -42,10 +42,11 @@ class TestQueryFederation(unittest.TestCase):
                 ))
         finally:
             store.close()
-        # ── projection 2: graph (real entity graph) ──
+        # ── projection 2: graph (real entity graph, TENANT-PARTITIONED) ──
         import lgwks_entity_graph
-        self.graph_db = self.root / "entity_graph.db"
-        g = lgwks_entity_graph.GraphDB(self.graph_db)
+        self.graph_base = self.root / "entity_graph"
+        self.graph_base.mkdir(parents=True, exist_ok=True)
+        g = lgwks_entity_graph.GraphDB(self.graph_base / f"{q._safe_tenant(TENANT)}.db")
         g.upsert_node("node:query", "module", "daemon query surface")
         g.upsert_node("node:other", "module", "unrelated widget")
         g.commit()
@@ -53,7 +54,7 @@ class TestQueryFederation(unittest.TestCase):
 
         self.adapters = {
             "transcript": q.transcript_adapter(self.daemon_db),
-            "graph": q.graph_adapter(self.graph_db),
+            "graph": q.graph_adapter(self.graph_base),
         }
 
     def _req(self, **over):
@@ -89,6 +90,18 @@ class TestQueryFederation(unittest.TestCase):
     def test_source_filter(self):
         hits = q.query(self._req(source="model"), self.adapters)["hits"]
         self.assertTrue(all(h["provenance"]["source"] == "model" for h in hits))
+
+    def test_graph_projection_is_tenant_isolated(self):
+        # Harden regression (#124 HIGH): another tenant's graph partition must NOT
+        # leak into this tenant's query. tenantB has a secret node in its own db.
+        import lgwks_entity_graph
+        gb = lgwks_entity_graph.GraphDB(self.graph_base / f"{q._safe_tenant('repo:secret')}.db")
+        gb.upsert_node("node:secret", "module", "daemon query SECRET tenantB")
+        gb.commit()
+        gb.close()
+        hits = q.query(self._req(), self.adapters)["hits"]
+        labels = " ".join(h.get("snippet", "") for h in hits)
+        self.assertNotIn("SECRET", labels, "cross-tenant graph leak")
 
     def test_deterministic_order(self):
         r1 = q.query(self._req(), self.adapters)["hits"]

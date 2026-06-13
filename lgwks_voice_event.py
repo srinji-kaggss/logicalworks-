@@ -99,7 +99,12 @@ def validate_voice_event(record: dict[str, Any]) -> dict[str, Any]:
     _require(isinstance(span, dict), "transcript_span must be a dict")
 
     cleanup = record.get("cleanup_provenance")
-    _require(isinstance(cleanup, dict), "cleanup_provenance must be a dict")
+    if not isinstance(cleanup, dict):
+        raise ValueError("cleanup_provenance must be a dict")
+    # `changed` must not lie — it has to reflect the actual raw→normalized delta.
+    if "changed" in cleanup:
+        _require(bool(cleanup["changed"]) == (record["normalized_text"] != record["raw_text"]),
+                 "cleanup_provenance.changed must equal (normalized_text != raw_text)")
 
     _require(isinstance(record.get("final"), bool), "final must be a bool")
     if record.get("speaker") is not None:
