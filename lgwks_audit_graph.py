@@ -43,13 +43,22 @@ def run_audit(repo_path: Path, language: str = "python") -> AuditResult:
     
     # 3. Map Trailmark IR to lgwks.rank format
     print(f"[audit-graph] building semantic tensor...", file=sys.stderr)
-    tm_json = engine.to_json()
+    tm_raw = engine.to_json()
+    tm_json = json.loads(tm_raw) if isinstance(tm_raw, str) else tm_raw
     
+    if not isinstance(tm_json, dict) or "nodes" not in tm_json:
+        return AuditResult([], [], {"error": "Invalid SCG format", "nodes": 0, "edges": 0})
+
     # Map tm_json nodes/edges to lgwks graph format
+    # Trailmark nodes is a dict[id -> node_info]
+    tm_nodes = tm_json["nodes"]
     lgwks_graph = {
-        "nodes": [{"id": n["id"]} for n in tm_json.get("nodes", [])],
+        "nodes": [{"id": nid} for nid in tm_nodes.keys()],
         "links": []
     }
+    
+    # Trailmark edges is a list of dicts
+    tm_edges = tm_json.get("edges", [])
     
     # Map Trailmark kinds to our RELATIONS vocabulary
     REL_MAP = {
@@ -59,7 +68,7 @@ def run_audit(repo_path: Path, language: str = "python") -> AuditResult:
         "contains": "contains",
     }
     
-    for edge in tm_json.get("edges", []):
+    for edge in tm_edges:
         kind = REL_MAP.get(edge["kind"], "uses")
         lgwks_graph["links"].append({
             "source": edge["source"],
@@ -71,9 +80,9 @@ def run_audit(repo_path: Path, language: str = "python") -> AuditResult:
 
     # 4. Statistical Benchmarking (Z-eigenpair)
     print(f"[audit-graph] computing Z-centrality signatures...", file=sys.stderr)
-    node_ids, T = lgwks_rank.build_tensor(lgwks_graph)
-    z_centrality = lgwks_rank.compute_z_eigenpair(T, n=len(node_ids))
-    rankings = lgwks_rank.rank_nodes(node_ids, z_centrality, T)
+    # The rank module provides a high-level rank_graph() that builds the tensor 
+    # and computes both relation-weighted and relation-blind centralities (Delta).
+    rankings = lgwks_rank.rank_graph(lgwks_graph)
     
     findings = []
     
@@ -84,16 +93,18 @@ def run_audit(repo_path: Path, language: str = "python") -> AuditResult:
     tainted_subgraph = engine.subgraph("tainted")
     if tainted_subgraph:
         for node_id in tainted_subgraph:
-            node = next((n for n in tm_json["nodes"] if n["id"] == node_id), None)
-            if not node: continue
+            node_info = tm_nodes.get(node_id)
+            if not node_info: continue
             
             callees = engine.callees_of(node_id)
+            callee_names = [c.get("name", "").lower() for c in callees]
             
             # SSRF/wget check: network sinks
-            if any(any(s in c.lower() for s in ["get", "post", "urlopen", "request", "wget", "curl"]) for c in callees):
+            if any(any(s in name for s in ["get", "post", "urlopen", "request", "wget", "curl"]) for name in callee_names):
                 # Look for missing guards in the execution path
                 callers = engine.callers_of(node_id)
-                if not any("_remote_allowed" in c for c in callers):
+                caller_names = [c.get("name", "") for c in callers]
+                if not any("_remote_allowed" in name for name in caller_names):
                     findings.append({
                         "kind": "ssrf_risk",
                         "node": node_id,
@@ -103,8 +114,8 @@ def run_audit(repo_path: Path, language: str = "python") -> AuditResult:
                     })
 
             # Command Injection check: exec sinks
-            if any(any(s in c.lower() for s in ["system", "popen", "spawn", "run"]) for c in callees):
-                if not any("quote" in c.lower() for c in callees): # shlex.quote / shells-escape
+            if any(any(s in name for s in ["system", "popen", "spawn", "run"]) for name in callee_names):
+                if not any("quote" in name for name in callee_names): # shlex.quote / shells-escape
                     findings.append({
                         "kind": "command_injection_risk",
                         "node": node_id,
@@ -114,10 +125,10 @@ def run_audit(repo_path: Path, language: str = "python") -> AuditResult:
                     })
 
     # Pass 5.2: Insecure Deserialization (Agnostic)
-    for node in tm_json.get("nodes", []):
-        node_id = node["id"]
+    for node_id, node_info in tm_nodes.items():
         callees = engine.callees_of(node_id)
-        if any(any(s in c.lower() for s in ["pickle", "marshal", "unsafe_load", "deserialize"]) for c in callees):
+        callee_names = [c.get("name", "").lower() for c in callees]
+        if any(any(s in name for s in ["pickle", "marshal", "unsafe_load", "deserialize"]) for name in callee_names):
              findings.append({
                  "kind": "insecure_deserialization",
                  "node": node_id,
@@ -130,9 +141,10 @@ def run_audit(repo_path: Path, language: str = "python") -> AuditResult:
     # Detect 'malloc' calls without a reachable 'free' in the same module/scope
     # //why human signature: AI rarely misses local cleanup; humans often forget it in complex branches.
     if language in {"c", "cpp", "rust"}:
-        for node_id in [n["id"] for n in tm_json["nodes"]]:
+        for node_id in tm_nodes.keys():
             callees = engine.callees_of(node_id)
-            if any("malloc" in c for c in callees) and not any("free" in c for c in callees):
+            callee_names = [c.get("name", "") for c in callees]
+            if any("malloc" in name for name in callee_names) and not any("free" in name for name in callee_names):
                 findings.append({
                     "kind": "memory_leak_risk",
                     "node": node_id,
@@ -143,12 +155,12 @@ def run_audit(repo_path: Path, language: str = "python") -> AuditResult:
 
     # Pass 5.4: Unchecked Privilege Path (Auth Bypass)
     # Finds paths from public entrypoints to privileged sinks that don't cross an AuthGate.
-    for node in tm_json.get("nodes", []):
-        node_id = node["id"]
+    for node_id, node_info in tm_nodes.items():
         if any(p in node_id.lower() for p in ["admin", "secret", "vault", "private"]):
             # This is a privileged node. Look for callers.
             callers = engine.callers_of(node_id)
-            if callers and not any("auth" in c.lower() or "permission" in c.lower() for c in callers):
+            caller_names = [c.get("name", "").lower() for c in callers]
+            if callers and not any("auth" in name or "permission" in name for name in caller_names):
                 findings.append({
                     "kind": "auth_gate_missing",
                     "node": node_id,
@@ -161,11 +173,13 @@ def run_audit(repo_path: Path, language: str = "python") -> AuditResult:
     for r in rankings:
         # High Discrepancy (Delta) suggests structural mismatch between logic and boilerplate
         if r.lane == "human":
-             node = next((n for n in tm_json["nodes"] if n["id"] == r.node_cid), None)
-             if node:
+             node_info = tm_nodes.get(r.node_cid)
+             if node_info:
                  # AI Signature: "Hollow Centrality"
                  # High verbosity (text size) but very low centrality contribution to the system graph.
-                 if len(node.get("text", "")) > 1000 and r.centrality < 0.0001:
+                 # node_info.get("text") might be in different subfields depending on trailmark version
+                 node_text = node_info.get("text") or node_info.get("docstring") or ""
+                 if len(node_text) > 1000 and r.centrality < 0.0001:
                      findings.append({
                          "kind": "ai_hollow_centrality",
                          "node": r.node_cid,
