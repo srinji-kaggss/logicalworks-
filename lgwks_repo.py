@@ -696,6 +696,22 @@ def sync_command(args: argparse.Namespace) -> int:
     return 1
 
 
+def audit_graph_command(args: argparse.Namespace) -> int:
+    import lgwks_audit_graph
+    repo = Path(getattr(args, "repo", ".")).resolve()
+    result = lgwks_audit_graph.run_audit(repo, language=getattr(args, "lang", "python"))
+    if getattr(args, "json", False):
+        print(json.dumps(result.__dict__, indent=2))
+    else:
+        print(f"\n=== LGWKS Agnostic Audit: {repo.name} ({getattr(args, 'lang', 'python')}) ===")
+        print(f"Substrate: {result.summary['nodes']} nodes, {result.summary['edges']} edges")
+        print(f"Found {len(result.findings)} finding(s).")
+        for f in result.findings:
+            print(f"[{f['severity'].upper()}] {f['kind']}: {f['node']}")
+            print(f"  {f['summary']}\n")
+    return 0
+
+
 def add_parser(sub) -> None:
     p = sub.add_parser("repo", help="repo lifecycle: audit, recover, cleanup, merge, handoff, graph, sync")
     ps = p.add_subparsers(dest="repo_command", required=True)
@@ -704,6 +720,13 @@ def add_parser(sub) -> None:
     audit.add_argument("--repo", default=".", help="path to repo")
     audit.add_argument("--json", action="store_true", help="structured output")
     audit.set_defaults(func=audit_command)
+
+    # Agnostic Graph Audit (SCG)
+    audit_graph = ps.add_parser("audit-graph", help="agnostic graph-theoretic security audit (ADR-080)")
+    audit_graph.add_argument("--repo", default=".", help="path to repo")
+    audit_graph.add_argument("--lang", default="python", help="target language (default: python)")
+    audit_graph.add_argument("--json", action="store_true", help="structured output")
+    audit_graph.set_defaults(func=audit_graph_command)
 
     recover = ps.add_parser("recover", help="extract missing files from dangling commits")
     recover.add_argument("--repo", default=".", help="path to repo")
