@@ -1,0 +1,131 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "lgwks.daemon.event.v2",
+  "description": "Normalized daemon event envelope (v2 — 'event_envelope'). Additive superset of v1: every v1 field is retained, every new field is OPTIONAL, and the `kind` enum is widened as a superset, so v1 records validate unchanged at the Python boundary (lgwks_daemon_event.validate_event accepts both v1 and v2). v2 adds the orthogonal `source` axis (where the event entered), `payload_cid` (content-addressed out-of-band payload, axiom CID scheme), `trust` (trust class — model output is untrusted until typed), `provenance` (back-references to source events/artifacts), and `replay` (migration/replay metadata). `source` and `trust` are the locked public join keys read by #120/#121/#122/#124.",
+  "type": "object",
+  "required": [
+    "schema",
+    "event_id",
+    "ts",
+    "tenant_id",
+    "agent_id",
+    "session_id",
+    "actor",
+    "client",
+    "lane",
+    "kind",
+    "scope",
+    "payload"
+  ],
+  "additionalProperties": false,
+  "properties": {
+    "schema": {
+      "type": "string",
+      "enum": ["lgwks.daemon.event.v2"]
+    },
+    "event_id": {
+      "type": "string",
+      "pattern": "^[A-Za-z0-9._:/@-]{1,128}$"
+    },
+    "ts": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "tenant_id": {
+      "type": "string",
+      "pattern": "^[A-Za-z0-9._:/@-]{1,128}$"
+    },
+    "agent_id": {
+      "type": "string",
+      "pattern": "^[A-Za-z0-9._:/@-]{1,128}$"
+    },
+    "session_id": {
+      "type": "string",
+      "pattern": "^[A-Za-z0-9._:/@-]{1,128}$"
+    },
+    "causal_parent_id": {
+      "type": "string",
+      "pattern": "^[A-Za-z0-9._:/@-]{1,128}$"
+    },
+    "actor": {
+      "type": "string",
+      "enum": ["human", "agent", "daemon", "system"]
+    },
+    "client": {
+      "type": "string",
+      "enum": ["claude", "codex", "gemini", "human", "daemon", "system", "unknown"]
+    },
+    "lane": {
+      "type": "string",
+      "enum": ["ingress", "telemetry", "workflow", "control"]
+    },
+    "kind": {
+      "type": "string",
+      "enum": [
+        "human_message",
+        "transcript_turn",
+        "tool_call",
+        "file_change",
+        "workflow_event",
+        "browser_action",
+        "repo_diff",
+        "terminal_output",
+        "model_output",
+        "artifact_emit"
+      ]
+    },
+    "scope": {
+      "type": "string",
+      "enum": ["agent_local", "shared_referee"]
+    },
+    "refs": {
+      "type": "object",
+      "additionalProperties": true
+    },
+    "payload": {
+      "type": "object",
+      "additionalProperties": true
+    },
+    "source": {
+      "type": "string",
+      "description": "v2: where the event entered the daemon, orthogonal to `kind`.",
+      "enum": ["speech", "text", "browser", "repo", "terminal", "model", "workflow", "artifact"]
+    },
+    "payload_cid": {
+      "type": "string",
+      "description": "v2: content-address of an out-of-band payload (axiom CID scheme, `<alg>:<64-hex>`).",
+      "pattern": "^b2b256:[0-9a-f]{64}$"
+    },
+    "trust": {
+      "type": "string",
+      "description": "v2: trust class of the event. Model output is untrusted until converted to a typed action.",
+      "enum": ["human_confirmed", "deterministic", "model_proposed", "untrusted"]
+    },
+    "provenance": {
+      "type": "object",
+      "description": "v2: back-references to the source events/artifacts this event derives from.",
+      "properties": {
+        "derived_from": {
+          "type": "array",
+          "items": {"type": "string"}
+        },
+        "producer": {"type": "string"},
+        "producer_version": {"type": "string"}
+      },
+      "additionalProperties": true
+    },
+    "replay": {
+      "type": "object",
+      "description": "v2: migration/replay metadata. `schema_from` marks events upgraded from v1 by the lazy adapter.",
+      "properties": {
+        "seq": {"type": "integer"},
+        "deterministic": {"type": "boolean"},
+        "schema_from": {
+          "type": ["string", "null"],
+          "enum": ["lgwks.daemon.event.v1", null]
+        }
+      },
+      "additionalProperties": true
+    }
+  }
+}

@@ -37,6 +37,8 @@ def _emit(repo_root: Path, tool_name: str, input_keys: list[str], response_size:
                 "input_keys": input_keys,
                 "response_size": response_size,
             },
+            source="model",
+            trust="model_proposed",
         )
         store = DaemonEventStore(db)
         try:

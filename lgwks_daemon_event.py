@@ -6,6 +6,20 @@ It unifies ingress and telemetry events under one schema so Claude/Codex/Gemini
 adapters can submit equivalent envelopes without teaching the core separate
 dialects. The envelope is intentionally metadata-first: callers should prefer
 content-addressed refs in `payload` over raw text whenever possible.
+
+v2 (#118 — "event_envelope"): additive superset of v1. Every new field is
+OPTIONAL and every enum is widened as a superset, so v1 records still validate
+unchanged (back-compat) and existing readers are not broken. The new axes are:
+  - `source`  — WHERE the event entered (speech/text/browser/repo/terminal/
+    model/workflow/artifact), orthogonal to `kind` (the semantic event type).
+  - `payload_cid` — content-address of an out-of-band payload (`b2b256:<hex>`),
+    reusing the axiom CID scheme; inline `payload` stays for small events.
+  - `trust` — trust class of the event (human_confirmed/deterministic/
+    model_proposed/untrusted); model output is untrusted until typed.
+  - `provenance` — `{derived_from, producer, producer_version}`; every derived
+    fact points back to its source events/artifacts.
+  - `replay` — `{seq, deterministic, schema_from}`; migration/replay metadata.
+`source` and `trust` are the locked public join keys read by #120/#121/#122/#124.
 """
 
 from __future__ import annotations
@@ -18,21 +32,44 @@ import sys
 from datetime import datetime, timezone
 from typing import Any
 
-SCHEMA = "lgwks.daemon.event.v1"
+from axiom.cid import CID_ALG
+
+SCHEMA = "lgwks.daemon.event.v2"  # current/default emitted contract
+SCHEMA_V1 = "lgwks.daemon.event.v1"  # legacy; still accepted by validate_event
+VALID_SCHEMAS = frozenset({SCHEMA_V1, SCHEMA})
 
 LANES = frozenset({"ingress", "telemetry", "workflow", "control"})
+# v2 superset: v1 kinds (semantic event types) + source-aligned kinds. Old
+# values remain valid; new ones cover the issue's source-coverage list.
 KINDS = frozenset({
     "human_message",
     "transcript_turn",
     "tool_call",
     "file_change",
     "workflow_event",
+    # v2 additions (superset)
+    "browser_action",
+    "repo_diff",
+    "terminal_output",
+    "model_output",
+    "artifact_emit",
 })
 SCOPES = frozenset({"agent_local", "shared_referee"})
 ACTORS = frozenset({"human", "agent", "daemon", "system"})
 CLIENTS = frozenset({"claude", "codex", "gemini", "human", "daemon", "system", "unknown"})
 
+# v2 axes (all optional on the envelope).
+SOURCES = frozenset({
+    "speech", "text", "browser", "repo", "terminal", "model", "workflow", "artifact",
+})
+TRUST_CLASSES = frozenset({
+    "human_confirmed", "deterministic", "model_proposed", "untrusted",
+})
+
 _ID_RE = re.compile(r"^[A-Za-z0-9._:/@-]{1,128}$")
+# Content-address shape: reuse the axiom CID scheme (`<alg>:<64-hex>`). Pinning
+# the alg prefix to axiom's CID_ALG keeps a single hashing scheme across the repo.
+_CID_RE = re.compile(rf"^{re.escape(CID_ALG)}:[0-9a-f]{{64}}$")
 
 
 def _now() -> str:
@@ -75,8 +112,9 @@ def validate_event(record: dict[str, Any]) -> dict[str, Any]:
     if missing:
         raise ValueError(f"missing required fields: {', '.join(missing)}")
 
-    if record["schema"] != SCHEMA:
-        raise ValueError(f"schema must be {SCHEMA}")
+    if record["schema"] not in VALID_SCHEMAS:
+        opts = ", ".join(sorted(VALID_SCHEMAS))
+        raise ValueError(f"schema must be one of: {opts}")
 
     for key in ("event_id", "tenant_id", "agent_id", "session_id"):
         _require_id(key, record[key])
@@ -94,6 +132,30 @@ def validate_event(record: dict[str, Any]) -> dict[str, Any]:
     if "causal_parent_id" in record:
         _require_id("causal_parent_id", record["causal_parent_id"])
 
+    # v2 optional axes — validated only when present (back-compat: absent → v1-shaped).
+    if "source" in record:
+        _require_choice("source", record["source"], SOURCES)
+    if "trust" in record:
+        _require_choice("trust", record["trust"], TRUST_CLASSES)
+    if "payload_cid" in record:
+        cid = record["payload_cid"]
+        if not isinstance(cid, str) or not _CID_RE.fullmatch(cid):
+            raise ValueError(f"payload_cid must match {_CID_RE.pattern}")
+    if "provenance" in record:
+        prov = record["provenance"]
+        if not isinstance(prov, dict):
+            raise ValueError("provenance must be a dict when present")
+        if "derived_from" in prov and not isinstance(prov["derived_from"], list):
+            raise ValueError("provenance.derived_from must be a list when present")
+    if "replay" in record:
+        replay = record["replay"]
+        if not isinstance(replay, dict):
+            raise ValueError("replay must be a dict when present")
+        if "deterministic" in replay and not isinstance(replay["deterministic"], bool):
+            raise ValueError("replay.deterministic must be a bool when present")
+        if replay.get("schema_from") not in (None, SCHEMA_V1):
+            raise ValueError(f"replay.schema_from must be {SCHEMA_V1} or null")
+
     try:
         datetime.fromisoformat(record["ts"].replace("Z", "+00:00"))
     except Exception as exc:
@@ -101,10 +163,11 @@ def validate_event(record: dict[str, Any]) -> dict[str, Any]:
 
     try:
         json.dumps(record["payload"], sort_keys=True, ensure_ascii=True)
-        if "refs" in record:
-            json.dumps(record["refs"], sort_keys=True, ensure_ascii=True)
+        for opt in ("refs", "provenance", "replay"):
+            if opt in record:
+                json.dumps(record[opt], sort_keys=True, ensure_ascii=True)
     except TypeError as exc:
-        raise ValueError("payload/refs must be JSON-serializable") from exc
+        raise ValueError("payload/refs/provenance/replay must be JSON-serializable") from exc
 
     return record
 
@@ -124,11 +187,18 @@ def build_event(
     causal_parent_id: str | None = None,
     ts: str | None = None,
     event_id: str | None = None,
+    source: str | None = None,
+    trust: str | None = None,
+    payload_cid: str | None = None,
+    provenance: dict[str, Any] | None = None,
+    replay: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
-    """Build a validated daemon event envelope.
+    """Build a validated daemon event envelope (v2).
 
     If `event_id` is omitted, it is derived deterministically from the canonical
-    event body so adapters can dedupe identical submissions safely.
+    event body so adapters can dedupe identical submissions safely. The v2 axes
+    (`source`/`trust`/`payload_cid`/`provenance`/`replay`) are optional and, when
+    supplied, participate in the canonical body so identical inputs hash alike.
     """
     record: dict[str, Any] = {
         "schema": SCHEMA,
@@ -147,10 +217,59 @@ def build_event(
         record["refs"] = refs
     if causal_parent_id:
         record["causal_parent_id"] = causal_parent_id
+    if source is not None:
+        record["source"] = source
+    if trust is not None:
+        record["trust"] = trust
+    if payload_cid is not None:
+        record["payload_cid"] = payload_cid
+    if provenance:
+        record["provenance"] = provenance
+    if replay:
+        record["replay"] = replay
 
     provisional = dict(record)
     provisional["event_id"] = event_id or _event_id_for(record)
     return validate_event(provisional)
+
+
+def upgrade_v1_to_v2(record: dict[str, Any]) -> dict[str, Any]:
+    """Project a stored v1 event into the v2 envelope WITHOUT recomputing its id.
+
+    Lazy back-compat adapter (build-the-basement seam for #122's packet read path):
+    a historical `lgwks.daemon.event.v1` record is returned as a valid v2 record
+    with the new axes filled from what v1 already carries — `source` inferred from
+    `kind`, a conservative `trust=deterministic` default, and `replay.schema_from`
+    marking the upgrade. The original `event_id` is PRESERVED (never re-derived) so
+    content identity and dedupe stay stable across the version line. A record that
+    is already v2 is returned unchanged.
+    """
+    if not isinstance(record, dict):
+        raise ValueError("record must be a dict")
+    if record.get("schema") == SCHEMA:
+        return record
+    if record.get("schema") != SCHEMA_V1:
+        raise ValueError(f"upgrade_v1_to_v2 expects {SCHEMA_V1}, got {record.get('schema')!r}")
+
+    upgraded = dict(record)
+    upgraded["schema"] = SCHEMA
+    upgraded.setdefault("source", _SOURCE_FROM_KIND.get(str(record.get("kind") or ""), "text"))
+    upgraded.setdefault("trust", "deterministic")
+    replay = dict(upgraded.get("replay") or {})
+    replay.setdefault("schema_from", SCHEMA_V1)
+    replay.setdefault("deterministic", True)
+    upgraded["replay"] = replay
+    return validate_event(upgraded)
+
+
+# Inference table for the lazy v1→v2 upgrade: map a v1 `kind` to its `source` axis.
+_SOURCE_FROM_KIND = {
+    "human_message": "text",
+    "transcript_turn": "text",
+    "tool_call": "model",
+    "file_change": "repo",
+    "workflow_event": "workflow",
+}
 
 
 def add_parser(sub) -> None:
@@ -170,6 +289,11 @@ def add_parser(sub) -> None:
     build.add_argument("--refs", help="JSON object")
     build.add_argument("--causal-parent-id")
     build.add_argument("--event-id")
+    build.add_argument("--source", choices=sorted(SOURCES), help="v2: where the event entered")
+    build.add_argument("--trust", choices=sorted(TRUST_CLASSES), help="v2: trust class")
+    build.add_argument("--payload-cid", help="v2: content-address of an out-of-band payload")
+    build.add_argument("--provenance", help="v2: JSON object {derived_from,producer,producer_version}")
+    build.add_argument("--replay", help="v2: JSON object {seq,deterministic,schema_from}")
     build.set_defaults(func=_build_command)
 
     validate = daemon_sub.add_parser("validate", help="validate a daemon event envelope from stdin")
@@ -179,6 +303,8 @@ def add_parser(sub) -> None:
 def _build_command(args: argparse.Namespace) -> int:
     payload = json.loads(args.payload)
     refs = json.loads(args.refs) if args.refs else None
+    provenance = json.loads(args.provenance) if getattr(args, "provenance", None) else None
+    replay = json.loads(args.replay) if getattr(args, "replay", None) else None
     record = build_event(
         tenant_id=args.tenant_id,
         agent_id=args.agent_id,
@@ -192,6 +318,11 @@ def _build_command(args: argparse.Namespace) -> int:
         refs=refs,
         causal_parent_id=args.causal_parent_id,
         event_id=args.event_id,
+        source=getattr(args, "source", None),
+        trust=getattr(args, "trust", None),
+        payload_cid=getattr(args, "payload_cid", None),
+        provenance=provenance,
+        replay=replay,
     )
     print(json.dumps(record, indent=2, sort_keys=True))
     return 0
