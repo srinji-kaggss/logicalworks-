@@ -341,5 +341,108 @@ class TestFingerprintStability(unittest.TestCase):
         self.assertNotEqual(fp1, fp2)
 
 
+class TestH5SsrfRisk(unittest.TestCase):
+    def _scan(self, src: str) -> list[dict]:
+        with TemporaryDirectory() as d:
+            tmp = Path(d)
+            _write(tmp, "target.py", src)
+            return hacker.run(tmp)
+
+    def test_unvalidated_httpx_get_flagged(self):
+        src = "import httpx\nurl = input()\nhttpx.get(url)\n"
+        findings = self._scan(src)
+        self.assertTrue(any(f["kind"] == "ssrf_risk" for f in findings))
+
+    def test_validated_httpx_get_not_flagged(self):
+        # Even a weak validation heuristic should reduce risk or suppress the finding
+        src = """\
+            import httpx
+            from lgwks_browser import _remote_allowed
+            url = input()
+            if _remote_allowed(url):
+                httpx.get(url)
+        """
+        findings = self._scan(src)
+        ssrf_finds = [f for f in findings if f["kind"] == "ssrf_risk"]
+        self.assertFalse(ssrf_finds, "validated request should not be flagged as high risk")
+
+
+class TestH6PathTraversal(unittest.TestCase):
+    def _scan(self, src: str) -> list[dict]:
+        with TemporaryDirectory() as d:
+            tmp = Path(d)
+            _write(tmp, "target.py", src)
+            return hacker.run(tmp)
+
+    def test_unsafe_read_text_flagged(self):
+        src = "from pathlib import Path\np = Path(input())\ncontent = p.read_text()\n"
+        findings = self._scan(src)
+        self.assertTrue(any(f["kind"] == "path_traversal_risk" for f in findings))
+
+    def test_safe_read_text_not_flagged(self):
+        src = """\
+            from pathlib import Path
+            root = Path("/tmp/safe")
+            p = Path(input())
+            if p.resolve().is_relative_to(root.resolve()):
+                content = p.read_text()
+        """
+        findings = self._scan(src)
+        path_finds = [f for f in findings if f["kind"] == "path_traversal_risk"]
+        self.assertFalse(path_finds, "boundary-checked path should not be flagged")
+
+
+class TestH7SqlInjection(unittest.TestCase):
+    def _scan(self, src: str) -> list[dict]:
+        with TemporaryDirectory() as d:
+            tmp = Path(d)
+            _write(tmp, "target.py", src)
+            return hacker.run(tmp)
+
+    def test_dynamic_sql_execute_flagged(self):
+        src = "import sqlite3\nconn = sqlite3.connect(':memory:')\ntable = input()\nconn.execute(f'SELECT * FROM {table}')\n"
+        findings = self._scan(src)
+        self.assertTrue(any(f["kind"] == "sql_injection_risk" for f in findings))
+
+    def test_parameterized_sql_not_flagged(self):
+        src = "import sqlite3\nconn = sqlite3.connect(':memory:')\nval = input()\nconn.execute('SELECT * FROM users WHERE id = ?', (val,))\n"
+        findings = self._scan(src)
+        sqli_finds = [f for f in findings if f["kind"] == "sql_injection_risk"]
+        self.assertFalse(sqli_finds, "parameterized SQL should not be flagged")
+
+
+class TestH1AdvancedCommandInjection(unittest.TestCase):
+    def _scan(self, src: str) -> list[dict]:
+        with TemporaryDirectory() as d:
+            tmp = Path(d)
+            _write(tmp, "target.py", src)
+            return hacker.run(tmp)
+
+    def test_subprocess_run_list_with_tainted_string_not_flagged_if_clean(self):
+        # This is safe because it's a list, even if tainted, shell won't interpret it
+        src = "import subprocess\ncmd = input()\nsubprocess.run(['ls', cmd])\n"
+        findings = self._scan(src)
+        exec_finds = [f for f in findings if f["kind"] == "dangerous_shell_exec"]
+        self.assertFalse(exec_finds)
+
+    def test_os_popen_tainted_flagged(self):
+        src = "import os\ncmd = input()\nos.popen(f'ls {cmd}')\n"
+        findings = self._scan(src)
+        self.assertTrue(any(f["kind"] == "dangerous_shell_exec" for f in findings))
+
+
+class TestH8FileUploadRisk(unittest.TestCase):
+    def _scan(self, src: str) -> list[dict]:
+        with TemporaryDirectory() as d:
+            tmp = Path(d)
+            _write(tmp, "target.py", src)
+            return hacker.run(tmp)
+
+    def test_unvalidated_file_write_flagged(self):
+        src = "from pathlib import Path\nname = input()\nPath(name).write_text('content')\n"
+        findings = self._scan(src)
+        self.assertTrue(any(f["kind"] == "file_storage_risk" for f in findings))
+
+
 if __name__ == "__main__":
     unittest.main()

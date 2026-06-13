@@ -36,8 +36,13 @@ _BOT = "code_hacker"
 
 # ── Surface detection rule sets (Layer 1) ──────────────────────────────────
 _SUBPROCESS_ATTRS = {"Popen", "run", "call", "check_call", "check_output", "getoutput", "getstatusoutput"}
+_EXEC_ATTRS = {"system", "popen", "spawnl", "spawnv", "spawnlp", "spawnvp"}
 _BROAD_DELETE = {"rmtree", "remove", "unlink", "rmdir"}
+_WRITE_ATTRS = {"write_text", "write_bytes", "save", "save_as"}
 _NET_MODULES = frozenset({"requests", "urllib.request", "httpx", "aiohttp", "http.client", "urllib3"})
+_NET_SINK_ATTRS = frozenset({"get", "post", "put", "delete", "request", "urlopen"})
+_PATH_SINK_ATTRS = frozenset({"read_text", "read_bytes", "write_text", "write_bytes", "open", "rglob", "glob"})
+_SQL_ATTRS = frozenset({"execute", "executescript"})
 _NET_TOPS = frozenset(m.split(".")[0] for m in _NET_MODULES)
 _NET_SAFE_RE = re.compile(r"(portal|network|search|fetch|browser|public|cohere|provider|auth_runtime)", re.I)
 _SECRET_RE = re.compile(r"(token|secret|key|password|api_key|credential|auth|bearer)", re.I)
@@ -149,6 +154,21 @@ class TaintTracker:
     def register_source(self, name: str, lineno: int, kind: str = "secret_var") -> None:
         if name not in self.sources:
             self.sources[name] = Source(name=name, lineno=lineno, kind=kind)
+
+    def is_tainted(self, node: ast.AST) -> bool:
+        """Returns True if the node represents or contains a tainted value."""
+        for child in ast.walk(node):
+            if isinstance(child, ast.Name) and child.id in self.sources:
+                return True
+            if isinstance(child, (ast.JoinedStr, ast.BinOp)):
+                return True
+            # Recognize source functions directly
+            if isinstance(child, ast.Call):
+                if isinstance(child.func, ast.Name) and child.func.id == "input":
+                    return True
+                if isinstance(child.func, ast.Attribute) and child.func.attr == "getenv":
+                    return True
+        return False
 
     def check_flow(self, node: ast.AST, sink_name: str, sink_lineno: int, sink_kind: str) -> list[tuple[Source, Sink, float]]:
         """Scan an AST subtree for references to tracked sources.
@@ -340,6 +360,9 @@ class _Visitor(ast.NodeVisitor):
         self.findings: list[dict] = []
         self.taint = TaintTracker()
         self._net_safe = _is_net_safe(rel)
+        
+        # Guard tracking
+        self.guards_found: set[str] = set()
 
     def _add(self, kind: str, summary: str, severity: str, confidence: float,
              evidence: list[dict], tags: list[str], lineno: int, symbol: Optional[str] = None) -> None:
@@ -374,33 +397,135 @@ class _Visitor(ast.NodeVisitor):
     def _check_h1(self, node: ast.Call) -> None:
         func = node.func
         ln = node.lineno
+        attr = None
+        if isinstance(func, ast.Attribute):
+            attr = func.attr
+        elif isinstance(func, ast.Name):
+            attr = func.id
 
-        if (isinstance(func, ast.Attribute) and func.attr == "system"
-                and isinstance(func.value, ast.Name) and func.value.id == "os"):
-            self._add("dangerous_shell_exec", f"os.system() call at line {ln}",
-                      "high", 0.9, [], ["shell", "exec", "h1"], ln)
-            return
+        if attr in _SUBPROCESS_ATTRS:
+            # Check for shell=True OR tainted string argument (when not a list)
+            is_shell = any(kw.arg == "shell" and isinstance(kw.value, ast.Constant) and kw.value.value is True
+                           for kw in node.keywords)
+            
+            if is_shell:
+                self._add("dangerous_shell_exec", f"subprocess.{attr}(shell=True) at line {ln}",
+                          "critical", 1.0, [], ["exec", "shell", "h1"], ln)
+            elif node.args:
+                # If first arg is a tainted string (not a list), it's a risk even with shell=False
+                if self.taint.is_tainted(node.args[0]) and not isinstance(node.args[0], (ast.List, ast.Tuple)):
+                    self._add("dangerous_shell_exec", f"subprocess.{attr}() with dynamic string command at line {ln}",
+                              "high", 0.8, [], ["exec", "h1"], ln)
 
-        if isinstance(func, ast.Attribute) and func.attr in _SUBPROCESS_ATTRS:
-            obj = func.value
-            if isinstance(obj, ast.Name) and obj.id in {"subprocess", "sp"}:
-                shell_true = any(
-                    isinstance(kw.value, ast.Constant) and kw.value.value is True
-                    for kw in node.keywords if kw.arg == "shell"
-                )
-                string_cmd = bool(node.args) and isinstance(node.args[0], (ast.JoinedStr, ast.BinOp))
-                if shell_true:
-                    self._add("dangerous_shell_exec", f"subprocess.{func.attr}(shell=True) at line {ln}",
-                              "critical", 0.9, [], ["shell", "exec", "h1"], ln)
-                elif string_cmd:
-                    self._add("dangerous_shell_exec",
-                              f"subprocess.{func.attr}() with string-built cmd at line {ln}",
-                              "high", 0.7, [], ["shell", "exec", "h1"], ln)
+        if attr in _EXEC_ATTRS:
+            # os.system and os.popen are inherently dangerous (deprecated for security)
+            is_tainted = bool(node.args) and self.taint.is_tainted(node.args[0])
+            sev = "critical" if is_tainted else "high"
+            conf = 0.9 if is_tainted else 0.8
+            self._add("dangerous_shell_exec", f"os.{attr}() call at line {ln}",
+                      sev, conf, [], ["exec", "h1"], ln)
 
-        if isinstance(func, ast.Name) and func.id in {"eval", "exec"}:
+        if attr in {"eval", "exec"}:
             if node.args and not isinstance(node.args[0], ast.Constant):
-                self._add("dangerous_shell_exec", f"{func.id}() with dynamic argument at line {ln}",
+                self._add("dangerous_shell_exec", f"{attr}() with dynamic argument at line {ln}",
                           "critical", 0.9, [], ["eval", "exec", "h1"], ln)
+
+    # ── H5: SSRF Risk detection ──────────────────────────────────────────────
+
+    def _check_h5(self, node: ast.Call) -> None:
+        func = node.func
+        ln = node.lineno
+        attr = None
+        if isinstance(func, ast.Attribute):
+            attr = func.attr
+        elif isinstance(func, ast.Name):
+            attr = func.id
+
+        if attr in _NET_SINK_ATTRS:
+            # Check for non-constant URL arguments OR tainted caller (e.g. session.get(url))
+            tainted = False
+            for arg in node.args:
+                if self.taint.is_tainted(arg):
+                    tainted = True
+                    break
+            if not tainted and isinstance(node.func, ast.Attribute) and self.taint.is_tainted(node.func.value):
+                tainted = True
+
+            if tainted:
+                # Potential SSRF. Look for suppression heuristic.
+                if "_remote_allowed" in self.guards_found:
+                    return
+
+                self._add("ssrf_risk", f"network request to tainted URL '{attr}()' at line {ln}",
+                          "high", 0.7, [], ["network", "ssrf", "h5"], ln)
+                return
+
+    # ── H6: Path Traversal detection ─────────────────────────────────────────
+
+    def _check_h6(self, node: ast.Call) -> None:
+        func = node.func
+        ln = node.lineno
+        attr = None
+        if isinstance(func, ast.Attribute):
+            attr = func.attr
+        elif isinstance(func, ast.Name):
+            attr = func.id
+
+        if attr in _PATH_SINK_ATTRS:
+            tainted = False
+            for arg in node.args:
+                if self.taint.is_tainted(arg):
+                    tainted = True
+                    break
+            # Check the object itself (e.g. p.read_text())
+            if not tainted and isinstance(node.func, ast.Attribute) and self.taint.is_tainted(node.func.value):
+                tainted = True
+
+            if tainted:
+                if "is_relative_to" in self.guards_found:
+                    return
+
+                self._add("path_traversal_risk", f"file operation on tainted path '{attr}()' at line {ln}",
+                          "high", 0.7, [], ["file", "traversal", "h6"], ln)
+                return
+
+    # ── H7: SQL Injection detection ──────────────────────────────────────────
+
+    def _check_h7(self, node: ast.Call) -> None:
+        func = node.func
+        ln = node.lineno
+        attr = None
+        if isinstance(func, ast.Attribute):
+            attr = func.attr
+        elif isinstance(func, ast.Name):
+            attr = func.id
+
+        if attr in _SQL_ATTRS:
+            # First argument is typically the SQL string
+            if node.args and self.taint.is_tainted(node.args[0]):
+                self._add("sql_injection_risk", f"dynamic SQL string in '{attr}()' at line {ln}",
+                          "high", 0.85, [], ["sql", "injection", "h7"], ln)
+
+    # ── H8: File Storage Risk ────────────────────────────────────────────────
+
+    def _check_h8(self, node: ast.Call) -> None:
+        func = node.func
+        ln = node.lineno
+        attr = None
+        if isinstance(func, ast.Attribute):
+            attr = func.attr
+        elif isinstance(func, ast.Name):
+            attr = func.id
+
+        if attr in _WRITE_ATTRS:
+            # Check if filename/path is tainted
+            tainted = False
+            if isinstance(node.func, ast.Attribute) and self.taint.is_tainted(node.func.value):
+                tainted = True
+            
+            if tainted:
+                self._add("file_storage_risk", f"file write to tainted path '{attr}()' at line {ln}",
+                          "high", 0.7, [], ["file", "upload", "h8"], ln)
 
     # ── H2: unsafe file mutation ─────────────────────────────────────────────
 
@@ -430,11 +555,21 @@ class _Visitor(ast.NodeVisitor):
     def visit_Import(self, node: ast.Import) -> None:  # noqa: N802
         for alias in node.names:
             self._flag_net_import(alias.name, node.lineno)
+            if "_remote_allowed" in alias.name:
+                self.guards_found.add("_remote_allowed")
         self.generic_visit(node)
 
     def visit_ImportFrom(self, node: ast.ImportFrom) -> None:  # noqa: N802
         if node.module:
             self._flag_net_import(node.module, node.lineno)
+        for alias in node.names:
+            if alias.name in {"_remote_allowed", "is_relative_to"}:
+                self.guards_found.add(alias.name)
+        self.generic_visit(node)
+
+    def visit_FunctionDef(self, node: ast.FunctionDef) -> None: # noqa: N802
+        if node.name in {"_remote_allowed", "is_relative_to"}:
+            self.guards_found.add(node.name)
         self.generic_visit(node)
 
     # ── H4: secret exposure / logging risk WITH taint tracking ──────────────
@@ -442,19 +577,32 @@ class _Visitor(ast.NodeVisitor):
     def visit_Assign(self, node: ast.Assign) -> None:  # noqa: N802
         for tgt in node.targets:
             if isinstance(tgt, ast.Name):
-                # Prefer env_var (more specific) over secret_var fallback.
-                env_var = False
-                if isinstance(node.value, ast.Call) and isinstance(node.value.func, ast.Attribute):
-                    if node.value.func.attr in {"get", "pop", "setdefault"}:
-                        env_hint = any(
-                            isinstance(arg, ast.Constant) and isinstance(arg.value, str)
-                            and _SECRET_RE.search(arg.value)
-                            for arg in node.value.args
-                        )
-                        if env_hint:
+                is_src = False
+                # If the value being assigned is itself tainted, the target becomes a source.
+                if self.taint.is_tainted(node.value):
+                    self.taint.register_source(tgt.id, node.lineno, kind="inferred_taint")
+                    is_src = True
+                
+                # Check for direct calls to known source functions
+                if not is_src and isinstance(node.value, ast.Call):
+                    if isinstance(node.value.func, ast.Name) and node.value.func.id == "input":
+                        self.taint.register_source(tgt.id, node.lineno, kind="user_input")
+                        is_src = True
+                    elif isinstance(node.value.func, ast.Attribute):
+                        if node.value.func.attr in {"get", "pop", "setdefault"}:
+                            env_hint = any(
+                                isinstance(arg, ast.Constant) and isinstance(arg.value, str)
+                                and _SECRET_RE.search(arg.value)
+                                for arg in node.value.args
+                            )
+                            if env_hint:
+                                self.taint.register_source(tgt.id, node.lineno, kind="env_var")
+                                is_src = True
+                        elif node.value.func.attr == "getenv":
                             self.taint.register_source(tgt.id, node.lineno, kind="env_var")
-                            env_var = True
-                if not env_var and _SECRET_RE.search(tgt.id):
+                            is_src = True
+
+                if not is_src and _SECRET_RE.search(tgt.id):
                     self.taint.register_source(tgt.id, node.lineno, kind="secret_var")
         self.generic_visit(node)
 
@@ -498,9 +646,21 @@ class _Visitor(ast.NodeVisitor):
     # ── combined Call dispatch ───────────────────────────────────────────────
 
     def visit_Call(self, node: ast.Call) -> None:  # noqa: N802
+        func = node.func
+        if isinstance(func, ast.Name):
+            if func.id in {"_remote_allowed", "is_relative_to"}:
+                self.guards_found.add(func.id)
+        elif isinstance(func, ast.Attribute):
+            if func.attr in {"_remote_allowed", "is_relative_to"}:
+                self.guards_found.add(func.attr)
+
         self._check_h1(node)
         self._check_h2(node)
         self._check_h4(node)
+        self._check_h5(node)
+        self._check_h6(node)
+        self._check_h7(node)
+        self._check_h8(node)
         self.generic_visit(node)
 
 
@@ -562,8 +722,9 @@ def run(
         rels = [f for f in changed_files if f.endswith(".py")]
     else:
         py_files = sorted(repo.glob("**/*.py"))
+        # Defense-in-depth: ignore large 3rd-party libs and hidden folders
         py_files = [p for p in py_files if not any(
-            part in {".git", "__pycache__", ".venv", "venv", "node_modules"}
+            (part.startswith(".venv") or part in {".git", "__pycache__", "venv", "node_modules"})
             for part in p.parts
         )]
         targets = py_files
