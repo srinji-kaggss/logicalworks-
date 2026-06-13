@@ -238,6 +238,17 @@ fields, don't fork the envelope.
 caller/callee/guard/escape edges) · `lgwks.model_hub.doctor.v1` (`lgwks_model_hub.py`) ·
 `lgwks.workflow.run.v1` (`lgwks_workflows.py`).
 
+**`lgwks.workflow.trigger.v1`** (**#121** — event-chain grammar; `lgwks_workflow_trigger.py`,
+`evaluate_triggers`; JSON-Schema: `docs/schemas/lgwks.workflow.trigger.v1.json`): a pure predicate
+over the append-only #118 event log that emits a #120 `lgwks.capability.action.v1` **proposal** when
+matched — never a direct execution. `{schema, trigger_id, pattern[EventMatcher over #118
+source/kind/refs/subject], required_evidence[], confidence{score,basis (rule floor; scorer model an
+open slot)}, preconditions[], cooldown{window,max_fires}, policy(ask\|act), lowers_to(#120 action
+template)}`. Replayable (same slice → same proposals) and non-executing (only sink is the proposal
+list; never calls `lgwks_do`/`lgwks_workflows`). The multi-event generalisation of the single-prompt
+`_workflow_for_intent` (left intact). **Repurpose when:** any cross-event/latent-workflow detection —
+add a trigger, do not hard-code a new classifier branch.
+
 **`lgwks.model.mesh.v1`** (**#119** — model law as data; `lgwks_model_mesh.py`, builder
 `scripts/build_model_mesh.py` → `.lgwks/model_mesh.json`; JSON-Schema:
 `docs/schemas/lgwks.model.mesh.v1.json`): single queryable manifest of the model-stack law
