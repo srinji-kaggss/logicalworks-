@@ -957,7 +957,7 @@ Verification:
 see reconciliation below):
 - **D4 Storage Gate** (`lgwks_storage.py`): two-DB substrate — local `CausalTape`
   (source of record) + content-addressed `GlobalFactList` (dedup moat), remotable
-  transport for a future R2/D1 backend. Wired into `lgwks_substrate_run.build_run`.
+  port for a future provider-agnostic backend. Wired into `lgwks_substrate_run.build_run`.
 - **OWASP hardening pass**: SSRF (loopback/link-local/metadata + decimal/hex IP +
   wildcard-DNS rebinding + non-http schemes), Path Traversal (out-of-tree symlinks),
   SQLi (parameterized queries) — guards in `lgwks_browser` / `lgwks_substrate_crawl` /
@@ -1010,7 +1010,7 @@ see reconciliation below):
   (`"get" in name` matches `widget`/`target`); FP-prone. Tighten to word/exact match.
 - `audit_graph` Tier-3 escalation is a no-op seam that emits a marker `escalated_reasoning`
   finding; documented in ADR-sast-003, but the marker should not read as analysis.
-- `LocalSQLiteTransport.execute` opens a fresh connection per call (hot-path cost).
+- DB 2 local fact-list port opened a fresh connection per call (hot-path cost).
 
 Verification:
 - `pytest tests/test_bot_code_hacker.py -q` → **37 passed**
@@ -1018,3 +1018,23 @@ Verification:
 - `pytest tests/test_substrate.py tests/test_score.py tests/test_embed_port.py -q` → **102 passed, 16 skipped** (skips are model-runtime / `lgwks_vector`)
 - hardened engine self-scan: `lgwks_bot_code_hacker.run(".")` → **202 findings, 0 from worktree/archive/claude**
 
+---
+
+## 2026-06-13 · #114 D4 storage hardening — causal tape sequence + agnostic fact-list port
+
+Closed the two D4 Storage Gate debts filed from the U5 reconciliation pass:
+
+- `CausalTape` now owns a long-lived WAL-backed connection and appends inside `BEGIN IMMEDIATE`.
+- `tape.sequence` is a monotonic per-tenant chain coordinate; tail selection and `prev_hash`
+  chaining now order by `sequence`, not 1-second wall-clock timestamps.
+- Legacy tapes without `sequence` are migrated in place, backfilled per tenant by
+  `(timestamp, rowid)`, then protected by a unique `(tenant_id, sequence)` index.
+- `GlobalFactList` no longer depends on a SQL-shaped backend API. It depends on a
+  provider-agnostic `FactListPort` operation contract (`init_global_facts`, `register_fact`,
+  `lookup_fact`); `LocalSQLiteFactListPort` is the current local implementation.
+- `StorageGate` reuses its tape/fact-list connections for the gate lifetime and exposes `close()`
+  / context-manager lifecycle.
+
+Verification:
+- `pytest tests/test_storage.py tests/test_owasp_hardening.py -q` → **8 passed, 10 subtests passed**
+- `pytest tests/test_substrate.py tests/test_score.py tests/test_embed_port.py -q` → **118 passed**
