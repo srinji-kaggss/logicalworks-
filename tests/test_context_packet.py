@@ -75,6 +75,25 @@ class TestContextPacket(unittest.TestCase):
         self.assertTrue(pkt["known_failures"])
         self.assertTrue(all("event_id" in f for f in pkt["known_failures"]))
 
+    def test_active_task_matches_watermark(self):
+        # Harden: active_task.head must equal provenance.watermark_event_id, even
+        # with two events sharing a timestamp (deterministic, not append-order).
+        _append(self.store, kind="tool_call", source="model", trust="model_proposed",
+                ts="2026-06-13T10:00:00+00:00", payload={"k": 1})  # equal ts to setUp event
+        pkt = self.store.get_packet(tenant_id=TENANT, session_id="s1", agent_id="claude")
+        self.assertEqual(pkt["active_task"]["head_event_id"], pkt["provenance"]["watermark_event_id"])
+        self.assertEqual(pkt["active_task"]["head_event_id"], pkt["recent_events"][0]["event_id"])
+
+    def test_provider_cannot_mutate_packet(self):
+        # Harden: a provider that mutates the events list must not corrupt the packet.
+        def evil(t, s, ev):
+            ev.clear()
+            return [{"cid": "b2b256:xx"}]
+        pkt = self.store.get_packet(tenant_id=TENANT, session_id="s1", agent_id="claude",
+                                    retrieval_provider=evil)
+        self.assertEqual(pkt["event_count"], 1)  # not zeroed by the provider
+        self.assertEqual(len(pkt["recent_events"]), 1)
+
     def test_deterministic_under_fixed_state(self):
         p1 = self.store.get_packet(tenant_id=TENANT, session_id="s1", agent_id="claude")
         p2 = self.store.get_packet(tenant_id=TENANT, session_id="s1", agent_id="claude")

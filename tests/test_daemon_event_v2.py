@@ -109,9 +109,17 @@ class TestBackCompat(unittest.TestCase):
     def test_upgrade_fills_axes(self):
         v2 = daemon_event.upgrade_v1_to_v2(self._v1_record())
         self.assertEqual(v2["source"], "text")  # inferred from kind=human_message
-        self.assertEqual(v2["trust"], "deterministic")
+        self.assertEqual(v2["trust"], "human_confirmed")  # human_message is human-origin
         self.assertEqual(v2["replay"]["schema_from"], "lgwks.daemon.event.v1")
         daemon_event.validate_event(v2)  # the upgrade output is a valid v2 envelope
+
+    def test_upgrade_does_not_overtrust_model_output(self):
+        # Harden regression: a legacy model-origin event must NOT migrate to the
+        # strongest non-human trust (deterministic). Model output is untrusted-until-typed.
+        v1 = dict(self._v1_record(), kind="tool_call", event_id="evt-legacy-tool")
+        v2 = daemon_event.upgrade_v1_to_v2(v1)
+        self.assertEqual(v2["trust"], "model_proposed")
+        self.assertNotEqual(v2["trust"], "deterministic")
 
     def test_upgrade_is_idempotent_on_v2(self):
         v2 = daemon_event.build_event(

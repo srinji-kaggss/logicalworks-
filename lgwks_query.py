@@ -141,8 +141,12 @@ def _passes_filters(hit: dict[str, Any], filters: dict[str, Any]) -> bool:
     if source is not None and hit["provenance"].get("source") != source:
         return False
     fresh = filters.get("freshness")
-    if fresh is not None and hit.get("ts") is not None and hit["ts"] < fresh:
-        return False  # older than the watermark cutoff
+    if fresh is not None:
+        ts = hit.get("ts")
+        # A hit that cannot prove its freshness (no ts) must NOT pass a freshness
+        # gate — absence of a timestamp can't masquerade as fresh.
+        if ts is None or ts < fresh:
+            return False
     trust = filters.get("trust")
     if trust is not None and hit.get("trust") != trust:
         return False
@@ -164,6 +168,10 @@ def query(request: dict[str, Any], adapters: dict[str, Adapter] | None = None) -
         except Exception:
             hits = []  # a degraded backend contributes nothing; it never breaks the federation
         for hit in hits:
+            # A malformed hit from one (custom) adapter must not crash the whole
+            # federation or the merge/sort — skip it, keep healthy adapters' hits.
+            if not isinstance(hit, dict) or not {"cid", "score", "provenance"} <= hit.keys():
+                continue
             hit.setdefault("projection", projection)
             if _passes_filters(hit, filters):
                 merged.append(hit)
@@ -209,12 +217,25 @@ def transcript_adapter(daemon_db) -> Adapter:
     return _adapter
 
 
-def graph_adapter(graph_db_path) -> Adapter:
-    """Adapt the entity graph (`lgwks_entity_graph`) as the `graph` projection."""
+def _safe_tenant(tenant: str) -> str:
+    """Filesystem-safe tenant token for per-tenant store partitioning."""
+    return re.sub(r"[^A-Za-z0-9._-]", "_", tenant)
+
+
+def graph_adapter(graph_db_base) -> Adapter:
+    """Adapt the entity graph (`lgwks_entity_graph`) as the `graph` projection.
+
+    TENANT-SCOPED: `graph_db_base` is a DIRECTORY; the adapter resolves a
+    per-tenant partition `<base>/<safe(tenant)>.db` at request time. The shared,
+    non-partitioned entity graph is NOT exposed through this tenant-mandatory
+    surface — a tenant sees only its own partition (absent partition → []),
+    so the graph projection cannot leak another tenant's nodes.
+    """
     def _adapter(request: dict[str, Any]) -> list[dict[str, Any]]:
         import lgwks_entity_graph
         from pathlib import Path
-        db = Path(graph_db_path)
+        tenant = request["filters"]["tenant"]
+        db = Path(graph_db_base) / f"{_safe_tenant(tenant)}.db"
         if not db.exists():
             return []
         g = lgwks_entity_graph.GraphDB(db)
@@ -244,5 +265,5 @@ def default_adapters() -> dict[str, Adapter]:
     repo = Path(__file__).resolve().parent
     return {
         "transcript": transcript_adapter(repo / "store" / "daemon" / "daemon-events.db"),
-        "graph": graph_adapter(repo / "store" / "entity_graph.db"),
+        "graph": graph_adapter(repo / "store" / "entity_graph"),  # per-tenant: <dir>/<tenant>.db
     }

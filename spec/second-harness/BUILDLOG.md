@@ -1055,3 +1055,53 @@ Closed the two audit-graph debts filed from the U5 reconciliation pass:
 Verification:
 - `pytest tests/test_audit_graph.py -q` → **5 passed**
 - `pytest tests/test_bot_code_hacker.py tests/test_owasp_hardening.py -q` → **41 passed, 10 subtests passed**
+
+---
+
+## 2026-06-13 · #118–#124 — §6 runtime contract family (MODEL-RUNTIME-FINALIZATION)
+
+Landed the seven §6 "immediate implementation contracts" as one layered runtime
+contract set (stacked PRs, dependency-DAG order — Director-approved deviation from
+ascending; #121/#122 forward-reference #120/#124). These **describe** the runtime;
+they do not touch the model layer (no model is loaded, selected, or changed — the
+out-of-scope constraint holds). Build order: #118 → #119 → #120 → #124 → #121 → #122 → #123.
+
+Prereq: `fix/register-audit-graph-v2` — registered `lgwks.audit.graph.v2` (left
+unregistered by #117), restoring the `check-registry` gate to green on main.
+
+- **#118** `lgwks.daemon.event.v2` (`lgwks_daemon_event.py`) — additive superset of
+  `event.v1` (NOT a colliding mint). New OPTIONAL axes `source`/`payload_cid`/`trust`/
+  `provenance`/`replay`; `KINDS` widened as a superset; `upgrade_v1_to_v2` lazy adapter
+  preserves `event_id`. v1 records still validate. 3 producers emit `source`+`trust`.
+  `source`+`trust` are the locked join keys for the rest of the family.
+- **#119** `lgwks.model.mesh.v1` (`lgwks_model_mesh.py`, builder `scripts/build_model_mesh.py`
+  → `.lgwks/model_mesh.json`) — model law as data (spec §3.1 current + §3.2 open slots);
+  records inventory, loads no model. Doctor reads it, degrades to in-code law when absent.
+- **#120** `lgwks.capability.action.v1` (`lgwks_capability_action.py`) — the execution
+  chokepoint. `validate_action` (gate) + `execute_action` (Hand); `verb` ∈ live
+  `lgwks.map.v1` catalog; declared `effect_class`/`reversibility`; irreversible needs
+  `confirmed`; trust→effect policy blocks weak-trust dangerous effects. Raw text cannot
+  reach the Hand. `lower_do_ship` lowers an existing workflow path.
+- **#124** `lgwks.daemon.query.v1` + `…result.v1` (`lgwks_query.py`) — one federated read
+  contract over projections; hits carry provenance + stable CIDs; deterministic order
+  `(score desc, cid asc)`; freshness/trust filters; graph projection is tenant-partitioned.
+- **#121** `lgwks.workflow.trigger.v1` (`lgwks_workflow_trigger.py`) — pure predicate over
+  the #118 log → #120 proposals (never executes). Multi-event generalisation of
+  `_workflow_for_intent` (left intact).
+- **#122** `lgwks.context.packet.v1` (`lgwks_daemon_store.get_packet`) — PROMOTED from
+  `lgwks.daemon.packet.v0`. Locked section set (active_task/retrieval/known_failures/
+  commitments/constraints/allowed_capabilities/provenance); dependent sections degrade
+  empty-but-shaped; deterministic.
+- **#123** `lgwks.voice.event.v1` (`lgwks_voice_event.py`) — speech ingress; `to_daemon_event`
+  lowers to #118 with `source:speech`, `trust:untrusted` (never pre-trusted). raw_text
+  immutable; `raw_ref` content-verified. No ASR model selected.
+
+Hardened: two adversarial passes; verified findings fixed (catalog fail-closed, trust→effect
+gate, conservative v1→v2 trust default, tenant-scoped graph projection, freshness null-ts gate,
+deterministic active_task, provider non-mutation, voice cleanup-honesty). Filed flaky #139
+(pre-existing `lgwks_sqlite` migration-init race under parallel load — not from this family).
+
+Verification:
+- `pytest` over the 7 new suites + touched existing (daemon_store/e2e/p1/hooks/model_hub) → **221 passed**
+- `python3 scripts/check_schema_registry.py` → **conformant (129 rows)**
+- Contracts + JSON-Schemas registered in `docs/schemas/REGISTRY.md` (each in its landing commit).

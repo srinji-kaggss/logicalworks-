@@ -172,16 +172,32 @@ def _ser(data: dict[str, Any] | None) -> str | None:
 # ── lgwks.context.packet.v1 section builders (#122) ──────────────────────────
 # Each section is an independent, deterministic builder over one source.
 
-def _active_task(head: dict[str, Any] | None, session_id: str, agent_id: str) -> dict[str, Any] | None:
-    """Current task head from session state. Null when the session has no head yet."""
-    if not head:
+def _active_task(events: list[dict[str, Any]], head: dict[str, Any] | None,
+                 session_id: str, agent_id: str) -> dict[str, Any] | None:
+    """Current task head — derived from the deterministic watermark event.
+
+    Uses `events[0]` (the newest by the store's `ts DESC, event_id DESC` order)
+    so `active_task.head_event_id` is a pure function of the scoped event set and
+    matches `provenance.watermark_event_id` — never the append-recency that the
+    raw session-head row records (which is ambiguous on equal timestamps). Falls
+    back to the session-head row, then null."""
+    if not events and not head:
         return None
+    watermark = events[0] if events else None
+    if watermark is not None:
+        return {
+            "session_id": session_id,
+            "agent_id": agent_id,
+            "head_event_id": watermark.get("event_id"),
+            "last_kind": watermark.get("kind"),
+            "last_ts": watermark.get("ts"),
+        }
     return {
         "session_id": session_id,
         "agent_id": agent_id,
-        "head_event_id": head.get("last_event_id"),
-        "last_kind": head.get("last_kind"),
-        "last_ts": head.get("last_ts"),
+        "head_event_id": head.get("last_event_id") if head else None,
+        "last_kind": head.get("last_kind") if head else None,
+        "last_ts": head.get("last_ts") if head else None,
     }
 
 
@@ -542,7 +558,9 @@ class DaemonEventStore:
         depth = self.queue_depth(tenant_id)
 
         # #124 retrieval (graph/vector hits) — provider-fed, empty when absent.
-        retrieval = list(retrieval_provider(tenant_id, session_id, events)) if retrieval_provider else []
+        # Pass a COPY of events: a provider must not be able to mutate the packet's
+        # own event slice (determinism + integrity of recent_events/event_count).
+        retrieval = list(retrieval_provider(tenant_id, session_id, list(events))) if retrieval_provider else []
         # #120 verbs the session is authorised for — provider-fed, empty when absent.
         allowed_capabilities = list(capability_provider(tenant_id, agent_id)) if capability_provider else []
 
@@ -555,7 +573,7 @@ class DaemonEventStore:
             "queue": depth,
             "recent_events": events,
             "event_count": len(events),
-            "active_task": _active_task(head, session_id, agent_id),
+            "active_task": _active_task(events, head, session_id, agent_id),
             "retrieval": retrieval,
             "known_failures": _known_failures(events),
             "commitments": [],   # transcript-cortex sourced; stubbed-but-shaped (#122 seam)

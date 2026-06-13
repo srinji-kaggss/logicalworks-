@@ -1,0 +1,54 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "lgwks.voice.event.v1",
+  "description": "Speech ingress (#123) — the Ear's output, NOT authority. Voice is source material that lowers into the #118 envelope with source:speech and trust:untrusted, carrying zero execution authority (spec §4: natural language must never bypass capability gates). Supports streaming (final:false interim + final:true) and file ASR. raw_text is the verbatim ASR output and is immutable; normalized_text is the cleanup result; raw_ref is a content-address pointer back to the raw transcript so cleanup never overwrites raw. This contract does NOT select an ASR/VAD/cleanup model — those are open slots behind audio_source, final, and cleanup_provenance.model.",
+  "type": "object",
+  "required": ["schema", "audio_source", "transcript_span", "confidence", "speaker", "raw_text", "normalized_text", "raw_ref", "cleanup_provenance", "final"],
+  "additionalProperties": false,
+  "properties": {
+    "schema": {"type": "string", "enum": ["lgwks.voice.event.v1"]},
+    "audio_source": {
+      "type": "object",
+      "required": ["kind"],
+      "additionalProperties": true,
+      "properties": {
+        "kind": {"type": "string", "enum": ["mic", "file", "stream"]},
+        "device": {"type": ["string", "null"]},
+        "path": {"type": ["string", "null"]},
+        "sample_rate": {"type": ["integer", "null"]},
+        "codec": {"type": ["string", "null"]}
+      }
+    },
+    "transcript_span": {
+      "type": "object",
+      "additionalProperties": true,
+      "properties": {
+        "start_ms": {"type": ["number", "null"]},
+        "end_ms": {"type": ["number", "null"]}
+      }
+    },
+    "confidence": {"type": ["number", "null"], "minimum": 0, "maximum": 1},
+    "speaker": {
+      "type": ["object", "null"],
+      "additionalProperties": true,
+      "properties": {
+        "speaker_id": {"type": ["string", "null"]},
+        "session_id": {"type": ["string", "null"]},
+        "agent_id": {"type": ["string", "null"]}
+      }
+    },
+    "raw_text": {"type": "string", "description": "verbatim ASR output — immutable"},
+    "normalized_text": {"type": "string", "description": "punctuation/cleanup result"},
+    "raw_ref": {"type": "string", "pattern": "^raw:b2b256:[0-9a-f]{64}$", "description": "content-address pointer from normalized → raw"},
+    "cleanup_provenance": {
+      "type": "object",
+      "additionalProperties": true,
+      "properties": {
+        "model": {"type": ["string", "null"], "description": "null until an ASR/cleanup model is selected (open slot)"},
+        "method": {"type": "string"},
+        "changed": {"type": "boolean"}
+      }
+    },
+    "final": {"type": "boolean", "description": "streaming: interim (false) vs final (true) segment"}
+  }
+}

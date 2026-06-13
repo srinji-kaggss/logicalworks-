@@ -556,3 +556,31 @@ this reconciliation pass. #114 is closed by PR #116. For #115, trust the GitHub 
 state and the latest `BUILDLOG.md` entry over this historical session-18 note.
 
 **Full HANDOFF refresh (fold sessions 15–18 into a clean current-state block) is still owed.**
+
+---
+
+### Session 19 (2026-06-13) — §6 runtime contract family #118–#124 landed
+
+The seven `MODEL-RUNTIME-FINALIZATION-2026-06-13.md` §6 contracts shipped as a stacked-PR
+chain (dependency-DAG order, Director-approved; see BUILDLOG 2026-06-13 entry for the full
+landing). **Build-state truth = BUILDLOG.md.** Net new/changed surface:
+
+- New root modules: `lgwks_model_mesh.py` (#119), `lgwks_capability_action.py` (#120),
+  `lgwks_query.py` (#124), `lgwks_workflow_trigger.py` (#121), `lgwks_voice_event.py` (#123).
+- Changed: `lgwks_daemon_event.py` (event **v2**, #118), `lgwks_daemon_store.py`
+  (packet **v0→v1**, #122), 3 ingress hooks (emit `source`+`trust`), `lgwks_model_hub.py`
+  (doctor reads the mesh). New builder `scripts/build_model_mesh.py` → `.lgwks/model_mesh.json`.
+- Prereq hotfix: registered `lgwks.audit.graph.v2` (gate was red on main since #117).
+- navmap regenerated (149 modules); all new contracts in `docs/schemas/REGISTRY.md`.
+
+**For the next agent — the locked seams (extend, don't refactor):**
+- #118 `source` + `trust` enums are the join keys every other contract reads. Additive only.
+- #120 `verb`/`effect_class`/`reversibility`/`required_authority` are the action interface;
+  the verifier (`postconditions`) + undo/compensation are shaped-but-stubbed behind it, and
+  the trust→effect gate is live — extend the gate, do not bypass it.
+- #122 packet section set is locked; `retrieval` (#124) and `allowed_capabilities` (#120)
+  are provider-fed — wire real providers without a schema bump.
+- Open slots (no model selected, by design): ASR/Ear (#123), confidence scorer (#121),
+  reranker (after #124), local Tongue/proposal/code helpers (#119 mesh `status:open_slot`).
+- Tracked debt: **#139** flaky `test_concurrent_appends_across_agents` (pre-existing
+  `lgwks_sqlite` migration-init race under parallel load — fix = idempotent migration apply).

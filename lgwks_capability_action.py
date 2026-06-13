@@ -34,6 +34,15 @@ EFFECT_CLASSES = frozenset({"read", "write", "network", "spawn", "delete", "exte
 # effects demand explicit confirmation before the Hand will execute them.
 REVERSIBILITY = frozenset({"reversible", "compensatable", "irreversible"})
 
+# Trust→effect policy (harden #120): provenance trust rides from the #118 event.
+# Weak-trust provenance (untrusted speech/NL, or merely model-proposed) may NOT
+# carry a dangerous effect without explicit confirmation. This is the seam that
+# stops #121's lowering — or a future Tongue compiler — from smuggling an
+# untrusted natural-language chain into an irreversible/destructive/publishing
+# action. The deterministic gate, not the absence of a compiler, holds the line.
+_WEAK_TRUST = frozenset({"untrusted", "model_proposed"})
+_DANGEROUS_EFFECTS = frozenset({"external_publish", "delete"})
+
 
 class ActionRejected(ValueError):
     """The governance gate refused an action proposal."""
@@ -67,7 +76,16 @@ def validate_action(record: dict[str, Any], *, known_verbs: Iterable[str] | None
 
     verb = record.get("verb")
     _require(isinstance(verb, str) and bool(verb), "verb must be a non-empty string")
-    catalog = frozenset(known_verbs) if known_verbs is not None else _live_verbs()
+    if known_verbs is not None:
+        catalog = frozenset(known_verbs)
+    else:
+        # FAIL CLOSED, explicitly: if the live catalog can't be loaded, refuse the
+        # action (never admit). Surfaced as ActionRejected so a future broadened
+        # except can't silently flip this to fail-open.
+        try:
+            catalog = _live_verbs()
+        except Exception as exc:
+            raise ActionRejected(f"capability catalog unavailable — failing closed: {exc}") from exc
     _require(verb in catalog, f"unknown verb (not in capability map catalog): {verb!r}")
 
     subject = record.get("subject")
@@ -110,6 +128,16 @@ def validate_action(record: dict[str, Any], *, known_verbs: Iterable[str] | None
         _require(record.get("confirmed") is True,
                  "irreversible action requires confirmed=true before it can execute")
         _require(undo is None, "irreversible action must have undo=null (nothing to compensate)")
+
+    # Trust→effect chokepoint: weak-trust provenance cannot carry a dangerous
+    # effect without explicit confirmation — untrusted/model-proposed NL can never
+    # auto-trigger an irreversible/destructive/publishing action.
+    if trust in _WEAK_TRUST and (
+        record["reversibility"] == "irreversible" or record["effect_class"] in _DANGEROUS_EFFECTS
+    ):
+        _require(record.get("confirmed") is True,
+                 f"weak-trust provenance ({trust}) cannot carry an "
+                 f"irreversible/external_publish/delete effect without confirmed=true")
 
     return record
 
