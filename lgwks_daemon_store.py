@@ -23,7 +23,15 @@ EVENT_QUERY_SCHEMA = "lgwks.daemon.events.query.v0"
 SESSION_QUERY_SCHEMA = "lgwks.daemon.sessions.query.v0"
 WORK_ITEM_SCHEMA = "lgwks.daemon.work_item.v0"
 QUEUE_SCHEMA = "lgwks.daemon.queue.v0"
-PACKET_SCHEMA = "lgwks.daemon.packet.v0"
+PACKET_SCHEMA = "lgwks.context.packet.v1"  # #122: promoted from lgwks.daemon.packet.v0 (superseded)
+# Locked section set (build-the-basement): every packet carries all of these keys,
+# even when a section ships empty. Filling a stubbed section later is additive —
+# no schema bump, no consumer refactor.
+CONTEXT_PACKET_SECTIONS = (
+    "session_head", "queue", "recent_events", "event_count",
+    "active_task", "retrieval", "known_failures", "commitments",
+    "constraints", "allowed_capabilities", "provenance",
+)
 WORKTREE_SCHEMA = "lgwks.daemon.worktree.v0"
 
 WORK_KINDS = frozenset({
@@ -159,6 +167,55 @@ def _ser(data: dict[str, Any] | None) -> str | None:
     if data is None:
         return None
     return json.dumps(data, sort_keys=True, separators=(",", ":"), ensure_ascii=True)
+
+
+# ── lgwks.context.packet.v1 section builders (#122) ──────────────────────────
+# Each section is an independent, deterministic builder over one source.
+
+def _active_task(head: dict[str, Any] | None, session_id: str, agent_id: str) -> dict[str, Any] | None:
+    """Current task head from session state. Null when the session has no head yet."""
+    if not head:
+        return None
+    return {
+        "session_id": session_id,
+        "agent_id": agent_id,
+        "head_event_id": head.get("last_event_id"),
+        "last_kind": head.get("last_kind"),
+        "last_ts": head.get("last_ts"),
+    }
+
+
+def _known_failures(events: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Recent failure/stuckness signals — a deterministic filter over #118 events.
+
+    Selects events whose payload flags a failure (`test_failed`/`error`) — the
+    same axes #121 triggers match on, surfaced into the briefing."""
+    out = []
+    for ev in events:
+        payload = ev.get("payload") or {}
+        if payload.get("test_failed") or payload.get("error"):
+            out.append({
+                "event_id": ev.get("event_id"),
+                "kind": ev.get("kind"),
+                "source": ev.get("source"),
+                "ts": ev.get("ts"),
+            })
+    return out
+
+
+def validate_context_packet(packet: dict[str, Any]) -> dict[str, Any]:
+    """Validate a context packet carries the full locked section set. Returns it."""
+    if not isinstance(packet, dict):
+        raise ValueError("packet must be a dict")
+    if packet.get("schema") != PACKET_SCHEMA:
+        raise ValueError(f"schema must be {PACKET_SCHEMA}")
+    missing = [s for s in CONTEXT_PACKET_SECTIONS if s not in packet]
+    if missing:
+        raise ValueError(f"context packet missing locked sections: {missing}")
+    prov = packet.get("provenance")
+    if not isinstance(prov, dict) or "watermark_event_id" not in prov:
+        raise ValueError("provenance must be a dict with watermark_event_id")
+    return packet
 
 
 class DaemonEventStore:
@@ -460,8 +517,20 @@ class DaemonEventStore:
         session_id: str,
         agent_id: str,
         event_limit: int = 20,
+        retrieval_provider=None,
+        capability_provider=None,
     ) -> dict[str, Any]:
-        """Deterministic snapshot: recent events + queue depth + session head."""
+        """Deterministic context packet (`lgwks.context.packet.v1`, #122).
+
+        The one canonical daemon briefing read by every agent and the human
+        cockpit — a derived projection, reproducible from {event log @ watermark,
+        stores @ watermark} with no hidden mutation. The v0 core (session_head,
+        queue, recent_events, event_count) is preserved; the v1 enrichment
+        sections are each an independent builder over one source. Sections that
+        depend on other contracts degrade to empty-but-shaped when no provider is
+        supplied (#124 retrieval, #120 allowed_capabilities), keeping the packet
+        valid and deterministic under partial availability.
+        """
         events = self.list_events(
             tenant_id=tenant_id, session_id=session_id, agent_id=agent_id, limit=event_limit
         )
@@ -471,6 +540,12 @@ class DaemonEventStore:
             None,
         )
         depth = self.queue_depth(tenant_id)
+
+        # #124 retrieval (graph/vector hits) — provider-fed, empty when absent.
+        retrieval = list(retrieval_provider(tenant_id, session_id, events)) if retrieval_provider else []
+        # #120 verbs the session is authorised for — provider-fed, empty when absent.
+        allowed_capabilities = list(capability_provider(tenant_id, agent_id)) if capability_provider else []
+
         return {
             "schema": PACKET_SCHEMA,
             "tenant_id": tenant_id,
@@ -480,6 +555,16 @@ class DaemonEventStore:
             "queue": depth,
             "recent_events": events,
             "event_count": len(events),
+            "active_task": _active_task(head, session_id, agent_id),
+            "retrieval": retrieval,
+            "known_failures": _known_failures(events),
+            "commitments": [],   # transcript-cortex sourced; stubbed-but-shaped (#122 seam)
+            "constraints": [],   # active governance/AUP constraints; stubbed-but-shaped (#122 seam)
+            "allowed_capabilities": allowed_capabilities,
+            "provenance": {
+                "watermark_event_id": events[0]["event_id"] if events else None,
+                "store_versions": {},
+            },
         }
 
 
