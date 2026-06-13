@@ -1,0 +1,28 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "lgwks.daemon.query.v1",
+  "description": "Unified daemon query REQUEST (#124). One filter envelope over the federated read surface (graph/vector/transcript/artifact/fact/symbol projections). `source` and `trust` reuse the #118 v2 axes (single vocabulary across the runtime). `tenant` is required (isolation). `order` is fixed to the one stable total order (score desc, cid asc).",
+  "type": "object",
+  "required": ["schema", "q", "filters", "limit", "order"],
+  "additionalProperties": false,
+  "properties": {
+    "schema": {"type": "string", "enum": ["lgwks.daemon.query.v1"]},
+    "q": {"type": ["string", "null"], "description": "free-text query; null = filter-only"},
+    "filters": {
+      "type": "object",
+      "required": ["tenant"],
+      "additionalProperties": false,
+      "properties": {
+        "tenant": {"type": "string", "minLength": 1},
+        "session": {"type": ["string", "null"]},
+        "project": {"type": ["string", "null"]},
+        "source": {"type": ["string", "null"], "enum": ["speech", "text", "browser", "repo", "terminal", "model", "workflow", "artifact", null]},
+        "type": {"type": ["string", "null"]},
+        "freshness": {"type": ["string", "null"], "description": "ISO-8601 watermark cutoff; hits older than this are dropped"},
+        "trust": {"type": ["string", "null"], "enum": ["human_confirmed", "deterministic", "model_proposed", "untrusted", null]}
+      }
+    },
+    "limit": {"type": "integer", "minimum": 1},
+    "order": {"type": "string", "enum": ["score_desc"]}
+  }
+}

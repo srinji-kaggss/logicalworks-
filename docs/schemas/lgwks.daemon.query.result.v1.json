@@ -1,0 +1,38 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "lgwks.daemon.query.result.v1",
+  "description": "Unified daemon query RESULT (#124). Provenance + stable CIDs, not prose. Hits are in the stable total order (score desc, cid asc). Every hit traces back to a #118 event (provenance.event_id) or an artifact CID (provenance.artifact_cid). The Hit shape is the public interface #122's `retrieval` section consumes directly — adding a new backend later is a new `projection` value + one adapter, no contract change.",
+  "type": "object",
+  "required": ["schema", "count", "hits"],
+  "additionalProperties": false,
+  "properties": {
+    "schema": {"type": "string", "enum": ["lgwks.daemon.query.result.v1"]},
+    "count": {"type": "integer", "minimum": 0},
+    "hits": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["cid", "projection", "score", "provenance"],
+        "additionalProperties": true,
+        "properties": {
+          "cid": {"type": "string", "description": "stable content-address (axiom CID, b2b256:<hex>)"},
+          "projection": {"type": "string", "enum": ["graph", "vector", "transcript", "artifact", "fact", "symbol"]},
+          "score": {"type": "number", "minimum": 0, "maximum": 1},
+          "provenance": {
+            "type": "object",
+            "required": ["source"],
+            "additionalProperties": true,
+            "properties": {
+              "event_id": {"type": ["string", "null"]},
+              "artifact_cid": {"type": ["string", "null"]},
+              "source": {"type": ["string", "null"]}
+            }
+          },
+          "snippet": {"type": ["string", "null"]},
+          "ts": {"type": ["string", "null"]},
+          "trust": {"type": ["string", "null"]}
+        }
+      }
+    }
+  }
+}
