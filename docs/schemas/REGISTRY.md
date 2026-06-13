@@ -229,7 +229,9 @@ fields, don't fork the envelope.
 
 ### 11. model-stack family (W-track, live)
 `lgwks.algorithms.catalog.v1` (`lgwks_algorithms.py`, W2 catalog) · `lgwks.sast.catalog.v1` +
-`lgwks.sast.flow.v1` (`lgwks_sast.py`) · `lgwks.model_hub.doctor.v1` (`lgwks_model_hub.py`) ·
+`lgwks.sast.flow.v1` (`lgwks_sast.py`) · `lgwks.audit.graph.v2` (`lgwks_audit_graph.py` — U5 Build #5
+"Liquid Brain" SAST result envelope, ADR-sast-003: `schema` + graph-flow audit findings over
+caller/callee/guard/escape edges) · `lgwks.model_hub.doctor.v1` (`lgwks_model_hub.py`) ·
 `lgwks.workflow.run.v1` (`lgwks_workflows.py`).
 **Repurpose when:** any deterministic scorer/detector → a CATALOG entry + these envelopes, not a new shape.
 
