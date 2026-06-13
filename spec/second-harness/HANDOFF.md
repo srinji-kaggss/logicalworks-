@@ -550,8 +550,9 @@ lgwks daemon stop
   relocated kernel→lgwks as `docs/ADR-sast-001/002/003`, commit refs reworded, browser
   SSRF-block `NameError` crash fixed.
 
-**Open debts (filed):** #114 (causal-tape 1s-timestamp tail → fork risk; per-call SQLite
-connections) and #115 (audit_graph substring matching + no-op Tier-3). #114's causal-tape
-fix is the next substantive lgwks correctness unit when this track resumes.
+**U5 follow-up debts:** #114 (causal-tape 1s-timestamp tail → fork risk; per-call SQLite
+connections) and #115 (audit_graph substring matching + no-op Tier-3) were filed from
+this reconciliation pass. #114 is closed by PR #116. For #115, trust the GitHub issue
+state and the latest `BUILDLOG.md` entry over this historical session-18 note.
 
 **Full HANDOFF refresh (fold sessions 15–18 into a clean current-state block) is still owed.**
