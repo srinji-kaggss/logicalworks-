@@ -234,6 +234,17 @@ fields, don't fork the envelope.
 "Liquid Brain" SAST result envelope, ADR-sast-003: `schema` + graph-flow audit findings over
 caller/callee/guard/escape edges) · `lgwks.model_hub.doctor.v1` (`lgwks_model_hub.py`) ·
 `lgwks.workflow.run.v1` (`lgwks_workflows.py`).
+
+**`lgwks.model.mesh.v1`** (**#119** — model law as data; `lgwks_model_mesh.py`, builder
+`scripts/build_model_mesh.py` → `.lgwks/model_mesh.json`; JSON-Schema:
+`docs/schemas/lgwks.model.mesh.v1.json`): single queryable manifest of the model-stack law
+(spec MODEL-RUNTIME-FINALIZATION §3.1 current law + §3.2 open slots). `{schema, generated_at,
+models[]}` where each entry = `{name, runtime, locality, role, input_schema, output_schema,
+trust_class, fallback, health{status,latency_ms_p50,last_checked}, eval_gate, status
+(current_law/open_slot/candidate_reference), notes?}`. **Records inventory; does not change it**
+— no new default, no selection, loads no model. `role`+`trust_class`+`input/output_schema`+
+`eval_gate` are the locked join keys for #120/#122 + the future LogicGPT-1 eval path. Doctor
+(`lgwks_model_hub._model_mesh_status`) reads the artifact, degrading to the in-code law when absent.
 **Repurpose when:** any deterministic scorer/detector → a CATALOG entry + these envelopes, not a new shape.
 
 ### 12. JEPA manifest-level ids (live, supplement family 7)

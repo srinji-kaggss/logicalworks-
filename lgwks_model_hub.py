@@ -174,6 +174,39 @@ def _catalog_entry_status(name: str, meta: dict[str, Any]) -> dict[str, Any]:
     }
 
 
+def _model_mesh_status() -> dict[str, Any]:
+    """Read the model mesh (#119) for the doctor surface — WITHOUT loading models.
+
+    Prefers the frozen `.lgwks/model_mesh.json` artifact; degrades to building the
+    same law from `lgwks_model_mesh.MESH_LAW` when the artifact is absent (same
+    graceful-degradation pattern as `lgwks.capability_idf.v1`). Either way no model
+    package is imported and no `store/models/` weights are touched — the mesh is
+    descriptive model law, not a model runtime.
+    """
+    try:
+        import lgwks_model_mesh as mesh_mod
+        artifact = Path(__file__).resolve().parent / ".lgwks" / "model_mesh.json"
+        if artifact.exists():
+            mesh = mesh_mod.load_mesh(artifact)
+            source = "artifact"
+        else:
+            mesh = mesh_mod.build_mesh(generated_at=None)
+            source = "law"
+        models = mesh["models"]
+        by_status: dict[str, int] = {}
+        for m in models:
+            by_status[m["status"]] = by_status.get(m["status"], 0) + 1
+        return {
+            "schema": mesh_mod.SCHEMA,
+            "source": source,
+            "total": len(models),
+            "by_status": by_status,
+            "roles": sorted({m["role"] for m in models}),
+        }
+    except Exception as exc:
+        return {"schema": "", "source": "unavailable", "reason": f"{type(exc).__name__}: {exc}"}
+
+
 def doctor() -> dict[str, Any]:
     """Machine-readable health report for the local ML stack."""
     entries = [_catalog_entry_status(name, meta) for name, meta in _MODEL_CATALOG.items()]
@@ -250,6 +283,7 @@ def doctor() -> dict[str, Any]:
         "intent_classifier": intent_classifier,
         "foundation": foundation,
         "semantic_eye": semantic_eye,
+        "model_mesh": _model_mesh_status(),
         "next_step": (
             "Semantic local path is active."
             if semantic_eye.get("up") and intent_classifier.get("semantic_centroids")
