@@ -15,10 +15,14 @@ class MockRoute:
     def __init__(self):
         self.continued_headers: dict[str, str] | None = None
         self.continued = False
+        self.aborted: str | None = None
 
     def continue_(self, headers: dict[str, str] | None = None):
         self.continued_headers = headers
         self.continued = True
+
+    def abort(self, error_code: str | None = None):
+        self.aborted = error_code or "failed"
 
 
 class MockRequest:
@@ -30,6 +34,16 @@ class MockRequest:
 class TestRouteHandler(unittest.TestCase):
     """Issue #14: auth headers must ONLY be sent to the lock host, never to cross-origin
     subresources or redirect destinations."""
+
+    def setUp(self):
+        # These tests exercise auth-header scoping, which is orthogonal to the SSRF
+        # gate the handler also runs. Pin _remote_allowed=True so the unit is tested
+        # deterministically offline (the SSRF gate does live DNS and would otherwise
+        # block non-resolving example hostnames). SSRF coverage lives in
+        # tests/test_owasp_hardening.py — this does not weaken that gate.
+        patcher = mock.patch.object(browser, "_remote_allowed", return_value=True)
+        patcher.start()
+        self.addCleanup(patcher.stop)
 
     def test_injects_auth_for_lock_host(self):
         handler = browser._route_handler("example.com", {"Authorization": "Bearer abc123"})

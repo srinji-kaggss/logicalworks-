@@ -980,6 +980,13 @@ see reconciliation below):
    (was a TOCTOU read-then-write costing 2 round-trips/fact on the hot path).
 4. **Dead code** — removed unused imports (`os`/`Optional`/`field`/`io`) and a dead
    `pre = engine.preanalysis()` binding in `lgwks_audit_graph.py`.
+4b. **Browser SSRF-block crash FIXED** — the OWASP commit's `_route_handler` called
+   `logger.warning(...)` in the SSRF-abort path but never defined `logger`, so a
+   *blocked* SSRF attempt crashed with `NameError` instead of aborting the route.
+   Added the module logger. The auth-scoping unit tests (issue #14) were also failing
+   on the branch — they hit the new live-DNS SSRF gate with non-resolving example
+   hosts + a mock lacking `abort`; isolated them by pinning `_remote_allowed` and
+   completing `MockRoute`. (Never caught because the U5 commits skipped CI.)
 5. **Generated artifact purged** — `findings_final.json` (130k-line self-scan, the old
    false-positive dump) and the `.worktrees/gemini` gitlink untracked + gitignored.
 6. **Root scratch → real tests** — 5 root print-scripts (`ssrf_test.py`, `lfi_test.py`,

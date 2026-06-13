@@ -16,6 +16,7 @@ install command — never a silent empty (the googler lesson).
 from __future__ import annotations
 
 import json
+import logging
 import re
 import ipaddress
 import select
@@ -23,6 +24,8 @@ import socket
 import sys
 import urllib.parse
 from pathlib import Path
+
+logger = logging.getLogger(__name__)
 
 _TAG = re.compile(r"<[^>]+>")
 _WS = re.compile(r"\n{3,}")
