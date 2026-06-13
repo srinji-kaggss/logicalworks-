@@ -1,0 +1,33 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "lgwks.context.packet.v1",
+  "description": "The canonical daemon briefing (#122), promoted from lgwks.daemon.packet.v0. One shape read by every agent (Claude/Codex/Gemini) and the human cockpit. A derived, read-only projection reproducible from {event log @ watermark, stores @ watermark} with no hidden mutation. The v0 core (session_head/queue/recent_events/event_count) is preserved; the v1 sections (active_task/retrieval/known_failures/commitments/constraints/allowed_capabilities/provenance) are each an independent builder and may ship empty-but-shaped — the section set is locked, so filling a stub later is additive (no schema bump, no consumer refactor). retrieval is fed by #124; allowed_capabilities by #120; recent_events are #118 v2 events.",
+  "type": "object",
+  "required": ["schema", "tenant_id", "session_id", "agent_id", "session_head", "queue", "recent_events", "event_count", "active_task", "retrieval", "known_failures", "commitments", "constraints", "allowed_capabilities", "provenance"],
+  "additionalProperties": true,
+  "properties": {
+    "schema": {"type": "string", "enum": ["lgwks.context.packet.v1"]},
+    "tenant_id": {"type": "string"},
+    "session_id": {"type": "string"},
+    "agent_id": {"type": "string"},
+    "session_head": {"type": ["object", "null"]},
+    "queue": {"type": "object"},
+    "recent_events": {"type": "array", "items": {"type": "object"}},
+    "event_count": {"type": "integer", "minimum": 0},
+    "active_task": {"type": ["object", "null"]},
+    "retrieval": {"type": "array", "description": "relevant graph+vector hits via #124, each with cid+provenance+score"},
+    "known_failures": {"type": "array", "description": "recent failure/stuckness events filtered from #118"},
+    "commitments": {"type": "array", "description": "unresolved commitments/TODOs from transcript cortex"},
+    "constraints": {"type": "array", "description": "active governance/AUP constraints in scope"},
+    "allowed_capabilities": {"type": "array", "description": "#120 verbs permitted given the session's authority"},
+    "provenance": {
+      "type": "object",
+      "required": ["watermark_event_id"],
+      "additionalProperties": true,
+      "properties": {
+        "watermark_event_id": {"type": ["string", "null"]},
+        "store_versions": {"type": "object"}
+      }
+    }
+  }
+}
