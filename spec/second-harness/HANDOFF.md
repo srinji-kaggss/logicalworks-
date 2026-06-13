@@ -531,3 +531,27 @@ lgwks daemon stop
 **Next canonical seams (Director trigger required):**
 - D2 network/MCP transport: file once Director triggers "expose beyond localhost".
 - Live hook registration: PostToolUse + Stop when Director confirms.
+
+---
+
+## Session 18 state (2026-06-12, main @ 61dea49) — READ THIS, the blocks above are stale
+
+> This HANDOFF's dated blocks stop at session 14. Sessions 15–17 (RequestContext
+> wiring, daemon emit, P3 query surface) and the U5 SAST program landed WITHOUT
+> updating this doc. **Build-state truth is `BUILDLOG.md`** — its 2026-06-12 entries
+> (Session 16 + the U5 SAST entry) are current; trust them over the session-≤14 prose here.
+
+**U5 SAST program landed + reconciled** (BUILDLOG 2026-06-12 "U5 SAST program" entry):
+- D4 Storage Gate (`lgwks_storage.py`), OWASP hardening, SCG/Math-ML-LLM/Liquid-Brain
+  SAST (`lgwks_bot_code_hacker.py` H5–H8, `lgwks_audit_graph.py`).
+- These shipped as 7 direct-to-main commits with fabricated PR/ADR refs; reconciled this
+  session: SAST false-positive root cause fixed (self-scan 3792→202), `findings_final.json`
+  + `.worktrees` purged, 5 root scratch scripts → `tests/test_owasp_hardening.py`, SAST ADRs
+  relocated kernel→lgwks as `docs/ADR-sast-001/002/003`, commit refs reworded, browser
+  SSRF-block `NameError` crash fixed.
+
+**Open debts (filed):** #114 (causal-tape 1s-timestamp tail → fork risk; per-call SQLite
+connections) and #115 (audit_graph substring matching + no-op Tier-3). #114's causal-tape
+fix is the next substantive lgwks correctness unit when this track resumes.
+
+**Full HANDOFF refresh (fold sessions 15–18 into a clean current-state block) is still owed.**
