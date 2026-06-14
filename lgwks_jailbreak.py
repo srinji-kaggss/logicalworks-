@@ -58,7 +58,7 @@ def sanitize(prompt: str) -> str:
 _SIGNALS: tuple[tuple[str, float, re.Pattern], ...] = (
     ("instruction_override", 0.6, re.compile(
         r"\b(ignore|disregard|forget)\b[^.]{0,40}\b(previous|prior|above|earlier|all|your)\b"
-        r"[^.]{0,30}\b(instruction|instructions|prompt|rule|rules|context)\b", re.I)),
+        r"[^.]{0,30}\b(instruction|prompt|rule|context|direction|guideline)s?\b", re.I)),
     ("system_prompt_probe", 0.5, re.compile(
         r"\b(reveal|print|repeat|show|leak|output)\b[^.]{0,30}\b(system prompt|your "
         r"(instructions|rules|prompt)|initial prompt)", re.I)),
@@ -69,7 +69,7 @@ _SIGNALS: tuple[tuple[str, float, re.Pattern], ...] = (
         r"(<\|im_(start|end)\|>|\[/?INST\]|<<SYS>>|###\s*(system|instruction)|^\s*system:)", re.I | re.M)),
     ("override_bypass", 0.4, re.compile(
         r"\b(override|bypass|disable|turn off|ignore)\b[^.]{0,25}\b(safety|guard|guardrail|"
-        r"filter|gate|moderation|restriction|policy|rules)\b", re.I)),
+        r"filter|gate|moderation|restriction|policy|policies|rule|safeguard|protection)s?\b", re.I)),
 )
 # Long base64-ish blob (a classic payload-smuggling tell), scored as obfuscation.
 _BASE64_BLOB = re.compile(r"[A-Za-z0-9+/]{120,}={0,2}")

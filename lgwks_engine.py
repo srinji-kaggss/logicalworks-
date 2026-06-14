@@ -320,7 +320,8 @@ def _denied_envelope(risk: dict[str, Any]) -> dict[str, Any]:
         "retrieval": [],
         "last_state": {},
         "insights": {
-            "scores": {"confidence_P": 0.0, "injection_risk": risk["injection_risk"]},
+            "scores": {"confidence_P": 0.0, "injection_risk": risk["injection_risk"],
+                       "risk_score": risk.get("risk_score", risk["injection_risk"])},
             "selections": [],
             "flags": ["llm_injection_attempt"],
             "actions_taken": [],
@@ -328,10 +329,12 @@ def _denied_envelope(risk: dict[str, Any]) -> dict[str, Any]:
         "pathways": [],
         "meta": {
             "status": "denied",
-            "injection": {
+            "injection": risk.get("injection", {
+                "verdict": "block", "signals": risk["signals"], "receipt": risk["receipt"]}),
+            "risk": {
                 "verdict": "block",
-                "signals": risk["signals"],
-                "receipt": risk["receipt"],
+                "risk_score": risk.get("risk_score", risk["injection_risk"]),
+                "components": risk.get("components", []),
             },
         },
     }
@@ -348,17 +351,26 @@ def run_engine(
 
     Fails silently on any sub-component error — always returns a valid envelope.
     """
-    # ── Layer 1: entrypoint injection-risk + abstention ladder (graceful) ─────
-    # Graded score → verdict (proceed|attenuate|confirm|block). Only `block`
-    # short-circuits; attenuate/confirm sanitize-and-continue but ride a flag +
-    # transparency receipt downstream so the gate can require confirmation. This
-    # is graceful degradation (clean & run), not a hard wall.
+    # ── Layer 1: unified risk + abstention gate (#143; graceful) ──────────────
+    # ONE gate composes every risk signal — injection (attacker) · assumption
+    # (accidental self-injection / ambiguity) · anomaly (fraud/drift seam) — into a
+    # single graded verdict (proceed|attenuate|confirm|block). Only `block` short-
+    # circuits; attenuate/confirm sanitize-and-continue but ride a flag + transparency
+    # receipt downstream so the gate can require confirmation. Graceful degradation
+    # (clean & run), not a hard wall. The assumption signal degrades to absent when
+    # the classifier is unavailable, so this stays an exact injection-only regression
+    # in headless/no-model contexts (INV-6 — never block the conscious channel).
     # INV-7: cap attacker-controlled input FIRST, so detection scans bounded text
     # (anything past the cap is discarded for all processing — no evasion gap).
+    import lgwks_had
     import lgwks_jailbreak
-    if isinstance(prompt, str) and len(prompt) > _MAX_PROMPT_CHARS:
+    # Coerce non-str FIRST so the envelope guarantee holds for any input (INV-6): sanitize()
+    # downstream assumes a string. A non-str prompt becomes empty rather than crashing.
+    if not isinstance(prompt, str):
+        prompt = ""
+    if len(prompt) > _MAX_PROMPT_CHARS:
         prompt = prompt[:_MAX_PROMPT_CHARS]
-    risk = lgwks_jailbreak.assess(prompt)
+    risk = lgwks_had.assess(prompt)
     if risk["verdict"] == "block":
         return _denied_envelope(risk)
     prompt = lgwks_jailbreak.sanitize(prompt)
@@ -440,6 +452,7 @@ def run_engine(
                 "decisiveness_d": decisiveness,
                 "confidence_P": P,
                 "injection_risk": risk["injection_risk"],
+                "risk_score": risk.get("risk_score", risk["injection_risk"]),
                 "grounding_status": grounding_status,
                 "coverage_mode": coverage_mode,
                 "note": "independent axes (capability / graph / margin); P = geometric "
@@ -456,10 +469,12 @@ def run_engine(
             "verb_count": verb_count,
             "query_tokens": qt,
             "graph_hits": len(graph_hits),
-            "injection": {
+            "injection": risk.get("injection", {
+                "verdict": risk["verdict"], "signals": risk["signals"], "receipt": risk["receipt"]}),
+            "risk": {
                 "verdict": risk["verdict"],
-                "signals": risk["signals"],
-                "receipt": risk["receipt"],
+                "risk_score": risk.get("risk_score", risk["injection_risk"]),
+                "components": risk.get("components", []),
             },
         },
     }
