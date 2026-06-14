@@ -82,8 +82,7 @@ class DoRun:
         }
 
 
-def _now() -> str:
-    return time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
+from lgwks_clock import now_iso as _now  # one source of truth for timestamps (was Z-suffixed; now +00:00)
 
 
 def _build_review_args(

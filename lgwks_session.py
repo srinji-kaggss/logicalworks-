@@ -20,7 +20,6 @@ import subprocess
 import sys
 from collections import Counter
 from dataclasses import dataclass, field
-from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
@@ -31,8 +30,7 @@ from lgwks_repo import _git, _is_repo
 _MARKER_FILE = Path.home() / ".config" / "lgwks" / "session-markers.jsonl"
 
 
-def _now() -> str:
-    return datetime.now(timezone.utc).replace(microsecond=0).isoformat()
+from lgwks_clock import now_iso as _now  # one source of truth for timestamps
 
 
 def _write_marker(repo: Path, kind: str, note: str = "") -> None:

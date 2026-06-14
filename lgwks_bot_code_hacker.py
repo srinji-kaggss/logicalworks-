@@ -285,8 +285,7 @@ class SARIFConverter:
 
 # ── Record factory ─────────────────────────────────────────────────────────
 
-def _ts() -> str:
-    return datetime.now(timezone.utc).isoformat(timespec="seconds")
+from lgwks_clock import now_iso as _ts  # one source of truth for timestamps
 
 
 def _run_seed(repo: str) -> str:

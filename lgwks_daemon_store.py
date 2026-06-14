@@ -12,7 +12,6 @@ import argparse
 import json
 import sqlite3
 import sys
-from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
@@ -41,8 +40,7 @@ WORK_KINDS = frozenset({
 ITEM_STATUSES = frozenset({"queued", "running", "done", "failed"})
 
 
-def _now() -> str:
-    return datetime.now(timezone.utc).replace(microsecond=0).isoformat()
+from lgwks_clock import now_iso as _now  # one source of truth for timestamps
 
 _MIGRATIONS = [
     (

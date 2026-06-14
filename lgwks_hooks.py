@@ -73,8 +73,6 @@ import re
 import subprocess
 import sys
 import threading
-import time
-from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
@@ -194,8 +192,7 @@ def _resolve_within_root(root: Path, candidate: str) -> Path | None:
 
 # ── timestamp / session ──────────────────────────────────────────────────────
 
-def _now() -> str:
-    return datetime.now(timezone.utc).replace(microsecond=0).isoformat()
+from lgwks_clock import now_iso as _now  # one source of truth for timestamps
 
 
 def _session_id() -> str:

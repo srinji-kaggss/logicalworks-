@@ -72,8 +72,7 @@ _ID_RE = re.compile(r"^[A-Za-z0-9._:/@-]{1,128}$")
 _CID_RE = re.compile(rf"^{re.escape(CID_ALG)}:[0-9a-f]{{64}}$")
 
 
-def _now() -> str:
-    return datetime.now(timezone.utc).replace(microsecond=0).isoformat()
+from lgwks_clock import now_iso as _now  # one source of truth for timestamps
 
 
 def _require_id(name: str, value: str) -> str:

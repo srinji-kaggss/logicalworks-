@@ -12,14 +12,12 @@ import os
 import time
 from pathlib import Path
 from typing import Optional, Any
-from datetime import datetime, timezone
 
 import lgwks_openrouter
 import lgwks_project_artifacts as artifacts
 
 
-def _ts() -> str:
-    return datetime.now(timezone.utc).isoformat(timespec="seconds")
+from lgwks_clock import now_iso as _ts  # one source of truth for timestamps
 
 
 def _write_meter(repo_path: Path, record: dict) -> None:
