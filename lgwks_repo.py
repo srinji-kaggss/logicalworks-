@@ -31,12 +31,7 @@ from lgwks_solve import _diagnose as _git_diagnose
 from lgwks_steering import Steering
 
 
-def _git(repo: Path, *args: str, timeout: int = 30) -> tuple[int, str]:
-    try:
-        p = subprocess.run(["git", "-C", str(repo), *args], capture_output=True, text=True, timeout=timeout)
-        return p.returncode, (p.stdout or "").strip()
-    except Exception as e:
-        return 1, f"<git failed: {e}>"
+from lgwks_proc import run_git as _git  # one source of truth for the (rc, stdout) git wrapper
 
 
 def _gh(*args: str, cwd: str | Path | None = None, timeout: int = 30) -> tuple[int, str]:
