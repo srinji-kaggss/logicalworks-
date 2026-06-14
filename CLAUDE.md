@@ -69,3 +69,10 @@ Cite the path you verified, not the path you remember.
   only business/client material is local to it. Changes to engine code happen
   HERE, never in cl-ideas.
 Entry doc in each repo is `CLAUDE.md` (`AGENTS.md` symlinks to it).
+
+## Agent Mandates (2026-06-14)
+- **Mandatory Pre-flight**: Run `lgwks doctor` before ANY research, code analysis, or daemon task.
+- **Local-First Models**: Use `lgwks_model_hub` for repo-resident weights. Never assume `~/.cache`.
+- **Absolute Paths**: All command executions (via `subprocess`) must use absolute paths to the `lgwks` script.
+- **Telemetry v2**: Use `lgwks_daemon_event.emit()` for all audit logs. No raw `print()` for telemetry.
+- **CognitionLog**: Persist all reasoning to the HMAC-chained log in `store/cognition/`.

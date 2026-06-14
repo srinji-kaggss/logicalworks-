@@ -70,91 +70,59 @@ def _entry(
     return entry
 
 
-# ── The model law, transcribed from spec §3.1 (current) and §3.2 (open slots) ──
-# Provenance (feedback_calculator_test): every row is copied from the spec's law
-# tables — no model is loaded, no selection is made here. Editing this list is a
-# model-law change and must cite the spec section it reflects.
+# ── The model law, transcribed from spec §3.1 (current) and §8 (Locked v1) ──
+# Provenance (reconciled 2026-06-14): every row is copied from the 2026-06-13 finalization spec.
 MESH_LAW: list[dict[str, Any]] = [
-    # §3.1 current law — the inventory this note must not silently replace.
     _entry(
-        name="Qwen/Qwen3-VL-Embedding-8B", runtime="mlx", locality="local", role="embed",
+        name="Qwen/Qwen3-Embedding-8B", runtime="mlx", locality="local", role="embed",
         input_schema="lgwks.modality.item.v1", output_schema="lgwks.vector.record.v1",
         trust_class="sensor", status="current_law",
-        notes="unified multimodal embed port; MLX primary, transformers fallback (lgwks_embed_port)",
+        notes="Universal semantic space; store-fetch status",
+    ),
+    _entry(
+        name="Qwen/Qwen3-Reranker-0.6B", runtime="mlx", locality="local", role="rerank",
+        trust_class="sensor", status="current_law",
+        notes="High-density retrieval ranker",
+    ),
+    _entry(
+        name="mlx-community/Olmo-3-1125-32B-4bit", runtime="mlx", locality="local", role="proposal",
+        trust_class="generative", status="current_law",
+        notes="Deep reasoning (owned core); Mac-tier only",
     ),
     _entry(
         name="tiny-bert", runtime="transformers", locality="local", role="intent",
         trust_class="sensor", status="current_law",
-        notes="lightweight text intent + cached intent centroids (lgwks_model_hub)",
     ),
     _entry(
         name="distilbert-base-uncased", runtime="transformers", locality="local", role="classify",
         trust_class="sensor", status="current_law",
-        eval_gate={"eval_id": None, "threshold": None, "status": "pending"},
-        notes="general classifier/gate; exact gate tasks + eval corpus open (lgwks_model_hub)",
     ),
     _entry(
-        name="codebert-base", runtime="transformers", locality="local", role="code",
+        name="microsoft/codebert-base", runtime="transformers", locality="local", role="code",
         trust_class="sensor", status="current_law",
-        notes="code intelligence encoder (lgwks_model_hub)",
     ),
     _entry(
         name="neobert", runtime="transformers", locality="local", role="salience",
         trust_class="sensor", status="current_law",
-        eval_gate={"eval_id": None, "threshold": None, "status": "pending"},
-        notes="transcript/cortex salience catalog slot; promote-or-replace after eval (lgwks_model_hub)",
-    ),
-    _entry(
-        name="qwen3-embedding:8b", runtime="ollama", locality="local", role="embed",
-        trust_class="sensor", status="current_law",
-        notes="semantic eye / intent path, local Ollama (model-stack law)",
     ),
     _entry(
         name="LiquidAI/LFM2-1.2B-Extract", runtime="llama_cpp", locality="local", role="extract",
-        output_schema="lgwks.crawl.artifacts.v1", trust_class="generative", status="current_law",
-        notes="structured extraction, llama.cpp/GGUF local worker (not authority)",
-    ),
-    _entry(
-        name="LiquidAI/LFM2.5-VL-1.6B-Extract", runtime="llama_cpp", locality="local", role="extract",
-        output_schema="lgwks.crawl.artifacts.v1", trust_class="generative", status="candidate_reference",
-        notes="optional VL extractor per ingestion docs; not selected",
-    ),
-    _entry(
-        name="mlx-community/all-MiniLM-L6-v2-4bit", runtime="mlx", locality="local", role="embed",
-        trust_class="sensor", status="current_law",
-        notes="Apple local embedding seam default (lgwks_apple)",
-    ),
-    _entry(
-        name=None, runtime="coreml", locality="local", role="classify",
-        trust_class="sensor", status="current_law",
-        notes="CoreML .mlpackage text-classifier seam; optional local classifier runtime (no pinned model)",
-    ),
-    _entry(
-        name=None, runtime="provider_seam", locality="cloud", role="proposal",
         trust_class="generative", status="current_law",
-        notes="Tongue research-language compiler via provider seam (lgwks_tongue); local replacement not selected",
     ),
     _entry(
-        name=None, runtime="provider_seam", locality="cloud", role="embed",
-        trust_class="generative", status="candidate_reference",
-        notes="legacy OpenRouter/Gemini media embedding path; existing seam only, not expanded by this note",
-    ),
-    # §3.2 open slots — missing slots, NOT selected models (name=null).
-    _entry(
-        name=None, runtime=None, locality=None, role="rerank", trust_class=None, status="open_slot",
-        notes="retrieval reranker; deferred in current model-stack ledger; sits after #124 query surface",
+        name="WhisperKit/lg-v3-turbo", runtime="mlx", locality="local", role="asr",
+        trust_class="sensor", status="current_law",
+        notes="Ear (ASR) layer; define voice contract",
     ),
     _entry(
-        name=None, runtime=None, locality=None, role="asr", trust_class=None, status="open_slot",
-        notes="Voice ASR / Ear; define the voice-event contract first (#123); model not selected",
+        name="hexgrad/Kokoro-82M", runtime="mlx", locality="local", role="asr",
+        trust_class="generative", status="current_law",
+        notes="Mouth (TTS) layer",
     ),
     _entry(
-        name=None, runtime=None, locality=None, role="proposal", trust_class=None, status="open_slot",
-        notes="local Tongue replacement (proposal/summarizer) for fully-local runtime; no model selected",
-    ),
-    _entry(
-        name=None, runtime=None, locality=None, role="code", trust_class=None, status="open_slot",
-        notes="code proposal helper for IDE mode; no direct write authority; no model selected",
+        name="meta-llama/Llama-Prompt-Guard-2-86M", runtime="transformers", locality="local", role="classify",
+        trust_class="sensor", status="current_law",
+        notes="ML-layer injection guard",
     ),
 ]
 

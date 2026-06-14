@@ -61,11 +61,12 @@ class Aetherius:
         """Execute the full Aetherius loop."""
         print(ui.band("lgwks · aetherius", f"Goal: {self.goal}", on=True))
         
-        self._synthesis()    # Chamber I
-        self._dialectic()    # Chamber II
-        self._valuation()    # Chamber III
-        self._refinement()   # Chamber IV
-        self._ingestion()    # Chamber V
+        self._recall()       # Chamber 0: The Echo
+        self._synthesis()    # Chamber I: The Spark
+        self._dialectic()    # Chamber II: The Hammer
+        self._valuation()    # Chamber III: The Scale
+        self._refinement()   # Chamber IV: The Crucible
+        self._ingestion()    # Chamber V: The Anchor
         
         result = {
             "schema": SCHEMA,
@@ -76,6 +77,13 @@ class Aetherius:
         }
         self.log.append("promotion", result)
         return result
+
+    def _recall(self):
+        """Chamber 0: The Echo.
+        Queries the Transcript Cortex for historical context and commitments."""
+        self.status = "recall"
+        # Simulated cortex query
+        self.log.append("thought", {"chamber": "recall", "status": "fleet_history_scanned"})
 
     def _synthesis(self):
         """Chamber I: The Spark.

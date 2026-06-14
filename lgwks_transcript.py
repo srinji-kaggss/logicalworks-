@@ -13,17 +13,11 @@ from pathlib import Path
 from typing import Any
 
 
-def tail(path: str | Path | None, n: int = 20) -> list[dict[str, Any]]:
+def tail(path: str | Path | None, n: int = 20, include_content: bool = False) -> list[dict[str, Any]]:
     """Return normalized payloads for the last N transcript turns.
 
     Each payload: {"role": ..., "content_len": int, "turn_index": int, "turn_id": str}
-
-    - role: "human" | "assistant" | "tool_result" | "unknown"
-    - content_len: byte length of the content field (no raw content stored)
-    - turn_index: 0-based index within the returned window (not the global position)
-    - turn_id: the uuid from the JSONL line, or a fallback index-based id
-
-    Handles: missing file, empty file, malformed JSONL — all return [].
+    Optional: "content" field if include_content is True.
     """
     if not path:
         return []
@@ -36,7 +30,6 @@ def tail(path: str | Path | None, n: int = 20) -> list[dict[str, Any]]:
     except OSError:
         return []
 
-    # Tail the last n raw lines before parsing (cheap for large files)
     tail_lines = lines[-n:] if len(lines) > n else lines
 
     results: list[dict[str, Any]] = []
@@ -55,14 +48,38 @@ def tail(path: str | Path | None, n: int = 20) -> list[dict[str, Any]]:
         content_len = _content_len(record)
         turn_id = _turn_id(record, idx)
 
-        results.append({
+        entry = {
             "role": role,
             "content_len": content_len,
             "turn_index": idx,
             "turn_id": turn_id,
-        })
+        }
+        
+        if include_content:
+            entry["content"] = _extract_content(record)
+
+        results.append(entry)
 
     return results
+
+
+def _extract_content(record: dict[str, Any]) -> str:
+    """Extract raw text content from a turn."""
+    msg = record.get("message", {})
+    if isinstance(msg, dict):
+        content = msg.get("content", "")
+        if isinstance(content, str):
+            return content
+        if isinstance(content, list):
+            text_parts = []
+            for block in content:
+                if isinstance(block, dict):
+                    if block.get("type") == "text":
+                        text_parts.append(block.get("text", ""))
+                elif isinstance(block, str):
+                    text_parts.append(block)
+            return "\n".join(text_parts)
+    return ""
 
 
 def _extract_role(record: dict[str, Any]) -> str:

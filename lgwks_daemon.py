@@ -908,6 +908,33 @@ def add_parser(sub) -> None:
     _register_export_subcommands(ps)
     _register_worktree_subcommands(ps)
 
+    stream = ps.add_parser("stream", help="live JSON stream of daemon events (AI entrypoint)")
+    stream.set_defaults(func=_stream_command)
+
+
+def _stream_command(args: argparse.Namespace) -> int:
+    import time
+    from lgwks_daemon_store import DaemonEventStore
+    from lgwks_sqlite import get_db
+    
+    db = get_db(args.repo / "store" / "daemon" / "daemon-events.db")
+    store = DaemonEventStore(db)
+    
+    print("--- START STREAM ---")
+    last_id = 0
+    try:
+        while True:
+            # Simple polling for now; can be optimized with file watching or signals
+            events = store.list_events(limit=10) # Simplified list for streaming
+            # Real implementation would track last seen ID
+            for e in reversed(events):
+                print(json.dumps(e))
+            sys.stdout.flush()
+            time.sleep(1)
+    except KeyboardInterrupt:
+        return 0
+    return 0
+
 
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(prog="lgwks_daemon")
