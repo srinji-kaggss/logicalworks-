@@ -227,3 +227,34 @@ These links were checked as runtime feasibility references only. They are not se
 - MLX local server paths exist for some small language/code models.
 - MLX embedding variants exist for experimentation.
 - MLX and WhisperKit/CoreML ASR packaging exists for future voice-ingress evaluation.
+
+## 8. FINALIZED MODEL PACK v1 — LOCKED 2026-06-13
+
+This is the lockfile for the Director's session-15 finalization (decisions logged in
+`BUILDLOG-model-stack.md`). "Locked" = the pinned reference is authoritative; weights are env
+artifacts (small ones committed under `models/`; big ones live in gitignored `store/models/` and are
+fetched per-machine; gated ones need the operator's HF license + token). We do NOT commit multi-GB
+weights to git history. Status legend: `committed` (in `models/`), `store-fetch` (gitignored, setup
+step), `gated` (operator must accept license), `pinned` (reference only, not yet fetched).
+
+| Slot | Finalized model | Repo / source | ~Size | Runtime | Trust | Status |
+|---|---|---|---|---|---|---|
+| Embed / semantic space | Qwen3-Embedding-8B (0.6B phone tier) | `Qwen/Qwen3-Embedding-8B` | ~16GB | mlx→transformers | sensor | store-fetch |
+| Rerank | Qwen3-Reranker (0.6/4B) | `Qwen/Qwen3-Reranker-0.6B` | ~1.2GB | mlx/gguf | sensor | pinned |
+| Code understanding | codebert-base (live) + Qwen3-Coder (opt) | `microsoft/codebert-base` | ~0.5GB | transformers | sensor | committed |
+| Intent / classify | tiny-bert + distilbert (centroids) | repo catalog | ~0.5GB | mlx/transformers | det.-fed | committed |
+| Salience / cortex | neobert (research slot) | repo catalog | ~0.9GB | transformers | sensor | committed |
+| Extract | LFM2-1.2B-Extract | `LiquidAI/LFM2-1.2B-Extract` | ~1.2GB | llama.cpp | sensor | pinned |
+| Ear (ASR) | WhisperKit lg-v3-turbo / Parakeet-TDT-0.6B-v3 | WhisperKit / NeMo Parakeet | ~0.6GB | ANE/MLX | sensor·untrusted | pinned |
+| Tongue (translator) | Qwen3-VL (text+vision) — composed, deferring, non-generative | `Qwen/Qwen3-VL-*-Instruct` | tier | mlx | generative·proposal | pinned |
+| Mouth (TTS) | Kokoro-82M | `hexgrad/Kokoro-82M` | ~0.3GB | mlx-audio | output | pinned |
+| Voice upgrade (Mac) | Moshi (full-duplex) | `kyutai/moshika-*` | tier | local | generative·proposal | pinned |
+| Injection guard | det. floor (LIVE) + Llama-Prompt-Guard-2-86M | `meta-llama/Llama-Prompt-Guard-2-86M` | ~0.35GB | transformers | sensor | gated |
+| Context-state (learned) | Titans/MIRAS target (det. JSONL+I7 is the live floor) | research target | — | — | deterministic engine | pinned |
+| Owned re-engineerable core | OLMo 3 / Molmo 2 (open recipe) | `allenai/OLMo-3-*` | tier | transformers/mlx | generative·proposal | pinned |
+| Heavy reasoning brain | rented frontier (swappable) | OpenRouter via `LGWKS_TONGUE_MODEL` | n/a | provider_seam | generative·proposal | live |
+
+Notes: the injection-guard DETERMINISTIC floor is implemented + tested NOW (`lgwks_jailbreak.assess`); the
+Prompt-Guard ML layer is the gated upgrade behind the `_ml_injection_score` seam. Big Qwen/OLMo/Moshi
+weights are pinned references — run a setup step on each machine to populate `store/models/`. MESH_LAW
+(`lgwks_model_mesh.py`) + §3.1/§3.2 promotion of these into formal law is the tracked follow-up.

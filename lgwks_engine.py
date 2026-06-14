@@ -308,6 +308,35 @@ def _aggregate(*axes: float | None) -> float:
     return round(prod ** (1.0 / len(vals)), 3)
 
 
+def _denied_envelope(risk: dict[str, Any]) -> dict[str, Any]:
+    """Complete §6 envelope for a blocked entrypoint — never run, fully audited.
+
+    Keeps the same shape as a normal result (so consumers need no special case)
+    while redacting the prompt and carrying the system-generated receipt."""
+    return {
+        "schema": _SCHEMA,
+        "prompt": "[REDACTED: INJECTION_DETECTED]",
+        "attention": None,
+        "retrieval": [],
+        "last_state": {},
+        "insights": {
+            "scores": {"confidence_P": 0.0, "injection_risk": risk["injection_risk"]},
+            "selections": [],
+            "flags": ["llm_injection_attempt"],
+            "actions_taken": [],
+        },
+        "pathways": [],
+        "meta": {
+            "status": "denied",
+            "injection": {
+                "verdict": "block",
+                "signals": risk["signals"],
+                "receipt": risk["receipt"],
+            },
+        },
+    }
+
+
 def run_engine(
     prompt: str,
     *,
@@ -319,20 +348,22 @@ def run_engine(
 
     Fails silently on any sub-component error — always returns a valid envelope.
     """
-    # ── Layer 1 Math Gate: Injection Guard ────────────────────────────────────
+    # ── Layer 1: entrypoint injection-risk + abstention ladder (graceful) ─────
+    # Graded score → verdict (proceed|attenuate|confirm|block). Only `block`
+    # short-circuits; attenuate/confirm sanitize-and-continue but ride a flag +
+    # transparency receipt downstream so the gate can require confirmation. This
+    # is graceful degradation (clean & run), not a hard wall.
+    # INV-7: cap attacker-controlled input FIRST, so detection scans bounded text
+    # (anything past the cap is discarded for all processing — no evasion gap).
     import lgwks_jailbreak
-    if not lgwks_jailbreak.is_clean(prompt):
-        return {
-            "schema": _SCHEMA,
-            "prompt": "[REDACTED: INJECTION_DETECTED]",
-            "insights": {"flags": ["llm_injection_attempt"], "scores": {"confidence_P": 0.0}},
-            "meta": {"status": "denied"}
-        }
+    if isinstance(prompt, str) and len(prompt) > _MAX_PROMPT_CHARS:
+        prompt = prompt[:_MAX_PROMPT_CHARS]
+    risk = lgwks_jailbreak.assess(prompt)
+    if risk["verdict"] == "block":
+        return _denied_envelope(risk)
     prompt = lgwks_jailbreak.sanitize(prompt)
     # ─────────────────────────────────────────────────────────────────────────
 
-    if isinstance(prompt, str) and len(prompt) > _MAX_PROMPT_CHARS:
-        prompt = prompt[:_MAX_PROMPT_CHARS]
     try:
         sys.path.insert(0, str(_REPO))
         import lgwks_map
@@ -390,6 +421,10 @@ def run_engine(
     P = _aggregate(C, grounding_rate, decisiveness)
 
     flags = _detect_flags(prompt)
+    # attenuate/confirm verdicts ride as additive flags so downstream gates can
+    # require confirmation; `proceed` adds nothing (clean path stays clean).
+    if risk["verdict"] in ("attenuate", "confirm"):
+        flags = flags + [f"injection_{risk['verdict']}"]
     state = _last_state(repo)
 
     return {
@@ -404,6 +439,7 @@ def run_engine(
                 "gap_G": gap_G,
                 "decisiveness_d": decisiveness,
                 "confidence_P": P,
+                "injection_risk": risk["injection_risk"],
                 "grounding_status": grounding_status,
                 "coverage_mode": coverage_mode,
                 "note": "independent axes (capability / graph / margin); P = geometric "
@@ -420,6 +456,11 @@ def run_engine(
             "verb_count": verb_count,
             "query_tokens": qt,
             "graph_hits": len(graph_hits),
+            "injection": {
+                "verdict": risk["verdict"],
+                "signals": risk["signals"],
+                "receipt": risk["receipt"],
+            },
         },
     }
 
