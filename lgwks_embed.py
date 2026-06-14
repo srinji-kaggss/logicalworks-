@@ -22,12 +22,7 @@ VAULT_ROOT = ROOT / "store" / "vectors"
 DIMS = 256
 CHUNK_WORDS = 420
 CHUNK_OVERLAP = 70
-TEXT_EXT = {
-    ".txt", ".md", ".json", ".jsonl", ".yaml", ".yml", ".toml", ".ini", ".cfg", ".xml", ".csv",
-    ".py", ".js", ".ts", ".tsx", ".jsx", ".rs", ".go", ".java", ".kt", ".swift", ".rb", ".php",
-    ".c", ".h", ".cpp", ".hpp", ".cc", ".cs", ".sh", ".bash", ".zsh", ".sql", ".lua", ".r",
-}
-SKIP_DIRS = {".git", "node_modules", "__pycache__", ".venv", "venv", "target", ".next", "dist", "build", "store"}
+from lgwks_substrate_config import TEXT_EXT, SKIP_DIRS  # one source of truth (were local copies)
 STOP = {
     "a", "an", "and", "are", "as", "at", "be", "by", "for", "from", "has", "have", "if", "in",
     "is", "it", "its", "not", "of", "on", "or", "that", "the", "this", "to", "was", "with",

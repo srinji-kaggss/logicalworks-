@@ -96,7 +96,7 @@ _TEXT_EXTS = frozenset({
     ".ipynb",
 })
 
-_IMAGE_EXTS = frozenset({".png", ".jpg", ".jpeg", ".webp", ".gif", ".bmp", ".tiff", ".tif"})
+from lgwks_substrate_config import IMAGE_EXTS as _IMAGE_EXTS  # one source of truth
 _VIDEO_EXTS = frozenset({".mp4", ".mov", ".avi", ".mkv", ".webm", ".m4v", ".3gp", ".flv"})
 _AUDIO_EXTS = frozenset({".mp3", ".wav", ".flac", ".aac", ".ogg", ".m4a", ".opus", ".wma"})
 

@@ -29,7 +29,7 @@ try:
 except Exception:
     _cap = None
 
-_TAG = re.compile(r"<[^>]+>")
+from lgwks_substrate_config import TAG_RE as _TAG  # one source of truth
 _WS = re.compile(r"\n{3,}")
 _PDF_EXT = {".pdf"}
 _OFFICE_EXT = {".docx", ".xlsx", ".pptx", ".doc", ".xls", ".ppt"}

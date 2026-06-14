@@ -44,9 +44,11 @@ TEXT_EXT = {
     ".c", ".h", ".cpp", ".hpp", ".cc", ".cs", ".sh", ".bash", ".zsh", ".sql", ".lua", ".r",
 }
 SKIP_DIRS = {".git", "node_modules", "__pycache__", ".venv", "venv", "target", ".next", "dist", "build", "store"}
+IMAGE_EXTS = frozenset({".png", ".jpg", ".jpeg", ".webp", ".gif", ".bmp", ".tiff", ".tif"})
 
 # ── Regex constants ──────────────────────────────────────────────────────────
 
+TAG_RE = re.compile(r"<[^>]+>")  # strip HTML/XML tags
 NUMERIC_RE = re.compile(r"\b\d+(?:[.,]\d+)?%?\b|\$\s*\d[\d,]*(?:\.\d+)?")
 CODE_RE = re.compile(r"\b(?:[A-Z]{2,}\d{0,4}|T\d{4}|TR\d{2}|[A-Z]{2,5})\b")
 REF_RE = re.compile(r"\b(?:s\.?\s*\d+(?:\.\d+)?|\d{4}-\d{2}-\d{2}|[A-Z][a-z]{2,8}\s+\d{1,2},\s+\d{4})\b")

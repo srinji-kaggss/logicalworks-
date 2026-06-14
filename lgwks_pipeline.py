@@ -443,8 +443,7 @@ def embed_multimodal(
 # DATASET INTAKE — streaming, batched; reads substrate artifacts when available
 # ══════════════════════════════════════════════════════════════════════════════
 
-_IMAGE_EXTS = {".png", ".jpg", ".jpeg", ".webp", ".gif", ".bmp"}
-from lgwks_substrate_config import SKIP_DIRS as _SKIP_DIRS  # one source of truth (was a local copy)
+from lgwks_substrate_config import SKIP_DIRS as _SKIP_DIRS, IMAGE_EXTS as _IMAGE_EXTS  # one source of truth
 
 
 from lgwks_hashing import content_id as _sha  # canonical content-id (one source of truth)

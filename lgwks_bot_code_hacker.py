@@ -46,7 +46,7 @@ _SQL_ATTRS = frozenset({"execute", "executescript"})
 _NET_TOPS = frozenset(m.split(".")[0] for m in _NET_MODULES)
 _NET_SAFE_RE = re.compile(r"(portal|network|search|fetch|browser|public|cohere|provider|auth_runtime)", re.I)
 _SECRET_RE = re.compile(r"(token|secret|key|password|api_key|credential|auth|bearer)", re.I)
-_LOG_ATTRS = frozenset({"debug", "info", "warning", "error", "critical", "exception", "log"})
+from lgwks_substrate_config import _LOG_ATTRS  # one source of truth
 _LOG_OBJ_RE = re.compile(r"^(logging|logger|log)", re.I)
 
 # ── Baseline / allowlist helpers ────────────────────────────────────────────
