@@ -1604,8 +1604,8 @@ def _tui_dispatch(args) -> int:
         return 1
         
     try:
-        # Pass the repo root to the TUI if needed (it currently auto-detects cwd)
-        return subprocess.call([str(binary)])
+        # Pass the canonical repo root to the TUI to avoid re-detection issues.
+        return subprocess.call([str(binary), "--repo", str(root)])
     except KeyboardInterrupt:
         return 0
     except Exception as e:
