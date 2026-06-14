@@ -104,4 +104,41 @@ impl Db {
         }
         Ok(items)
     }
+
+    pub fn emit_telemetry(&self, lane: &str, kind: &str, scope: &str, payload_msg: &str) -> Result<()> {
+        let repo_path = std::env::current_dir()?;
+        let tenant_id = format!("repo:{}", repo_path.file_name().unwrap_or_default().to_string_lossy());
+        
+        let payload = serde_json::json!({
+            "message": payload_msg,
+        });
+
+        // Layer 4: Debug Instrumentation & Telemetry Audit
+        // Use std::process::Command to securely execute the emit command, avoiding shell injection.
+        let status = std::process::Command::new("python3")
+            .args([
+                "lgwks", "daemon", "emit",
+                "--lane", lane,
+                "--kind", kind,
+                "--scope", scope,
+                "--tenant", &tenant_id,
+                "--session-id", "tui_session",
+                "--agent-id", "tui",
+            ])
+            .current_dir(&repo_path)
+            .env("LGWKS_DAEMON_DB", self.db_path.to_str().unwrap_or(""))
+            // We pass the payload via stdin to avoid exposing it to process arguments.
+            .stdin(std::process::Stdio::piped())
+            .spawn();
+
+        if let Ok(mut child) = status {
+            if let Some(mut stdin) = child.stdin.take() {
+                use std::io::Write;
+                let _ = stdin.write_all(payload.to_string().as_bytes());
+            }
+            let _ = child.wait();
+        }
+
+        Ok(())
+    }
 }

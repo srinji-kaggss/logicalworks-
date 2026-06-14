@@ -2,15 +2,21 @@ mod models;
 mod db;
 
 use color_eyre::Result;
-use crossterm::event::{self, Event, KeyCode, KeyEventKind};
+use crossterm::{
+    event::{self, Event, KeyCode, KeyEventKind, EnableMouseCapture, DisableMouseCapture, MouseEventKind, MouseButton},
+    execute,
+};
 use ratatui::{
     layout::{Constraint, Direction, Layout, Rect},
     style::{Color, Modifier, Style},
     text::{Line, Span},
-    widgets::{Block, Borders, Paragraph, Tabs, Wrap, ListItem, Table, Row, List},
+    widgets::{Block, Borders, Paragraph, Tabs, Wrap, ListItem, Table, Row, List, Clear},
     DefaultTerminal, Frame,
 };
 use std::time::{Duration, Instant};
+use std::process::Command;
+use tui_input::Input;
+use tui_input::backend::crossterm::EventHandler;
 use crate::models::{DaemonEvent, WorkItem, DaemonStatus, NavModule};
 use crate::db::Db;
 
@@ -18,6 +24,7 @@ use crate::db::Db;
 enum Tab {
     Dashboard,
     NavMap,
+    Initialize,
     Events,
     Queue,
     Logs,
@@ -25,26 +32,28 @@ enum Tab {
 
 impl Tab {
     fn all() -> &'static [Tab] {
-        &[Tab::Dashboard, Tab::NavMap, Tab::Events, Tab::Queue, Tab::Logs]
+        &[Tab::Dashboard, Tab::NavMap, Tab::Initialize, Tab::Events, Tab::Queue, Tab::Logs]
     }
 
     fn to_index(self) -> usize {
         match self {
             Tab::Dashboard => 0,
             Tab::NavMap => 1,
-            Tab::Events => 2,
-            Tab::Queue => 3,
-            Tab::Logs => 4,
+            Tab::Initialize => 2,
+            Tab::Events => 3,
+            Tab::Queue => 4,
+            Tab::Logs => 5,
         }
     }
 
     fn from_index(index: usize) -> Self {
-        match index % 5 {
+        match index % 6 {
             0 => Tab::Dashboard,
             1 => Tab::NavMap,
-            2 => Tab::Events,
-            3 => Tab::Queue,
-            4 => Tab::Logs,
+            2 => Tab::Initialize,
+            3 => Tab::Events,
+            4 => Tab::Queue,
+            5 => Tab::Logs,
             _ => unreachable!(),
         }
     }
@@ -53,6 +62,7 @@ impl Tab {
         match self {
             Tab::Dashboard => "◈ DASHBOARD",
             Tab::NavMap => "🧭 NAVMAP",
+            Tab::Initialize => "⚙ INITIALIZE",
             Tab::Events => "◆ EVENTS",
             Tab::Queue => "✦ QUEUE",
             Tab::Logs => "◇ LOGS",
@@ -68,6 +78,8 @@ struct App {
     events: Vec<DaemonEvent>,
     queue: Vec<WorkItem>,
     nav_modules: Vec<(String, NavModule)>,
+    init_input: Input,
+    init_error: Option<String>,
 }
 
 impl App {
@@ -85,6 +97,8 @@ impl App {
             events: Vec::new(),
             queue: Vec::new(),
             nav_modules: Vec::new(),
+            init_input: Input::default().with_value(".".to_string()),
+            init_error: None,
         }
     }
 
@@ -114,9 +128,55 @@ impl App {
     fn prev_tab(&mut self) {
         let index = self.active_tab.to_index();
         if index == 0 {
-            self.active_tab = Tab::from_index(3);
+            self.active_tab = Tab::from_index(5);
         } else {
             self.active_tab = Tab::from_index(index - 1);
+        }
+    }
+
+    fn start_daemon(&mut self, db: &Db) {
+        let target_dir = self.init_input.value().trim();
+        // Layer 1: Entry/UI Validation
+        if target_dir.is_empty() {
+            self.init_error = Some("Error: Target directory cannot be empty.".to_string());
+            let _ = db.emit_telemetry("terminal_output", "human_message", "validation_failed", &format!("Start daemon failed: empty target_dir"));
+            return;
+        }
+
+        // Layer 2: Business Logic Validation
+        if self.status.status == "running" && self.status.pid.is_some() {
+            self.init_error = Some("Error: Daemon is already running.".to_string());
+            let _ = db.emit_telemetry("terminal_output", "human_message", "validation_failed", "Start daemon failed: already running");
+            return;
+        }
+
+        // Layer 3: Environment Guards
+        let target_path = std::path::Path::new(target_dir);
+        if !target_path.exists() || !target_path.join(".git").exists() {
+            self.init_error = Some("Error: Target directory must be a valid git repository.".to_string());
+            let _ = db.emit_telemetry("terminal_output", "human_message", "validation_failed", &format!("Start daemon failed: {} is not a git repo", target_dir));
+            return;
+        }
+
+        // Layer 4: Execution & Auditing
+        self.init_error = None;
+        let _ = db.emit_telemetry("control", "human_message", "daemon_start", &format!("Starting daemon in {}", target_dir));
+        
+        let status = Command::new("python3")
+            .args(["lgwks", "daemon", "start", "--repo", target_dir])
+            .current_dir(target_dir)
+            .status();
+
+        match status {
+            Ok(s) if s.success() => {
+                self.init_error = Some("Daemon started successfully.".to_string());
+            }
+            Ok(s) => {
+                self.init_error = Some(format!("Error: Process exited with code {}", s));
+            }
+            Err(e) => {
+                self.init_error = Some(format!("Error: Failed to execute python3: {}", e));
+            }
         }
     }
 }
@@ -124,16 +184,17 @@ impl App {
 fn main() -> Result<()> {
     color_eyre::install()?;
     
-    // Auto-detect repo root
     let repo_root = std::env::current_dir()?;
-    // If we are in a worktree, we might need to go up or find the main repo.
-    // For now, assume the cwd is where the store should be or it's a valid repo.
-    
     let db = Db::new(&repo_root);
+    
+    execute!(std::io::stdout(), EnableMouseCapture)?;
     let mut terminal = ratatui::init();
+    
     let app = App::new();
     let result = run_app(&mut terminal, app, db);
+    
     ratatui::restore();
+    execute!(std::io::stdout(), DisableMouseCapture)?;
     result
 }
 
@@ -150,20 +211,47 @@ fn run_app(terminal: &mut DefaultTerminal, mut app: App, db: Db) -> Result<()> {
         if event::poll(timeout)? {
             if let Event::Key(key) = event::read()? {
                 if key.kind == KeyEventKind::Press {
-                    match key.code {
-                        KeyCode::Char('q') | KeyCode::Esc => app.should_quit = true,
-                        KeyCode::Tab | KeyCode::Right => app.next_tab(),
-                        KeyCode::Left => app.prev_tab(),
-                        KeyCode::Char('1') => app.active_tab = Tab::Dashboard,
-                        KeyCode::Char('2') => app.active_tab = Tab::NavMap,
-                        KeyCode::Char('3') => app.active_tab = Tab::Events,
-                        KeyCode::Char('4') => app.active_tab = Tab::Queue,
-                        KeyCode::Char('5') => app.active_tab = Tab::Logs,
-                        _ => {}
+                    if app.active_tab == Tab::Initialize {
+                        match key.code {
+                            KeyCode::Esc => app.should_quit = true,
+                            KeyCode::Tab => app.next_tab(),
+                            KeyCode::BackTab => app.prev_tab(),
+                            KeyCode::Enter => {
+                                app.start_daemon(&db);
+                            }
+                            _ => {
+                                app.init_input.handle_event(&Event::Key(key));
+                            }
+                        }
+                    } else {
+                        match key.code {
+                            KeyCode::Char('q') | KeyCode::Esc => app.should_quit = true,
+                            KeyCode::Tab | KeyCode::Right => app.next_tab(),
+                            KeyCode::Left => app.prev_tab(),
+                            KeyCode::Char('1') => app.active_tab = Tab::Dashboard,
+                            KeyCode::Char('2') => app.active_tab = Tab::NavMap,
+                            KeyCode::Char('3') => app.active_tab = Tab::Initialize,
+                            KeyCode::Char('4') => app.active_tab = Tab::Events,
+                            KeyCode::Char('5') => app.active_tab = Tab::Queue,
+                            KeyCode::Char('6') => app.active_tab = Tab::Logs,
+                            _ => {}
+                        }
+                    }
+                }
+            } else if let Event::Mouse(mouse) = event::read()? {
+                if mouse.kind == MouseEventKind::Down(MouseButton::Left) {
+                    // Simple hit testing for tabs (top 3 lines)
+                    if mouse.row <= 3 {
+                        let tab_width = 15; // rough estimate
+                        let clicked_tab = (mouse.column / tab_width) as usize;
+                        if clicked_tab < 6 {
+                            app.active_tab = Tab::from_index(clicked_tab);
+                        }
                     }
                 }
             }
         }
+
 
         if app.last_tick.elapsed() >= tick_rate {
             app.last_tick = Instant::now();
@@ -247,9 +335,65 @@ fn render_content(f: &mut Frame, area: Rect, app: &App) {
     match app.active_tab {
         Tab::Dashboard => render_dashboard(f, area, app),
         Tab::NavMap => render_navmap(f, area, app),
+        Tab::Initialize => render_initialize(f, area, app),
         Tab::Events => render_events(f, area, app),
         Tab::Queue => render_queue(f, area, app),
         Tab::Logs => render_logs(f, area),
+    }
+}
+
+fn render_initialize(f: &mut Frame, area: Rect, app: &App) {
+    let chunks = Layout::default()
+        .direction(Direction::Vertical)
+        .constraints([
+            Constraint::Length(3), // Title
+            Constraint::Length(3), // Input box
+            Constraint::Length(3), // Action Button
+            Constraint::Min(0),    // Error/Status message
+        ])
+        .margin(2)
+        .split(area);
+
+    let title = Paragraph::new(Line::from(vec![
+        Span::styled("◆ INITIALIZE DAEMON", Style::default().fg(EMERALD).add_modifier(Modifier::BOLD)),
+    ]));
+    f.render_widget(title, chunks[0]);
+
+    let input = Paragraph::new(app.init_input.value())
+        .block(Block::default().borders(Borders::ALL).title(" Target Repository Path ").border_style(Style::default().fg(CREAM_DIM)))
+        .style(Style::default().fg(CREAM));
+    f.render_widget(input, chunks[1]);
+    
+    // Make cursor visible for input
+    f.set_cursor_position((
+        chunks[1].x + app.init_input.visual_cursor() as u16 + 1,
+        chunks[1].y + 1,
+    ));
+
+    let btn_style = if app.status.status == "running" {
+        Style::default().fg(MUTED)
+    } else {
+        Style::default().bg(EMERALD).fg(Color::Black)
+    };
+    
+    let btn_text = if app.status.status == "running" {
+        "  DAEMON IS ALREADY RUNNING  "
+    } else {
+        "  [ENTER] START DAEMON  "
+    };
+
+    let btn = Paragraph::new(btn_text)
+        .style(btn_style)
+        .alignment(ratatui::layout::Alignment::Center);
+    
+    let btn_area = Layout::default().direction(Direction::Horizontal).constraints([Constraint::Percentage(30), Constraint::Percentage(40), Constraint::Percentage(30)]).split(chunks[2])[1];
+    f.render_widget(btn, btn_area);
+
+    if let Some(ref err) = app.init_error {
+        let err_color = if err.starts_with("Error") { RUST } else { EMERALD };
+        let msg = Paragraph::new(err.as_str())
+            .style(Style::default().fg(err_color));
+        f.render_widget(msg, chunks[3]);
     }
 }
 
