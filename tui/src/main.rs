@@ -31,8 +31,8 @@ enum Mode {
 struct App {
     should_quit: bool,
     last_tick: Instant,
-    repo_root: PathBuf,
-    script_path: PathBuf,
+    repo_root: Option<PathBuf>,
+    script_path: Option<PathBuf>,
     status: DaemonStatus,
     events: Vec<DaemonEvent>,
     queue: Vec<WorkItem>,
@@ -46,8 +46,8 @@ struct App {
 }
 
 impl App {
-    fn new(repo_root: PathBuf) -> Self {
-        let script_path = repo_root.join("lgwks");
+    fn new(repo_root: Option<PathBuf>) -> Self {
+        let script_path = repo_root.as_ref().map(|r| r.join("lgwks"));
         Self {
             should_quit: false,
             last_tick: Instant::now(),
@@ -55,8 +55,8 @@ impl App {
             script_path,
             status: DaemonStatus {
                 pid: None,
-                status: "stopped".to_string(),
-                repo_root: repo_root.to_string_lossy().to_string(),
+                status: "unknown".to_string(),
+                repo_root: repo_root.as_ref().map(|r| r.to_string_lossy().to_string()).unwrap_or_default(),
                 heartbeat_at: "".to_string(),
                 alive: false,
                 lock_present: false,
@@ -73,46 +73,49 @@ impl App {
         }
     }
 
-    fn update_data(&mut self, db: &Db) {
-        if let Ok(status) = db.get_status() {
-            self.status = status;
-        }
-        if let Ok(events) = db.get_events(50) {
-            self.events = events;
-        }
-        if let Ok(queue) = db.get_queue(20) {
-            self.queue = queue;
-        }
-        if self.workflows.is_empty() {
-            if let Ok(workflows) = db.get_workflows() {
-                self.workflows = workflows;
+    fn update_data(&mut self, db: &Option<Db>) {
+        if let Some(db) = db {
+            if let Ok(status) = db.get_status() {
+                self.status = status;
             }
-        }
-        if self.nav_modules.is_empty() {
-            if let Ok(navmap) = db.get_navmap() {
-                let mut modules: Vec<_> = navmap.modules.into_iter().collect();
-                modules.sort_by(|a, b| a.0.cmp(&b.0));
-                self.nav_modules = modules;
+            if let Ok(events) = db.get_events(50) {
+                self.events = events;
+            }
+            if let Ok(queue) = db.get_queue(20) {
+                self.queue = queue;
+            }
+            if self.workflows.is_empty() {
+                if let Ok(workflows) = db.get_workflows() {
+                    self.workflows = workflows;
+                }
+            }
+            if self.nav_modules.is_empty() {
+                if let Ok(navmap) = db.get_navmap() {
+                    let mut modules: Vec<_> = navmap.modules.into_iter().collect();
+                    modules.sort_by(|a, b| a.0.cmp(&b.0));
+                    self.nav_modules = modules;
+                }
             }
         }
     }
 
-    fn execute_workflow(&mut self, db: &Db) {
-        if let Some(ref wf_name) = self.selected_workflow {
+    fn execute_workflow(&mut self, db: &Option<Db>) {
+        if let (Some(ref wf_name), Some(script_path), Some(repo_root)) = (&self.selected_workflow, &self.script_path, &self.repo_root) {
             let input_val = self.form_input.value().to_string();
             self.status_msg = Some(format!("Executing {}...", wf_name));
             
-            // Secure Execution using absolute paths and vector args
-            let mut args = vec![self.script_path.to_str().unwrap_or("lgwks"), "workflow", wf_name];
+            let mut args = vec![script_path.to_str().unwrap_or("lgwks"), "workflow", wf_name];
             if !input_val.is_empty() {
                 args.push(&input_val);
             }
 
-            let _ = db.emit_telemetry("control", "workflow_event", "human_message", &format!("Triggered workflow: {}", wf_name));
+            if let Some(db) = db {
+                let _ = db.emit_telemetry("control", "workflow_event", "human_message", &format!("Triggered workflow: {}", wf_name));
+            }
 
             let status = Command::new("python3")
                 .args(&args)
-                .current_dir(&self.repo_root)
+                .current_dir(repo_root)
                 .status();
 
             match status {
@@ -130,54 +133,62 @@ impl App {
         }
     }
 
-    fn start_daemon(&mut self, db: &Db) {
-        self.status_msg = Some("Starting daemon...".to_string());
-        let _ = db.emit_telemetry("control", "human_message", "daemon_start", "Starting daemon via TUI");
-        
-        let status = Command::new("python3")
-            .args([self.script_path.to_str().unwrap_or("lgwks"), "daemon", "start"])
-            .current_dir(&self.repo_root)
-            .status();
+    fn start_daemon(&mut self, db: &Option<Db>) {
+        if let (Some(script_path), Some(repo_root)) = (&self.script_path, &self.repo_root) {
+            self.status_msg = Some("Starting daemon...".to_string());
+            if let Some(db) = db {
+                let _ = db.emit_telemetry("control", "human_message", "daemon_start", "Starting daemon via TUI");
+            }
+            
+            let status = Command::new("python3")
+                .args([script_path.to_str().unwrap_or("lgwks"), "daemon", "start"])
+                .current_dir(repo_root)
+                .status();
 
-        match status {
-            Ok(s) if s.success() => {
-                self.status_msg = Some("Daemon started successfully.".to_string());
-            }
-            Ok(s) => {
-                self.status_msg = Some(format!("Error: Process exited with code {}", s));
-            }
-            Err(e) => {
-                self.status_msg = Some(format!("Error: Failed to execute: {}", e));
+            match status {
+                Ok(s) if s.success() => {
+                    self.status_msg = Some("Daemon started successfully.".to_string());
+                }
+                Ok(s) => {
+                    self.status_msg = Some(format!("Error: Process exited with code {}", s));
+                }
+                Err(e) => {
+                    self.status_msg = Some(format!("Error: Failed to execute: {}", e));
+                }
             }
         }
     }
 
-    fn stop_daemon(&mut self, db: &Db) {
-        self.status_msg = Some("Stopping daemon...".to_string());
-        let _ = db.emit_telemetry("control", "human_message", "daemon_stop", "Stopping daemon via TUI");
-        
-        let status = Command::new("python3")
-            .args([self.script_path.to_str().unwrap_or("lgwks"), "daemon", "stop"])
-            .current_dir(&self.repo_root)
-            .status();
+    fn stop_daemon(&mut self, db: &Option<Db>) {
+        if let (Some(script_path), Some(repo_root)) = (&self.script_path, &self.repo_root) {
+            self.status_msg = Some("Stopping daemon...".to_string());
+            if let Some(db) = db {
+                let _ = db.emit_telemetry("control", "human_message", "daemon_stop", "Stopping daemon via TUI");
+            }
+            
+            let status = Command::new("python3")
+                .args([script_path.to_str().unwrap_or("lgwks"), "daemon", "stop"])
+                .current_dir(repo_root)
+                .status();
 
-        match status {
-            Ok(_) => self.status_msg = Some("Stop command issued.".to_string()),
-            Err(e) => self.status_msg = Some(format!("Error: {}", e)),
+            match status {
+                Ok(_) => self.status_msg = Some("Stop command issued.".to_string()),
+                Err(e) => self.status_msg = Some(format!("Error: {}", e)),
+            }
         }
     }
 }
 
-fn find_repo_root() -> Result<PathBuf> {
-    let mut curr = std::env::current_dir()?;
+fn find_repo_root() -> Option<PathBuf> {
+    let mut curr = std::env::current_dir().ok()?;
     loop {
         if curr.join("lgwks").exists() && curr.join(".git").exists() {
-            return Ok(curr);
+            return Some(curr);
         }
         if let Some(parent) = curr.parent() {
             curr = parent.to_path_buf();
         } else {
-            return Err(eyre!("Could not find lgwks root. Are you in the repo?"));
+            return None;
         }
     }
 }
@@ -185,8 +196,8 @@ fn find_repo_root() -> Result<PathBuf> {
 fn main() -> Result<()> {
     color_eyre::install()?;
     
-    let repo_root = find_repo_root().wrap_err("TUI must be started within or below the logicalworks- repository.")?;
-    let db = Db::new(&repo_root);
+    let repo_root = find_repo_root();
+    let db = repo_root.as_ref().map(|r| Db::new(r));
     
     execute!(std::io::stdout(), EnableMouseCapture)?;
     let mut terminal = ratatui::init();
@@ -199,7 +210,7 @@ fn main() -> Result<()> {
     result
 }
 
-fn run_app(terminal: &mut DefaultTerminal, mut app: App, db: Db) -> Result<()> {
+fn run_app(terminal: &mut DefaultTerminal, mut app: App, db: Option<Db>) -> Result<()> {
     let tick_rate = Duration::from_millis(250);
     loop {
         app.update_data(&db);
@@ -218,30 +229,30 @@ fn run_app(terminal: &mut DefaultTerminal, mut app: App, db: Db) -> Result<()> {
                             Mode::Normal => match key.code {
                                 KeyCode::Char('q') | KeyCode::Esc => app.should_quit = true,
                                 KeyCode::Char('j') | KeyCode::Down => {
-                                    let i = match app.workflow_list_state.selected() {
-                                        Some(i) => {
-                                            if i >= app.workflows.len().saturating_sub(1) { 0 } else { i + 1 }
-                                        }
-                                        None => 0,
-                                    };
-                                    app.workflow_list_state.select(Some(i));
-                                    let mut names: Vec<_> = app.workflows.keys().cloned().collect();
-                                    names.sort();
-                                    if !names.is_empty() {
+                                    if !app.workflows.is_empty() {
+                                        let i = match app.workflow_list_state.selected() {
+                                            Some(i) => {
+                                                if i >= app.workflows.len().saturating_sub(1) { 0 } else { i + 1 }
+                                            }
+                                            None => 0,
+                                        };
+                                        app.workflow_list_state.select(Some(i));
+                                        let mut names: Vec<_> = app.workflows.keys().cloned().collect();
+                                        names.sort();
                                         app.selected_workflow = Some(names[i].clone());
                                     }
                                 }
                                 KeyCode::Char('k') | KeyCode::Up => {
-                                    let i = match app.workflow_list_state.selected() {
-                                        Some(i) => {
-                                            if i == 0 { app.workflows.len().saturating_sub(1) } else { i - 1 }
-                                        }
-                                        None => 0,
-                                    };
-                                    app.workflow_list_state.select(Some(i));
-                                    let mut names: Vec<_> = app.workflows.keys().cloned().collect();
-                                    names.sort();
-                                    if !names.is_empty() {
+                                    if !app.workflows.is_empty() {
+                                        let i = match app.workflow_list_state.selected() {
+                                            Some(i) => {
+                                                if i == 0 { app.workflows.len().saturating_sub(1) } else { i - 1 }
+                                            }
+                                            None => 0,
+                                        };
+                                        app.workflow_list_state.select(Some(i));
+                                        let mut names: Vec<_> = app.workflows.keys().cloned().collect();
+                                        names.sort();
                                         app.selected_workflow = Some(names[i].clone());
                                     }
                                 }
@@ -271,10 +282,7 @@ fn run_app(terminal: &mut DefaultTerminal, mut app: App, db: Db) -> Result<()> {
                 }
                 Event::Mouse(mouse) => {
                     if mouse.kind == MouseEventKind::Down(MouseButton::Left) {
-                        // Mouse interaction handling
-                        if mouse.row <= 3 {
-                            // Header interactions
-                        }
+                        // Simple hit testing for tab sidebar could go here
                     }
                 }
                 _ => {}
@@ -334,16 +342,20 @@ fn render_header(f: &mut Frame, area: Rect, app: &App) {
     let header_chunks = Layout::default()
         .direction(Direction::Horizontal)
         .constraints([
-            Constraint::Length(30), // Logo + Repo
+            Constraint::Length(35), // Logo + Repo
             Constraint::Min(0),    // Stats
             Constraint::Length(40), // Daemon Status
         ])
         .split(area);
 
+    let repo_name = app.repo_root.as_ref()
+        .map(|r| r.file_name().unwrap_or_default().to_string_lossy().to_string())
+        .unwrap_or_else(|| "NO REPO".to_string());
+
     let logo = Paragraph::new(Line::from(vec![
         Span::styled("◇◈◆✦ ", Style::default().fg(EMERALD).add_modifier(Modifier::BOLD)),
         Span::styled("LGWKS ", Style::default().fg(CREAM).add_modifier(Modifier::BOLD)),
-        Span::styled(format!("({})", app.repo_root.file_name().unwrap_or_default().to_string_lossy()), Style::default().fg(SLATE_DIM)),
+        Span::styled(format!("({})", repo_name), Style::default().fg(SLATE_DIM)),
     ]))
     .block(Block::default().borders(Borders::BOTTOM).border_style(Style::default().fg(SLATE_DIM)));
     f.render_widget(logo, header_chunks[0]);
@@ -393,6 +405,14 @@ fn render_workflow_sidebar(f: &mut Frame, area: Rect, app: &App) {
 }
 
 fn render_main_area(f: &mut Frame, area: Rect, app: &App) {
+    if app.repo_root.is_none() {
+        let error = Paragraph::new("\n\n  ❌ NO REPOSITORY DETECTED\n\n  The TUI must be started within a Logical Works\n  repository (containing '.git' and 'lgwks').\n\n  Please navigate to the repo root and restart.")
+            .block(Block::default().title(" ERROR ").borders(Borders::ALL).border_style(Style::default().fg(AMBER)))
+            .style(Style::default().fg(CREAM_DIM));
+        f.render_widget(error, area);
+        return;
+    }
+
     if let Some(ref wf_name) = app.selected_workflow {
         if let Some(wf) = app.workflows.get(wf_name) {
             let chunks = Layout::default()
