@@ -27,7 +27,7 @@ import os
 from pathlib import Path
 from typing import Any
 
-SCHEMA = "lgwks.reasoning.result.v1"
+SCHEMA = "lgwks.reasoning.result.v0"  # research-grade (breakable); daemon-dispatch wiring pending
 
 _REPO_ROOT = Path(__file__).resolve().parent
 _MODEL_STORE = _REPO_ROOT / "store" / "models"

@@ -80,7 +80,7 @@ class TestReasoningPort(unittest.TestCase):
         a = rp.reason("same prompt", persona="co_scientist", agent="claude")
         b = rp.reason("same prompt", persona="co_scientist", agent="claude")
         self.assertEqual(a, b)
-        self.assertEqual(a["schema"], "lgwks.reasoning.result.v1")
+        self.assertEqual(a["schema"], "lgwks.reasoning.result.v0")
         self.assertEqual(a["handoff"]["request"]["prompt"], "same prompt")
         self.assertEqual(a["handoff"]["reason"], "deep_reasoning_exceeds_local_tier")
 
