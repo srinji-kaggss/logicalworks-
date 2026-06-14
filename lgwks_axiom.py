@@ -511,8 +511,6 @@ def _is_relative_to(path: Path, base: Path) -> bool:
         return False
 
 
-def _command_display(command: str | tuple[str, ...]) -> str:
-    return command if isinstance(command, str) else " ".join(command)
 
 
 def _test_fact(

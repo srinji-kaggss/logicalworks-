@@ -139,11 +139,6 @@ def _repo_slug_args(repo: str | None) -> list[str]:
     return ["--repo", validated] if validated else []
 
 
-def _auth_ok() -> bool:
-    rc, _ = _gh("auth", "status")
-    return rc == 0
-
-
 # ── data models ──────────────────────────────────────────────────────────────
 
 @dataclass

@@ -48,12 +48,7 @@ _MM_TIMEOUT = int(os.environ.get("LGWKS_MM_TIMEOUT", "60"))
 _MAX_IMG_DIM = 1024
 _MAX_IMG_BYTES = 3_000_000  # ~3MB base64 cap
 
-# File extensions we treat as images — one source of truth
-from lgwks_substrate_config import IMAGE_EXTS as _IMAGE_EXTS
 
-
-def _is_image(path: Path | str) -> bool:
-    return Path(path).suffix.lower() in _IMAGE_EXTS
 
 
 def _b64size(b64: str) -> int:
