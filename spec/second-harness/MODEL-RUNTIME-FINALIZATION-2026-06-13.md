@@ -251,8 +251,9 @@ step), `gated` (operator must accept license), `pinned` (reference only, not yet
 | Voice upgrade (Mac) | Moshi (full-duplex) | `kyutai/moshika-*` | tier | local | generative·proposal | pinned |
 | Injection guard | det. floor (LIVE) + Llama-Prompt-Guard-2-86M | `meta-llama/Llama-Prompt-Guard-2-86M` | ~0.35GB | transformers | sensor | gated |
 | Context-state (learned) | Titans/MIRAS target (det. JSONL+I7 is the live floor) | research target | — | — | deterministic engine | pinned |
-| Owned re-engineerable core | OLMo 3 / Molmo 2 (open recipe) | `allenai/OLMo-3-*` | tier | transformers/mlx | generative·proposal | pinned |
-| Heavy reasoning brain | rented frontier (swappable) | OpenRouter via `LGWKS_TONGUE_MODEL` | n/a | provider_seam | generative·proposal | live |
+| Deep reasoning (owned core) | OLMo-3-32B (4-bit, thinking) — Mac-tier only; hands off to the working agent on weaker devices | `mlx-community/Olmo-3-1125-32B-4bit` | ~18GB | mlx | generative·proposal | pinned (store-fetch, ~32GB+ Mac) |
+| Multimodal owned (opt) | Molmo 2 (open recipe) | `allenai/Molmo-2-*` | tier | transformers/mlx | sensor/generative | pinned |
+| Reasoning escalation (frontier) | **the working agent** — Claude / Codex / Gemini (operator's pick), the daemon's own client | adapter + context packet path | n/a | agent handoff | conscious layer | live |
 
 Notes: the injection-guard DETERMINISTIC floor is implemented + tested NOW (`lgwks_jailbreak.assess`); the
 Prompt-Guard ML layer is the gated upgrade behind the `_ml_injection_score` seam. Big Qwen/OLMo/Moshi

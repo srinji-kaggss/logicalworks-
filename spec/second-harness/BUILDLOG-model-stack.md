@@ -329,3 +329,43 @@ peer module minted.
 - **Still pending (next):** wire the ML sensor (Prompt Guard 2 / embedding head); revive `lgwks_had` +
   `lgwks_algorithms` so injection_risk composes with fraud/anomaly/assumption-risk in ONE engine; attenuation
   EXECUTION at the capability gate (clean-and-run / downgrade); mesh §3.1/§3.2 sync; e2e (#139).
+
+## 2026-06-13 (session 15 cont.) - DECISION: deep-reasoning = OLMo-3-32B (owned, behind agnostic port)
+
+Director: use `mlx-community/Olmo-3-1125-32B-4bit` for DEEP REASONING; leave Tongue/other slots as finalized;
+specialized roles (co-scientist) are HARNESS changes that CALL this model, not new models; 32B won't run on
+all laptops, so the model core must be AGNOSTIC + CHANGEABLE.
+
+- **Deep-reasoning slot FINALIZED:** OLMo-3-32B-4bit (MLX, fully-open thinking model = owned re-engineerable
+  core). ~18GB → ~32GB+ Mac only. NOT the absolute quality ceiling (frontier rented brain still beats a local
+  32B) — this is the OWNED/private/offline/re-engineerable deep-reasoning option. Logged in §8 of
+  MODEL-RUNTIME-FINALIZATION.
+- **Architecture (confirmed):** reasoning goes behind a runtime-neutral PORT (pattern = `lgwks_embed_port`),
+  role = `reasoning`. Harness calls the ROLE, never the model. Tier routing: OLMo-32B on capable Macs →
+  fallback to rented brain (OpenRouter seam) or a smaller local model on weak devices. Zero harness change on
+  swap. Co-scientist (+ other specialized roles) = persona/tool-loop/prompt calling the `reasoning` role —
+  weights unchanged, only the harness changes.
+- **Tongue + other slots:** unchanged (composed lightweight; rented seam for general generation).
+- **NEXT SLICE (offered, not yet built):** the agnostic `reasoning` port (stub + OLMo-MLX behind it + tier
+  routing). Download of the 32B (~18GB, Mac-only, gitignored store/) is a separate setup step — pinned now,
+  fetched on Director's go.
+
+## 2026-06-13 (session 15 cont.) - DECISION: remove "rented brain" → agent handoff; embed/reason residency
+
+Director: remove the rented-brain concept — the frontier layer IS the working agent (Claude/Codex/Gemini,
+operator's pick), which is already a daemon CLIENT. Too-complex → hand off to that agent, not a rented API.
+
+- **Reasoning escalation FINALIZED = AGENT HANDOFF.** `reasoning` port tiers: local OLMo-3-32B (capable Mac)
+  → hand off to the working agent via the existing adapter + context-packet path → agent reasons → result
+  back. Removed the "Heavy reasoning brain / OpenRouter rented frontier" row from §8. The daemon is the
+  subconscious; the agent is the conscious/frontier layer on top (matches DAEMON-CORE-PLAN "clients are
+  adapters"). Edge: headless + OLMo-insufficient + no agent → defer/queue to human (never fabricate).
+- **`lgwks_openrouter` / `LGWKS_TONGUE_MODEL` DEMOTED** from "the brain" to an OPTIONAL seam. Not the
+  canonical reasoning path anymore; may be removed later. (Tongue/translator stays composed-lightweight/local.)
+- **Residency (Director: "do embed + deep-reasoning run together? no right" — CORRECT):** they are NOT
+  co-required and NOT simultaneous.
+  - Embed (Qwen3-VL-Embedding-8B): always-warm, every-event, small-ish, FAST single-forward. The moat.
+  - OLMo-32B: BURSTY (rare, heavy), lazy-loaded on demand, tier-gated.
+  - On a request they run SEQUENTIALLY: embed → retrieve → (only if needed) reason. Never in parallel.
+  - Big Mac (48GB+): can hold both resident. Tighter Mac: embed resident + OLMo lazy-load/unload. Weak
+    device: embed local + reasoning handed to the agent (no OLMo at all). This IS the device tiering.
