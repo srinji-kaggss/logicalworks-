@@ -1555,6 +1555,10 @@ def build_parser() -> argparse.ArgumentParser:
     doctor = sub.add_parser("doctor", help="self-test: verify install health")
     doctor.set_defaults(func=_doctor_dispatch)
 
+    # tui — high-performance Rust TUI (the "pop up" cockpit)
+    tui_p = sub.add_parser("tui", help="launch the high-performance daemon cockpit (Rust TUI)")
+    tui_p.set_defaults(func=_tui_dispatch)
+
     # repl — interactive readline harness (history, completion, inline queries)
     repl = sub.add_parser("repl", help="interactive readline harness (history, tab completion, inline queries)")
     repl.add_argument("--repo", default=".", help="repo path to load graph context from")
@@ -1581,6 +1585,32 @@ def _home_dispatch(args) -> int:
 def _repl_dispatch(args) -> int:
     import lgwks_repl
     return lgwks_repl.run_repl(repo_path=getattr(args, "repo", "."))
+
+
+def _tui_dispatch(args) -> int:
+    import subprocess
+    import sys
+    from pathlib import Path
+    
+    # Try to find the built binary
+    root = Path(__file__).resolve().parent
+    binary = root / "tui" / "target" / "debug" / "lgwks-tui"
+    if not binary.exists():
+        # Fallback to release
+        binary = root / "tui" / "target" / "release" / "lgwks-tui"
+        
+    if not binary.exists():
+        print("TUI binary not found. Build it first with: cd tui && cargo build", file=sys.stderr)
+        return 1
+        
+    try:
+        # Pass the repo root to the TUI if needed (it currently auto-detects cwd)
+        return subprocess.call([str(binary)])
+    except KeyboardInterrupt:
+        return 0
+    except Exception as e:
+        print(f"Failed to launch TUI: {e}", file=sys.stderr)
+        return 1
 
 
 def _manifest_dispatch(args) -> int:

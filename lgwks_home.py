@@ -435,8 +435,10 @@ def _quick_actions_for_repo(repo: Path | None) -> list[tuple[str, str, str, list
     if repo:
         actions.append(("g", "gh issues", "open issues on GitHub", ["lgwks", "gh", "issues", "--repo", str(repo)]))
         actions.append(("v", "viz", "open graph visualization", []))
+        actions.append(("t", "tui", "launch daemon cockpit", []))
         actions.append(("r", "repl", "interactive harness", []))
     else:
+        actions.append(("t", "tui", "launch daemon cockpit", []))
         actions.append(("r", "repl", "interactive harness", []))
     actions.append(("d", "doctor", "what's wired on this machine", []))
     return actions
@@ -943,6 +945,22 @@ def _browser_entryway(on: bool) -> int:
                         browser.run()
                     except Exception as e:
                         print(fg(f"  · viz error: {type(e).__name__}: {e}", AMBER, on=on), file=sys.stderr)
+                        _pause(on)
+                elif label == "tui":
+                    try:
+                        from pathlib import Path as _P
+                        root = _P(__file__).resolve().parent
+                        binary = root / "tui" / "target" / "debug" / "lgwks-tui"
+                        if not binary.exists():
+                            binary = root / "tui" / "target" / "release" / "lgwks-tui"
+                        
+                        if not binary.exists():
+                            print(ui.spine(fg("TUI binary not found. Build it with: cd tui && cargo build", AMBER, on=on), on=on))
+                            _pause(on)
+                        else:
+                            subprocess.call([str(binary)])
+                    except Exception as e:
+                        print(fg(f"  · tui error: {type(e).__name__}: {e}", AMBER, on=on), file=sys.stderr)
                         _pause(on)
                 elif argv:
                     _run(_resolve_argv(argv))
