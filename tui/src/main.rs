@@ -15,17 +15,28 @@ use ratatui::{
 };
 use std::time::{Duration, Instant};
 use std::process::Command;
-use std::path::{PathBuf};
+use std::path::{Path, PathBuf};
 use std::collections::HashMap;
 use tui_input::Input;
 use tui_input::backend::crossterm::EventHandler;
 use crate::models::{DaemonEvent, WorkItem, DaemonStatus, NavModule, WorkflowDef};
 use crate::db::Db;
 
+use clap::Parser;
+
+#[derive(Parser, Debug)]
+#[command(author, version, about, long_about = None)]
+struct Args {
+    /// Path to the repository root
+    #[arg(short, long)]
+    repo: Option<PathBuf>,
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum Mode {
     Normal,
     Insert,
+    Setup,
 }
 
 struct App {
@@ -41,12 +52,14 @@ struct App {
     selected_workflow: Option<String>,
     workflow_list_state: ratatui::widgets::ListState,
     form_input: Input,
+    repo_input: Input,
     mode: Mode,
     status_msg: Option<String>,
 }
 
 impl App {
     fn new(repo_root: Option<PathBuf>) -> Self {
+        let mode = if repo_root.is_some() { Mode::Normal } else { Mode::Setup };
         let script_path = repo_root.as_ref().map(|r| r.join("lgwks"));
         Self {
             should_quit: false,
@@ -68,9 +81,18 @@ impl App {
             selected_workflow: None,
             workflow_list_state: ratatui::widgets::ListState::default(),
             form_input: Input::default(),
-            mode: Mode::Normal,
+            repo_input: Input::default().with_value(std::env::current_dir().unwrap_or_default().to_string_lossy().to_string()),
+            mode,
             status_msg: None,
         }
+    }
+
+    fn set_repo_root(&mut self, root: PathBuf) {
+        self.repo_root = Some(root.clone());
+        self.script_path = Some(root.join("lgwks"));
+        self.status.repo_root = root.to_string_lossy().to_string();
+        self.mode = Mode::Normal;
+        self.status_msg = Some("Repository detected.".to_string());
     }
 
     fn update_data(&mut self, db: &Option<Db>) {
@@ -195,25 +217,26 @@ fn find_repo_root() -> Option<PathBuf> {
 
 fn main() -> Result<()> {
     color_eyre::install()?;
+    let args = Args::parse();
     
-    let repo_root = find_repo_root();
-    let db = repo_root.as_ref().map(|r| Db::new(r));
+    let repo_root = args.repo.or_else(find_repo_root);
+    let mut db = repo_root.as_ref().map(|r| Db::new(r.as_path()));
     
     execute!(std::io::stdout(), EnableMouseCapture)?;
     let mut terminal = ratatui::init();
     
     let app = App::new(repo_root);
-    let result = run_app(&mut terminal, app, db);
+    let result = run_app(&mut terminal, app, &mut db);
     
     ratatui::restore();
     execute!(std::io::stdout(), DisableMouseCapture)?;
     result
 }
 
-fn run_app(terminal: &mut DefaultTerminal, mut app: App, db: Option<Db>) -> Result<()> {
+fn run_app(terminal: &mut DefaultTerminal, mut app: App, db: &mut Option<Db>) -> Result<()> {
     let tick_rate = Duration::from_millis(250);
     loop {
-        app.update_data(&db);
+        app.update_data(db);
         terminal.draw(|f| ui(f, &app))?;
 
         let timeout = tick_rate
@@ -263,18 +286,37 @@ fn run_app(terminal: &mut DefaultTerminal, mut app: App, db: Option<Db>) -> Resu
                                 }
                                 KeyCode::Enter => {
                                     if app.selected_workflow.is_some() {
-                                        app.execute_workflow(&db);
+                                        app.execute_workflow(db);
                                     }
                                 }
-                                KeyCode::Char('s') => app.start_daemon(&db),
-                                KeyCode::Char('x') => app.stop_daemon(&db),
+                                KeyCode::Char('s') => app.start_daemon(db),
+                                KeyCode::Char('x') => app.stop_daemon(db),
+                                KeyCode::Char('r') => app.mode = Mode::Setup,
                                 _ => {}
                             },
                             Mode::Insert => match key.code {
                                 KeyCode::Esc => app.mode = Mode::Normal,
-                                KeyCode::Enter => app.execute_workflow(&db),
+                                KeyCode::Enter => app.execute_workflow(db),
                                 _ => {
                                     app.form_input.handle_event(&Event::Key(key));
+                                }
+                            },
+                            Mode::Setup => match key.code {
+                                KeyCode::Esc => {
+                                    if app.repo_root.is_some() { app.mode = Mode::Normal; }
+                                    else { app.should_quit = true; }
+                                }
+                                KeyCode::Enter => {
+                                    let path = PathBuf::from(app.repo_input.value());
+                                    if path.exists() && path.join("lgwks").exists() {
+                                        *db = Some(Db::new(&path));
+                                        app.set_repo_root(path);
+                                    } else {
+                                        app.status_msg = Some("Error: Not a valid Logical Works repo root.".to_string());
+                                    }
+                                }
+                                _ => {
+                                    app.repo_input.handle_event(&Event::Key(key));
                                 }
                             }
                         }
@@ -282,7 +324,7 @@ fn run_app(terminal: &mut DefaultTerminal, mut app: App, db: Option<Db>) -> Resu
                 }
                 Event::Mouse(mouse) => {
                     if mouse.kind == MouseEventKind::Down(MouseButton::Left) {
-                        // Simple hit testing for tab sidebar could go here
+                        // Mouse interaction handling
                     }
                 }
                 _ => {}
@@ -405,8 +447,40 @@ fn render_workflow_sidebar(f: &mut Frame, area: Rect, app: &App) {
 }
 
 fn render_main_area(f: &mut Frame, area: Rect, app: &App) {
+    if app.mode == Mode::Setup {
+        let chunks = Layout::default()
+            .direction(Direction::Vertical)
+            .constraints([
+                Constraint::Length(3), // Title
+                Constraint::Length(3), // Input
+                Constraint::Min(0),    // Instructions
+            ])
+            .margin(2)
+            .split(area);
+
+        let title = Paragraph::new(Line::from(vec![
+            Span::styled("◆ CONFIGURE REPOSITORY ROOT", Style::default().fg(AMBER).add_modifier(Modifier::BOLD)),
+        ]));
+        f.render_widget(title, chunks[0]);
+
+        let input = Paragraph::new(app.repo_input.value())
+            .block(Block::default().borders(Borders::ALL).title(" Path to Logical Works repo ").border_style(Style::default().fg(AMBER)))
+            .style(Style::default().fg(CREAM));
+        f.render_widget(input, chunks[1]);
+
+        f.set_cursor_position((
+            chunks[1].x + app.repo_input.visual_cursor() as u16 + 1,
+            chunks[1].y + 1,
+        ));
+
+        let help = Paragraph::new("\n  Type the absolute path to your Logical Works folder.\n  It must contain both '.git/' and the 'lgwks' script.\n\n  [ENTER] Confirm and Load\n  [ESC]   Cancel / Quit")
+            .style(Style::default().fg(CREAM_DIM));
+        f.render_widget(help, chunks[2]);
+        return;
+    }
+
     if app.repo_root.is_none() {
-        let error = Paragraph::new("\n\n  ❌ NO REPOSITORY DETECTED\n\n  The TUI must be started within a Logical Works\n  repository (containing '.git' and 'lgwks').\n\n  Please navigate to the repo root and restart.")
+        let error = Paragraph::new("\n\n  ❌ NO REPOSITORY DETECTED\n\n  Press 'R' to configure manually.")
             .block(Block::default().title(" ERROR ").borders(Borders::ALL).border_style(Style::default().fg(AMBER)))
             .style(Style::default().fg(CREAM_DIM));
         f.render_widget(error, area);
@@ -449,7 +523,7 @@ fn render_main_area(f: &mut Frame, area: Rect, app: &App) {
             f.render_widget(details, chunks[2]);
         }
     } else {
-        let welcome = Paragraph::new("\n\n  Select a workflow from the left sidebar\n  to begin research or system operations.\n\n  Press 's' to start daemon\n  Press 'x' to stop daemon")
+        let welcome = Paragraph::new("\n\n  Select a workflow from the left sidebar\n  to begin research or system operations.\n\n  Press 'S' to start daemon\n  Press 'X' to stop daemon\n  Press 'R' to switch repository")
             .block(Block::default().title(" DASHBOARD ").borders(Borders::ALL).border_style(Style::default().fg(SLATE_DIM)))
             .style(Style::default().fg(CREAM_DIM));
         f.render_widget(welcome, area);
@@ -484,10 +558,12 @@ fn render_footer(f: &mut Frame, area: Rect, app: &App) {
     let mode_str = match app.mode {
         Mode::Normal => " NORMAL ",
         Mode::Insert => " INSERT ",
+        Mode::Setup => " SETUP ",
     };
     let mode_color = match app.mode {
         Mode::Normal => SLATE,
         Mode::Insert => EMERALD,
+        Mode::Setup => AMBER,
     };
 
     let msg = app.status_msg.as_deref().unwrap_or("Ready.");
@@ -501,6 +577,8 @@ fn render_footer(f: &mut Frame, area: Rect, app: &App) {
         Span::styled("nav  ", Style::default().fg(CREAM_DIM)),
         Span::styled(" I ", Style::default().fg(EMERALD).add_modifier(Modifier::BOLD)),
         Span::styled("input  ", Style::default().fg(CREAM_DIM)),
+        Span::styled(" R ", Style::default().fg(EMERALD).add_modifier(Modifier::BOLD)),
+        Span::styled("repo  ", Style::default().fg(CREAM_DIM)),
         Span::styled(" ENTER ", Style::default().fg(EMERALD).add_modifier(Modifier::BOLD)),
         Span::styled("run  ", Style::default().fg(CREAM_DIM)),
     ]);
