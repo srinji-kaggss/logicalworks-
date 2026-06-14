@@ -369,3 +369,89 @@ operator's pick), which is already a daemon CLIENT. Too-complex → hand off to 
   - On a request they run SEQUENTIALLY: embed → retrieve → (only if needed) reason. Never in parallel.
   - Big Mac (48GB+): can hold both resident. Tighter Mac: embed resident + OLMo lazy-load/unload. Weak
     device: embed local + reasoning handed to the agent (no OLMo at all). This IS the device tiering.
+
+## 2026-06-14 (session 16) - IMPLEMENTED: unified risk engine — injection is one composed signal (#143)
+
+Director's session-15 ruling made real: injection detection is NOT a separate system — it is ONE signal in
+the existing risk-scoring + abstention engine. Revived `lgwks_had` + `lgwks_algorithms` from `archive/` into
+the live risk path and generalized the injection-only verdict ladder into a composed multi-signal abstention
+gate. Spec/contract: issue #143. Branch `feat/143-unify-risk-engine`.
+
+- **Basement (final seam):** `lgwks_had.assess(prompt)` is now the gate the U6 engine calls (supersedes the
+  injection-only `lgwks_jailbreak.assess`). It composes a list of `RiskSignal{name,score,weight,signals,
+  evidence}` → ONE verdict on the SHARED ladder (thresholds imported from `lgwks_jailbreak` — single source):
+  `composed = max(weight·score)` (max-dominant defense-in-depth). Schema `lgwks.risk.assessment.v1`,
+  back-compat SUPERSET of the old injection dict (`verdict`/`injection_risk`/`signals`/`receipt` preserved +
+  `risk_score`/`components`).
+- **Three signal providers, one gate:**
+  - `injection_risk` ← `lgwks_jailbreak.injection_risk` (now a pure provider; verdict authority moved to the
+    gate; the ML head still plugs into `_ml_injection_score` unchanged). Weight 1.0 → injection-only path is an
+    EXACT regression.
+  - `assumption_risk` ← `lgwks_had.decode` over the intent classifier (accidental-self-injection / ambiguity
+    defense). CONSERVATIVE calibration: elevates to CONFIRM only when HAD abstains on a HIGH/CRITICAL-risk
+    inferred op (we inferred a destructive action rather than being told it). Capped at CONFIRM — never BLOCK
+    (the human's ambiguity escalates, it is not an attack). GATED behind `assume`/`classify_fn`: a cold
+    classifier load is ~7s and would blow the engine's <1s budget (caught by INV-7 test), so the synchronous
+    hot path leaves it dormant (injection+anomaly only) until a warm classifier exists (daemon / shared head).
+  - `anomaly_score` ← `lgwks_algorithms.rolling_z_score` (fraud/drift). SEAM: needs a per-request history
+    series with no live source yet → contributes 0.0 (available-but-unfed); z→[0,1] via threshold when fed.
+- **Engine wiring:** `lgwks_engine.run_engine` routes through `lgwks_had.assess`; §6 `insights.scores` gains
+  `risk_score`, `meta` gains `risk{verdict,risk_score,components}`; `meta.injection` kept as the legacy view.
+  Receipt stays system-templated from fixed signal names + verdict (NOT attacker-controlled, NOT LLM).
+- **Tests:** `tests/test_risk_engine.py` (17 new) — back-compat regression (clean→proceed, block→block,
+  verdict == injection-only when alone, superset keys), assumption ladder (high-risk-abstain→confirm,
+  low-risk→proceed, critical capped at confirm, dormant on hot path, skipped under LGWKS_NO_MODELS), anomaly
+  (flat→0, spike→elevate, unfed graceful), composition (max-dominant, determinism, contribution clamp/weight),
+  engine wiring. Revived `tests/test_had.py` + `tests/test_algorithms.py` (16) un-skipped into `tests/`.
+- **Verified:** 146 green across risk/injection/had/algorithms/engine/home/capability/daemon/workflow/reasoning
+  (1 pre-existing unrelated failure: `test_home.py::test_browser_navigates_domain_to_command`, fails on main
+  too — not a regression; debt). Registry gate green (123 ids, `lgwks.risk.assessment.v1` registered). CLI
+  `lgwks engine "<prompt>"` shows the composed `components` vector + `risk_score`.
+- **Still deferred (named seams, NOT built):** ML injection sensor (Prompt-Guard-2-86M / Qwen3-Embedding head,
+  `_ml_injection_score`); anomaly time-series feed (daemon event store query at gate time); attenuation
+  EXECUTION at the capability gate (clean-and-run / downgrade — separate packet); threshold + assumption-bar
+  calibration on labelled data; warm-classifier wiring to flip `assume=True` on the daemon hot path.
+
+### 2026-06-14 (session 16) - HARDENED: #143 adversarial pass (3 specialist agents) + fixes
+
+Spawned red-team / pen-test / adversarial-reviewer agents (Director-approved) to actively attack the gate.
+All findings triaged + fixed in the main thread; re-verified (81 green across risk/injection/had/algorithms/
+engine-invariants).
+
+Fixed:
+- **HIGH — plural-blind injection regexes** (pre-existing in `lgwks_jailbreak` from #141, surfaced by the
+  unified gate): the trailing `\b` after the object alternations made `instruction_override` /
+  `override_bypass` blind to plural/un-enumerated objects — "ignore your previous prompts", "disable all the
+  guardrails", "bypass the restrictions" all reached `proceed`. Fixed both object groups (`...s?` + expanded
+  vocab); SQL-injection-is-a-topic guard preserved. Regression: `test_injection_risk.py::test_r5b`.
+- **HIGH — `meta.injection` mislabel**: it carried the COMPOSED verdict + ALL flattened signals under an
+  "injection" key (a lie when assumption/anomaly warm). Now `assess` emits an injection-ONLY `injection`
+  sub-view and the engine routes `meta.injection` through it. Regression: `test_injection_view_is_injection_only`.
+- **MED — `_W_ANOMALY=0.8` magic constant** (calculator-test violation; also let a fed anomaly reach BLOCK):
+  all weights now 1.0 (no magic); authority differences are explicit per-signal CAPS — injection can BLOCK,
+  assumption + anomaly are capped at CONFIRM (an anomaly is evidence for a human gate, not an autonomous
+  block — `lgwks_algorithms` doctrine). Regression: `test_spike_series_elevates_but_capped_at_confirm`.
+- **MED — `assess` had no input cap** (soft-DoS for direct/daemon callers; the 16k cap lived only in the
+  engine): `assess` now self-caps at `_MAX_GATE_CHARS=16000`. Regression: `test_assess_self_caps_oversized_input`.
+- **LOW — `run_engine` TypeError on non-str** (broke the INV-6 envelope guarantee): coerce non-str → "" before
+  sanitize. Regression: `test_engine_envelope_holds_for_non_str`.
+- **LOW — risk-lexicon coverage**: added destructive synonyms (wipe/purge/truncate/erase/revoke/reset/
+  overwrite/rm/kill/uninstall/format/withdraw/refund) so the assumption-gate's high-risk escalation isn't
+  limited to the original short list.
+- **MED — tautological test** (`assess` vs `jb.assess` delegation): replaced with hard-coded per-fixture
+  verdicts (`test_explicit_verdicts_per_fixture`).
+
+Honest accounting (NOT fixed — logged):
+- `lgwks_jailbreak.assess` retains its own verdict ladder = a second copy of the if/elif (thresholds ARE
+  single-sourced via `_ladder()`; the ladder LOGIC is duplicated). Kept intentionally as the injection-only
+  view; drift-risk noted.
+- **assumption-CONFIRM coverage == the explicit high/critical `_RISK_LEXICON` entries only** — an inferred
+  destructive verb NOT in the lexicon won't escalate. The unknown-verb default is "medium" (won't elevate).
+  Lexicon expansion / learned risk head is the named calibration packet.
+- MED period-split (`[^.]` intra-pattern windows): a '.' between keyword groups defeats a single detector;
+  bounded (fluent multi-sentence attacks still catch on a later clause). Deferred — `[^.]`→`[^\n]` risks FP.
+- LOW `override_bypass` weight 0.4 → a bare guardrail-disable lands at `attenuate` not `confirm`. Defensible
+  (engine is non-generative/powerless; attenuate is the floor). Calibration packet.
+- KNOWN-LIMIT — pure obfuscation (homoglyph/leetspeak/spaced/multilingual/sub-120-char-base64) evades the
+  deterministic floor; this is exactly what the documented `_ml_injection_score` seam (Prompt-Guard-2 /
+  Qwen head) is for. Cheap pre-fold (NFKC + homoglyph normalize) is a candidate floor hardening.
