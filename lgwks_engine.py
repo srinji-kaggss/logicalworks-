@@ -44,7 +44,7 @@ _STOP = frozenset(
     "lgwks create make build do use via from into your you my our please can "
     "how what when where why which will should would could".split()
 )
-_TOKEN = re.compile(r"[a-z0-9]+")
+from lgwks_substrate_config import WORD_RE as _TOKEN  # one source of truth
 
 # Prompt patterns that flag structural slop / intent drift
 _HEDGE_RE = re.compile(
@@ -149,21 +149,7 @@ def _capability_coverage(
     return round(coverage, 3), [v for _, v in matched[:8]]
 
 
-def _cosine(a: list[float], b: list[float]) -> float:
-    """Cosine similarity, clamped to [-1, 1]. Pure arithmetic on the GIVEN vectors
-    (calculator-derivable); the vectors are the Qwen sensor layer (exempt — see
-    feedback_math_not_bert_scorer). Returns 0.0 on shape/degenerate/non-finite."""
-    if not a or not b or len(a) != len(b):
-        return 0.0
-    dot = sum(x * y for x, y in zip(a, b))
-    na = math.sqrt(sum(x * x for x in a))
-    nb = math.sqrt(sum(y * y for y in b))
-    if na == 0.0 or nb == 0.0:
-        return 0.0
-    sim = dot / (na * nb)
-    if not math.isfinite(sim):
-        return 0.0
-    return max(-1.0, min(1.0, sim))
+from lgwks_vecmath import cosine as _cosine  # one source of truth for cosine similarity
 
 
 def _load_capability_vectors() -> dict | None:

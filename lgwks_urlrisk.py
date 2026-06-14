@@ -107,13 +107,7 @@ def _malware_score(url: str, feed: set[str]) -> tuple[float, list[str]]:
     return min(100.0, score), reasons
 
 
-def _cosine(a: list[float], b: list[float]) -> float:
-    if not a or not b or len(a) != len(b):
-        return 0.0
-    dot = sum(x * y for x, y in zip(a, b))
-    na = math.sqrt(sum(x * x for x in a)) or 1.0
-    nb = math.sqrt(sum(y * y for y in b)) or 1.0
-    return dot / (na * nb)
+from lgwks_vecmath import cosine as _cosine  # one source of truth for cosine similarity
 
 
 def _intent_corruption(slug: str, intent_vec: list[float] | None,

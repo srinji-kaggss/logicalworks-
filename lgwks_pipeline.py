@@ -149,10 +149,7 @@ class NoiseRecord:
 # MATH UTILITIES  — wrapper layer delegates to lgwks_embed where already built
 # ══════════════════════════════════════════════════════════════════════════════
 
-def _cosine(a: list[float], b: list[float]) -> float:
-    """Thin wrapper — uses lgwks_embed._cos() which is already tested."""
-    import lgwks_embed
-    return lgwks_embed._cos(a, b)
+from lgwks_vecmath import cosine as _cosine  # one source of truth (was a bare dot via embed._cos)
 
 
 def _l2_norm(v: list[float]) -> list[float]:
