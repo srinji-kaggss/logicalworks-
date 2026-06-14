@@ -74,6 +74,11 @@ Injected to Opus each prompt. **No generated prose** — scores, selections, ret
 
 ## 7. The three equations (the compressed read)
 
+> ⚠️ **DRIFT (2026-06-14):** the shipped engine computes deterministic *proxies* that differ from these
+> equations (capability-coverage C, grounding-gap G, geometric-mean P). The design below (grounded/required
+> nodes, trust-weighted G, Bayesian P) is the **target, not what runs**. See the `PRD-06` DRIFT banner +
+> `Desktop/LogicOS-Conflict-Ledger-2026-06-14.md` C-01. Canonical choice pending PI.
+
 Surfaced in both projections (cockpit visual + schema scores):
 - **Coverage** `C = grounded_nodes / required_nodes` — how much of the intent's required context is grounded vs assumed.
 - **Gap/Risk** `G = Σ(unverified_claim_i · trust_weight_i)` — the predicted hole, weighted by trust tier.

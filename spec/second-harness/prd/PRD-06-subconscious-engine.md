@@ -3,6 +3,15 @@
 Parent: [PRD.md](../PRD.md) U5+U6, §7 equations, §8 flags · Status: draft v0.1 · **gated on SCIENCE.md pre-registration**
 Replaces: nothing external — this is the novel core, and the highest-risk child.
 
+> ⚠️ **DRIFT NOTICE (2026-06-14) — spec ≠ shipped. Do not read the equations below as what runs.**
+> The shipped engine (`lgwks_engine.py`, schema **`lgwks.engine.schema.v1`** — *not* the `lgwks.engine.v1`
+> named in this PRD's Contract section) computes **different math under the same names**: `C` = capability
+> coverage (IDF/Qwen-cosine), `G` = `1 − grounding_rate`, `P` = geometric mean over available axes (+ a 4th
+> axis `decisiveness_d` not in this spec). The `required_nodes`/`grounded_nodes` model and the Bayesian/
+> calibrated `P` **below are UNBUILT** (target, not current). Canonical reconciliation decision is pending the
+> PI — see `Desktop/LogicOS-Conflict-Ledger-2026-06-14.md` C-01 and the tracking issue. The definitions
+> below are the *design target*, retained verbatim for that decision.
+
 ## Problem (and the hard truth)
 
 §7 is the product: C (coverage), G (gap/risk), P (outcome confidence). It is also the least

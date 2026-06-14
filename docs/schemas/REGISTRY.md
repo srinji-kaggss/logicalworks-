@@ -251,9 +251,14 @@ fields, don't fork the envelope.
 **Repurpose when:** deterministic replay/verification jobs — reuse the axiom harness records.
 
 ### 9. PRD candidates (planned, spec-only — do not cite as existing)
-`lgwks.state.v1` · `lgwks.engine.v1` · `lgwks.detect.v1` · `lgwks.docs.v1` · `lgwks.depthpack.v1` ·
-`lgwks.codegraph.v1` · `lgwks.map.v1` · `lgwks.had.intent.v1` (spec/second-harness/prd/).
+`lgwks.state.v1` · `lgwks.detect.v1` · `lgwks.docs.v1` · `lgwks.depthpack.v1` · `lgwks.codegraph.v1`
+(spec/second-harness/prd/).
 **Rule:** a planned schema becomes real only via its packet/PRD unit + a status flip here.
+
+> **Reconciliation (2026-06-14):** the following were stale in this "planned" list — they have SHIPPED and
+> are live above: `lgwks.map.v1` (§ live, U1) · `lgwks.had.intent.v1` (live, `lgwks_had.py`) · the planned
+> `lgwks.engine.v1` shipped under the different id **`lgwks.engine.schema.v1`** (live, U6) — note its built
+> shape/scoring also diverges from PRD-06 (see `Desktop/LogicOS-Conflict-Ledger-2026-06-14.md` C-01/C-02/C-05).
 
 ### 10. CLI / repo-ops family (v0 research — gate-registered 2026-06-10)
 `lgwks.repo.{audit,cleanup,handoff,merge,recover,sync}.v0` (`lgwks_repo.py`) ·
