@@ -94,9 +94,7 @@ def _today() -> tuple[int, int, int]:
     return n.year, n.month, n.day
 
 
-def _is_repo(repo: Path) -> bool:
-    rc, out = _git(repo, "rev-parse", "--is-inside-work-tree")
-    return rc == 0 and out == "true"
+from lgwks_proc import is_git_repo as _is_repo  # one source of truth
 
 
 def _diagnose(repo: Path) -> list[Finding]:

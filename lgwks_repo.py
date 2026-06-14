@@ -52,9 +52,7 @@ def _git_stderr(repo: Path, *args: str, timeout: int = 30) -> tuple[int, str]:
         return 1, f"<git failed: {e}>"
 
 
-def _is_repo(repo: Path) -> bool:
-    rc, out = _git(repo, "rev-parse", "--is-inside-work-tree")
-    return rc == 0 and out == "true"
+from lgwks_proc import is_git_repo as _is_repo  # one source of truth (re-exported for lgwks_session)
 
 
 def _head_sha(repo: Path) -> str:

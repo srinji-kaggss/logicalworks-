@@ -19,7 +19,6 @@ from __future__ import annotations
 import argparse
 import json
 import os
-import re
 import shlex
 import subprocess
 import sys
@@ -38,8 +37,6 @@ _MAX_PROBES_PER_ROUTE = 12
 _MAX_ISSUE = 9_999_999
 _MAX_PR = 9_999_999
 
-
-_SLUG_RE = re.compile(r"^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$")
 
 # Conditions we allow in next_if (extensible, but gated)
 _ALLOWLIST_CONDITIONS = frozenset({
@@ -102,13 +99,7 @@ def _audit(intent_file: str, matched: str, next_cmd: str, probed: dict[str, Any]
 
 # ── input validation ────────────────────────────────────────────────────────
 
-def _validate_slug(slug: str | None) -> str | None:
-    if not slug:
-        return None
-    slug = slug.strip()
-    if not _SLUG_RE.match(slug):
-        raise ValueError(f"invalid repo slug: {slug!r} — expected owner/repo")
-    return slug
+from lgwks_gh import _validate_slug  # one source of truth for repo-slug validation
 
 
 def _validate_number(n: int, name: str, max_val: int = _MAX_ISSUE) -> int:

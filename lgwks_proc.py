@@ -16,7 +16,13 @@ from __future__ import annotations
 import subprocess
 from pathlib import Path
 
-__all__ = ["run_git"]
+__all__ = ["run_git", "is_git_repo"]
+
+
+def is_git_repo(repo: Path | str) -> bool:
+    """True if `repo` is inside a git work tree. (rc, stdout) contract via run_git."""
+    rc, out = run_git(repo, "rev-parse", "--is-inside-work-tree")
+    return rc == 0 and out == "true"
 
 
 def run_git(repo: Path | str, *args: str, timeout: int = 30) -> tuple[int, str]:

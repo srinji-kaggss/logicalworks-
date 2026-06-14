@@ -43,7 +43,7 @@ def _gh_meta(items: list[Any] | None = None, warnings: list[str] | None = None, 
 
 # ── constants ───────────────────────────────────────────────────────────────
 
-_SLUG_RE = re.compile(r"^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$")
+from lgwks_substrate_config import REPO_SLUG_RE as _SLUG_RE  # one source of truth
 from lgwks_redact import scrub as _scrub  # one source of truth for credential redaction
 _RATE_LIMIT_RE = re.compile(r"rate limit|API rate limit exceeded|403 Forbidden", re.IGNORECASE)
 

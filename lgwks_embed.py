@@ -94,11 +94,7 @@ def _read(path: Path, max_chars: int) -> str:
         return ""
 
 
-def _write_jsonl(path: Path, rows: list[dict]) -> None:
-    path.parent.mkdir(parents=True, exist_ok=True)
-    with path.open("w", encoding="utf-8") as fh:
-        for row in rows:
-            fh.write(json.dumps(row, sort_keys=True, ensure_ascii=False) + "\n")
+from lgwks_substrate_io import _emit_jsonl as _write_jsonl  # one source of truth for JSONL write
 
 
 def build_vault(root_path: str, project: str, keywords: list[str], cycles: int = 1,
