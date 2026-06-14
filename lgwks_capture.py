@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import argparse
-import hashlib
 import json
 import sys
 import time
@@ -19,22 +18,10 @@ CAPTURE_ROOT = ROOT / "store" / "captures"
 CAPTURE_SCHEMA = "lgwks.capture.v1"
 
 
-def _sha(text: str, n: int = 16) -> str:
-    return hashlib.sha256(text.encode("utf-8", errors="ignore")).hexdigest()[:n]
+from lgwks_hashing import content_id as _sha  # canonical content-id (one source of truth)
 
 
-def _read_context(args: argparse.Namespace) -> str:
-    parts: list[str] = []
-    if getattr(args, "intent", ""):
-        parts.append(args.intent.strip())
-    for file_arg in getattr(args, "context_file", []) or []:
-        p = Path(file_arg)
-        if p.exists():
-            parts.append(p.read_text(encoding="utf-8"))
-    stdin_blob = getattr(args, "stdin_text", "")
-    if stdin_blob:
-        parts.append(stdin_blob)
-    return "\n\n".join(p for p in parts if p.strip()).strip()
+from lgwks_portal import _read_context  # one source of truth (capture already imports portal)
 
 
 def _capture_key(target: str, context: str) -> str:

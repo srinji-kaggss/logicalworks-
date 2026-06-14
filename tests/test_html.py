@@ -21,8 +21,8 @@ def test_html_to_markdown_basic():
       </body>
     </html>
     """
-    markdown, title, links = html_to_markdown(html_input)
-    
+    markdown, title, links, _media = html_to_markdown(html_input)
+
     assert title == "Test Page Title"
     assert "Home" not in markdown
     assert "Copyright" not in markdown
@@ -36,7 +36,7 @@ def test_html_to_markdown_links():
     html_input = """
     <p>Check out <a href="/docs/guide.html">the guide</a> and the <a href="https://example.com/about">about page</a>.</p>
     """
-    markdown, _, links = html_to_markdown(html_input, base_url="https://example.com/start/")
+    markdown, _, links, _media = html_to_markdown(html_input, base_url="https://example.com/start/")
     
     assert "[the guide](https://example.com/docs/guide.html)" in markdown
     assert "[about page](https://example.com/about)" in markdown
@@ -51,7 +51,7 @@ def test_html_to_markdown_lists():
       <li>Second bullet</li>
     </ul>
     """
-    markdown, _, _ = html_to_markdown(html_input)
+    markdown, _, _, _ = html_to_markdown(html_input)
     assert "- First bullet" in markdown
     assert "- Second bullet" in markdown
 
@@ -75,8 +75,8 @@ def test_html_to_markdown_table_colspan_rowspan():
       </tr>
     </table>
     """
-    markdown, _, _ = html_to_markdown(html_input)
-    
+    markdown, _, _, _ = html_to_markdown(html_input)
+
     lines = [ln.strip() for ln in markdown.split("\n") if ln.strip()]
     assert "| Col 1 | Col 2 | Col 3 | |" in lines
     assert "| --- | --- | --- | --- |" in lines

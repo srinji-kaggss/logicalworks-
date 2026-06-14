@@ -215,10 +215,6 @@ def execute_batch(report: dict, *, yes: bool = False, force: bool = False, dry_r
 
 # ── persistence ────────────────────────────────────────────────────────────────
 
-def _sha(value: str) -> str:
-    import hashlib
-    return hashlib.sha256(value.encode("utf-8")).hexdigest()[:16]
-
 
 def _persist(spec: dict, report: dict, transcript: dict) -> Path:
     batch_id = report["batch_id"]

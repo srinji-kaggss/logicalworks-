@@ -22,18 +22,13 @@ VAULT_ROOT = ROOT / "store" / "vectors"
 DIMS = 256
 CHUNK_WORDS = 420
 CHUNK_OVERLAP = 70
-TEXT_EXT = {
-    ".txt", ".md", ".json", ".jsonl", ".yaml", ".yml", ".toml", ".ini", ".cfg", ".xml", ".csv",
-    ".py", ".js", ".ts", ".tsx", ".jsx", ".rs", ".go", ".java", ".kt", ".swift", ".rb", ".php",
-    ".c", ".h", ".cpp", ".hpp", ".cc", ".cs", ".sh", ".bash", ".zsh", ".sql", ".lua", ".r",
-}
-SKIP_DIRS = {".git", "node_modules", "__pycache__", ".venv", "venv", "target", ".next", "dist", "build", "store"}
+from lgwks_substrate_config import TEXT_EXT, SKIP_DIRS  # one source of truth (were local copies)
 STOP = {
     "a", "an", "and", "are", "as", "at", "be", "by", "for", "from", "has", "have", "if", "in",
     "is", "it", "its", "not", "of", "on", "or", "that", "the", "this", "to", "was", "with",
     "you", "your",
 }
-SAFE = re.compile(r"[^a-z0-9._-]+")
+from lgwks_substrate_config import SLUG_SCRUB_RE as SAFE  # one source of truth
 
 
 def _project_id(project: str) -> str:
@@ -99,11 +94,7 @@ def _read(path: Path, max_chars: int) -> str:
         return ""
 
 
-def _write_jsonl(path: Path, rows: list[dict]) -> None:
-    path.parent.mkdir(parents=True, exist_ok=True)
-    with path.open("w", encoding="utf-8") as fh:
-        for row in rows:
-            fh.write(json.dumps(row, sort_keys=True, ensure_ascii=False) + "\n")
+from lgwks_substrate_io import _emit_jsonl as _write_jsonl  # one source of truth for JSONL write
 
 
 def build_vault(root_path: str, project: str, keywords: list[str], cycles: int = 1,

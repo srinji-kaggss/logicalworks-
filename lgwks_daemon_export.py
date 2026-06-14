@@ -12,7 +12,6 @@ Usage (CLI via lgwks_daemon):
 """
 from __future__ import annotations
 
-import hashlib
 import json
 import tarfile
 from pathlib import Path
@@ -22,12 +21,7 @@ EXPORT_SCHEMA = "lgwks.daemon.export.v0"
 CLEANUP_SCHEMA = "lgwks.daemon.cleanup.v0"
 
 
-def _sha256_file(path: Path) -> str:
-    h = hashlib.sha256()
-    with open(path, "rb") as f:
-        for chunk in iter(lambda: f.read(65536), b""):
-            h.update(chunk)
-    return h.hexdigest()
+from lgwks_hashing import digest_file as _sha256_file  # canonical file digest (one source of truth)
 
 
 def _default_export_dir(repo_root: Path) -> Path:

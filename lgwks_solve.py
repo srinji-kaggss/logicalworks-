@@ -22,7 +22,6 @@ from __future__ import annotations
 
 import json
 import re
-import subprocess
 import sys
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
@@ -52,14 +51,12 @@ def _whisper(phase: str, msg: str) -> None:
     sys.stderr.flush()
 
 
+from lgwks_proc import run_git
+
+
 def _git(repo: Path, *args: str) -> tuple[int, str]:
     """Run a READ-ONLY git command. Returns (rc, stdout). Never mutates — solve advises, it does not act."""
-    try:
-        p = subprocess.run(["git", "-C", str(repo), *args],
-                            capture_output=True, text=True, timeout=_TIMEOUT)
-        return p.returncode, (p.stdout or "").strip()
-    except Exception as e:
-        return 1, f"<git invocation failed: {e}>"
+    return run_git(repo, *args, timeout=_TIMEOUT)  # one source of truth for the git wrapper
 
 
 @dataclass
@@ -97,9 +94,7 @@ def _today() -> tuple[int, int, int]:
     return n.year, n.month, n.day
 
 
-def _is_repo(repo: Path) -> bool:
-    rc, out = _git(repo, "rev-parse", "--is-inside-work-tree")
-    return rc == 0 and out == "true"
+from lgwks_proc import is_git_repo as _is_repo  # one source of truth
 
 
 def _diagnose(repo: Path) -> list[Finding]:

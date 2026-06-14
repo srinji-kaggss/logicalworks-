@@ -21,15 +21,13 @@ import subprocess
 import tempfile
 from pathlib import Path
 from typing import Optional, Any
-from datetime import datetime, timezone
 
 import lgwks_project_artifacts as artifacts
 
 _BOT = "stress"
 
 
-def _ts() -> str:
-    return datetime.now(timezone.utc).isoformat(timespec="seconds")
+from lgwks_clock import now_iso as _ts  # one source of truth for timestamps
 
 
 def _run_seed(repo: str) -> str:

@@ -52,14 +52,14 @@ def _pick_fingerprint(seed: int = 0) -> dict[str, Any]:
 def _text_from_html(html: str, max_chars: int = 8000, base_url: str = "") -> str:
     """Extract readable text from rendered HTML."""
     from lgwks_html import html_to_markdown
-    text, _, _ = html_to_markdown(html, base_url)
+    text, _, _, _ = html_to_markdown(html, base_url)
     return text[:max_chars]
 
 
 def _extract_links(html: str, base: str) -> list[dict[str, str]]:
     """Extract anchor links from rendered HTML."""
     from lgwks_html import html_to_markdown
-    _, _, links = html_to_markdown(html, base)
+    _, _, links, _ = html_to_markdown(html, base)
     seen: set[str] = set()
     out: list[dict[str, str]] = []
     for ln in links:

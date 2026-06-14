@@ -66,7 +66,6 @@ from __future__ import annotations
 import argparse
 from contextlib import contextmanager
 import fcntl
-import hashlib
 import json
 import logging
 import os
@@ -74,8 +73,6 @@ import re
 import subprocess
 import sys
 import threading
-import time
-from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
@@ -195,8 +192,7 @@ def _resolve_within_root(root: Path, candidate: str) -> Path | None:
 
 # ── timestamp / session ──────────────────────────────────────────────────────
 
-def _now() -> str:
-    return datetime.now(timezone.utc).replace(microsecond=0).isoformat()
+from lgwks_clock import now_iso as _now  # one source of truth for timestamps
 
 
 def _session_id() -> str:
@@ -248,8 +244,7 @@ def build_event(
 
 # ── SHA-256 hash chaining ────────────────────────────────────────────────────
 
-def _sha256(data: str) -> str:
-    return hashlib.sha256(data.encode("utf-8", errors="replace")).hexdigest()
+from lgwks_hashing import digest as _sha256  # canonical full digest (audit chain; one source of truth)
 
 
 def _last_line_hash(log_path: Path) -> str:

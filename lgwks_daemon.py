@@ -21,7 +21,6 @@ import subprocess
 import sys
 import time
 from dataclasses import dataclass
-from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
@@ -36,8 +35,7 @@ START_TIMEOUT_S = 5.0
 STOP_TIMEOUT_S = 5.0
 
 
-def _now() -> str:
-    return datetime.now(timezone.utc).replace(microsecond=0).isoformat()
+from lgwks_clock import now_iso as _now  # one source of truth for timestamps
 
 
 def _pid_alive(pid: int) -> bool:

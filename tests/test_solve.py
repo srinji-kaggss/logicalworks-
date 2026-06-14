@@ -29,9 +29,15 @@ class TestSolveGit(unittest.TestCase):
             evidence=[solve.Evidence("ev-head", "HEAD is detached", "git symbolic-ref HEAD", "detached")]
         )
         
+        # Mock _synthesize too: this test asserts the deterministic relatedness
+        # gate (_evidence_answers_thought), NOT the live Tongue's prose. Left
+        # unmocked, a real LLM narration can contain a trigger word ("insufficient
+        # evidence", ...) that solve_git collapses to story=="abstain" (see
+        # lgwks_solve line ~307), making Case 1 flaky. Pin it to a fixed story.
         with patch("lgwks_solve._is_repo", return_value=True), \
-             patch("lgwks_solve._diagnose", return_value=[f1]):
-            
+             patch("lgwks_solve._diagnose", return_value=[f1]), \
+             patch("lgwks_solve._synthesize", return_value="You are in detached HEAD; create a rescue branch to keep your commits."):
+
             # Case 1: thought is related to detached head -> does not abstain
             out = io.StringIO()
             with contextlib.redirect_stdout(out):

@@ -17,11 +17,9 @@ FleetOrchestrator intentionally shells out to git for worktree lifecycle managem
 from __future__ import annotations
 
 import argparse
-import hashlib
 import json
 import os
 import re
-import subprocess
 import time
 import uuid
 from dataclasses import asdict, dataclass, field
@@ -149,15 +147,8 @@ class FleetOrchestrator:
     # Git plumbing (single-node prototype)
     # ------------------------------------------------------------------
     def _git(self, *args: str, cwd: Path | None = None, timeout: int = 30) -> tuple[int, str]:
-        target = cwd or self.repo_root
-        try:
-            p = subprocess.run(
-                ["git", "-C", str(target), *args],
-                capture_output=True, text=True, timeout=timeout, check=False,
-            )
-            return p.returncode, (p.stdout or "").strip()
-        except Exception as e:
-            return 1, f"<git failed: {e}>"
+        from lgwks_proc import run_git  # one source of truth for the (rc, stdout) git wrapper
+        return run_git(cwd or self.repo_root, *args, timeout=timeout)
 
     # ------------------------------------------------------------------
     # Agent manifests
@@ -319,8 +310,7 @@ class FleetOrchestrator:
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
-def _sha256(text: str) -> str:
-    return hashlib.sha256(text.encode("utf-8", errors="ignore")).hexdigest()
+from lgwks_hashing import digest as _sha256  # canonical full digest (one source of truth)
 
 
 def _fleet_home() -> Path:

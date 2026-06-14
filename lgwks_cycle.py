@@ -9,14 +9,13 @@ from __future__ import annotations
 
 import hashlib
 import json
-import re
 import time
 from pathlib import Path
 
 import lgwks_sign
 
 GENESIS = "0" * 64
-SAFE = re.compile(r"[^a-z0-9._-]+")
+from lgwks_substrate_config import SLUG_SCRUB_RE as SAFE  # one source of truth
 
 
 def project_id(project: str) -> str:
@@ -35,10 +34,9 @@ def cycle_hash(record: dict, key: bytes | None = None) -> str:
 
 
 def write_jsonl(path: Path, rows: list[dict]) -> None:
-    path.parent.mkdir(parents=True, exist_ok=True)
-    with path.open("w", encoding="utf-8") as fh:
-        for row in rows:
-            fh.write(json.dumps(row, sort_keys=True, ensure_ascii=False) + "\n")
+    """Public JSONL writer. Delegates to the one source of truth."""
+    from lgwks_substrate_io import _emit_jsonl
+    _emit_jsonl(path, rows)
 
 
 def read_jsonl(path: Path) -> list[dict]:

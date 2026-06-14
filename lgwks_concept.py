@@ -86,8 +86,7 @@ _BRANDED_RE = re.compile(
 )
 
 
-def _hash(text: str) -> str:
-    return hashlib.blake2b(text.encode(), digest_size=16).hexdigest()
+from lgwks_hashing import blake_id as _hash  # canonical blake2b id (one source of truth)
 
 
 def _slug(text: str) -> str:

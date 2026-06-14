@@ -246,8 +246,7 @@ class WorkflowRun:
         }
 
 
-def _now() -> str:
-    return time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
+from lgwks_clock import now_iso as _now  # one source of truth for timestamps (was Z-suffixed; now +00:00)
 
 
 def _verdict_from_phases(phases: list[PhaseResult]) -> str:
@@ -295,14 +294,6 @@ def _cached_run(key: str) -> WorkflowRun | None:
         return None
 
 
-def _cache_put(key: str, run: WorkflowRun) -> None:
-    _CACHE_DIR.mkdir(parents=True, exist_ok=True)
-    path = _CACHE_DIR / f"{key}.json"
-    d = run.to_dict()
-    d["_cached_at"] = _now()
-    path.write_text(json.dumps(d, indent=None, separators=(",", ":")), encoding="utf-8")
-
-
 # ---------------------------------------------------------------------------
 # Checkpoint / resume layer
 # ---------------------------------------------------------------------------
@@ -315,11 +306,6 @@ def _checkpoint_path(key: str) -> Path:
     return _CHECKPOINT_DIR / f"{key}.checkpoint.json"
 
 
-def _save_checkpoint(key: str, run: WorkflowRun) -> None:
-    path = _checkpoint_path(key)
-    d = run.to_dict()
-    d["_checkpointed_at"] = _now()
-    path.write_text(json.dumps(d, indent=None, separators=(",", ":")), encoding="utf-8")
 
 
 def _load_checkpoint(key: str) -> WorkflowRun | None:

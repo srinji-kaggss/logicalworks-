@@ -204,7 +204,7 @@ def ingest(url: str, *, project: str = "", run_root: str = "store/ingest",
 
     from lgwks_html import html_to_markdown
     html = page.get("html", "")
-    markdown, title, _links = html_to_markdown(html, url)
+    markdown, title, _links, _ = html_to_markdown(html, url)
     # //why: lgwks_html.html_to_markdown returns empty on some large/complex pages
     # (e.g. a 374KB Wikipedia article -> md_len 0). render()'s _text_from already
     # extracted clean text, so fall back to it — same guard substrate uses

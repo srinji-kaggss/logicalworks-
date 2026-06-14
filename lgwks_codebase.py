@@ -90,8 +90,7 @@ class CodebaseIndex:
 # Parsing
 # ---------------------------------------------------------------------------
 
-def _content_hash(text: str) -> str:
-    return hashlib.sha256(text.encode("utf-8")).hexdigest()[:16]
+from lgwks_hashing import content_id as _content_hash  # canonical content-id (one source of truth)
 
 
 def _rel_path(path: Path, root: Path) -> str:

@@ -153,8 +153,7 @@ def _utc() -> str:
     return time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
 
 
-def _sha(text: str, n: int = 16) -> str:
-    return hashlib.sha256(text.encode("utf-8", errors="ignore")).hexdigest()[:n]
+from lgwks_hashing import content_id as _sha  # canonical content-id (one source of truth)
 
 
 def _run_id(repo: Path, intent: str) -> str:
@@ -512,8 +511,6 @@ def _is_relative_to(path: Path, base: Path) -> bool:
         return False
 
 
-def _command_display(command: str | tuple[str, ...]) -> str:
-    return command if isinstance(command, str) else " ".join(command)
 
 
 def _test_fact(

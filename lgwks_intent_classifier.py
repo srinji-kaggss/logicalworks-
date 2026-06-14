@@ -51,7 +51,6 @@ from __future__ import annotations
 
 import hashlib
 import json
-import math
 import time
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -366,19 +365,11 @@ def _embed(text: str) -> tuple[list[float], bool]:
     return vec, bool(is_semantic)
 
 
-def _cosine(a: list[float], b: list[float]) -> float:
-    # //why a true normalized cosine, not a bare dot: feature-hash vectors are
-    # unit-normalized but Eye vectors are NOT unit-norm after the MRL slice, so a
-    # dot product would conflate magnitude with similarity. Normalizing both makes
-    # one definition correct for both spaces. Mismatched length → 0.0 (incomparable).
-    if len(a) != len(b):
-        return 0.0
-    dot = sum(x * y for x, y in zip(a, b))
-    na = math.sqrt(sum(x * x for x in a))
-    nb = math.sqrt(sum(x * x for x in b))
-    if na == 0.0 or nb == 0.0:
-        return 0.0
-    return dot / (na * nb)
+# //why a true normalized cosine, not a bare dot: feature-hash vectors are
+# unit-normalized but Eye vectors are NOT unit-norm after the MRL slice, so a dot
+# product would conflate magnitude with similarity. The canonical cosine normalizes
+# both, making one definition correct for both spaces.
+from lgwks_vecmath import cosine as _cosine  # one source of truth for cosine similarity
 
 
 def _verb_signature(verbs: list[dict]) -> str:

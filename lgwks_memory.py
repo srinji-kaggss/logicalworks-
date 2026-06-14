@@ -30,7 +30,7 @@ import lgwks_sign
 ROOT = Path(__file__).resolve().parent
 _DIR = ROOT / "store" / "projects"
 _GENESIS = "0" * 64
-_SAFE = re.compile(r"[^a-z0-9._-]+")
+from lgwks_substrate_config import SLUG_SCRUB_RE as _SAFE  # one source of truth
 _KINDS = {"project_scope", "conversation", "theme", "fetch_plan", "fetch_result", "note"}
 _STOP = {
     "a", "an", "and", "are", "as", "at", "be", "by", "for", "from", "have", "i", "if", "in",

@@ -17,7 +17,6 @@ from __future__ import annotations
 
 import hashlib
 import json
-import re
 import time
 from pathlib import Path
 
@@ -27,7 +26,7 @@ ROOT = Path(__file__).resolve().parent
 _DIR = ROOT / "store" / "cognition"
 _GENESIS = "0" * 64
 _KINDS = {"thought", "intent_commit", "alignment", "gate", "note", "promotion"}
-_STREAM_SAFE = re.compile(r"[^a-z0-9._-]+")
+from lgwks_substrate_config import SLUG_SCRUB_RE as _STREAM_SAFE  # one source of truth
 
 
 def _log_path(stream: str) -> Path:

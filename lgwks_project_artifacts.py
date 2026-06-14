@@ -102,8 +102,7 @@ def _embedding(text: str, dims: int = EMBED_DIMS) -> list[float]:
     return [round(v / norm, 6) for v in vec]
 
 
-def _sha(value: str) -> str:
-    return hashlib.sha256(value.encode("utf-8")).hexdigest()
+from lgwks_hashing import digest as _sha  # canonical full digest (one source of truth)
 
 
 def _clamp(value: Optional[int], default: int, low: int, high: int) -> int:

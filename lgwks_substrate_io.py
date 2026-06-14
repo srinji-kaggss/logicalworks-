@@ -9,15 +9,12 @@ Defense-in-Depth:
 
 from __future__ import annotations
 
-import hashlib
 import json
 from pathlib import Path
 from typing import Any
 
 
-def _sha(text: str) -> str:
-    """SHA-256 digest of UTF-8 text, ignoring encoding errors."""
-    return hashlib.sha256(text.encode("utf-8", errors="ignore")).hexdigest()
+from lgwks_hashing import digest as _sha  # canonical full digest (one source of truth)
 
 
 def _slug(text: str, limit: int = 64) -> str:

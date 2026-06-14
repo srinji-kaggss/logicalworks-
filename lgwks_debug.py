@@ -4,7 +4,7 @@ Defense-in-Depth layers:
   T0 input validation: command args validated against blocklist; no shell metacharacters.
   T1 execution safety: shlex.split + shell=False; dangerous commands rejected before spawn.
   T2 pattern matching: expanded DB (25+ signatures) with severity-classified fixes.
-  T3 secret scrub: _SECRET_RE strips credentials from stdout/stderr before any log/display.
+  T3 secret scrub: lgwks_redact.scrub strips credentials from stdout/stderr before any log/display.
   T4 timeout: all runs have explicit timeout; hung commands fail fast (exit 124).
   T5 audit: .lgwks/debug-audit.jsonl records every command run (not just failures).
   T6 isolation: fix commands carry risk class (read/mutate/destructive); never auto-execute.
@@ -30,10 +30,6 @@ import lgwks_ui as ui
 
 
 # ── constants ───────────────────────────────────────────────────────────────
-
-_SECRET_RE = re.compile(
-    r"(?i)(api[_-]?key\w*|token\w*|password\w*|secret\w*|auth\w*)\s*([=:]\s*(bearer|token)?|(bearer|token))\s*['\"]?[^\s'\"]{8,}['\"]?"
-)
 
 # Commands we refuse to run (destructive or dangerous)
 _BLOCKLIST = re.compile(
@@ -74,9 +70,7 @@ def _validate_command(cmd_parts: list[str]) -> tuple[bool, str]:
     return True, ""
 
 
-def _scrub(text: str) -> str:
-    """Redact secrets from text before any log or display."""
-    return _SECRET_RE.sub("[REDACTED]", text)
+from lgwks_redact import scrub as _scrub  # one source of truth for credential redaction
 
 
 # ── pattern database ─────────────────────────────────────────────────────────

@@ -149,10 +149,7 @@ class NoiseRecord:
 # MATH UTILITIES  — wrapper layer delegates to lgwks_embed where already built
 # ══════════════════════════════════════════════════════════════════════════════
 
-def _cosine(a: list[float], b: list[float]) -> float:
-    """Thin wrapper — uses lgwks_embed._cos() which is already tested."""
-    import lgwks_embed
-    return lgwks_embed._cos(a, b)
+from lgwks_vecmath import cosine as _cosine  # one source of truth (was a bare dot via embed._cos)
 
 
 def _l2_norm(v: list[float]) -> list[float]:
@@ -443,14 +440,10 @@ def embed_multimodal(
 # DATASET INTAKE — streaming, batched; reads substrate artifacts when available
 # ══════════════════════════════════════════════════════════════════════════════
 
-_IMAGE_EXTS = {".png", ".jpg", ".jpeg", ".webp", ".gif", ".bmp"}
-_SKIP_DIRS = {".git", "node_modules", "__pycache__", ".venv", "venv",
-              "target", ".next", "dist", "build", "store"}
+from lgwks_substrate_config import SKIP_DIRS as _SKIP_DIRS, IMAGE_EXTS as _IMAGE_EXTS  # one source of truth
 
 
-def _sha(text: str, n: int = 16) -> str:
-    import hashlib
-    return hashlib.sha256(text.encode("utf-8", errors="ignore")).hexdigest()[:n]
+from lgwks_hashing import content_id as _sha  # canonical content-id (one source of truth)
 
 
 def _chunk_id(source_id: str, text: str, idx: int) -> str:

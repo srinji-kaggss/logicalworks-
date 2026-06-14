@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import argparse
-import hashlib
 import json
 import re
 import sys
@@ -29,8 +28,7 @@ _STOP = {
 }
 
 
-def _sha(text: str, n: int = 16) -> str:
-    return hashlib.sha256(text.encode("utf-8", errors="ignore")).hexdigest()[:n]
+from lgwks_hashing import content_id as _sha  # canonical content-id (one source of truth)
 
 
 def _tokenize(text: str) -> list[str]:
@@ -81,33 +79,6 @@ def _latent_anchors(views: list[dict[str, Any]], limit: int = 12) -> list[dict[s
         rows.append({"anchor": tok, "views": sorted(provenance[tok]), "score": round(ct / max(1, len(views)), 4)})
     rows.sort(key=lambda r: (-r["score"], -len(r["anchor"]), r["anchor"]))
     return rows[:limit]
-
-
-def _human_projection(anchors: list[dict[str, Any]], views: list[dict[str, Any]]) -> dict[str, Any]:
-    if anchors:
-        summary = "Shared anchors across views: " + ", ".join(a["anchor"] for a in anchors[:6]) + "."
-    else:
-        summary = "No repeated anchors across views yet; package is still a raw intake shell."
-    return {
-        "summary": summary,
-        "view_count": len(views),
-        "next_questions": [
-            "Which anchor is central rather than incidental?",
-            "Which view is strongest evidence versus framing noise?",
-            "What concrete repo, paper, or experiment should this bind to next?",
-        ],
-    }
-
-
-def _machine_projection(anchors: list[dict[str, Any]], capture_packet: dict[str, Any] | None,
-                        portal_packet: dict[str, Any] | None) -> dict[str, Any]:
-    return {
-        "anchors": anchors,
-        "capture_key": capture_packet["key"] if capture_packet else "",
-        "portal_key": portal_packet["key"] if portal_packet else "",
-        "repo": portal_packet["repo"] if portal_packet else "",
-        "candidate_files": portal_packet["candidate_files"][:6] if portal_packet else [],
-    }
 
 
 def _anchor_records(

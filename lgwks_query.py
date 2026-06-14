@@ -37,7 +37,7 @@ RESULT_SCHEMA = "lgwks.daemon.query.result.v1"
 
 PROJECTIONS = frozenset({"graph", "vector", "transcript", "artifact", "fact", "symbol"})
 
-_TOKEN_RE = re.compile(r"[a-z0-9]+")
+from lgwks_substrate_config import WORD_RE as _TOKEN_RE  # one source of truth
 
 # An adapter maps a validated request → a list of raw hit dicts for ONE projection.
 Adapter = Callable[[dict[str, Any]], list[dict[str, Any]]]

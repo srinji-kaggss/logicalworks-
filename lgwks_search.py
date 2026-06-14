@@ -52,7 +52,7 @@ _SNIPPET = re.compile(r'class="result__snippet"[^>]*>(.*?)</a>', re.S)
 _ANY_A = re.compile(r'<a\b[^>]*href="([^"]+)"[^>]*>(.*?)</a>', re.S)
 _MOJEEK_A = re.compile(r'<a[^>]*class="title"[^>]*href="([^"]+)"[^>]*>(.*?)</a>', re.S)  # mojeek result only
 _NAV_HOSTS = ("duckduckgo.com", "mojeek.com")       # self/nav links, never a result
-_TAG = re.compile(r"<[^>]+>")
+from lgwks_substrate_config import TAG_RE as _TAG  # one source of truth
 _YEAR = re.compile(r"\b(20\d{2})\b")
 _YEAR_SPAN = re.compile(r"\b(20\d{2})\s*[-–]\s*(20\d{2})\b")
 

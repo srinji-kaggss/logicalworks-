@@ -43,10 +43,8 @@ def _gh_meta(items: list[Any] | None = None, warnings: list[str] | None = None, 
 
 # ── constants ───────────────────────────────────────────────────────────────
 
-_SLUG_RE = re.compile(r"^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$")
-_SECRET_RE = re.compile(
-    r"(?i)(api[_-]?key\w*|token\w*|password\w*|secret\w*|auth\w*)\s*([=:]\s*(bearer|token)?|(bearer|token))\s*['\"]?[^\s'\"]{8,}['\"]?"
-)
+from lgwks_substrate_config import REPO_SLUG_RE as _SLUG_RE  # one source of truth
+from lgwks_redact import scrub as _scrub  # one source of truth for credential redaction
 _RATE_LIMIT_RE = re.compile(r"rate limit|API rate limit exceeded|403 Forbidden", re.IGNORECASE)
 
 
@@ -94,9 +92,6 @@ def _validate_number(n: str) -> int:
     return num
 
 
-def _scrub(text: str) -> str:
-    """Redact secrets from text before display or logging."""
-    return _SECRET_RE.sub("[REDACTED]", text)
 
 
 # ── subprocess wrapper ────────────────────────────────────────────────────────
@@ -142,11 +137,6 @@ def _repo_slug_args(repo: str | None) -> list[str]:
     """Return [--repo owner/repo] args if repo is given and valid."""
     validated = _validate_slug(repo)
     return ["--repo", validated] if validated else []
-
-
-def _auth_ok() -> bool:
-    rc, _ = _gh("auth", "status")
-    return rc == 0
 
 
 # ── data models ──────────────────────────────────────────────────────────────

@@ -17,7 +17,6 @@ in lgwks; the daemon (U10) folds those in from the environment. Not this unit.
 from __future__ import annotations
 
 import json
-import re
 import subprocess
 from pathlib import Path
 from typing import Any
@@ -25,7 +24,7 @@ from typing import Any
 _REPO = Path(__file__).resolve().parent   # so the hook can run from any cwd
 _LGWKS = _REPO / "lgwks"
 
-_TOKEN = re.compile(r"[a-z0-9]+")
+from lgwks_substrate_config import WORD_RE as _TOKEN  # one source of truth
 # Generic words that add no discriminative signal when matching an intent to a verb.
 _STOP = frozenset("the a an of to for and or with in on it this that is are be run get show "
                   "lgwks create make build do use via from into your you my our".split())

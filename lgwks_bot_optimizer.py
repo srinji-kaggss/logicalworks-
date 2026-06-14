@@ -16,7 +16,6 @@ from __future__ import annotations
 import ast
 import hashlib
 import re
-from datetime import datetime, timezone
 from pathlib import Path
 from typing import Optional, Any
 
@@ -36,8 +35,7 @@ _RE_EXPORTS = {
 }
 
 
-def _ts() -> str:
-    return datetime.now(timezone.utc).isoformat(timespec="seconds")
+from lgwks_clock import now_iso as _ts  # one source of truth for timestamps
 
 
 def _run_seed(repo: str) -> str:
