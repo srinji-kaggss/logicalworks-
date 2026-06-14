@@ -43,168 +43,23 @@ from lgwks_project_artifacts import (
     _terms,
     jsonl,
     write_json,
+    # record builders — one source of truth (were verbatim copies here); local _names preserved
+    worker_leases as _worker_leases,
+    token_ledger as _token_ledger,
+    critic_records as _critic_records,
+    model_state as _model_state,
+    model_lineage as _model_lineage,
+    machine_packets as _machine_packets,
+    graph_edges as _graph_edges,
 )
 from lgwks_project_plan import worker_cap
 
 
-# -- pure record builders (deploy-side) ----------------------------------
-# Each is a small pure projection. The spec lists these as deploy-family
-# helpers; they live here next to deploy_command, which is their only
-# caller (review reads the serialized artifacts, not these functions).
-
-def _worker_leases(project: str, chain_head: str, tokens_per_cycle: int, max_workers: int) -> list[dict]:
-    workers = [
-        ("context-001", "scope_memory", ["memory", "transcript", "operator-profile"]),
-        ("source-001", "neutral_academic", ["openalex", "crossref", "openverse"]),
-        ("embed-001", "vectorize_everything", ["artifact-embeddings", "local-folder", "subvaults"]),
-        ("critic-packet-001", "rigor_packet", ["critic", "heldout", "ai-to-ai"]),
-    ]
-    out: list[dict] = []
-    for worker_id, form, sources in workers[:max_workers]:
-        out.append({
-            "schema": "lgwks-worker-lease/1",
-            "worker_id": worker_id,
-            "project": project,
-            "input_chain_head": chain_head,
-            "budget": {"tokens": tokens_per_cycle, "commands": 8, "fetches": 25},
-            "allowed_sources": sources,
-            "query_form": form,
-            "postcondition": "claims have source handle or unsupported label; no narrative as source of truth",
-        })
-    return out
-
-
-def _token_ledger(cycles: list[dict]) -> list[dict]:
-    return [{
-        "schema": "lgwks-token-ledger/1",
-        "project": row["project"],
-        "cycle_hash": row["hash"],
-        "seq": row["seq"],
-        "token_budget": row["token_budget"],
-        "estimated_tokens": row["estimated_tokens"],
-        "token_status": row["token_status"],
-        "reason": "dry-run estimate; execute path records measured provider counts",
-    } for row in cycles]
-
-
-def _critic_records(cycles: list[dict]) -> list[dict]:
-    rows = []
-    for row in cycles:
-        rows.append({
-            "schema": "lgwks-critic/1",
-            "cycle_hash": row["hash"],
-            "claim_id": f"claim-{row['seq']:03d}",
-            "label": "unsupported" if row["query_form"] in {"synthesis_packet", "disproof"} else "observed",
-            "bias": {
-                "human_bias": [{"kind": "desired_outcome_pressure", "severity": "l"}],
-                "ai_bias": [{"kind": "slop_completion_pressure", "severity": "m"}],
-                "prompt_bias": [{"kind": "thesis_lock", "severity": "m"}],
-                "cognitive_bias": [{"kind": "availability", "severity": "l"}],
-            },
-            "contradiction": {"found": row["query_form"] == "disproof", "source": "planned:disproof-search"},
-            "next_action": "disprove" if row["query_form"] == "disproof" else "deepen",
-        })
-    return rows
-
-
-def _model_state(project: str, prompt: str) -> dict:
-    champion_id = "champion-" + _sha(project + "\n" + prompt)[:16]
-    return {
-        "schema": "lgwks-model-state/1",
-        "champion": {"id": champion_id, "score": {"brier": 0.18, "contradiction_recall": 0.70,
-                                                  "slop_chain_recall": 0.0}},
-        "challenger": {"id": "challenger-planned-" + champion_id.split("-", 1)[1], "score": None},
-        "promotion_policy": {
-            "brier_must_improve": True,
-            "contradiction_recall_must_not_regress": True,
-            "slop_chain_recall_must_not_regress": True,
-            "raw_user_data_must_stay_local": True,
-        },
-    }
-
-
-def _model_lineage(project: str, learning_mode: str) -> list[dict]:
-    base = {
-        "schema": "lgwks-model-lineage/1",
-        "upstream_url": "local://lgwks/deterministic-feature-hash-v1",
-        "upstream_license": "project-local",
-        "upstream_sha256": _sha("deterministic-feature-hash-v1"),
-        "training_data_refs": [],
-        "conversion": {"source_format": "python", "target_format": "none", "conversion_tool": "none",
-                       "quantization": "none", "coreml_hash": ""},
-        "adapter_hash": "",
-        "eval_ref": "heldout-fixture-planned",
-        "export_policy": learning_mode,
-    }
-    return [
-        {**base, "model_id": "deterministic-intent-encoder-v1", "project": project, "role": "intent_encoder",
-         "base_model": "deterministic-feature-hash-v1"},
-        {**base, "model_id": "deterministic-reranker-v1", "project": project, "role": "reranker",
-         "base_model": "deterministic-cosine-reranker-v1"},
-        {**base, "model_id": "planned-oss-coreml-spine", "project": project, "role": "oss_coreml_spine",
-         "base_model": "BERT/ModernBERT/E5/BGE/UniXcoder candidate; license+hash required before download",
-         "conversion": {"source_format": "safetensors|onnx", "target_format": "coreml",
-                        "conversion_tool": "coremltools", "quantization": "fp16|int8", "coreml_hash": "planned"}},
-    ]
-
-
-def _machine_packets(cycles: list[dict], model_lineage_rows: list[dict]) -> list[dict]:
-    refs = {row["role"]: row["model_id"] for row in model_lineage_rows}
-    packets = []
-    for row in cycles:
-        packet = {
-            "schema": "lgwks-machine-packet/1",
-            "project": row["project"],
-            "chain_head": row["hash"],
-            "intent_features": {
-                "class": "research_orchestration",
-                "specificity": 1.0,
-                "said_meant_distance": 0.18,
-                "query_form": row["query_form"],
-            },
-            "evidence_refs": [e["id"] for e in row["evidence_attention"]],
-            "bias_planes": ["human_bias", "ai_bias", "prompt_bias", "cognitive_bias"],
-            "model_refs": {
-                "intent_encoder": refs.get("intent_encoder", ""),
-                "reranker": refs.get("reranker", ""),
-                "oss_coreml_spine": refs.get("oss_coreml_spine", ""),
-            },
-            "next_commands": row["next_commands"],
-        }
-        packet["packet_id"] = _sha(json.dumps(packet, sort_keys=True))
-        packets.append(packet)
-    return packets
-
-
-def _graph_edges(cycles: list[dict]) -> list[dict]:
-    edges = []
-    for row in cycles:
-        cycle_id = row["hash"]
-        edges.append({
-            "schema": "lgwks-graph-edge/1",
-            "project": row["project"],
-            "src": {"kind": "intent", "id": row["intent"]},
-            "dst": {"kind": "cycle", "id": cycle_id},
-            "edge_type": "refines",
-            "weight": row["weight"]["intent_mapping"],
-            "evidence_ref": "",
-            "created_by": "deterministic",
-            "attribution": {"top_features": [row["query_form"], "prompt-derived keywords"]},
-        })
-        for e in row["evidence_attention"]:
-            edges.append({
-                "schema": "lgwks-graph-edge/1",
-                "project": row["project"],
-                "src": {"kind": "cycle", "id": cycle_id},
-                "dst": {"kind": "source", "id": e["id"]},
-                "edge_type": "schedules",
-                "weight": e["score"],
-                "evidence_ref": e["id"],
-                "created_by": "deterministic",
-                "attribution": {"top_features": [e["why"]]},
-            })
-    return edges
-
+# -- pure record builders -------------------------------------------------
+# These 7 (worker_leases, token_ledger, critic_records, model_state,
+# model_lineage, machine_packets, graph_edges) are imported from
+# lgwks_project_artifacts (their one source of truth) and aliased to the
+# _names deploy_command calls below. They used to be verbatim copies here.
 
 def _learning_records(project: str, prompt: str, cycles: list[dict], learning_mode: str,
                       device_consent: str) -> list[dict]:
