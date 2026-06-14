@@ -27,8 +27,7 @@ from pathlib import Path
 
 logger = logging.getLogger(__name__)
 
-from lgwks_substrate_config import TAG_RE as _TAG  # one source of truth
-_WS = re.compile(r"\n{3,}")
+from lgwks_substrate_config import TAG_RE as _TAG, WS_COLLAPSE_RE as _WS  # one source of truth
 # A real, current desktop Chrome fingerprint — present as a human browser, the honest way past JS walls.
 _UA = ("Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 "
        "(KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36")

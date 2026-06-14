@@ -9,14 +9,13 @@ from __future__ import annotations
 
 import hashlib
 import json
-import re
 import time
 from pathlib import Path
 
 import lgwks_sign
 
 GENESIS = "0" * 64
-SAFE = re.compile(r"[^a-z0-9._-]+")
+from lgwks_substrate_config import SLUG_SCRUB_RE as SAFE  # one source of truth
 
 
 def project_id(project: str) -> str:

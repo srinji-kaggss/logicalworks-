@@ -29,8 +29,7 @@ try:
 except Exception:
     _cap = None
 
-from lgwks_substrate_config import TAG_RE as _TAG  # one source of truth
-_WS = re.compile(r"\n{3,}")
+from lgwks_substrate_config import TAG_RE as _TAG, WS_COLLAPSE_RE as _WS  # one source of truth
 _PDF_EXT = {".pdf"}
 _OFFICE_EXT = {".docx", ".xlsx", ".pptx", ".doc", ".xls", ".ppt"}
 _TEXT_EXT = {".txt", ".md", ".csv", ".json", ".yaml", ".yml", ".log", ".toml", ".ini", ".cfg", ".xml",

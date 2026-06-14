@@ -14,7 +14,6 @@ import base64
 import hashlib
 import json
 import os
-import re
 import time
 from dataclasses import dataclass
 from pathlib import Path
@@ -42,7 +41,7 @@ ROOT = Path(__file__).resolve().parent
 _DIR = ROOT / "store" / "intent"
 _AUDIT_DIR = ROOT / ".lgwks"
 _AUDIT_LOG = _AUDIT_DIR / "vault-audit.jsonl"
-_SAFE = re.compile(r"[^a-z0-9._-]+")
+from lgwks_substrate_config import SLUG_SCRUB_RE as _SAFE  # one source of truth
 
 # Enterprise defaults
 _KDF_MEMORY_KB = 64 * 1024       # 64 MB

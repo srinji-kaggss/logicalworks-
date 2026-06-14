@@ -28,7 +28,7 @@ STOP = {
     "is", "it", "its", "not", "of", "on", "or", "that", "the", "this", "to", "was", "with",
     "you", "your",
 }
-SAFE = re.compile(r"[^a-z0-9._-]+")
+from lgwks_substrate_config import SLUG_SCRUB_RE as SAFE  # one source of truth
 
 
 def _project_id(project: str) -> str:
