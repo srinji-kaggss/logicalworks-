@@ -4,7 +4,7 @@ Defense-in-Depth layers:
   T0 schema validation: strict version pin, typed fields, repo slug regex, bounded numbers.
   T1 input sanitization: next_if keys allowlisted; substitution escapes shell metacharacters.
   T2 probe sandbox: isolated subprocess, per-probe timeout, no shell=True anywhere.
-  T3 secret scrub: _SECRET_RE strips credentials from all probe stdout/stderr.
+  T3 secret scrub: lgwks_redact.scrub strips credentials from all probe stdout/stderr.
   T4 rate/circuit: probe count capped per route; consecutive failures back off.
   T5 audit: .lgwks/intent-audit.jsonl records every routing decision with full probed state.
   T6 execution gate: auto-execute (--yes) carries risk class (read/mutate/destructive);
@@ -38,9 +38,6 @@ _MAX_PROBES_PER_ROUTE = 12
 _MAX_ISSUE = 9_999_999
 _MAX_PR = 9_999_999
 
-_SECRET_RE = re.compile(
-    r"(?i)(api[_-]?key\w*|token\w*|password\w*|secret\w*|auth\w*)\s*([=:]\s*(bearer|token)?|(bearer|token))\s*['\"]?[^\s'\"]{8,}['\"]?"
-)
 
 _SLUG_RE = re.compile(r"^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$")
 
@@ -127,8 +124,7 @@ def _validate_next_if_keys(next_if: dict[str, str]) -> dict[str, str]:
     return next_if
 
 
-def _scrub(text: str) -> str:
-    return _SECRET_RE.sub("[REDACTED]", text)
+from lgwks_redact import scrub as _scrub  # one source of truth for credential redaction
 
 
 def _safe_substitute(cmd: str, intent: "IntentDoc") -> str:
