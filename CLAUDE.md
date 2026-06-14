@@ -70,9 +70,13 @@ Cite the path you verified, not the path you remember.
   HERE, never in cl-ideas.
 Entry doc in each repo is `CLAUDE.md` (`AGENTS.md` symlinks to it).
 
-## Agent Mandates (2026-06-14)
+## Standalone Foundation Strategy (2026-06-14)
+- **The North Star**: We are building the **Standalone Aetherius Model**. This is a proprietary foundation model that will eventually handle ALL tasks (embedding, reasoning, vision, research, code) natively.
+- **The Workaround (Today)**: The current "Model Mesh" (Qwen3-VL, OLMo-3, WhisperKit) is a temporary **Borrowed Cognition** layer. It exists solely to provide high-fidelity "scaffolding" for current operations.
+- **The Goal**: The `lgwks` daemon's primary purpose today is **Training Data Ingestion**. Every event, thought, and commitment captured in our JSONL/DB streams is a future training trajectory for the Standalone Model.
+
+## Agent Mandates
+- **Data Integrity First**: Every interaction must be recorded in the `CognitionLog` and `daemon-events.db`. This is the training material for the Standalone Model.
 - **Mandatory Pre-flight**: Run `lgwks doctor` before ANY research, code analysis, or daemon task.
-- **Local-First Models**: Use `lgwks_model_hub` for repo-resident weights. Never assume `~/.cache`.
-- **Absolute Paths**: All command executions (via `subprocess`) must use absolute paths to the `lgwks` script.
-- **Telemetry v2**: Use `lgwks_daemon_event.emit()` for all audit logs. No raw `print()` for telemetry.
-- **CognitionLog**: Persist all reasoning to the HMAC-chained log in `store/cognition/`.
+- **Absolute Paths**: All command executions must use absolute paths to the `lgwks` script.
+- **No Hallucination**: Refer ONLY to `lgwks_model_mesh.py` for model law.

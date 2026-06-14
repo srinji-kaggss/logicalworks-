@@ -70,59 +70,42 @@ def _entry(
     return entry
 
 
-# ── The model law, transcribed from spec §3.1 (current) and §8 (Locked v1) ──
-# Provenance (reconciled 2026-06-14): every row is copied from the 2026-06-13 finalization spec.
+# ── The Model Law: Workaround Hierarchy (Borrowed Cognition for Data Collection) ──
+# Provenance (reconciled 2026-06-14): these models are temporary workers used
+# to generate the trajectories needed to train the Standalone Aetherius Model.
 MESH_LAW: list[dict[str, Any]] = [
+    # TARGET: THE OWNED FOUNDATION (SCAFFOLDING)
     _entry(
-        name="Qwen/Qwen3-Embedding-8B", runtime="mlx", locality="local", role="embed",
+        name="logicalworks/aetherius-standalone-v1", runtime="custom", locality="local", role="foundation",
+        trust_class="authority", status="open_slot",
+        notes="The future proprietary core. Will eventually unify all roles below.",
+    ),
+
+    # WORKAROUND 1: UNIVERSAL MULTIMODAL EYE (BORROWED)
+    _entry(
+        name="Qwen/Qwen3-VL-Embedding-8B", runtime="mlx", locality="local", role="embed",
         input_schema="lgwks.modality.item.v1", output_schema="lgwks.vector.record.v1",
         trust_class="sensor", status="current_law",
-        notes="Universal semantic space; store-fetch status",
+        notes="Temporary sensor for high-fidelity multimodal data collection.",
     ),
-    _entry(
-        name="Qwen/Qwen3-Reranker-0.6B", runtime="mlx", locality="local", role="rerank",
-        trust_class="sensor", status="current_law",
-        notes="High-density retrieval ranker",
-    ),
+    
+    # WORKAROUND 2: DEEP REASONING TONGUE (BORROWED)
     _entry(
         name="mlx-community/Olmo-3-1125-32B-4bit", runtime="mlx", locality="local", role="proposal",
         trust_class="generative", status="current_law",
-        notes="Deep reasoning (owned core); Mac-tier only",
+        notes="Temporary simplifier for complex state-to-language delegation.",
     ),
-    _entry(
-        name="tiny-bert", runtime="transformers", locality="local", role="intent",
-        trust_class="sensor", status="current_law",
-    ),
-    _entry(
-        name="distilbert-base-uncased", runtime="transformers", locality="local", role="classify",
-        trust_class="sensor", status="current_law",
-    ),
-    _entry(
-        name="microsoft/codebert-base", runtime="transformers", locality="local", role="code",
-        trust_class="sensor", status="current_law",
-    ),
-    _entry(
-        name="neobert", runtime="transformers", locality="local", role="salience",
-        trust_class="sensor", status="current_law",
-    ),
-    _entry(
-        name="LiquidAI/LFM2-1.2B-Extract", runtime="llama_cpp", locality="local", role="extract",
-        trust_class="generative", status="current_law",
-    ),
+
+    # WORKAROUND 3: SPECIALIZED SENSORS (BORROWED)
     _entry(
         name="WhisperKit/lg-v3-turbo", runtime="mlx", locality="local", role="asr",
         trust_class="sensor", status="current_law",
-        notes="Ear (ASR) layer; define voice contract",
-    ),
-    _entry(
-        name="hexgrad/Kokoro-82M", runtime="mlx", locality="local", role="asr",
-        trust_class="generative", status="current_law",
-        notes="Mouth (TTS) layer",
+        notes="Temporary ear layer for voice trajectory capture.",
     ),
     _entry(
         name="meta-llama/Llama-Prompt-Guard-2-86M", runtime="transformers", locality="local", role="classify",
         trust_class="sensor", status="current_law",
-        notes="ML-layer injection guard",
+        notes="Temporary safety gate for training data sanitization.",
     ),
 ]
 
