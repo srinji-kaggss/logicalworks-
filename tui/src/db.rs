@@ -126,6 +126,34 @@ impl Db {
         Ok(items)
     }
 
+    pub fn get_thoughts(&self, limit: usize) -> Result<Vec<serde_json::Value>> {
+        let cognition_dir = self.repo_root.join("store").join("cognition");
+        if !cognition_dir.exists() {
+            return Ok(vec![]);
+        }
+        
+        // Find newest cognition file
+        let mut entries = fs::read_dir(cognition_dir)?
+            .filter_map(|e| e.ok())
+            .filter(|e| e.file_name().to_string_lossy().ends_with(".jsonl"))
+            .collect::<Vec<_>>();
+        
+        entries.sort_by_key(|e| e.metadata().and_then(|m| m.modified()).ok());
+        
+        if let Some(entry) = entries.last() {
+            let content = fs::read_to_string(entry.path())?;
+            let mut thoughts = Vec::new();
+            for line in content.lines().rev().take(limit) {
+                if let Ok(v) = serde_json::from_str::<serde_json::Value>(line) {
+                    thoughts.push(v);
+                }
+            }
+            Ok(thoughts)
+        } else {
+            Ok(vec![])
+        }
+    }
+
     pub fn emit_telemetry(&self, lane: &str, kind: &str, scope: &str, payload_msg: &str) -> Result<()> {
         let tenant_id = format!("repo:{}", self.repo_root.file_name().unwrap_or_default().to_string_lossy());
         

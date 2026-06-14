@@ -55,6 +55,7 @@ struct App {
     repo_input: Input,
     mode: Mode,
     status_msg: Option<String>,
+    thoughts: Vec<serde_json::Value>,
 }
 
 impl App {
@@ -84,6 +85,7 @@ impl App {
             repo_input: Input::default().with_value(std::env::current_dir().unwrap_or_default().to_string_lossy().to_string()),
             mode,
             status_msg: None,
+            thoughts: Vec::new(),
         }
     }
 
@@ -105,6 +107,9 @@ impl App {
             }
             if let Ok(queue) = db.get_queue(20) {
                 self.queue = queue;
+            }
+            if let Ok(thoughts) = db.get_thoughts(20) {
+                self.thoughts = thoughts;
             }
             if self.workflows.is_empty() {
                 if let Ok(workflows) = db.get_workflows() {
@@ -357,7 +362,7 @@ fn ui(f: &mut Frame, app: &App) {
         .direction(Direction::Vertical)
         .constraints([
             Constraint::Length(3), // Header
-            Constraint::Min(0),    // Main Content (3 cols)
+            Constraint::Min(0),    // Main Content (4 cols)
             Constraint::Length(1), // Footer
         ])
         .split(f.area());
@@ -368,14 +373,16 @@ fn ui(f: &mut Frame, app: &App) {
         .direction(Direction::Horizontal)
         .constraints([
             Constraint::Percentage(20), // Left: Workflows
-            Constraint::Percentage(50), // Center: Active View
-            Constraint::Percentage(30), // Right: Events
+            Constraint::Percentage(40), // Center: Active View
+            Constraint::Percentage(20), // Center-Right: Thoughts
+            Constraint::Percentage(20), // Right: Events
         ])
         .split(chunks[1]);
 
     render_workflow_sidebar(f, main_chunks[0], app);
     render_main_area(f, main_chunks[1], app);
-    render_event_sidebar(f, main_chunks[2], app);
+    render_thought_sidebar(f, main_chunks[2], app);
+    render_event_sidebar(f, main_chunks[3], app);
     
     render_footer(f, chunks[2], app);
 }
@@ -528,6 +535,36 @@ fn render_main_area(f: &mut Frame, area: Rect, app: &App) {
             .style(Style::default().fg(CREAM_DIM));
         f.render_widget(welcome, area);
     }
+}
+
+fn render_thought_sidebar(f: &mut Frame, area: Rect, app: &App) {
+    let items: Vec<ListItem> = app.thoughts.iter().map(|t| {
+        let kind = t.get("kind").and_then(|v| v.as_str()).unwrap_or("thought");
+        let color = match kind {
+            "thought" => CREAM_DIM,
+            "intent_commit" => EMERALD,
+            "promotion" => EMERALD_DIM,
+            _ => SLATE_DIM,
+        };
+        let data = t.get("data").cloned().unwrap_or(serde_json::json!({}));
+        let summary = match kind {
+            "thought" => data.get("chamber").and_then(|v| v.as_str()).unwrap_or("think"),
+            "intent_commit" => "COMMIT",
+            "promotion" => "ANCHOR",
+            _ => kind,
+        };
+        
+        ListItem::new(vec![
+            Line::from(vec![
+                Span::styled(format!("{} ", summary.to_uppercase()), Style::default().fg(color).add_modifier(Modifier::BOLD)),
+                Span::styled(format!("{}", data), Style::default().fg(MUTED)),
+            ]),
+        ])
+    }).collect();
+
+    let list = List::new(items)
+        .block(Block::default().title(" AETHERIUS THOUGHTS ").borders(Borders::ALL).border_style(Style::default().fg(SLATE_DIM)).title_style(Style::default().fg(EMERALD_DIM)));
+    f.render_widget(list, area);
 }
 
 fn render_event_sidebar(f: &mut Frame, area: Rect, app: &App) {

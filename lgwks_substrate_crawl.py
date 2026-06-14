@@ -15,12 +15,12 @@ from pathlib import Path
 from typing import Any
 
 import lgwks_browser
+import lgwks_hashing
 from lgwks_substrate_config import (
     AUTH_GATE_RE,
     STRONG_AUTH_GATE_RE,
     FrontierList,
 )
-from lgwks_substrate_io import _sha
 
 
 def _html_to_markdown(html: str, url: str) -> tuple[str, str, list[dict[str, str]], list[dict[str, str]]]:
@@ -111,7 +111,7 @@ def _crawl_site(
                    discovered_by: str, screenshot_b64: str = "", screenshot_mime: str = "image/png",
                    media: list[dict[str, str]] | None = None) -> bool:
         clean_source = _canonicalize_crawl_url(source) or source
-        fingerprint = (clean_source, _sha(text or ""))
+        fingerprint = (clean_source, lgwks_hashing.digest(text or ""))
         if fingerprint in doc_fingerprints:
             return False
         doc_fingerprints.add(fingerprint)

@@ -102,7 +102,12 @@ def cluster(
     LeidenUnavailableError
         If algorithm="leiden" and leidenalg cannot be imported on this Python version.
         Never silently substitutes Louvain.
+    ValueError
+        If resolution is outside the safe boundary [0.1, 5.0].
     """
+    if not (0.1 <= resolution <= 5.0):
+        raise ValueError(f"modularity resolution must be in [0.1, 5.0], got {resolution}")
+
     if force_louvain:
         return _run_louvain(graph, resolution=resolution, seed=seed, forced=True)
 

@@ -22,7 +22,6 @@ guesses intent. The abstain threshold is tunable by the steering Depth dial.
 
 from __future__ import annotations
 
-import hashlib
 import json
 import re
 from pathlib import Path
@@ -225,8 +224,11 @@ def refine_command(args) -> int:
     return 0
 
 
+import lgwks_hashing
+
+
 def _state_hash(state: dict) -> str:
-    return hashlib.sha256(json.dumps(state, sort_keys=True).encode("utf-8")).hexdigest()
+    return lgwks_hashing.content_id(json.dumps(state, sort_keys=True))
 
 
 def snapshot(state: dict) -> dict:
