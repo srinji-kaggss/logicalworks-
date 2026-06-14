@@ -153,8 +153,7 @@ def _utc() -> str:
     return time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
 
 
-def _sha(text: str, n: int = 16) -> str:
-    return hashlib.sha256(text.encode("utf-8", errors="ignore")).hexdigest()[:n]
+from lgwks_hashing import content_id as _sha  # canonical content-id (one source of truth)
 
 
 def _run_id(repo: Path, intent: str) -> str:

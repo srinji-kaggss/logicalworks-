@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import argparse
-import hashlib
 import json
 import re
 import sys
@@ -29,8 +28,7 @@ _STOP = {
 }
 
 
-def _sha(text: str, n: int = 16) -> str:
-    return hashlib.sha256(text.encode("utf-8", errors="ignore")).hexdigest()[:n]
+from lgwks_hashing import content_id as _sha  # canonical content-id (one source of truth)
 
 
 def _tokenize(text: str) -> list[str]:

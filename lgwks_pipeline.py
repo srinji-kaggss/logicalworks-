@@ -444,13 +444,10 @@ def embed_multimodal(
 # ══════════════════════════════════════════════════════════════════════════════
 
 _IMAGE_EXTS = {".png", ".jpg", ".jpeg", ".webp", ".gif", ".bmp"}
-_SKIP_DIRS = {".git", "node_modules", "__pycache__", ".venv", "venv",
-              "target", ".next", "dist", "build", "store"}
+from lgwks_substrate_config import SKIP_DIRS as _SKIP_DIRS  # one source of truth (was a local copy)
 
 
-def _sha(text: str, n: int = 16) -> str:
-    import hashlib
-    return hashlib.sha256(text.encode("utf-8", errors="ignore")).hexdigest()[:n]
+from lgwks_hashing import content_id as _sha  # canonical content-id (one source of truth)
 
 
 def _chunk_id(source_id: str, text: str, idx: int) -> str:

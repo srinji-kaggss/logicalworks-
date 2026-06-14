@@ -17,7 +17,6 @@ FleetOrchestrator intentionally shells out to git for worktree lifecycle managem
 from __future__ import annotations
 
 import argparse
-import hashlib
 import json
 import os
 import re
@@ -319,8 +318,7 @@ class FleetOrchestrator:
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
-def _sha256(text: str) -> str:
-    return hashlib.sha256(text.encode("utf-8", errors="ignore")).hexdigest()
+from lgwks_hashing import digest as _sha256  # canonical full digest (one source of truth)
 
 
 def _fleet_home() -> Path:

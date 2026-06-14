@@ -60,8 +60,7 @@ def _err(error_code: str, detail: str):
     return {"ok": False, "error_code": error_code, "detail": detail}
 
 
-def _sha(obj) -> str:
-    return hashlib.sha256(json.dumps(obj, sort_keys=True, separators=(",", ":")).encode("utf-8")).hexdigest()
+from lgwks_hashing import canonical_id as _sha  # canonical-JSON object id (one source of truth)
 
 
 def validate_geoexpr(obj) -> dict:

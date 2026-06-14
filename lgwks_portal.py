@@ -11,7 +11,6 @@ instead of rereading a slop-heavy chat log.
 from __future__ import annotations
 
 import argparse
-import hashlib
 import json
 import re
 import sys
@@ -52,8 +51,10 @@ def _tokenize(text: str) -> list[str]:
     return [t.lower() for t in re.findall(r"[A-Za-z][A-Za-z0-9_./-]{1,}", text)]
 
 
-def _sha(text: str, n: int = 12) -> str:
-    return hashlib.sha256(text.encode("utf-8")).hexdigest()[:n]
+from lgwks_hashing import content_id
+
+def _sha(text: str, n: int = 12) -> str:  # portal store width = 12; canonical primitive
+    return content_id(text, n)
 
 
 def _project_key(intent: str, repo: Path) -> str:

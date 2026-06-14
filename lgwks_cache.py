@@ -13,7 +13,6 @@ The three stores are separate dirs so a leak in one can't expose the others.
 
 from __future__ import annotations
 
-import hashlib
 import json
 import os
 import re
@@ -30,8 +29,7 @@ def _ensure() -> None:
     _DIR.mkdir(parents=True, exist_ok=True)
 
 
-def _hash(content: bytes) -> str:
-    return hashlib.sha256(content).hexdigest()
+from lgwks_hashing import digest_bytes as _hash  # canonical bytes digest (one source of truth)
 
 
 def _path_for(h: str) -> Path:

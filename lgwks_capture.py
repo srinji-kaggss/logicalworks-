@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import argparse
-import hashlib
 import json
 import sys
 import time
@@ -19,8 +18,7 @@ CAPTURE_ROOT = ROOT / "store" / "captures"
 CAPTURE_SCHEMA = "lgwks.capture.v1"
 
 
-def _sha(text: str, n: int = 16) -> str:
-    return hashlib.sha256(text.encode("utf-8", errors="ignore")).hexdigest()[:n]
+from lgwks_hashing import content_id as _sha  # canonical content-id (one source of truth)
 
 
 def _read_context(args: argparse.Namespace) -> str:
