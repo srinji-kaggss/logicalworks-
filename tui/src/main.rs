@@ -1,7 +1,7 @@
 mod models;
 mod db;
 
-use color_eyre::Result;
+use color_eyre::{Result, eyre::WrapErr, eyre::eyre};
 use crossterm::{
     event::{self, Event, KeyCode, KeyEventKind, EnableMouseCapture, DisableMouseCapture, MouseEventKind, MouseButton},
     execute,
@@ -10,95 +10,66 @@ use ratatui::{
     layout::{Constraint, Direction, Layout, Rect},
     style::{Color, Modifier, Style},
     text::{Line, Span},
-    widgets::{Block, Borders, Paragraph, Tabs, Wrap, ListItem, Table, Row, List, Clear},
+    widgets::{Block, Borders, Paragraph, ListItem, List},
     DefaultTerminal, Frame,
 };
 use std::time::{Duration, Instant};
 use std::process::Command;
+use std::path::{PathBuf};
+use std::collections::HashMap;
 use tui_input::Input;
 use tui_input::backend::crossterm::EventHandler;
-use crate::models::{DaemonEvent, WorkItem, DaemonStatus, NavModule};
+use crate::models::{DaemonEvent, WorkItem, DaemonStatus, NavModule, WorkflowDef};
 use crate::db::Db;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum Tab {
-    Dashboard,
-    NavMap,
-    Initialize,
-    Events,
-    Queue,
-    Logs,
-}
-
-impl Tab {
-    fn all() -> &'static [Tab] {
-        &[Tab::Dashboard, Tab::NavMap, Tab::Initialize, Tab::Events, Tab::Queue, Tab::Logs]
-    }
-
-    fn to_index(self) -> usize {
-        match self {
-            Tab::Dashboard => 0,
-            Tab::NavMap => 1,
-            Tab::Initialize => 2,
-            Tab::Events => 3,
-            Tab::Queue => 4,
-            Tab::Logs => 5,
-        }
-    }
-
-    fn from_index(index: usize) -> Self {
-        match index % 6 {
-            0 => Tab::Dashboard,
-            1 => Tab::NavMap,
-            2 => Tab::Initialize,
-            3 => Tab::Events,
-            4 => Tab::Queue,
-            5 => Tab::Logs,
-            _ => unreachable!(),
-        }
-    }
-
-    fn title(self) -> &'static str {
-        match self {
-            Tab::Dashboard => "◈ DASHBOARD",
-            Tab::NavMap => "🧭 NAVMAP",
-            Tab::Initialize => "⚙ INITIALIZE",
-            Tab::Events => "◆ EVENTS",
-            Tab::Queue => "✦ QUEUE",
-            Tab::Logs => "◇ LOGS",
-        }
-    }
+enum Mode {
+    Normal,
+    Insert,
 }
 
 struct App {
-    active_tab: Tab,
     should_quit: bool,
     last_tick: Instant,
+    repo_root: PathBuf,
+    script_path: PathBuf,
     status: DaemonStatus,
     events: Vec<DaemonEvent>,
     queue: Vec<WorkItem>,
     nav_modules: Vec<(String, NavModule)>,
-    init_input: Input,
-    init_error: Option<String>,
+    workflows: HashMap<String, WorkflowDef>,
+    selected_workflow: Option<String>,
+    workflow_list_state: ratatui::widgets::ListState,
+    form_input: Input,
+    mode: Mode,
+    status_msg: Option<String>,
 }
 
 impl App {
-    fn new() -> Self {
+    fn new(repo_root: PathBuf) -> Self {
+        let script_path = repo_root.join("lgwks");
         Self {
-            active_tab: Tab::Dashboard,
             should_quit: false,
             last_tick: Instant::now(),
+            repo_root: repo_root.clone(),
+            script_path,
             status: DaemonStatus {
                 pid: None,
                 status: "stopped".to_string(),
-                repo_root: "".to_string(),
+                repo_root: repo_root.to_string_lossy().to_string(),
                 heartbeat_at: "".to_string(),
+                alive: false,
+                lock_present: false,
             },
             events: Vec::new(),
             queue: Vec::new(),
             nav_modules: Vec::new(),
-            init_input: Input::default().with_value(".".to_string()),
-            init_error: None,
+            workflows: HashMap::new(),
+            selected_workflow: None,
+            workflow_list_state: ratatui::widgets::ListState::default(),
+            form_input: Input::default(),
+            mode: Mode::Normal,
+            status_msg: None,
         }
     }
 
@@ -112,6 +83,11 @@ impl App {
         if let Ok(queue) = db.get_queue(20) {
             self.queue = queue;
         }
+        if self.workflows.is_empty() {
+            if let Ok(workflows) = db.get_workflows() {
+                self.workflows = workflows;
+            }
+        }
         if self.nav_modules.is_empty() {
             if let Ok(navmap) = db.get_navmap() {
                 let mut modules: Vec<_> = navmap.modules.into_iter().collect();
@@ -121,62 +97,87 @@ impl App {
         }
     }
 
-    fn next_tab(&mut self) {
-        self.active_tab = Tab::from_index(self.active_tab.to_index() + 1);
-    }
+    fn execute_workflow(&mut self, db: &Db) {
+        if let Some(ref wf_name) = self.selected_workflow {
+            let input_val = self.form_input.value().to_string();
+            self.status_msg = Some(format!("Executing {}...", wf_name));
+            
+            // Secure Execution using absolute paths and vector args
+            let mut args = vec![self.script_path.to_str().unwrap_or("lgwks"), "workflow", wf_name];
+            if !input_val.is_empty() {
+                args.push(&input_val);
+            }
 
-    fn prev_tab(&mut self) {
-        let index = self.active_tab.to_index();
-        if index == 0 {
-            self.active_tab = Tab::from_index(5);
-        } else {
-            self.active_tab = Tab::from_index(index - 1);
+            let _ = db.emit_telemetry("control", "workflow_event", "human_message", &format!("Triggered workflow: {}", wf_name));
+
+            let status = Command::new("python3")
+                .args(&args)
+                .current_dir(&self.repo_root)
+                .status();
+
+            match status {
+                Ok(s) if s.success() => {
+                    self.status_msg = Some(format!("Workflow {} completed.", wf_name));
+                }
+                Ok(s) => {
+                    self.status_msg = Some(format!("Error: Process exited with code {}", s));
+                }
+                Err(e) => {
+                    self.status_msg = Some(format!("Error: Failed to execute: {}", e));
+                }
+            }
+            self.mode = Mode::Normal;
         }
     }
 
     fn start_daemon(&mut self, db: &Db) {
-        let target_dir = self.init_input.value().trim();
-        // Layer 1: Entry/UI Validation
-        if target_dir.is_empty() {
-            self.init_error = Some("Error: Target directory cannot be empty.".to_string());
-            let _ = db.emit_telemetry("terminal_output", "human_message", "validation_failed", &format!("Start daemon failed: empty target_dir"));
-            return;
-        }
-
-        // Layer 2: Business Logic Validation
-        if self.status.status == "running" && self.status.pid.is_some() {
-            self.init_error = Some("Error: Daemon is already running.".to_string());
-            let _ = db.emit_telemetry("terminal_output", "human_message", "validation_failed", "Start daemon failed: already running");
-            return;
-        }
-
-        // Layer 3: Environment Guards
-        let target_path = std::path::Path::new(target_dir);
-        if !target_path.exists() || !target_path.join(".git").exists() {
-            self.init_error = Some("Error: Target directory must be a valid git repository.".to_string());
-            let _ = db.emit_telemetry("terminal_output", "human_message", "validation_failed", &format!("Start daemon failed: {} is not a git repo", target_dir));
-            return;
-        }
-
-        // Layer 4: Execution & Auditing
-        self.init_error = None;
-        let _ = db.emit_telemetry("control", "human_message", "daemon_start", &format!("Starting daemon in {}", target_dir));
+        self.status_msg = Some("Starting daemon...".to_string());
+        let _ = db.emit_telemetry("control", "human_message", "daemon_start", "Starting daemon via TUI");
         
         let status = Command::new("python3")
-            .args(["lgwks", "daemon", "start", "--repo", target_dir])
-            .current_dir(target_dir)
+            .args([self.script_path.to_str().unwrap_or("lgwks"), "daemon", "start"])
+            .current_dir(&self.repo_root)
             .status();
 
         match status {
             Ok(s) if s.success() => {
-                self.init_error = Some("Daemon started successfully.".to_string());
+                self.status_msg = Some("Daemon started successfully.".to_string());
             }
             Ok(s) => {
-                self.init_error = Some(format!("Error: Process exited with code {}", s));
+                self.status_msg = Some(format!("Error: Process exited with code {}", s));
             }
             Err(e) => {
-                self.init_error = Some(format!("Error: Failed to execute python3: {}", e));
+                self.status_msg = Some(format!("Error: Failed to execute: {}", e));
             }
+        }
+    }
+
+    fn stop_daemon(&mut self, db: &Db) {
+        self.status_msg = Some("Stopping daemon...".to_string());
+        let _ = db.emit_telemetry("control", "human_message", "daemon_stop", "Stopping daemon via TUI");
+        
+        let status = Command::new("python3")
+            .args([self.script_path.to_str().unwrap_or("lgwks"), "daemon", "stop"])
+            .current_dir(&self.repo_root)
+            .status();
+
+        match status {
+            Ok(_) => self.status_msg = Some("Stop command issued.".to_string()),
+            Err(e) => self.status_msg = Some(format!("Error: {}", e)),
+        }
+    }
+}
+
+fn find_repo_root() -> Result<PathBuf> {
+    let mut curr = std::env::current_dir()?;
+    loop {
+        if curr.join("lgwks").exists() && curr.join(".git").exists() {
+            return Ok(curr);
+        }
+        if let Some(parent) = curr.parent() {
+            curr = parent.to_path_buf();
+        } else {
+            return Err(eyre!("Could not find lgwks root. Are you in the repo?"));
         }
     }
 }
@@ -184,13 +185,13 @@ impl App {
 fn main() -> Result<()> {
     color_eyre::install()?;
     
-    let repo_root = std::env::current_dir()?;
+    let repo_root = find_repo_root().wrap_err("TUI must be started within or below the logicalworks- repository.")?;
     let db = Db::new(&repo_root);
     
     execute!(std::io::stdout(), EnableMouseCapture)?;
     let mut terminal = ratatui::init();
     
-    let app = App::new();
+    let app = App::new(repo_root);
     let result = run_app(&mut terminal, app, db);
     
     ratatui::restore();
@@ -209,49 +210,76 @@ fn run_app(terminal: &mut DefaultTerminal, mut app: App, db: Db) -> Result<()> {
             .unwrap_or_else(|| Duration::from_secs(0));
 
         if event::poll(timeout)? {
-            if let Event::Key(key) = event::read()? {
-                if key.kind == KeyEventKind::Press {
-                    if app.active_tab == Tab::Initialize {
-                        match key.code {
-                            KeyCode::Esc => app.should_quit = true,
-                            KeyCode::Tab => app.next_tab(),
-                            KeyCode::BackTab => app.prev_tab(),
-                            KeyCode::Enter => {
-                                app.start_daemon(&db);
+            let event = event::read()?;
+            match event {
+                Event::Key(key) => {
+                    if key.kind == KeyEventKind::Press {
+                        match app.mode {
+                            Mode::Normal => match key.code {
+                                KeyCode::Char('q') | KeyCode::Esc => app.should_quit = true,
+                                KeyCode::Char('j') | KeyCode::Down => {
+                                    let i = match app.workflow_list_state.selected() {
+                                        Some(i) => {
+                                            if i >= app.workflows.len().saturating_sub(1) { 0 } else { i + 1 }
+                                        }
+                                        None => 0,
+                                    };
+                                    app.workflow_list_state.select(Some(i));
+                                    let mut names: Vec<_> = app.workflows.keys().cloned().collect();
+                                    names.sort();
+                                    if !names.is_empty() {
+                                        app.selected_workflow = Some(names[i].clone());
+                                    }
+                                }
+                                KeyCode::Char('k') | KeyCode::Up => {
+                                    let i = match app.workflow_list_state.selected() {
+                                        Some(i) => {
+                                            if i == 0 { app.workflows.len().saturating_sub(1) } else { i - 1 }
+                                        }
+                                        None => 0,
+                                    };
+                                    app.workflow_list_state.select(Some(i));
+                                    let mut names: Vec<_> = app.workflows.keys().cloned().collect();
+                                    names.sort();
+                                    if !names.is_empty() {
+                                        app.selected_workflow = Some(names[i].clone());
+                                    }
+                                }
+                                KeyCode::Char('i') => {
+                                    if app.selected_workflow.is_some() {
+                                        app.mode = Mode::Insert;
+                                    }
+                                }
+                                KeyCode::Enter => {
+                                    if app.selected_workflow.is_some() {
+                                        app.execute_workflow(&db);
+                                    }
+                                }
+                                KeyCode::Char('s') => app.start_daemon(&db),
+                                KeyCode::Char('x') => app.stop_daemon(&db),
+                                _ => {}
+                            },
+                            Mode::Insert => match key.code {
+                                KeyCode::Esc => app.mode = Mode::Normal,
+                                KeyCode::Enter => app.execute_workflow(&db),
+                                _ => {
+                                    app.form_input.handle_event(&Event::Key(key));
+                                }
                             }
-                            _ => {
-                                app.init_input.handle_event(&Event::Key(key));
-                            }
-                        }
-                    } else {
-                        match key.code {
-                            KeyCode::Char('q') | KeyCode::Esc => app.should_quit = true,
-                            KeyCode::Tab | KeyCode::Right => app.next_tab(),
-                            KeyCode::Left => app.prev_tab(),
-                            KeyCode::Char('1') => app.active_tab = Tab::Dashboard,
-                            KeyCode::Char('2') => app.active_tab = Tab::NavMap,
-                            KeyCode::Char('3') => app.active_tab = Tab::Initialize,
-                            KeyCode::Char('4') => app.active_tab = Tab::Events,
-                            KeyCode::Char('5') => app.active_tab = Tab::Queue,
-                            KeyCode::Char('6') => app.active_tab = Tab::Logs,
-                            _ => {}
                         }
                     }
                 }
-            } else if let Event::Mouse(mouse) = event::read()? {
-                if mouse.kind == MouseEventKind::Down(MouseButton::Left) {
-                    // Simple hit testing for tabs (top 3 lines)
-                    if mouse.row <= 3 {
-                        let tab_width = 15; // rough estimate
-                        let clicked_tab = (mouse.column / tab_width) as usize;
-                        if clicked_tab < 6 {
-                            app.active_tab = Tab::from_index(clicked_tab);
+                Event::Mouse(mouse) => {
+                    if mouse.kind == MouseEventKind::Down(MouseButton::Left) {
+                        // Mouse interaction handling
+                        if mouse.row <= 3 {
+                            // Header interactions
                         }
                     }
                 }
+                _ => {}
             }
         }
-
 
         if app.last_tick.elapsed() >= tick_rate {
             app.last_tick = Instant::now();
@@ -272,7 +300,6 @@ const CREAM_DIM: Color = Color::Indexed(187);
 const EMERALD: Color = Color::Indexed(78);
 const EMERALD_DIM: Color = Color::Indexed(36);
 const AMBER: Color = Color::Indexed(179);
-const RUST: Color = Color::Indexed(167);
 const MUTED: Color = Color::Indexed(245);
 
 fn ui(f: &mut Frame, app: &App) {
@@ -280,341 +307,182 @@ fn ui(f: &mut Frame, app: &App) {
         .direction(Direction::Vertical)
         .constraints([
             Constraint::Length(3), // Header
-            Constraint::Min(0),    // Content
+            Constraint::Min(0),    // Main Content (3 cols)
             Constraint::Length(1), // Footer
         ])
         .split(f.area());
 
     render_header(f, chunks[0], app);
-    render_content(f, chunks[1], app);
-    render_footer(f, chunks[2]);
+    
+    let main_chunks = Layout::default()
+        .direction(Direction::Horizontal)
+        .constraints([
+            Constraint::Percentage(20), // Left: Workflows
+            Constraint::Percentage(50), // Center: Active View
+            Constraint::Percentage(30), // Right: Events
+        ])
+        .split(chunks[1]);
+
+    render_workflow_sidebar(f, main_chunks[0], app);
+    render_main_area(f, main_chunks[1], app);
+    render_event_sidebar(f, main_chunks[2], app);
+    
+    render_footer(f, chunks[2], app);
 }
 
 fn render_header(f: &mut Frame, area: Rect, app: &App) {
-    let titles = Tab::all().iter().map(|t| t.title()).collect::<Vec<_>>();
-    let tabs = Tabs::new(titles)
-        .block(Block::default().borders(Borders::BOTTOM).border_style(Style::default().fg(SLATE_DIM)))
-        .select(app.active_tab.to_index())
-        .style(Style::default().fg(CREAM_DIM))
-        .highlight_style(Style::default().fg(EMERALD).add_modifier(Modifier::BOLD));
-    
     let header_chunks = Layout::default()
         .direction(Direction::Horizontal)
         .constraints([
-            Constraint::Length(20), // Logo
-            Constraint::Min(0),    // Tabs
+            Constraint::Length(30), // Logo + Repo
+            Constraint::Min(0),    // Stats
             Constraint::Length(40), // Daemon Status
         ])
         .split(area);
 
     let logo = Paragraph::new(Line::from(vec![
         Span::styled("◇◈◆✦ ", Style::default().fg(EMERALD).add_modifier(Modifier::BOLD)),
-        Span::styled("LGWKS", Style::default().fg(CREAM).add_modifier(Modifier::BOLD)),
+        Span::styled("LGWKS ", Style::default().fg(CREAM).add_modifier(Modifier::BOLD)),
+        Span::styled(format!("({})", app.repo_root.file_name().unwrap_or_default().to_string_lossy()), Style::default().fg(SLATE_DIM)),
     ]))
     .block(Block::default().borders(Borders::BOTTOM).border_style(Style::default().fg(SLATE_DIM)));
-    
     f.render_widget(logo, header_chunks[0]);
-    f.render_widget(tabs, header_chunks[1]);
 
-    let status_color = if app.status.status == "running" { EMERALD } else { AMBER };
+    let stats = Paragraph::new(Line::from(vec![
+        Span::styled(" MEM: ", Style::default().fg(SLATE_DIM)),
+        Span::styled("142MB", Style::default().fg(CREAM_DIM)),
+        Span::styled("  QUEUE: ", Style::default().fg(SLATE_DIM)),
+        Span::styled(format!("{}", app.queue.len()), Style::default().fg(EMERALD)),
+        Span::styled("  MODULES: ", Style::default().fg(SLATE_DIM)),
+        Span::styled(format!("{}", app.nav_modules.len()), Style::default().fg(CREAM_DIM)),
+    ]))
+    .block(Block::default().borders(Borders::BOTTOM).border_style(Style::default().fg(SLATE_DIM)));
+    f.render_widget(stats, header_chunks[1]);
+
+    let status_color = if app.status.alive { EMERALD } else { AMBER };
     let pid_str = app.status.pid.map(|p| p.to_string()).unwrap_or_else(|| "---".to_string());
     
     let daemon_status = Paragraph::new(Line::from(vec![
         Span::styled("DAEMON: ", Style::default().fg(SLATE_DIM)),
         Span::styled(app.status.status.to_uppercase(), Style::default().fg(status_color)),
-        Span::styled("  ·  ", Style::default().fg(SLATE_DIM)),
-        Span::styled(format!("PID: {}", pid_str), Style::default().fg(CREAM_DIM)),
-        Span::styled("  ·  ", Style::default().fg(SLATE_DIM)),
-        Span::styled(app.status.heartbeat_at.chars().take(19).collect::<String>(), Style::default().fg(SLATE_DIM)),
+        Span::styled("  PID: ", Style::default().fg(SLATE_DIM)),
+        Span::styled(pid_str, Style::default().fg(CREAM_DIM)),
     ]))
     .block(Block::default().borders(Borders::BOTTOM).border_style(Style::default().fg(SLATE_DIM)));
     f.render_widget(daemon_status, header_chunks[2]);
 }
 
-fn render_content(f: &mut Frame, area: Rect, app: &App) {
-    match app.active_tab {
-        Tab::Dashboard => render_dashboard(f, area, app),
-        Tab::NavMap => render_navmap(f, area, app),
-        Tab::Initialize => render_initialize(f, area, app),
-        Tab::Events => render_events(f, area, app),
-        Tab::Queue => render_queue(f, area, app),
-        Tab::Logs => render_logs(f, area),
-    }
-}
-
-fn render_initialize(f: &mut Frame, area: Rect, app: &App) {
-    let chunks = Layout::default()
-        .direction(Direction::Vertical)
-        .constraints([
-            Constraint::Length(3), // Title
-            Constraint::Length(3), // Input box
-            Constraint::Length(3), // Action Button
-            Constraint::Min(0),    // Error/Status message
-        ])
-        .margin(2)
-        .split(area);
-
-    let title = Paragraph::new(Line::from(vec![
-        Span::styled("◆ INITIALIZE DAEMON", Style::default().fg(EMERALD).add_modifier(Modifier::BOLD)),
-    ]));
-    f.render_widget(title, chunks[0]);
-
-    let input = Paragraph::new(app.init_input.value())
-        .block(Block::default().borders(Borders::ALL).title(" Target Repository Path ").border_style(Style::default().fg(CREAM_DIM)))
-        .style(Style::default().fg(CREAM));
-    f.render_widget(input, chunks[1]);
+fn render_workflow_sidebar(f: &mut Frame, area: Rect, app: &App) {
+    let mut names: Vec<_> = app.workflows.keys().cloned().collect();
+    names.sort();
     
-    // Make cursor visible for input
-    f.set_cursor_position((
-        chunks[1].x + app.init_input.visual_cursor() as u16 + 1,
-        chunks[1].y + 1,
-    ));
-
-    let btn_style = if app.status.status == "running" {
-        Style::default().fg(MUTED)
-    } else {
-        Style::default().bg(EMERALD).fg(Color::Black)
-    };
-    
-    let btn_text = if app.status.status == "running" {
-        "  DAEMON IS ALREADY RUNNING  "
-    } else {
-        "  [ENTER] START DAEMON  "
-    };
-
-    let btn = Paragraph::new(btn_text)
-        .style(btn_style)
-        .alignment(ratatui::layout::Alignment::Center);
-    
-    let btn_area = Layout::default().direction(Direction::Horizontal).constraints([Constraint::Percentage(30), Constraint::Percentage(40), Constraint::Percentage(30)]).split(chunks[2])[1];
-    f.render_widget(btn, btn_area);
-
-    if let Some(ref err) = app.init_error {
-        let err_color = if err.starts_with("Error") { RUST } else { EMERALD };
-        let msg = Paragraph::new(err.as_str())
-            .style(Style::default().fg(err_color));
-        f.render_widget(msg, chunks[3]);
-    }
-}
-
-fn render_navmap(f: &mut Frame, area: Rect, app: &App) {
-    let block = Block::default()
-        .title(" NAVMAP — MODULE ATLAS ")
-        .borders(Borders::ALL)
-        .border_style(Style::default().fg(SLATE_DIM))
-        .title_style(Style::default().fg(EMERALD_DIM));
-
-    let header = Row::new(vec!["MODULE", "SUBSYSTEM", "LOC", "STALE", "PURPOSE"])
-        .style(Style::default().fg(EMERALD).add_modifier(Modifier::BOLD));
-
-    let rows: Vec<Row> = app.nav_modules.iter().map(|(name, module)| {
-        let stale_color = match module.staleness.as_str() {
-            "active" => EMERALD,
-            "staling" => AMBER,
-            "orphan" => RUST,
-            _ => MUTED,
-        };
-        Row::new(vec![
-            name.clone(),
-            module.subsystem.clone(),
-            module.loc.to_string(),
-            module.staleness.clone(),
-            module.purpose.clone(),
-        ]).style(Style::default().fg(CREAM_DIM)).style(Style::default().fg(stale_color))
+    let items: Vec<ListItem> = names.iter().map(|name| {
+        ListItem::new(Line::from(vec![
+            Span::styled(" ▸ ", Style::default().fg(SLATE_DIM)),
+            Span::styled(name, Style::default().fg(CREAM)),
+        ]))
     }).collect();
 
-    let table = Table::new(rows, [
-        Constraint::Length(25),
-        Constraint::Length(20),
-        Constraint::Length(6),
-        Constraint::Length(10),
-        Constraint::Min(0),
-    ])
-    .header(header)
-    .block(block);
-
-    f.render_widget(table, area);
+    let list = List::new(items)
+        .block(Block::default().title(" WORKFLOWS ").borders(Borders::ALL).border_style(Style::default().fg(SLATE_DIM)).title_style(Style::default().fg(EMERALD_DIM)))
+        .highlight_style(Style::default().bg(SLATE_DIM).fg(CREAM).add_modifier(Modifier::BOLD))
+        .highlight_symbol(">> ");
+    
+    let mut state = app.workflow_list_state.clone();
+    f.render_stateful_widget(list, area, &mut state);
 }
 
-fn render_dashboard(f: &mut Frame, area: Rect, app: &App) {
-    let chunks = Layout::default()
-        .direction(Direction::Horizontal)
-        .constraints([
-            Constraint::Percentage(60), // Left: Actors & Current Task
-            Constraint::Percentage(40), // Right: Capabilities & Dials
-        ])
-        .split(area);
+fn render_main_area(f: &mut Frame, area: Rect, app: &App) {
+    if let Some(ref wf_name) = app.selected_workflow {
+        if let Some(wf) = app.workflows.get(wf_name) {
+            let chunks = Layout::default()
+                .direction(Direction::Vertical)
+                .constraints([
+                    Constraint::Length(4), // Description
+                    Constraint::Length(3), // Input
+                    Constraint::Min(0),    // Verbs/Details
+                ])
+                .split(area);
 
-    let left_chunks = Layout::default()
-        .direction(Direction::Vertical)
-        .constraints([
-            Constraint::Length(10), // Actors
-            Constraint::Min(0),     // Current Task
-        ])
-        .split(chunks[0]);
+            let desc = Paragraph::new(format!("\n  {}\n  Budget: {}", wf.description, wf.tokens))
+                .block(Block::default().title(format!(" {} ", wf_name.to_uppercase())).borders(Borders::ALL).border_style(Style::default().fg(EMERALD)))
+                .style(Style::default().fg(CREAM_DIM));
+            f.render_widget(desc, chunks[0]);
 
-    let actors_block = Block::default()
-        .title(" THE TWO ACTORS ")
-        .borders(Borders::ALL)
-        .border_style(Style::default().fg(SLATE_DIM))
-        .title_style(Style::default().fg(EMERALD_DIM));
-    
-    let actors_text = vec![
-        Line::from(""),
-        Line::from(vec![
-            Span::styled("  ◆ THE MACHINE", Style::default().fg(CREAM).add_modifier(Modifier::BOLD)),
-            Span::styled("  intent · desire · goal", Style::default().fg(CREAM_DIM)),
-            Span::styled("  ⟷  ", Style::default().fg(EMERALD).add_modifier(Modifier::BOLD)),
-            Span::styled("✦ THE CURIOUS AI", Style::default().fg(CREAM).add_modifier(Modifier::BOLD)),
-        ]),
-        Line::from(vec![
-            Span::styled("    not ai · discriminative · learning", Style::default().fg(SLATE_DIM)),
-            Span::styled("        ", Style::default()),
-            Span::styled("free · harnessed · insight-or-silence", Style::default().fg(SLATE_DIM)),
-        ]),
-        Line::from(""),
-        Line::from(vec![
-            Span::styled("           │ ", Style::default().fg(SLATE)),
-            Span::styled("refines your intent", Style::default().fg(CREAM_DIM)),
-            Span::styled("                │ ", Style::default().fg(SLATE)),
-            Span::styled("distills into the machine", Style::default().fg(CREAM_DIM)),
-        ]),
-        Line::from(vec![
-            Span::styled("           ▾", Style::default().fg(EMERALD)),
-            Span::styled("                                ▾", Style::default().fg(EMERALD)),
-        ]),
-    ];
-    f.render_widget(Paragraph::new(actors_text).block(actors_block), left_chunks[0]);
+            let input_style = if app.mode == Mode::Insert { Style::default().fg(EMERALD) } else { Style::default().fg(CREAM_DIM) };
+            let input = Paragraph::new(app.form_input.value())
+                .block(Block::default().borders(Borders::ALL).title(" Arguments / Query ").border_style(input_style))
+                .style(Style::default().fg(CREAM));
+            f.render_widget(input, chunks[1]);
 
-    let task_block = Block::default()
-        .title(" ACTIVE TASK ")
-        .borders(Borders::ALL)
-        .border_style(Style::default().fg(SLATE_DIM))
-        .title_style(Style::default().fg(EMERALD_DIM));
-    
-    let task_text = if let Some(latest_event) = app.events.iter().find(|e| e.lane == "ingress" || e.lane == "workflow") {
-        format!("Last Activity: {}\nKind: {}\nActor: {}", latest_event.ts, latest_event.kind, latest_event.actor)
+            if app.mode == Mode::Insert {
+                f.set_cursor_position((
+                    chunks[1].x + app.form_input.visual_cursor() as u16 + 1,
+                    chunks[1].y + 1,
+                ));
+            }
+
+            let verbs: Vec<ListItem> = wf.verbs.iter().map(|v| ListItem::new(format!("  • {}", v))).collect();
+            let details = List::new(verbs)
+                .block(Block::default().title(" VERB CHAIN ").borders(Borders::ALL).border_style(Style::default().fg(SLATE_DIM)))
+                .style(Style::default().fg(SLATE_DIM));
+            f.render_widget(details, chunks[2]);
+        }
     } else {
-        "No active task. Use the CLI or type an intent to begin research.".to_string()
-    };
-    f.render_widget(Paragraph::new(task_text).block(task_block).wrap(Wrap { trim: true }), left_chunks[1]);
-
-    let right_chunks = Layout::default()
-        .direction(Direction::Vertical)
-        .constraints([
-            Constraint::Length(8),  // Capabilities
-            Constraint::Length(10), // Dials
-            Constraint::Min(0),     // Recent Runs
-        ])
-        .split(chunks[1]);
-
-    let caps_block = Block::default()
-        .title(" CAPABILITIES ")
-        .borders(Borders::ALL)
-        .border_style(Style::default().fg(SLATE_DIM))
-        .title_style(Style::default().fg(EMERALD_DIM));
-    f.render_widget(Paragraph::new("▸ eyes  search (floor)   read playwright\n        fetch standard   browser webkit").block(caps_block), right_chunks[0]);
-
-    let dials_block = Block::default()
-        .title(" STEERING ")
-        .borders(Borders::ALL)
-        .border_style(Style::default().fg(SLATE_DIM))
-        .title_style(Style::default().fg(EMERALD_DIM));
-    f.render_widget(Paragraph::new("frontierness [██████░░░░░] 0.60\nlens         [───◆───] +0.00\ndepth        [███░░░░░░░] 0.30").block(dials_block), right_chunks[1]);
-
-    let runs_block = Block::default()
-        .title(" RECENT RUNS ")
-        .borders(Borders::ALL)
-        .border_style(Style::default().fg(SLATE_DIM))
-        .title_style(Style::default().fg(EMERALD_DIM));
-    f.render_widget(Paragraph::new("▸ scans local substrate\n  awaiting first research run").block(runs_block), right_chunks[2]);
+        let welcome = Paragraph::new("\n\n  Select a workflow from the left sidebar\n  to begin research or system operations.\n\n  Press 's' to start daemon\n  Press 'x' to stop daemon")
+            .block(Block::default().title(" DASHBOARD ").borders(Borders::ALL).border_style(Style::default().fg(SLATE_DIM)))
+            .style(Style::default().fg(CREAM_DIM));
+        f.render_widget(welcome, area);
+    }
 }
 
-fn render_events(f: &mut Frame, area: Rect, app: &App) {
-    let block = Block::default()
-        .title(" DAEMON EVENT LOG ")
-        .borders(Borders::ALL)
-        .border_style(Style::default().fg(SLATE_DIM))
-        .title_style(Style::default().fg(EMERALD_DIM));
-    
-    let items: Vec<ListItem> = app.events.iter().map(|e| {
+fn render_event_sidebar(f: &mut Frame, area: Rect, app: &App) {
+    let items: Vec<ListItem> = app.events.iter().take(20).map(|e| {
         let color = match e.lane.as_str() {
             "ingress" => CREAM,
-            "telemetry" => SLATE_DIM,
             "workflow" => EMERALD,
             "control" => AMBER,
-            _ => MUTED,
+            _ => SLATE_DIM,
         };
-        let content = Line::from(vec![
-            Span::styled(format!("{} ", e.ts.chars().skip(11).take(8).collect::<String>()), Style::default().fg(SLATE_DIM)),
-            Span::styled(format!("{:<10} ", e.lane), Style::default().fg(color)),
-            Span::styled(format!("{:<15} ", e.kind), Style::default().fg(CREAM)),
-            Span::styled(format!("{}", e.payload), Style::default().fg(CREAM_DIM)),
-        ]);
-        ListItem::new(content)
+        ListItem::new(vec![
+            Line::from(vec![
+                Span::styled(format!("{} ", e.ts.chars().skip(11).take(8).collect::<String>()), Style::default().fg(SLATE_DIM)),
+                Span::styled(&e.kind, Style::default().fg(color)),
+            ]),
+            Line::from(vec![
+                Span::styled(format!("  {}", e.payload), Style::default().fg(MUTED)),
+            ]),
+        ])
     }).collect();
 
-    let list = List::new(items).block(block);
+    let list = List::new(items)
+        .block(Block::default().title(" LIVE EVENTS ").borders(Borders::ALL).border_style(Style::default().fg(SLATE_DIM)).title_style(Style::default().fg(EMERALD_DIM)));
     f.render_widget(list, area);
 }
 
-fn render_queue(f: &mut Frame, area: Rect, app: &App) {
-    let block = Block::default()
-        .title(" WORK QUEUE ")
-        .borders(Borders::ALL)
-        .border_style(Style::default().fg(SLATE_DIM))
-        .title_style(Style::default().fg(EMERALD_DIM));
-    
-    let header = Row::new(vec!["ID", "KIND", "PRIO", "STATUS", "ENQUEUED"])
-        .style(Style::default().fg(EMERALD).add_modifier(Modifier::BOLD));
-    
-    let rows: Vec<Row> = app.queue.iter().map(|item| {
-        let status_color = match item.status.as_str() {
-            "queued" => MUTED,
-            "running" => EMERALD,
-            "done" => CREAM_DIM,
-            "failed" => RUST,
-            _ => SLATE_DIM,
-        };
-        Row::new(vec![
-            item.item_id.chars().take(8).collect::<String>(),
-            item.kind.clone(),
-            item.priority.to_string(),
-            item.status.clone(),
-            item.enqueued_at.chars().skip(11).take(8).collect::<String>(),
-        ]).style(Style::default().fg(CREAM_DIM)).style(Style::default().fg(status_color))
-    }).collect();
+fn render_footer(f: &mut Frame, area: Rect, app: &App) {
+    let mode_str = match app.mode {
+        Mode::Normal => " NORMAL ",
+        Mode::Insert => " INSERT ",
+    };
+    let mode_color = match app.mode {
+        Mode::Normal => SLATE,
+        Mode::Insert => EMERALD,
+    };
 
-    let table = Table::new(rows, [
-        Constraint::Length(10),
-        Constraint::Length(15),
-        Constraint::Length(6),
-        Constraint::Length(10),
-        Constraint::Min(0),
-    ])
-    .header(header)
-    .block(block);
-    
-    f.render_widget(table, area);
-}
+    let msg = app.status_msg.as_deref().unwrap_or("Ready.");
 
-fn render_logs(f: &mut Frame, area: Rect) {
-    let block = Block::default()
-        .title(" SYSTEM LOGS ")
-        .borders(Borders::ALL)
-        .border_style(Style::default().fg(SLATE_DIM))
-        .title_style(Style::default().fg(EMERALD_DIM));
-    f.render_widget(Paragraph::new("Initializing...").block(block), area);
-}
-
-fn render_footer(f: &mut Frame, area: Rect) {
     let footer_text = Line::from(vec![
+        Span::styled(mode_str, Style::default().bg(mode_color).fg(Color::Black).add_modifier(Modifier::BOLD)),
+        Span::styled(format!("  {}  ", msg), Style::default().fg(CREAM)),
         Span::styled(" Q ", Style::default().fg(EMERALD).add_modifier(Modifier::BOLD)),
         Span::styled("quit  ", Style::default().fg(CREAM_DIM)),
-        Span::styled(" TAB ", Style::default().fg(EMERALD).add_modifier(Modifier::BOLD)),
-        Span::styled("next tab  ", Style::default().fg(CREAM_DIM)),
-        Span::styled(" 1-5 ", Style::default().fg(EMERALD).add_modifier(Modifier::BOLD)),
-        Span::styled("jump  ", Style::default().fg(CREAM_DIM)),
+        Span::styled(" J/K ", Style::default().fg(EMERALD).add_modifier(Modifier::BOLD)),
+        Span::styled("nav  ", Style::default().fg(CREAM_DIM)),
+        Span::styled(" I ", Style::default().fg(EMERALD).add_modifier(Modifier::BOLD)),
+        Span::styled("input  ", Style::default().fg(CREAM_DIM)),
+        Span::styled(" ENTER ", Style::default().fg(EMERALD).add_modifier(Modifier::BOLD)),
+        Span::styled("run  ", Style::default().fg(CREAM_DIM)),
     ]);
     f.render_widget(Paragraph::new(footer_text).style(Style::default().bg(SLATE_DIM).fg(CREAM)), area);
 }

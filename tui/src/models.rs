@@ -39,6 +39,16 @@ pub struct DaemonStatus {
     pub status: String,
     pub repo_root: String,
     pub heartbeat_at: String,
+    pub alive: bool,
+    pub lock_present: bool,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct WorkflowDef {
+    pub description: String,
+    pub args: HashMap<String, String>,
+    pub verbs: Vec<String>,
+    pub tokens: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

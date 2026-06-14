@@ -1,10 +1,13 @@
-use anyhow::Result;
+use anyhow::{Result, anyhow};
 use rusqlite::Connection;
 use std::path::{Path, PathBuf};
-use crate::models::{DaemonEvent, WorkItem, DaemonStatus, NavMapIndex};
+use crate::models::{DaemonEvent, WorkItem, DaemonStatus, NavMapIndex, WorkflowDef};
 use std::fs;
+use std::collections::HashMap;
 
 pub struct Db {
+    repo_root: PathBuf,
+    script_path: PathBuf,
     db_path: PathBuf,
     state_path: PathBuf,
     navmap_path: PathBuf,
@@ -14,15 +17,31 @@ impl Db {
     pub fn new(repo_root: &Path) -> Self {
         let daemon_dir = repo_root.join("store").join("daemon");
         Self {
+            repo_root: repo_root.to_path_buf(),
+            script_path: repo_root.join("lgwks"),
             db_path: daemon_dir.join("daemon-events.db"),
             state_path: daemon_dir.join("daemon.state.json"),
             navmap_path: repo_root.join("docs").join("navmap").join("index.json"),
         }
     }
 
+    pub fn get_workflows(&self) -> Result<HashMap<String, WorkflowDef>> {
+        let output = std::process::Command::new("python3")
+            .args([self.script_path.to_str().unwrap_or("lgwks"), "workflow", "list", "--json"])
+            .current_dir(&self.repo_root)
+            .output()?;
+        
+        if !output.status.success() {
+            return Err(anyhow!("Failed to list workflows: {}", String::from_utf8_lossy(&output.stderr)));
+        }
+
+        let workflows: HashMap<String, WorkflowDef> = serde_json::from_slice(&output.stdout)?;
+        Ok(workflows)
+    }
+
     pub fn get_navmap(&self) -> Result<NavMapIndex> {
         if !self.navmap_path.exists() {
-            return Err(anyhow::anyhow!("NavMap not found at {:?}", self.navmap_path));
+            return Err(anyhow!("NavMap not found at {:?}", self.navmap_path));
         }
         let content = fs::read_to_string(&self.navmap_path)?;
         let index: NavMapIndex = serde_json::from_str(&content)?;
@@ -34,8 +53,10 @@ impl Db {
             return Ok(DaemonStatus {
                 pid: None,
                 status: "stopped".to_string(),
-                repo_root: "".to_string(),
+                repo_root: self.repo_root.to_string_lossy().to_string(),
                 heartbeat_at: "".to_string(),
+                alive: false,
+                lock_present: false,
             });
         }
         let content = fs::read_to_string(&self.state_path)?;
@@ -106,18 +127,15 @@ impl Db {
     }
 
     pub fn emit_telemetry(&self, lane: &str, kind: &str, scope: &str, payload_msg: &str) -> Result<()> {
-        let repo_path = std::env::current_dir()?;
-        let tenant_id = format!("repo:{}", repo_path.file_name().unwrap_or_default().to_string_lossy());
+        let tenant_id = format!("repo:{}", self.repo_root.file_name().unwrap_or_default().to_string_lossy());
         
         let payload = serde_json::json!({
             "message": payload_msg,
         });
 
-        // Layer 4: Debug Instrumentation & Telemetry Audit
-        // Use std::process::Command to securely execute the emit command, avoiding shell injection.
-        let status = std::process::Command::new("python3")
+        let mut child = std::process::Command::new("python3")
             .args([
-                "lgwks", "daemon", "emit",
+                self.script_path.to_str().unwrap_or("lgwks"), "daemon", "emit",
                 "--lane", lane,
                 "--kind", kind,
                 "--scope", scope,
@@ -125,19 +143,15 @@ impl Db {
                 "--session-id", "tui_session",
                 "--agent-id", "tui",
             ])
-            .current_dir(&repo_path)
-            .env("LGWKS_DAEMON_DB", self.db_path.to_str().unwrap_or(""))
-            // We pass the payload via stdin to avoid exposing it to process arguments.
+            .current_dir(&self.repo_root)
             .stdin(std::process::Stdio::piped())
-            .spawn();
+            .spawn()?;
 
-        if let Ok(mut child) = status {
-            if let Some(mut stdin) = child.stdin.take() {
-                use std::io::Write;
-                let _ = stdin.write_all(payload.to_string().as_bytes());
-            }
-            let _ = child.wait();
+        if let Some(mut stdin) = child.stdin.take() {
+            use std::io::Write;
+            let _ = stdin.write_all(payload.to_string().as_bytes());
         }
+        let _ = child.wait();
 
         Ok(())
     }
