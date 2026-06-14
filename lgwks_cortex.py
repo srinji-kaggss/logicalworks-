@@ -1,52 +1,115 @@
-"""lgwks_cortex — the Transcript Cortex: indexes agent conversations into the substrate.
+"""lgwks_cortex — the Transcript Cortex (PRD-06 U5).
 
-Converts agent JSONL transcripts into searchable entities and vectors.
-Enables the 'docs agent' features by allowing Aetherius to query fleet history.
+Tails agent JSONL transcripts and converts them into per-turn records for the
+Subconscious Engine. This is the sensory organ that allows the daemon to
+detect "lies," intent drift, and unresolved commitments.
+
+Contract: emits `lgwks.cortex.v1`
 """
 
 from __future__ import annotations
 
 import json
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
 import lgwks_hashing
 import lgwks_transcript
-import lgwks_substrate_db as db
-import lgwks_substrate_text as text
 from lgwks_clock import now_iso as _now
 
-SCHEMA = "lgwks.cortex.v1"
+@dataclass
+class CortexTurn:
+    turn_id: str
+    session_id: str
+    role: str
+    intent_class: str = "unknown"
+    phase: str = "observation"
+    entities: list[str] = field(default_factory=list)
+    attention: list[str] = field(default_factory=list)
+    content: str = ""
+    ts: str = field(default_factory=_now)
 
-def index_transcript(transcript_path: Path, tenant_id: str, session_id: str) -> dict[str, Any]:
-    """Index the latest turns from a transcript into the substrate."""
-    turns = lgwks_transcript.tail(transcript_path, n=50, include_content=True)
-    
-    indexed_count = 0
-    for turn in turns:
-        content = turn.get("content", "").strip()
-        if not content:
-            continue
-            
-        turn_id = turn["turn_id"]
-        role = turn["role"]
-        
-        # Create a document entry for the turn
-        doc_id = f"turn-{lgwks_hashing.content_id(f'{session_id}:{turn_id}', 16)}"
-        
-        # In a real implementation, we would call lgwks_substrate_run or similar
-        # For now, we simulate the 'Commitment Extraction'
-        if role == "human" and ("promise" in content.lower() or "todo" in content.lower()):
-            _extract_commitment(content, tenant_id, session_id, turn_id)
-            
-        indexed_count += 1
-        
-    return {
-        "ok": True,
-        "indexed": indexed_count,
-        "ts": _now(),
-    }
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "turn_id": self.turn_id,
+            "session_id": self.session_id,
+            "role": self.role,
+            "intent_class": self.intent_class,
+            "phase": self.phase,
+            "entities": self.entities,
+            "attention": self.attention,
+            "ts": self.ts,
+        }
 
-def _extract_commitment(content: str, tenant: str, session: str, turn: str):
-    """Placeholder for future commitment extraction logic."""
-    pass
+class TranscriptCortex:
+    def __init__(self, repo_root: Path):
+        self.repo_root = repo_root
+        self.cortex_dir = repo_root / "store" / "cortex"
+        self.cortex_dir.mkdir(parents=True, exist_ok=True)
+
+    def process_transcript(self, transcript_path: Path, session_id: str) -> list[CortexTurn]:
+        """Convert a raw JSONL transcript into a sequence of CortexTurns."""
+        # Layer 1: Entry Point Validation
+        if not transcript_path.exists():
+            return []
+
+        # Tail the last 50 turns with content
+        raw_turns = lgwks_transcript.tail(transcript_path, n=50, include_content=True)
+        processed: list[CortexTurn] = []
+
+        for turn in raw_turns:
+            content = turn.get("content", "")
+            
+            # Layer 2: Business Logic (Deterministic Extraction)
+            # PRD-06: "deterministic extraction first, BERT salience when 05 lands"
+            entities = self._extract_entities(content)
+            intent = self._classify_intent(content)
+            
+            ct = CortexTurn(
+                turn_id=turn["turn_id"],
+                session_id=session_id,
+                role=turn["role"],
+                intent_class=intent,
+                entities=entities,
+                attention=entities[:3], # Simple attention baseline
+                content=content
+            )
+            processed.append(ct)
+            
+            # Layer 4: Audit (Telemetry)
+            self._persist_turn(ct)
+
+        return processed
+
+    def _extract_entities(self, text: str) -> list[str]:
+        """Find repo entities (files, modules) mentioned in text."""
+        # Simple regex-based extraction for now
+        import re
+        # Match potential file paths or module names
+        matches = re.findall(r'\b[a-zA-Z0-9_\-/]+\.(?:py|rs|js|ts|md|json)\b', text)
+        return sorted(list(set(matches)))
+
+    def _classify_intent(self, text: str) -> str:
+        """Heuristic intent classification."""
+        text_lower = text.lower()
+        if "research" in text_lower or "find" in text_lower:
+            return "research_orchestration"
+        if "test" in text_lower or "pytest" in text_lower:
+            return "quality_assurance"
+        if "fix" in text_lower or "refactor" in text_lower:
+            return "code_mutation"
+        return "unknown"
+
+    def _persist_turn(self, turn: CortexTurn):
+        """Save the turn to the local cortex store (JSONL)."""
+        path = self.cortex_dir / f"{turn.session_id}.cortex.jsonl"
+        with path.open("a", encoding="utf-8") as f:
+            f.write(json.dumps(turn.to_dict()) + "\n")
+
+def index_command(args) -> int:
+    """CLI entrypoint for indexing."""
+    from pathlib import Path
+    cortex = TranscriptCortex(Path(args.repo))
+    cortex.process_transcript(Path(args.path), args.session_id)
+    return 0
