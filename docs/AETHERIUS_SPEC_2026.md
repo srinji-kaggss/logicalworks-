@@ -1,16 +1,38 @@
 # Aetherius Protocol: Proprietary Foundation Model Specification (2026-06-14)
 
 ## 1. Vision and Identity
-Aetherius is the proprietary foundation world-model of Logical Works. It represents a fundamental departure from standard large language model (LLM) architectures. While contemporary systems treat a user's digital history as a static prompt for autoregressive token prediction, Aetherius perceives the digital world as a continuous, evolving environment. It is designed as a recurrent latent world model that predicts future state transitions rather than next words. This local-first architecture ensures that intelligence is bounded by mathematical proof and high-fidelity sensory evidence, rather than generative probability alone.
+Aetherius is the proprietary foundation world-model of Logical Works. It represents a fundamental departure from standard large language model (LLM) architectures. While contemporary systems treat a user's digital history as a static prompt for autoregressive token prediction, Aetherius perceives the digital world as a continuous, evolving environment. It is designed as a recurrent latent world model that predicts future state transitions rather than next words.
 
-## 2. The Five Chambers of the Cognitive Forge
-The Aetherius kernel operates through a multi-chamber cognitive loop known as the "Forge." In the first chamber, Synthesis (The Spark), the model generates mechanistic proposals grounded in substrate data. These proposals move to the second chamber, Dialectic (The Hammer), for adversarial peer-review and weighted skepticism. The third chamber, Valuation (The Scale), performs a probabilistic ranking based on evidence density and critique severity. In the fourth chamber, Refinement (The Crucible), the strongest signals are evolved into unified claims. Finally, the fifth chamber, Ingestion (The Anchor), performs a deterministic commitment of the forged insight into the global entity graph.
+## 2. The Core Doctrine: Multimodal-First
+The system is strictly **Multimodal-First**. There is no "text-only" layer. Every digital event—whether a source code change, a voice command, a UI interaction, or a terminal signal—is treated as a Vision-Language (VL) tensor from the moment it enters the substrate.
 
-## 3. The Memory Echo and Transcript Cortex
-Aetherius is uniquely integrated with the Transcript Cortex through a preliminary "Recall" phase (Chamber 0). Before synthesizing new hypotheses, the kernel "echoes" against the cumulative history of human intents and agent promises captured in the system's JSONL streams. This eliminates the "Context Blur" inherent in stateless agent sessions. By indexing every turn of dialogue and every tool-call outcome, Aetherius maintains a persistent subconscious awareness of the entire fleet's activities. This allows the model to detect intent drift and resolve conflicting commitments without requiring a 10M-token context window.
+## 3. The Authoritative 8-Component Stack (v1 Locked)
+This configuration bridges the 'Today' (Workaround) and 'Future' (Standalone) timelines. These models serve as temporary sensors/workers to harvest high-integrity trajectories for Aetherius.
 
-## 4. Hardening through Defense in Depth
-The integrity of the Aetherius Protocol is enforced through four layers of Defense in Depth. The first layer, the Lexicon Gate, ensures all inputs and outputs adhere to strictly-typed schemas, blocking free-form hallucination at the boundary. The second layer, the Consensus Lock, prevents context blur by requiring a single source of truth for all capability resolution. The third layer, the Integrity Chain, persists all reasoning steps to HMAC-chained, tamper-evident logs. The final layer, Content-Addressed Identity, derives a unique hash for every forged entity, making state-drift mathematically impossible across the decentralized fleet.
+| Layer | Component | Model (4-bit MLX) | Trust | Purpose |
+| :--- | :--- | :--- | :--- | :--- |
+| **I. MATH** | Anchor | **Axiom ISA** | Authority | Deterministic BLAKE3 CIDs and CRDT Algebra. |
+| **II. ML** | Membrane | **ModernBERT-base** | Sensor | 8k Task-Salience Encoder. Maps 'slop' to tool intents. |
+| **III. ML** | Ingestion | **Liquid AI LFM 2.5** | Sensor | **Constant-RAM** Trajectory Tailing (Recurrent Core). |
+| **IV. OMNI** | Voice | **Qwen 3.5-Omni-3B** | Generative | **Native Speech-to-Speech**. Direct Ear/Mouth. |
+| **V. EYE** | Vision | **Qwen 3.7-VL-8B** | Sensor | GUI Agent. Operates terminal/GUI via screenshots. |
+| **VI. BRAIN** | Reasoner | **OLMo-2-32B** | Generative | **The Stay Model**. Deep Architectural Resolve. |
+| **VII. GUARD**| Security | **Prompt-Guard-2** | Sensor | <1ms Injection Blocking & Jailbreak Detection. |
+| **VIII. FRAUD**| Anomaly | **LightGBM / HAD** | Sensor | Statistical Drift & Fraud Detection (Z-Score). |
 
-## 5. Transition from Mesh to Standalone
-The current implementation of Aetherius utilizes a Model Mesh of "Borrowed Cognition" as a temporary workaround. Models such as OLMo-3 and Qwen3-VL act as high-fidelity sensors and simplifiers to facilitate the collection of high-integrity training data. Every interaction within this mesh is recorded as a "trajectory" in the system's causal tape. This data serves as the Stage 1 training corpus for the ultimate Standalone Aetherius Model. Once trained, the Standalone Model will natively unify the roles of embedding, reasoning, and vision, decommissioning the temporary mesh and achieving full functional autonomy.
+## 4. The Subconscious Overseer Protocol
+The "Subconscious" is an always-on observer that concurrently tails 6 system streams to detect drift and automate "Issues" management.
+
+### The 6 Vital Streams:
+1.  **`cognition.jsonl`**: Real-time AI thinking traces.
+2.  **`learning-records.jsonl`**: Measured outcomes and error rates.
+3.  **`token-ledger.jsonl`**: Economic usage and budget gates.
+4.  **`daemon-events.db`**: The persistent causal tape of the repository.
+5.  **`fleet-audit.jsonl`**: Agent OS worktree and capability events.
+6.  **`transcript.jsonl`**: The human-to-agent dialogue history.
+
+### The "Surprise" Mechanism:
+When the ML layer (Liquid AI) detects a "Surprise" (prediction error > 0.7) between the predicted state and the Math (Axiom) reality, it invokes the Brain layer (OLMo-2) to simplify the conflict and update the canonical issue list at `.project/1/README.md`.
+
+## 5. Transition to Standalone
+Once 1M+ trajectories have been harvested via this mesh, the **Aetherius Standalone Model** will be trained to natively unify the roles of the Eye, Ear, and Brain. The system will then achieve full functional autonomy, decommissioning the "Borrowed Cognition" mesh and running entirely on owned weights.

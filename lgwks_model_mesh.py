@@ -70,42 +70,65 @@ def _entry(
     return entry
 
 
-# ── The Model Law: Workaround Hierarchy (Borrowed Cognition for Data Collection) ──
-# Provenance (reconciled 2026-06-14): these models are temporary workers used
-# to generate the trajectories needed to train the Standalone Aetherius Model.
+# ── The Authoritative Model Law: Approved 8-Component Stack (2026-06-14) ──
+# This stack bridges the 'Today' (Workaround) and 'Future' (Standalone) timelines.
+# These models are temporary sensors/workers used to harvest trajectories for Aetherius.
 MESH_LAW: list[dict[str, Any]] = [
-    # TARGET: THE OWNED FOUNDATION (SCAFFOLDING)
+    # I. THE ANCHOR (Mathematical Authority)
     _entry(
-        name="logicalworks/aetherius-standalone-v1", runtime="custom", locality="local", role="foundation",
-        trust_class="authority", status="open_slot",
-        notes="The future proprietary core. Will eventually unify all roles below.",
+        name="Axiom-Byte-Framework", runtime="axiom", locality="local", role="identity",
+        trust_class="deterministic", status="current_law",
+        notes="Zero-trust foundation; BLAKE3 CID and CRDT merge algebra.",
     ),
 
-    # WORKAROUND 1: UNIVERSAL MULTIMODAL EYE (BORROWED)
+    # II. THE MEMBRANE (Task Salience Sensor)
     _entry(
-        name="Qwen/Qwen3-VL-Embedding-8B", runtime="mlx", locality="local", role="embed",
+        name="mlx-community/ModernBERT-base-mlx-4bit", runtime="mlx", locality="local", role="intent",
+        trust_class="sensor", status="current_law",
+        notes="8k context Task Salience encoder. Unlocks new dimensionality for intents.",
+    ),
+
+    # III. THE HEART (Recurrent Ingestion)
+    _entry(
+        name="mlx-community/liquid-lfm-2.5-1.2b-mlx-4bit", runtime="mlx", locality="local", role="encode",
+        trust_class="sensor", status="current_law",
+        notes="Liquid AI recurrent core. Constant-RAM tailing of JSONL trajectories.",
+    ),
+
+    # IV. THE OMNI (Native Voice Interaction)
+    _entry(
+        name="mlx-community/Qwen2.5-Omni-3B-Instruct-4bit-mlx", runtime="mlx", locality="local", role="asr",
+        trust_class="generative", status="current_law",
+        notes="Truly Multimodal. Native speech-to-speech (Ear/Mouth). Wisprflow feel.",
+    ),
+
+    # V. THE EYE (Visual Agent)
+    _entry(
+        name="mlx-community/Qwen3.7-VL-8B-Instruct-4bit", runtime="mlx", locality="local", role="embed",
         input_schema="lgwks.modality.item.v1", output_schema="lgwks.vector.record.v1",
         trust_class="sensor", status="current_law",
-        notes="Temporary sensor for high-fidelity multimodal data collection.",
-    ),
-    
-    # WORKAROUND 2: DEEP REASONING TONGUE (BORROWED)
-    _entry(
-        name="mlx-community/Olmo-3-1125-32B-4bit", runtime="mlx", locality="local", role="proposal",
-        trust_class="generative", status="current_law",
-        notes="Temporary simplifier for complex state-to-language delegation.",
+        notes="Visual Agent. Operates terminal/GUI via screenshots. Everything is VL.",
     ),
 
-    # WORKAROUND 3: SPECIALIZED SENSORS (BORROWED)
+    # VI. THE BRAIN (Final Resolve)
     _entry(
-        name="WhisperKit/lg-v3-turbo", runtime="mlx", locality="local", role="asr",
-        trust_class="sensor", status="current_law",
-        notes="Temporary ear layer for voice trajectory capture.",
+        name="mlx-community/OLMo-2-0325-32B-Instruct-4bit", runtime="mlx", locality="local", role="proposal",
+        trust_class="generative", status="current_law",
+        notes="The Stay Model. Deep architectural resolve and reasoning overflow.",
     ),
+
+    # VII. THE GUARD (Injection Blocking)
     _entry(
         name="meta-llama/Llama-Prompt-Guard-2-86M", runtime="transformers", locality="local", role="classify",
         trust_class="sensor", status="current_law",
-        notes="Temporary safety gate for training data sanitization.",
+        notes="<1ms injection blocking and jailbreak detection.",
+    ),
+
+    # VIII. THE FRAUD (Statistical Anomaly)
+    _entry(
+        name="logicalworks/had-fraud-engine-v1", runtime="custom", locality="local", role="classify",
+        trust_class="sensor", status="current_law",
+        notes="LightGBM / Z-Score scorer. Detects slop and intent drift in real-time streams.",
     ),
 ]
 

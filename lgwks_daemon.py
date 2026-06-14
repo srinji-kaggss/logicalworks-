@@ -921,14 +921,24 @@ def _stream_command(args: argparse.Namespace) -> int:
     store = DaemonEventStore(db)
     
     print("--- START STREAM ---")
-    last_id = 0
+    last_event_id = None
     try:
         while True:
-            # Simple polling for now; can be optimized with file watching or signals
-            events = store.list_events(limit=10) # Simplified list for streaming
-            # Real implementation would track last seen ID
-            for e in reversed(events):
+            # Fetch events for this tenant (repo)
+            events = store.list_events(tenant_id=f"repo:{args.repo.name}", limit=10)
+            
+            # Identify new events (those after last_event_id)
+            new_events = []
+            for e in events:
+                if e["event_id"] == last_event_id:
+                    break
+                new_events.append(e)
+            
+            # Print new events in chronological order (list_events returns DESC)
+            for e in reversed(new_events):
                 print(json.dumps(e))
+                last_event_id = e["event_id"]
+            
             sys.stdout.flush()
             time.sleep(1)
     except KeyboardInterrupt:
