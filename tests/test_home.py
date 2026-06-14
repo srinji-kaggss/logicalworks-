@@ -156,20 +156,37 @@ def test_render_command_detail_leaf():
 
 
 def test_browser_navigates_domain_to_command():
-    """L0: user picks domain '1' (Research), then command '1' (first Research verb), then 'q'."""
+    """L0: pick the Research domain, then a no-subcommand verb in it, then 'q' → that verb runs.
+
+    Indices are computed from the live menu (same source the UI numbers from) rather than
+    hard-coded, so the test survives domain/verb reordering. We pick a verb WITHOUT
+    subcommands so selecting it dispatches directly (a verb with subcommands would open a
+    second picker instead of running). The dispatched argv may carry an injected --repo, so
+    we assert the verb is what ran rather than pinning the exact argv.
+    """
     tree = home._build_command_tree()
-    research_verbs = sorted([v for v in tree if home._domain_for(v) == "Research"])
-    first_verb = research_verbs[0]
+    by_domain: dict[str, list[str]] = {}
+    for verb in sorted(tree):
+        by_domain.setdefault(home._domain_for(verb), []).append(verb)
+    domains = [d for d in list(home._DOMAINS.keys()) + ["Other"] if d in by_domain]
+    domain_idx = domains.index("Research") + 1  # UI numbers from 1
+    research_verbs = by_domain["Research"]
+    # first Research verb that dispatches directly (no subcommand picker)
+    verb_pos, target_verb = next(
+        (i, v) for i, v in enumerate(research_verbs, 1)
+        if "subcommands" not in tree[v]
+    )
     fake_repo = Path("/tmp/fake-repo")
     with patch("lgwks_home.sys.stdin.isatty", return_value=True):
-        with patch("lgwks_home._ask", side_effect=["1", "1", "q"]):
+        with patch("lgwks_home._ask", side_effect=[str(domain_idx), str(verb_pos), "q"]):
             with patch("lgwks_home._run") as mock_run:
                 with patch("lgwks_home._pause"):
                     with patch("lgwks_home.print"):
                         with patch("lgwks_home._detect_repo_context", return_value=(fake_repo, [])):
                             home._browser_entryway(on=False)
-    # The first Research verb should have been run
-    mock_run.assert_called_once_with(["lgwks", first_verb])
+    mock_run.assert_called_once()
+    argv = mock_run.call_args.args[0]
+    assert argv[:2] == ["lgwks", target_verb], argv
 
 
 def test_browser_back_navigation():
