@@ -1199,6 +1199,12 @@ def build_parser() -> argparse.ArgumentParser:
     prb.add_argument("--repo", default=".", help="repo path")
     prb.set_defaults(func=_probe_dispatch)
 
+    # bulk-harvest — "The Great Accumulation": ingest everything from everywhere.
+    bulk = sub.add_parser("bulk-harvest", help="ingest historical .claude/.gemini/.codex transcripts")
+    bulk.add_argument("--repo", default=".", help="repo root")
+    bulk.add_argument("--limit", type=int, help="max turns to ingest")
+    bulk.set_defaults(func=_bulk_harvest_dispatch)
+
     jarvis = sub.add_parser("jarvis", help="deterministic research graph crawler")
     jarvis_sub = jarvis.add_subparsers(dest="jarvis_command", required=True)
     crawl = jarvis_sub.add_parser("crawl", help="crawl a website or keyword frontier")
@@ -1624,6 +1630,11 @@ def _begin_dispatch(args) -> int:
     print(ui.spine(on=on))
     print("  " + ui.footer("ready to harvest", on=on) + "\n")
     return 0
+
+
+def _bulk_harvest_dispatch(args) -> int:
+    import lgwks_bulk_harvest
+    return lgwks_bulk_harvest.main(args)
 
 
 def _probe_dispatch(args) -> int:

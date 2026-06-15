@@ -48,19 +48,20 @@ class TranscriptCortex:
         self.cortex_dir = repo_root / "store" / "cortex"
         self.cortex_dir.mkdir(parents=True, exist_ok=True)
 
-    def process_transcript(self, transcript_path: Path, session_id: str) -> list[CortexTurn]:
-        """Convert a raw JSONL transcript into a sequence of CortexTurns."""
+    def process_transcript(self, transcript_path: Path, session_id: str, n: int = 0) -> list[CortexTurn]:
+        """Convert a raw JSONL transcript into a sequence of CortexTurns.
+        n=0 means process the whole file.
+        """
         # Layer 1: Entry Point Validation
         if not transcript_path.exists():
             return []
 
-        # Tail the last 50 turns with content
         # PRD-06: "deterministic extraction first, BERT salience when 05 lands"
         import lgwks_intent_classifier as ic
         clf = ic.IntentClassifier.load()
         processed: list[CortexTurn] = []
 
-        raw_turns = lgwks_transcript.tail(transcript_path, n=50, include_content=True)
+        raw_turns = lgwks_transcript.tail(transcript_path, n=n, include_content=True)
 
         for turn in raw_turns:
             content = turn.get("content", "")
