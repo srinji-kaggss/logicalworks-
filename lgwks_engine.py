@@ -426,6 +426,19 @@ def run_engine(
     #     is a future packet).
     P = _aggregate(C, grounding_rate, decisiveness) * referee_penalty
 
+    # ── Oriented-inference seam (Structural Inference #172; objective in
+    #    lgwks_oriented.py) ─────────────────────────────────────────────────────
+    #    The oriented objective L = description_length + prediction_error +
+    #    intent_divergence is defined ENTIRELY IN BITS. C / grounding_rate /
+    #    decisiveness above are indices/ratios, NOT bits — feeding them into L
+    #    would fabricate the calculator-test bar this engine holds. So the engine
+    #    deliberately does NOT call oriented_loss yet. The legitimate consumer is
+    #    the #180 harness, which derives bit-valued prediction_error from logged
+    #    ground-truth consequences on the causal tape (collapse-resistant), and
+    #    intent_divergence from a signed Pi field. When this engine emits a
+    #    bit-valued predictive distribution, plug it in here — fill the term, do
+    #    not reshape the schema. gap_G is the natural prediction_error precursor.
+
     flags = _detect_flags(prompt)
     if referee_penalty < 1.0:
         flags.append("referee_vibe_penalty")
