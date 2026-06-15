@@ -194,6 +194,34 @@ class CausalTape:
             conn.execute("ROLLBACK")
             raise
 
+    def replay(self, tenant_id: str | None = None):
+        """Yield tape entries in causal order — the basis for training-corpus
+        extraction and projection rebuild. Each entry is a dict including the
+        decoded meta. With no tenant_id, replays all tenants (tenant, sequence).
+        """
+        if tenant_id is None:
+            cur = self._conn.execute(
+                "SELECT tenant_id, sequence, entry_hash, prev_hash, capability_id, fact_cid, meta_json, timestamp "
+                "FROM tape ORDER BY tenant_id ASC, sequence ASC"
+            )
+        else:
+            cur = self._conn.execute(
+                "SELECT tenant_id, sequence, entry_hash, prev_hash, capability_id, fact_cid, meta_json, timestamp "
+                "FROM tape WHERE tenant_id = ? ORDER BY sequence ASC",
+                (tenant_id,),
+            )
+        for row in cur:
+            yield {
+                "tenant_id": row[0],
+                "sequence": row[1],
+                "entry_hash": row[2],
+                "prev_hash": row[3],
+                "capability_id": row[4],
+                "fact_cid": row[5],
+                "meta": json.loads(row[6]) if row[6] else {},
+                "timestamp": row[7],
+            }
+
     def close(self) -> None:
         self._conn.close()
 
@@ -257,6 +285,11 @@ class VectorFabric:
             (artifact_cid,),
         ).fetchall()
         return [vec_mod.decode_record(r) for r in rows]
+
+    def space_dims(self) -> int | None:
+        """Largest embedding dimension stored — the substrate vector-space dim."""
+        row = self._conn.execute("SELECT MAX(dim) FROM vector_records").fetchone()
+        return int(row[0]) if row and row[0] else None
 
     def close(self) -> None:
         self._conn.close()
@@ -376,6 +409,12 @@ class GraphFabric:
         import lgwks_entity_graph as graph_mod
 
         graph_mod.ingest_chunks(self._db, chunks)
+
+    def neighbors(self, node_id: str, direction: str = "both", rel: str | None = None, limit: int = 100) -> list[dict]:
+        return self._db.neighbors(node_id, direction=direction, rel=rel, limit=limit)
+
+    def stats(self) -> dict[str, Any]:
+        return self._db.stats()
 
     def commit(self) -> None:
         self._db.commit()
@@ -544,6 +583,28 @@ class RelationalProjection:
                  r.get("discovered_by", ""), r.get("links_found", 0)),
             )
         conn.commit()
+
+    def search_chunks(self, query: str, limit: int = 20) -> list[dict[str, Any]]:
+        """Lexical FTS5 search over indexed chunks. Returns chunk rows joined to text."""
+        rows = self._conn.execute(
+            "SELECT c.chunk_id, c.document_id, c.source, c.url, c.text, c.fact_score, c.chunk_kind "
+            "FROM chunk_fts f JOIN chunks c ON c.chunk_id = f.chunk_id "
+            "WHERE chunk_fts MATCH ? ORDER BY rank LIMIT ?",
+            (query, limit),
+        ).fetchall()
+        cols = ("chunk_id", "document_id", "source", "url", "text", "fact_score", "chunk_kind")
+        return [dict(zip(cols, r)) for r in rows]
+
+    def search_facts(self, query: str, limit: int = 20) -> list[dict[str, Any]]:
+        """Lexical FTS5 search over indexed facts."""
+        rows = self._conn.execute(
+            "SELECT fa.fact_id, fa.chunk_id, fa.document_id, fa.fact_text, fa.fact_score, fa.chunk_kind "
+            "FROM fact_fts f JOIN facts fa ON fa.fact_id = f.fact_id "
+            "WHERE fact_fts MATCH ? ORDER BY rank LIMIT ?",
+            (query, limit),
+        ).fetchall()
+        cols = ("fact_id", "chunk_id", "document_id", "fact_text", "fact_score", "chunk_kind")
+        return [dict(zip(cols, r)) for r in rows]
 
     def close(self) -> None:
         self._conn.close()
