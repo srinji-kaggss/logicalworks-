@@ -17,8 +17,6 @@ Vocab Layers:
 from __future__ import annotations
 
 import json
-import hashlib
-import re
 from pathlib import Path
 from dataclasses import dataclass, field
 from typing import Any
@@ -29,6 +27,11 @@ import lgwks_hashing
 # modal 512-1023, and BPE merges 1024+). The token value is the entity's full
 # 32-bit content hash offset by this base.
 ENTITY_TOKEN_BASE = 1_000_000
+
+# Content is bounded so a single turn can't produce an unbounded token stream.
+# Truncation is RECORDED in the trajectory metadata (never silent) — the causal
+# tape must be honest about what it dropped (#180 verifiable-tape contract).
+_MAX_CONTENT_CHARS = 1000
 
 
 @dataclass
@@ -72,7 +75,18 @@ class AetheriusTokenizer:
         return v
 
     def _smart_correct(self, text: str) -> str:
-        """Frontier spelling correction: maps noisy input to system primitives."""
+        """Map noisy tokens to known system primitives (Levenshtein <= 1).
+
+        Deterministic: `self.primitives` is a set (non-deterministic iteration
+        order across processes under hash randomisation), so we scan it SORTED and
+        keep the closest match (lowest distance, then lexicographic). The previous
+        first-match-over-a-set made the output depend on iteration order — a
+        reproducibility bug for anything downstream that must be replayable.
+
+        NOTE: this is input-normalisation for the NLU / intent-matching path. It is
+        deliberately NOT applied to the causal tape — `tokenize_trajectory` records
+        content verbatim so the logged (state) matches the input that produced the
+        consequence (#180 ground-truth requirement)."""
         words = text.split()
         corrected = []
         for word in words:
@@ -80,14 +94,12 @@ class AetheriusTokenizer:
             if len(w_lower) < 3:
                 corrected.append(word)
                 continue
-            
-            # Simple Levenshtein distance check against primitives
-            match = word
-            for prim in self.primitives:
-                if self._levenshtein(w_lower, prim) <= 1:
-                    match = prim
-                    break
-            corrected.append(match)
+            best: tuple[int, str] | None = None
+            for prim in sorted(self.primitives):
+                d = self._levenshtein(w_lower, prim)
+                if d <= 1 and (best is None or d < best[0]):
+                    best = (d, prim)
+            corrected.append(best[1] if best else word)
         return " ".join(corrected)
 
     def _levenshtein(self, s1: str, s2: str) -> int:
@@ -107,11 +119,20 @@ class AetheriusTokenizer:
         return previous_row[-1]
 
     def encode_modality(self, kind: str, data_hash: str) -> list[int]:
-        """Encodes non-text modalities into the token stream."""
+        """Encode a non-text modality anchor + a compact reference to its content.
+
+        Emits the anchor token followed by the first 4 bytes of the (hex) content
+        hash as positional byte-tokens; the FULL hash is preserved in the
+        trajectory's `modality_map`, so the 4-byte prefix is only a locator, not the
+        identity. Malformed input (short / non-hex hash) yields the anchor alone
+        rather than raising — a bad upstream hash must not crash the tape encoder
+        (cortex would otherwise swallow the exception into an empty token stream,
+        silently dropping the whole turn from the training corpus)."""
         anchor = f"[{kind.upper()}]"
         tokens = [self.vocab.get(anchor, self.vocab["[SYM]"])]
-        # Encode the first 4 bytes of the hash as positional tokens
-        tokens.extend([int(data_hash[i:i+2], 16) for i in range(0, 8, 2)])
+        h = str(data_hash or "")
+        if len(h) >= 8 and all(c in "0123456789abcdefABCDEF" for c in h[:8]):
+            tokens.extend(int(h[i:i + 2], 16) for i in range(0, 8, 2))
         return tokens
 
     def tokenize_trajectory(self, turn_data: dict[str, Any]) -> TokenizedTrajectory:
@@ -119,11 +140,16 @@ class AetheriusTokenizer:
         tokens = []
         hashes = []
         m_map = {}
-        
-        # 1. Normalize Intent (Smart Correction)
+
+        # 1. Content is recorded VERBATIM. The causal tape is ground-truth training
+        # data (#180): the logged (state) must be exactly what produced the
+        # downstream consequence/residual. Spell-correcting it here (the old
+        # `_smart_correct(content)`) desynced the tape from reality and silently
+        # rewrote history — input-normalisation belongs in the NLU/intent path.
         content = turn_data.get("content", "")
-        clean_content = self._smart_correct(content)
-        
+        if not isinstance(content, str):
+            content = str(content)
+
         # 2. Encode Modal Context (Images/Screenshots/TTY)
         # If the turn has an image (visual reasoning)
         if turn_data.get("image_hash"):
@@ -152,15 +178,24 @@ class AetheriusTokenizer:
             tokens.append(tok)
             hashes.append(h_hex)
 
-        # 5. Encode Clean Content — byte-level (UTF-8), never codepoint.
+        # 5. Encode content — byte-level (UTF-8), never codepoint.
         # `ord(c)` was codepoint-level: any char >255 (e.g. '—' -> 8212) collided
         # with the core/modal/entity token ranges and corrupted the stream. UTF-8
         # bytes are always 0-255, matching the byte layer this tokenizer promises.
+        # Slicing by char before encode is codepoint-safe (no mid-char byte split).
+        truncated = len(content) > _MAX_CONTENT_CHARS
         tokens.append(self.vocab["[BEG]"])
-        tokens.extend(clean_content[:1000].encode("utf-8"))
+        tokens.extend(content[:_MAX_CONTENT_CHARS].encode("utf-8"))
         tokens.append(self.vocab["[END]"])
-        
-        return TokenizedTrajectory(tokens=tokens, hashes=hashes, modality_map=m_map)
+
+        metadata = {
+            "content_chars": len(content),
+            "content_truncated": truncated,
+            "entity_count": len(hashes),
+        }
+        return TokenizedTrajectory(
+            tokens=tokens, hashes=hashes, modality_map=m_map, metadata=metadata
+        )
 
     def save(self):
         self.vocab_path.parent.mkdir(parents=True, exist_ok=True)
