@@ -98,6 +98,27 @@ FULL_AUTHORITY_THRESHOLD = 0.85
 # here — it surfaces as method "cosine" and is capped.
 SEMANTIC_METHODS = frozenset({"coreml", "eye", "mlx"})
 
+# //The Referee Doctrine: Evidence over Vibes.
+# Claims of system state must be backed by deterministic artifacts.
+EVIDENCE_KEYWORDS = {"hash", "blake3", "axiom", "proof", "ledger", "log", "diff", "checksum", "trace"}
+VIBE_KEYWORDS = {"think", "feel", "maybe", "probably", "buggy", "broken", "weird"}
+
+def _referee_gate(text: str, result: ClassifyResult) -> ClassifyResult:
+    """Harden result by penalizing 'vibe-heavy' claims that lack evidence."""
+    text_lower = text.lower()
+    has_vibe = any(w in text_lower for w in VIBE_KEYWORDS)
+    has_evidence = any(w in text_lower for w in EVIDENCE_KEYWORDS)
+    
+    if has_vibe and not has_evidence and result.confidence > CONFIDENCE_THRESHOLD:
+        # Cap confidence to force PLAN_ONLY if claim is subjective/unproven
+        new_conf = min(result.confidence, CONFIDENCE_THRESHOLD - 0.01)
+        return dataclass_replace(result, confidence=new_conf, 
+                                 metadata={**result.metadata, "referee_penalty": "vibe_no_evidence"})
+    return result
+
+from dataclasses import replace as dataclass_replace
+
+
 # //why ceiling sits below FULL_AUTHORITY_THRESHOLD by a margin, not at it:
 # floating-point cosine can land exactly on a boundary; a strict gap removes
 # any path where a rounded lexical score ties the authority bar.
@@ -267,7 +288,8 @@ class IntentClassifier:
         elif result.top_k:
             result.margin = round(result.top_k[0][1], 6)
         result.inference_ms = (time.perf_counter() - t0) * 1000
-        return result
+        # Final safeguard: the Referee Gate (Evidence over Vibes)
+        return _referee_gate(text, result)
 
     def _classify_coreml(self, text: str) -> ClassifyResult:
         # //why: CoreML path — fastest, runs on ANE. Requires trained model file.

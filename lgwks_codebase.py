@@ -557,6 +557,44 @@ def load_entities() -> list[CodeEntity]:
     return entities
 
 
+def spine(entity_id: str, depth: int = 3) -> list[dict[str, Any]]:
+    """
+    Extract the 'Logical Spine' (causal path) starting from an entity.
+    Bridges the gap with logic-path trackers (Greptile/Serena).
+    """
+    entities = {e.id: e for e in load_entities()}
+    relations = load_relations()
+    
+    path = []
+    current_id = entity_id
+    
+    for _ in range(depth):
+        if current_id not in entities:
+            break
+        
+        e = entities[current_id]
+        # Find outbound relations
+        rel_links = [r for r in relations if r.source == current_id]
+        
+        path.append({
+            "id": e.id,
+            "kind": e.kind,
+            "name": e.name,
+            "file": e.file,
+            "line": e.line_start,
+            "calls": [{"id": r.target, "kind": r.kind} for r in rel_links if r.kind == "calls"]
+        })
+        
+        # Follow the first 'calls' relation for the next link in the spine
+        next_call = next((r for r in rel_links if r.kind == "calls" and r.target in entities), None)
+        if next_call:
+            current_id = next_call.target
+        else:
+            break
+            
+    return path
+
+
 def search(query: str, top_k: int = 5, kind_filter: str | None = None) -> list[dict[str, Any]]:
     """Semantic search over the codebase."""
     query_vec = lgwks_embed._embedding(query, dims=256)
@@ -615,6 +653,12 @@ def add_parser(sub) -> None:
     search_p.add_argument("--json", action="store_true", help="structured output")
     search_p.set_defaults(func=_codebase_search_command)
 
+    spine_p = cb_sub.add_parser("spine", help="extract logical execution path from an entity")
+    spine_p.add_argument("entity_id", help="starting entity id")
+    spine_p.add_argument("--depth", type=int, default=3, help="max path depth")
+    spine_p.add_argument("--json", action="store_true", help="structured output")
+    spine_p.set_defaults(func=_codebase_spine_command)
+
     status_p = cb_sub.add_parser("status", help="show index status")
     status_p.add_argument("--json", action="store_true", help="structured output")
     status_p.set_defaults(func=_codebase_status_command)
@@ -629,6 +673,17 @@ def _codebase_index_command(args: argparse.Namespace) -> int:
         print(f"    {meta.relation_count} relations extracted")
         print(f"    schema: {meta.schema}")
         print(f"    git:    {meta.git_sha[:8] if meta.git_sha else 'unknown'}")
+    return 0
+
+
+def _codebase_spine_command(args: argparse.Namespace) -> int:
+    path = spine(args.entity_id, depth=args.depth)
+    if args.json:
+        print(json.dumps(path, indent=2))
+    else:
+        for i, step in enumerate(path):
+            indent = "  " * i
+            print(f"{indent}➔ {step['name']} ({step['kind']}) in {step['file']}:{step['line']}")
     return 0
 
 
