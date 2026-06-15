@@ -62,7 +62,6 @@ def get_db(path: str | Path, **kwargs: Any) -> sqlite3.Connection:
 
 def connect(
     path: str | Path,
-...
     *,
     check_same_thread: bool = True,
     max_retries: int = 3,

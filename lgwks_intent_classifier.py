@@ -74,29 +74,28 @@ _CENTROID_CACHE_SCHEMA = "lgwks.intent.centroids.v1"
 # Thresholds + the authority law
 # ---------------------------------------------------------------------------
 
-# //why 0.55 not 0.5: cosine similarity in high-dim space clusters tighter
-# than intuition suggests; 0.55 empirically separates clear matches from
-# ambiguous ones on a held-out set of lgwks verb examples. Below this →
-# PLAN_ONLY (Claude plans, does not execute).
-CONFIDENCE_THRESHOLD = 0.55
+# Authority thresholds (loaded from calibration artifact, H1)
+def _load_thresholds() -> dict[str, float]:
+    p = Path(__file__).resolve().parent / "store" / "models" / "intent_calibration.json"
+    defaults = {
+        "confidence_threshold": 0.55,
+        "full_authority_threshold": 0.85,
+        "lexical_confidence_ceiling": 0.74,
+        "margin_min": 0.02
+    }
+    if p.exists():
+        try:
+            data = json.loads(p.read_text())
+            return {k: data.get(k, v) for k, v in defaults.items()}
+        except Exception:
+            pass
+    return defaults
 
-# //why a separate, higher bar for full authority: this classifier gates how
-# much tool authority Claude receives. issue #29 — "gates trust broken model"
-# — was caused by a non-semantic path emitting a confident-looking score that
-# would have granted execution. Full tool access requires crossing this bar.
-FULL_AUTHORITY_THRESHOLD = 0.85
-
-# //why only semantic methods may cross FULL_AUTHORITY_THRESHOLD: a lexical
-# path (feature-hash cosine, keyword overlap) measures surface-form overlap,
-# not meaning. It can pre-fill a schema field as a *suggestion*, but it must
-# never alone unlock execution. We make that unrepresentable by capping every
-# non-semantic method strictly below the full-authority bar. So:
-#   high authority  ⟹  method ∈ SEMANTIC_METHODS  (the contrapositive is enforced)
-# "eye" = the real Qwen Eye embedder (Qwen3-VL-Embedding-8B via MLX, lgwks_run.embed
-# is_semantic=True). "coreml" = a future trained on-device encoder. Both measure
-# meaning, so both may cross the bar. The deterministic feature-hash path is NOT
-# here — it surfaces as method "cosine" and is capped.
-SEMANTIC_METHODS = frozenset({"coreml", "eye", "mlx"})
+_THRESH = _load_thresholds()
+CONFIDENCE_THRESHOLD = _THRESH["confidence_threshold"]
+FULL_AUTHORITY_THRESHOLD = _THRESH["full_authority_threshold"]
+LEXICAL_CONFIDENCE_CEILING = _THRESH["lexical_confidence_ceiling"]
+MARGIN_MIN = _THRESH["margin_min"]
 
 # //The Referee Doctrine: Evidence over Vibes.
 # Claims of system state must be backed by deterministic artifacts.
@@ -117,24 +116,6 @@ def _referee_gate(text: str, result: ClassifyResult) -> ClassifyResult:
     return result
 
 from dataclasses import replace as dataclass_replace
-
-
-# //why ceiling sits below FULL_AUTHORITY_THRESHOLD by a margin, not at it:
-# floating-point cosine can land exactly on a boundary; a strict gap removes
-# any path where a rounded lexical score ties the authority bar.
-LEXICAL_CONFIDENCE_CEILING = 0.74
-
-# //why a margin gate, not just an absolute-confidence floor: measured live, the
-# Qwen Eye compresses ALL cosines into a narrow 0.68–0.83 band, so the absolute
-# score barely separates a clear intent (manifest 0.72) from gibberish (0.68) —
-# the 0.55 floor never fires and authority is mis-gated. The top1−top2 MARGIN
-# separates them cleanly: measured gibberish margin 0.0025 vs real intents
-# 0.030–0.074 (4-sample probe, this session). So an ambiguous query is one where
-# the top two classes nearly tie, regardless of absolute score. This is the
-# consultant "abstain if posterior margin < delta" rule made concrete.
-# HEURISTIC, pending a labeled calibration corpus (see SCIENCE.md §7): 0.02 sits
-# above the gibberish tie and below every measured real margin. Harden with data.
-MARGIN_MIN = 0.02
 
 
 @dataclass
@@ -312,18 +293,19 @@ class IntentClassifier:
         emb, q_semantic = _embed(text)
         centroids = self._centroids or []
 
-        # //why the space-mismatch guard is load-bearing, not paranoia: centroids
-        # are embedded once at load(); the query is embedded live. If the Eye was up
-        # for one and down for the other, the vectors live in incomparable spaces
-        # (Eye-MRL vs blake2b feature-hash) — a cosine between them is noise. Same
-        # dim by coincidence (both DIMS=256), so a length check is NOT enough; we
-        # trust the cosine only when BOTH halves are semantic, else degrade to the
-        # capped lexical method. Mismatched length → unusable, return empty.
-        if centroids and len(emb) != len(centroids[0]):
-            return ClassifyResult(label="", confidence=0.0, top_k=[], method="cosine")
+        # //why the space-mismatch guard is load-bearing (H2): centroids and
+        # queries must live in the same mathematical space (e.g. both Eye-MRL or
+        # both blake2b hash). A length check is NOT enough if dimensions coincide.
+        # We enforce parity here.
+        if self._semantic != q_semantic:
+            # Spaces are incomparable (e.g. Eye centroids vs Hash query).
+            # Force zero-confidence to trigger PLAN_ONLY or pass-through.
+            return ClassifyResult(label="", confidence=0.0, top_k=[], method="mismatch")
 
-        both_semantic = bool(self._semantic and q_semantic)
-        method = "eye" if both_semantic else "cosine"
+        if centroids and len(emb) != len(centroids[0]):
+            return ClassifyResult(label="", confidence=0.0, top_k=[], method="error")
+
+        method = "eye" if q_semantic else "cosine"
 
         sims = [(self._classes[i], _cosine(emb, c)) for i, c in enumerate(centroids)]
         sims.sort(key=lambda x: x[1], reverse=True)

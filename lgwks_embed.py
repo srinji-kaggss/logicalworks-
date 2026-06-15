@@ -145,6 +145,7 @@ def build_vault(root_path: str, project: str, keywords: list[str], cycles: int =
                     "score": score,
                     "focus": focus,
                     "embedding_model": "deterministic-feature-hash-v1",
+                    "is_semantic": False,
                     "dimensions": DIMS,
                     "embedding": vec,
                 }

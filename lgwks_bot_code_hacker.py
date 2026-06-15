@@ -93,6 +93,14 @@ class Baseline:
             return False
         return self._seen[fp].get("dismiss_count", 0) >= 2
 
+    def get_history_penalty(self, fp: str) -> float:
+        """Calculate penalty based on dismissal history (0..0.2). (H5)"""
+        if fp not in self._seen:
+            return 0.0
+        # If it was dismissed once, -0.1; twice, -0.2 (which hits suppression threshold if >=2)
+        count = self._seen[fp].get("dismiss_count", 0)
+        return min(0.2, count * 0.1)
+
     def record(self, findings: list[dict]) -> None:
         """Persist current findings as the new baseline."""
         if not self.path:
@@ -414,7 +422,7 @@ class _Visitor(ast.NodeVisitor):
             fp = _finding_fingerprint(rec)
             if self.baseline.is_suppressed(fp):
                 return  # skip suppressed finding
-            # We don't have real dismiss history in baseline yet; penalty stays 0
+            history_penalty = self.baseline.get_history_penalty(fp)
 
         risk = RiskScore(base=confidence, context_boost=0.0, history_penalty=history_penalty)
 

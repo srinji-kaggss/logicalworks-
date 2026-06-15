@@ -65,11 +65,23 @@ class G3Verifier:
         return None
 
     def _find_rustdoc_json(self) -> Path | None:
-        """Search for existing rustdoc JSON in target/doc."""
+        """Search for existing rustdoc JSON in target/doc, pinned to package name."""
         if not self.crate_dir:
             return None
+        
+        meta = self._cargo_metadata()
+        if not meta or not meta.get("packages"):
+            return None
+        
+        # Heuristic: use the first workspace member or first package
+        pkg_name = meta["packages"][0]["name"].replace("-", "_")
+        target_path = self.crate_dir / "target" / "doc" / f"{pkg_name}.json"
+        
+        if target_path.exists():
+            return target_path
+
+        # Fallback to broad glob if exact name fails
         candidates = list(self.crate_dir.glob("target/doc/*.json"))
-        # prefer the crate's own rustdoc JSON
         for c in candidates:
             return c
         return None
