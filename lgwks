@@ -1185,6 +1185,20 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--machine", action="store_true", help="machine-first output: pure JSON/ND-JSON, no decoration, no escape codes, no prompts")
     parser.set_defaults(func=_home_dispatch)
     sub = parser.add_subparsers(dest="command", required=False)
+
+    # begin — "I'm starting X": the Grand Unified Entrypoint. Starts session + engine.
+    beg = sub.add_parser("begin", help="start a task: begin session + subconscious engine")
+    beg.add_argument("goal", help="what you are trying to achieve")
+    beg.add_argument("--repo", default=".", help="repo path")
+    beg.add_argument("--json", action="store_true", help="structured machine-first transition packet")
+    beg.set_defaults(func=_begin_dispatch)
+
+    # probe — "Check my gut": subtle AI guidance. Runs engine on current intent.
+    prb = sub.add_parser("probe", help="check gut: run engine on current intent (subtle guidance)")
+    prb.add_argument("intent", help="current intent text")
+    prb.add_argument("--repo", default=".", help="repo path")
+    prb.set_defaults(func=_probe_dispatch)
+
     jarvis = sub.add_parser("jarvis", help="deterministic research graph crawler")
     jarvis_sub = jarvis.add_subparsers(dest="jarvis_command", required=True)
     crawl = jarvis_sub.add_parser("crawl", help="crawl a website or keyword frontier")
@@ -1570,6 +1584,54 @@ def build_parser() -> argparse.ArgumentParser:
     init.set_defaults(func=_initialize_dispatch)
 
     return parser
+
+
+def _begin_dispatch(args) -> int:
+    import lgwks_session
+    import lgwks_engine
+    import lgwks_ui as ui
+    repo = Path(getattr(args, "repo", ".")).resolve()
+    goal = args.goal
+    
+    # 1. Start session
+    session_summary = lgwks_session.session_begin(repo)
+    
+    # 2. Run engine on goal
+    engine_result = lgwks_engine.run_engine(goal, repo=repo)
+    
+    if getattr(args, "json", False):
+        print(json.dumps({
+            "session": session_summary,
+            "subconscious": engine_result
+        }, indent=2))
+        return 0
+    
+    # 3. Human view (Transition Packet)
+    on = ui.color_on()
+    print("")
+    print("\n".join(ui.band("lgwks · begin", f"Starting goal: {goal}", on=on)))
+    print(ui.spine(ui.fg(f"Session marked: {session_summary['generated_at']}", ui.CREAM_DIM, on=on), on=on))
+    
+    # Show engine scores C/G/P
+    scores = engine_result["insights"]["scores"]
+    scores_str = f"Coverage: {scores['coverage_C']} · Gap: {scores['gap_G']} · Confidence: {scores['confidence_P']}"
+    print(ui.spine(ui.fg(scores_str, ui.AMBER, on=on), on=on))
+    
+    if engine_result["insights"]["flags"]:
+        flags = ", ".join(engine_result["insights"]["flags"])
+        print(ui.twig(f"flags: {flags}", 1, "warn", on=on))
+        
+    print(ui.spine(on=on))
+    print("  " + ui.footer("ready to harvest", on=on) + "\n")
+    return 0
+
+
+def _probe_dispatch(args) -> int:
+    import lgwks_engine
+    repo = Path(getattr(args, "repo", ".")).resolve()
+    result = lgwks_engine.run_engine(args.intent, repo=repo)
+    print(json.dumps(result, indent=2))
+    return 0
 
 
 def _solve_dispatch(args) -> int:

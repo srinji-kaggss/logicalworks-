@@ -413,12 +413,22 @@ def run_engine(
     # d — decisiveness: p1 - p2 over the match distribution. Constant-free.
     decisiveness = _decisiveness([v.get("score", 0.0) for v in selections])
 
+    # //Referee Doctrine: penalize confidence if vibe-heavy without evidence
+    referee_penalty = 1.0
+    text_lower = prompt.lower()
+    has_vibe = any(w in text_lower for w in ("think", "feel", "maybe", "probably", "buggy", "broken", "weird"))
+    has_evidence = any(w in text_lower for w in ("hash", "blake3", "axiom", "proof", "ledger", "log", "diff", "checksum", "trace"))
+    if has_vibe and not has_evidence:
+        referee_penalty = 0.5  # sharp cut to confidence
+
     # P — confidence index: geometric mean over the AVAILABLE axes (None drops out).
     #     No magic constants; null-collapse. An index, not a probability (calibration
     #     is a future packet).
-    P = _aggregate(C, grounding_rate, decisiveness)
+    P = _aggregate(C, grounding_rate, decisiveness) * referee_penalty
 
     flags = _detect_flags(prompt)
+    if referee_penalty < 1.0:
+        flags.append("referee_vibe_penalty")
     # attenuate/confirm verdicts ride as additive flags so downstream gates can
     # require confirmation; `proceed` adds nothing (clean path stays clean).
     if risk["verdict"] in ("attenuate", "confirm"):
