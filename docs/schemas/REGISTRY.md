@@ -48,8 +48,8 @@ the stack — build ON these, never reimplement hashing/encoding locally.
 |----|-----|--------|-----------|------------|
 | `lgwks.vector.record.v1` | 1 | **live** (20 tests) | `lgwks_vector.py` | decode_record + require_cid |
 
-Fields: `cid` (blake2b of canonical bytes) · `modality` (text\|image\|video) · `embedding` (BLOB, float32[d] big-endian, L2-normalized) · `norm` f32 (pre-norm audit) · `dim` u16 · `space_id` str · `tenant` str · `source_cid` str.
-Invariants: ‖ê‖ = 1 ± 1e-6; same inputs → same cid (dedup); cross-space compare raises `SpaceMismatchError`.
+Fields: `cid` (blake2b of canonical bytes) · `modality` (text\|image\|video) · `embedding` (BLOB, float32[d] big-endian, L2-normalized) · `norm` f32 (pre-norm audit) · `dim` u16 · `space_id` str · `tenant` str · `source_cid` str · **v2:** `tokenization_id` str · `artifact_cid` str.
+Invariants: ‖ê‖ = 1 ± 1e-6; same inputs → same cid (dedup); cross-space compare raises `SpaceMismatchError`. v2 metadata columns do NOT affect the cid — identical embeddings dedup regardless of which tokenizer named them.
 Proof fixture: `~/ingestion_results/code_embeddings_v1.db` — 4100 rows migrated from JSON-TEXT, 659 deduped (cid-dedup working on real data).
 **Supersedes:** `vector_json TEXT` column in `lgwks_substrate_db.py:85` + `fact_vectors.vector_json` (gap G-11).
 
@@ -57,6 +57,24 @@ Proof fixture: `~/ingestion_results/code_embeddings_v1.db` — 4100 rows migrate
 `lgwks_substrate_vector.py`, `lgwks_substrate_crawl.py`) · `lgwks.ingest.v1` (`lgwks_ingest.py:284`) ·
 SQLite DDL: `lgwks_substrate_db.py:43-98` (sources/documents/chunks/facts/vectors/frontier + FTS5),
 `lgwks_entity_graph.py:111-138` (nodes/edges/chunks).
+#### lgwks.artifact.tokenized.v1 — landed Phase 1 (2026-06-15)
+| id | ver | status | defined in | validation |
+|----|-----|--------|-----------|------------|
+| `lgwks.artifact.tokenized.v1` | 1 | **live** | `lgwks_artifact_tokenized.py` | `build_artifact()` + JSON-Schema |
+
+Fields: `artifact_cid` (content-addressed canonical bytes) · `tenant_id` · `source` (research/run/ingest/substrate/daemon_event/project_artifact) · `run_id`/`session_id` · `modality` (text/image/video/audio/terminal/reasoning) · `tokenization_id` (FK to tokenizer registry) · `token_stream` · `payload_cid` (raw bytes) · `payload_meta` · `capability_id` · `timestamp` · `prev_hash`.
+Invariants: deterministic `artifact_cid` over canonical JSON; one artifact = one row on the Causal Tape; all projections derive from it.
+**Supersedes/retires:** ad-hoc file-tree rows as source of truth in `lgwks_substrate_run.py`, `lgwks_ingest.py`, `lgwks_research.py`, `lgwks_run.py`.
+
+#### lgwks.tokenizer.registry.v1 — landed Phase 1 (2026-06-15)
+| id | ver | status | defined in | validation |
+|----|-----|--------|-----------|------------|
+| `lgwks.tokenizer.registry.v1` | 1 | **live** | `lgwks_tokenizer_registry.py` | JSON-Schema |
+
+Fields: `tokenizer_id` · `kind` · `version` · `config_json` · `vocab_cid` · `modality_anchors` · `created_at`.
+Invariants: registration is idempotent (first definition wins); default entries `word_regex:v1` and `aetherius:v0` are auto-seeded.
+**Why:** attaches tokenizer/analyzer identity to every stored unit so FTS, vector, graph, and relational projections are tokenizer-aware and auditable.
+
 #### lgwks.modality.item.v1 — landed I2 (2026-06-10)
 | id | ver | status | defined in | validation |
 |----|-----|--------|-----------|------------|

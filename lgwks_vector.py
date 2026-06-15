@@ -36,18 +36,22 @@ MODALITIES = frozenset(("text", "image", "video"))
 
 VECTOR_RECORDS_DDL = """
 CREATE TABLE IF NOT EXISTS vector_records (
-    cid        TEXT PRIMARY KEY,
-    modality   TEXT NOT NULL CHECK(modality IN ('text', 'image', 'video')),
-    embedding  BLOB NOT NULL,
-    norm       REAL NOT NULL,
-    dim        INTEGER NOT NULL,
-    space_id   TEXT NOT NULL,
-    tenant     TEXT NOT NULL DEFAULT '',
-    source_cid TEXT NOT NULL,
-    schema     TEXT NOT NULL DEFAULT 'lgwks.vector.record.v1'
+    cid             TEXT PRIMARY KEY,
+    modality        TEXT NOT NULL CHECK(modality IN ('text', 'image', 'video')),
+    embedding       BLOB NOT NULL,
+    norm            REAL NOT NULL,
+    dim             INTEGER NOT NULL,
+    space_id        TEXT NOT NULL,
+    tenant          TEXT NOT NULL DEFAULT '',
+    source_cid      TEXT NOT NULL,
+    schema          TEXT NOT NULL DEFAULT 'lgwks.vector.record.v1',
+    tokenization_id TEXT,                                    -- v2: which tokenizer produced the source
+    artifact_cid    TEXT                                     -- v2: link to lgwks.artifact.tokenized.v1
 );
 CREATE INDEX IF NOT EXISTS vr_space_tenant ON vector_records(space_id, tenant);
 CREATE INDEX IF NOT EXISTS vr_source       ON vector_records(source_cid);
+CREATE INDEX IF NOT EXISTS vr_tokenizer    ON vector_records(tokenization_id);
+CREATE INDEX IF NOT EXISTS vr_artifact     ON vector_records(artifact_cid);
 """
 
 
@@ -65,7 +69,7 @@ class SpaceMismatchError(VectorError):
 
 @dataclass(frozen=True)
 class VectorRecord:
-    """Immutable, fully validated lgwks.vector.record.v1 instance."""
+    """Immutable, fully validated lgwks.vector.record.v1/v2 instance."""
     cid: str
     modality: str
     embedding: bytes    # packed big-endian float32[dim], L2-normalized
@@ -74,6 +78,8 @@ class VectorRecord:
     space_id: str
     tenant: str
     source_cid: str
+    tokenization_id: str = ""  # v2
+    artifact_cid: str = ""     # v2
 
     def floats(self) -> list[float]:
         """Unpack the normalized embedding to a Python float list."""
@@ -126,10 +132,14 @@ def encode_record(
     space_id: str,
     tenant: str,
     source_cid: str,
+    tokenization_id: str = "",
+    artifact_cid: str = "",
 ) -> VectorRecord:
     """Normalize floats → pack → cid → VectorRecord.
 
     Guarantees ‖ê‖ = 1 at the byte level. Identical inputs → identical cid.
+    tokenization_id and artifact_cid are metadata (not part of the cid) so the
+    same embedding bytes still dedup regardless of which tokenizer named them.
     """
     if modality not in MODALITIES:
         raise VectorError(f"unknown modality {modality!r}; must be one of {sorted(MODALITIES)}")
@@ -154,22 +164,30 @@ def encode_record(
         space_id=space_id,
         tenant=tenant,
         source_cid=source_cid,
+        tokenization_id=tokenization_id,
+        artifact_cid=artifact_cid,
     )
 
 
 def decode_record(row: tuple) -> VectorRecord:
     """Reconstruct a VectorRecord from a DB row and verify its cid.
 
-    Row order: cid, modality, embedding, norm, dim, space_id, tenant, source_cid
+    Row order: cid, modality, embedding, norm, dim, space_id, tenant, source_cid,
+    [schema, tokenization_id, artifact_cid]
     Raises axiom.cid.CidError on cid mismatch (tampered or corrupt store).
     """
     cid, modality, embedding, norm, dim, space_id, tenant, source_cid = row[:8]
+    # v2 rows may include schema, tokenization_id, artifact_cid after source_cid.
+    tokenization_id = row[8] if len(row) > 8 else ""
+    artifact_cid = row[9] if len(row) > 9 else ""
     embedding = bytes(embedding)
     canonical = _canonical_bytes(source_cid, modality, space_id, embedding)
     require_cid(canonical, cid)
     return VectorRecord(
         cid=cid, modality=modality, embedding=embedding, norm=float(norm),
         dim=int(dim), space_id=space_id, tenant=tenant, source_cid=source_cid,
+        tokenization_id=tokenization_id or "",
+        artifact_cid=artifact_cid or "",
     )
 
 
@@ -204,6 +222,28 @@ def require_same_space(a: VectorRecord, b: VectorRecord) -> None:
 # SQLite store
 # ---------------------------------------------------------------------------
 
+def _ensure_v2_columns(conn: sqlite3.Connection) -> None:
+    """Additively migrate a pre-existing v1 vector_records table to v2.
+
+    //why before the DDL: VECTOR_RECORDS_DDL declares the v2 indexes
+    (vr_tokenizer/vr_artifact) over tokenization_id/artifact_cid. On a store
+    created with the v1 schema those columns do not exist, so executing the DDL
+    would raise "no such column" and break *opening* the store — not just
+    writing. We add the columns first so CREATE TABLE IF NOT EXISTS is a no-op
+    and the index DDL then succeeds. Idempotent and safe on a fresh DB (the
+    table won't exist yet, so nothing is altered).
+    """
+    table = conn.execute(
+        "SELECT name FROM sqlite_master WHERE type='table' AND name='vector_records'"
+    ).fetchone()
+    if not table:
+        return
+    existing = {row[1] for row in conn.execute("PRAGMA table_info(vector_records)").fetchall()}
+    for col in ("tokenization_id", "artifact_cid"):
+        if col not in existing:
+            conn.execute(f"ALTER TABLE vector_records ADD COLUMN {col} TEXT")
+
+
 def _connect(path: Path) -> sqlite3.Connection:
     """Open (or create) a vector store with WAL and the vector_records table."""
     try:
@@ -214,6 +254,7 @@ def _connect(path: Path) -> sqlite3.Connection:
         conn.execute("PRAGMA journal_mode=WAL")
         conn.execute("PRAGMA foreign_keys=ON")
         conn.execute("PRAGMA synchronous=NORMAL")
+    _ensure_v2_columns(conn)
     conn.executescript(VECTOR_RECORDS_DDL)
     conn.commit()
     return conn
@@ -263,13 +304,15 @@ def upsert_record(conn: sqlite3.Connection, record: VectorRecord, *, admin: obje
     cur = conn.execute(
         """
         INSERT OR IGNORE INTO vector_records
-            (cid, modality, embedding, norm, dim, space_id, tenant, source_cid, schema)
-        VALUES (?,?,?,?,?,?,?,?,?)
+            (cid, modality, embedding, norm, dim, space_id, tenant, source_cid, schema,
+             tokenization_id, artifact_cid)
+        VALUES (?,?,?,?,?,?,?,?,?,?,?)
         """,
         (
             record.cid, record.modality, record.embedding,
             record.norm, record.dim, record.space_id,
             record.tenant, record.source_cid, SCHEMA,
+            record.tokenization_id, record.artifact_cid,
         ),
     )
     return cur.rowcount == 1
@@ -285,7 +328,7 @@ def get_record(conn: sqlite3.Connection, cid: str, *, admin: object = None) -> O
     """
     _require_admin(admin, "get_record")
     row = conn.execute(
-        "SELECT cid, modality, embedding, norm, dim, space_id, tenant, source_cid "
+        "SELECT cid, modality, embedding, norm, dim, space_id, tenant, source_cid, tokenization_id, artifact_cid "
         "FROM vector_records WHERE cid = ?",
         (cid,),
     ).fetchone()
@@ -306,13 +349,13 @@ def query_by_source(
     _require_admin(admin, "query_by_source")
     if space_id:
         rows = conn.execute(
-            "SELECT cid, modality, embedding, norm, dim, space_id, tenant, source_cid "
+            "SELECT cid, modality, embedding, norm, dim, space_id, tenant, source_cid, tokenization_id, artifact_cid "
             "FROM vector_records WHERE source_cid = ? AND space_id = ?",
             (source_cid, space_id),
         ).fetchall()
     else:
         rows = conn.execute(
-            "SELECT cid, modality, embedding, norm, dim, space_id, tenant, source_cid "
+            "SELECT cid, modality, embedding, norm, dim, space_id, tenant, source_cid, tokenization_id, artifact_cid "
             "FROM vector_records WHERE source_cid = ?",
             (source_cid,),
         ).fetchall()
@@ -342,14 +385,14 @@ def query_for_tenant(
     """
     if space_id:
         sql = (
-            "SELECT cid, modality, embedding, norm, dim, space_id, tenant, source_cid "
+            "SELECT cid, modality, embedding, norm, dim, space_id, tenant, source_cid, tokenization_id, artifact_cid "
             "FROM vector_records "
             "WHERE (tenant = ? OR tenant = ?) AND space_id = ?"
         )
         params: tuple = (tenant, WORLD_TENANT, space_id)
     else:
         sql = (
-            "SELECT cid, modality, embedding, norm, dim, space_id, tenant, source_cid "
+            "SELECT cid, modality, embedding, norm, dim, space_id, tenant, source_cid, tokenization_id, artifact_cid "
             "FROM vector_records WHERE tenant = ? OR tenant = ?"
         )
         params = (tenant, WORLD_TENANT)
@@ -378,14 +421,14 @@ def get_record_for_tenant(
     """
     if space_id:
         row = conn.execute(
-            "SELECT cid, modality, embedding, norm, dim, space_id, tenant, source_cid "
+            "SELECT cid, modality, embedding, norm, dim, space_id, tenant, source_cid, tokenization_id, artifact_cid "
             "FROM vector_records "
             "WHERE cid = ? AND (tenant = ? OR tenant = ?) AND space_id = ?",
             (cid, tenant, WORLD_TENANT, space_id),
         ).fetchone()
     else:
         row = conn.execute(
-            "SELECT cid, modality, embedding, norm, dim, space_id, tenant, source_cid "
+            "SELECT cid, modality, embedding, norm, dim, space_id, tenant, source_cid, tokenization_id, artifact_cid "
             "FROM vector_records WHERE cid = ? AND (tenant = ? OR tenant = ?)",
             (cid, tenant, WORLD_TENANT),
         ).fetchone()

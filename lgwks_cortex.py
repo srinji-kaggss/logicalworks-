@@ -48,9 +48,19 @@ class TranscriptCortex:
         self.cortex_dir = repo_root / "store" / "cortex"
         self.cortex_dir.mkdir(parents=True, exist_ok=True)
 
-    def process_transcript(self, transcript_path: Path, session_id: str, n: int = 0) -> list[CortexTurn]:
+    def process_transcript(
+        self,
+        transcript_path: Path,
+        session_id: str,
+        n: int = 0,
+        gate: Any = None,
+    ) -> list[CortexTurn]:
         """Convert a raw JSONL transcript into a sequence of CortexTurns.
-        n=0 means process the whole file.
+
+        Each turn is ANT-tokenized and emitted as a tokenized artifact onto the
+        State Fabric (Causal Tape + TokenIndex) — the durable, replayable training
+        trajectory. n=0 processes the whole file. A caller may pass its own `gate`
+        (it owns the lifecycle); otherwise a per-session gate is opened/closed here.
         """
         # Layer 1: Entry Point Validation
         if not transcript_path.exists():
@@ -58,44 +68,98 @@ class TranscriptCortex:
 
         # PRD-06: "deterministic extraction first, BERT salience when 05 lands"
         import lgwks_intent_classifier as ic
+        import lgwks_tokenizer as atok
+
         clf = ic.IntentClassifier.load()
+        tokenizer = atok.AetheriusTokenizer(self.repo_root)
+
+        own_gate = gate is None
+        if own_gate:
+            import lgwks_storage
+            gate = lgwks_storage.get_gate("cortex", tenant_id=session_id)
+
         processed: list[CortexTurn] = []
+        try:
+            raw_turns = lgwks_transcript.tail(transcript_path, n=n, include_content=True)
 
-        raw_turns = lgwks_transcript.tail(transcript_path, n=n, include_content=True)
+            for turn in raw_turns:
+                content = turn.get("content", "")
 
-        for turn in raw_turns:
-            content = turn.get("content", "")
+                # Layer 2: Business Logic (ModernBERT Salience)
+                entities = self._extract_entities(content)
+                res = clf.classify(content)
 
-            # Layer 2: Business Logic (ModernBERT Salience)
-            entities = self._extract_entities(content)
-            res = clf.classify(content)
-            intent = res.label
+                ct = CortexTurn(
+                    turn_id=turn["turn_id"],
+                    session_id=session_id,
+                    role=turn["role"],
+                    intent_class=res.label,
+                    entities=entities,
+                    attention=entities[:3],  # Simple attention baseline
+                    content=content,
+                )
 
-            ct = CortexTurn(
-                turn_id=turn["turn_id"],
-                session_id=session_id,
-                role=turn["role"],
-                intent_class=intent,
-                entities=entities,
-                attention=entities[:3], # Simple attention baseline
-                content=content
-            )
-            
-            # Layer 3: Neural Tokenization (Aetherius Neural Tokenizer)
-            try:
-                import lgwks_tokenizer as atok
-                tokenizer = atok.AetheriusTokenizer(self.repo_root)
-                tokenized = tokenizer.tokenize_trajectory(ct.to_dict())
-                ct.attention.extend([f"atok:{t}" for t in tokenized.tokens[:5]])
-            except Exception:
-                pass
+                # Layer 3: Neural Tokenization (Aetherius Neural Tokenizer).
+                # Tokenize the full turn (content + entities + modality anchors) —
+                # not the metadata-only to_dict() that previously dropped content.
+                tokens: tuple[int, ...] = ()
+                try:
+                    traj = tokenizer.tokenize_trajectory({
+                        "content": content,
+                        "entities": entities,
+                        "image_hash": turn.get("image_hash", ""),
+                        "tty_hash": turn.get("tty_hash", ""),
+                    })
+                    tokens = tuple(traj.tokens)
+                    ct.attention.extend([f"atok:{t}" for t in tokens[:5]])
+                except Exception:
+                    tokens = ()
 
-            processed.append(ct)
-            
-            # Layer 4: Audit (Telemetry)
-            self._persist_turn(ct)
+                # Layer 4: persist. The durable, replayable training trajectory
+                # goes on the Causal Tape (+ TokenIndex); the JSONL is a mirror.
+                self._emit_trajectory(gate, ct, content, tokens)
+                self._persist_turn(ct)
+                processed.append(ct)
+        finally:
+            if own_gate:
+                gate.close()
 
         return processed
+
+    def _emit_trajectory(self, gate: Any, ct: CortexTurn, content: str, tokens: tuple[int, ...]) -> None:
+        """Append one turn to the State Fabric as a tokenized reasoning artifact.
+
+        Best-effort: trajectory capture must never break transcript processing
+        (the gate isolates projection failures; we only guard the tape append).
+        """
+        import time
+
+        import lgwks_artifact_tokenized as artifact_mod
+
+        try:
+            payload_cid = lgwks_hashing.content_id(content or ct.turn_id)
+            artifact = artifact_mod.build_artifact(
+                tenant_id=ct.session_id,
+                source="daemon_event",
+                modality="reasoning",
+                tokenization_id=gate.tokenizers.default_aetherius_id(),
+                token_stream=tokens,
+                payload_cid=payload_cid,
+                payload_meta={
+                    "turn_id": ct.turn_id,
+                    "role": ct.role,
+                    "intent_class": ct.intent_class,
+                    "phase": ct.phase,
+                    "entities": ct.entities,
+                    "ts": ct.ts,
+                    "text": content[:2000],
+                },
+                capability_id="cap:cortex",
+                timestamp=time.time(),
+            )
+            gate.ingest_artifact(artifact)
+        except Exception:
+            pass
 
     def _extract_entities(self, text: str) -> list[str]:
         """Find repo entities (files, modules) mentioned in text."""

@@ -87,7 +87,6 @@ from lgwks_substrate_crawl import (
 
 # DB layer
 from lgwks_substrate_db import (
-    _build_index_db,
     _upsert_global_fact_vectors,
 )
 
@@ -167,7 +166,6 @@ __all__ = [
     "_crawl_map",
     "_frontier_status_counts",
     # DB
-    "_build_index_db",
     "_upsert_global_fact_vectors",
     # Vector
     "_dot",

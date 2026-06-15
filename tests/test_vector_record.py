@@ -241,5 +241,77 @@ class TestValidation(unittest.TestCase):
                           tenant="t", source_cid="b2b256:" + "a" * 64)
 
 
+class TestVectorRecordV2Metadata(unittest.TestCase):
+    def test_v2_fields_roundtrip(self):
+        conn = sqlite3.connect(":memory:")
+        conn.executescript(vmod.VECTOR_RECORDS_DDL)
+        r = encode_record(
+            _vec(),
+            modality="text",
+            space_id="sp:v2",
+            tenant="t",
+            source_cid="b2b256:" + "a" * 64,
+            tokenization_id="word_regex:v1",
+            artifact_cid="b2b256:" + "b" * 64,
+        )
+        upsert_record(conn, r, admin=vmod.ADMIN)
+        r2 = get_record(conn, r.cid, admin=vmod.ADMIN)
+        self.assertIsNotNone(r2)
+        self.assertEqual(r2.tokenization_id, "word_regex:v1")
+        self.assertEqual(r2.artifact_cid, "b2b256:" + "b" * 64)
+
+    def test_v2_fields_not_in_cid(self):
+        """Same bytes with different tokenization_id/artifact_cid must dedup."""
+        base = dict(modality="text", space_id="sp:v2", tenant="t",
+                    source_cid="b2b256:" + "a" * 64)
+        r1 = encode_record(_vec(), tokenization_id="a:v1", artifact_cid="b2b256:00", **base)
+        r2 = encode_record(_vec(), tokenization_id="b:v1", artifact_cid="b2b256:11", **base)
+        self.assertEqual(r1.cid, r2.cid)
+
+    def test_v1_store_migrates_to_v2_on_open(self):
+        """A pre-existing v1 store (no tokenization_id/artifact_cid columns) must
+        migrate additively when reopened, not raise on the v2 index DDL."""
+        import tempfile
+
+        V1_DDL = """
+        CREATE TABLE vector_records (
+            cid        TEXT PRIMARY KEY,
+            modality   TEXT NOT NULL CHECK(modality IN ('text', 'image', 'video')),
+            embedding  BLOB NOT NULL,
+            norm       REAL NOT NULL,
+            dim        INTEGER NOT NULL,
+            space_id   TEXT NOT NULL,
+            tenant     TEXT NOT NULL DEFAULT '',
+            source_cid TEXT NOT NULL,
+            schema     TEXT NOT NULL DEFAULT 'lgwks.vector.record.v1'
+        );
+        """
+        with tempfile.TemporaryDirectory() as d:
+            path = Path(d) / "legacy_v1.db"
+            seed = sqlite3.connect(str(path))
+            seed.executescript(V1_DDL)
+            seed.commit()
+            seed.close()
+
+            # Reopening through create_store must not raise on the v2 index DDL.
+            conn = vmod.create_store(path)
+            cols = {row[1] for row in conn.execute("PRAGMA table_info(vector_records)").fetchall()}
+            self.assertIn("tokenization_id", cols)
+            self.assertIn("artifact_cid", cols)
+
+            # And a v2 write must round-trip on the migrated store.
+            r = encode_record(
+                _vec(), modality="text", space_id="sp:v2", tenant="t",
+                source_cid="b2b256:" + "a" * 64,
+                tokenization_id="word_regex:v1", artifact_cid="b2b256:" + "b" * 64,
+            )
+            upsert_record(conn, r, admin=vmod.ADMIN)
+            r2 = get_record(conn, r.cid, admin=vmod.ADMIN)
+            self.assertIsNotNone(r2)
+            assert r2 is not None
+            self.assertEqual(r2.tokenization_id, "word_regex:v1")
+            conn.close()
+
+
 if __name__ == "__main__":
     unittest.main()

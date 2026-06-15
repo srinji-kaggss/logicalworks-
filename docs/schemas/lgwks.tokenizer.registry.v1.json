@@ -1,0 +1,49 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "lgwks.tokenizer.registry.v1",
+  "description": "Tokenizer/analyzer identity registry. Every stored tokenized artifact references a tokenizer registry row, so FTS, vector embeddings, graph edges, and chunk tables are tokenizer-aware and can be replayed or audited per analyzer version.",
+  "type": "object",
+  "required": [
+    "schema", "tokenizer_id", "kind", "version", "config_json",
+    "vocab_cid", "modality_anchors", "created_at"
+  ],
+  "additionalProperties": false,
+  "properties": {
+    "schema": {
+      "type": "string",
+      "enum": ["lgwks.tokenizer.registry.v1"]
+    },
+    "tokenizer_id": {
+      "type": "string",
+      "minLength": 1,
+      "description": "Canonical id, e.g. word_regex:v1 or aetherius:v0:sha256:abc123",
+      "pattern": "^[a-z][a-z0-9_-]*:[^:]+(:[^:]+)*$"
+    },
+    "kind": {
+      "type": "string",
+      "minLength": 1,
+      "description": "Analyzer family: aetherius, word_regex, uqa_analyzer, embed_port, etc."
+    },
+    "version": {
+      "type": "string",
+      "minLength": 1
+    },
+    "config_json": {
+      "type": "string",
+      "description": "JSON-serialized analyzer parameters (chunk size, BPE merges, regex pattern, etc.)"
+    },
+    "vocab_cid": {
+      "type": "string",
+      "description": "Content-addressed vocab file; empty if not applicable"
+    },
+    "modality_anchors": {
+      "type": "array",
+      "items": { "type": "string" },
+      "description": "Special tokens the analyzer emits for non-text modalities (e.g. [IMG], [TTY])"
+    },
+    "created_at": {
+      "type": "number",
+      "description": "Seconds since epoch when the tokenizer was registered"
+    }
+  }
+}
