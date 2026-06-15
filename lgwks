@@ -1183,6 +1183,8 @@ def build_parser() -> argparse.ArgumentParser:
     # bare `lgwks` → the home launcher (the "pop up" experience), so no subcommand is required.
     parser.add_argument("--no-anim", action="store_true", help="skip the reveal animation")
     parser.add_argument("--machine", action="store_true", help="machine-first output: pure JSON/ND-JSON, no decoration, no escape codes, no prompts")
+    parser.add_argument("--transform", help="transform machine output using a simple path expression (Issue 159)")
+    parser.add_argument("-r", "--raw", action="store_true", help="output raw scalar strings when using --transform (Issue 159)")
     parser.set_defaults(func=_home_dispatch)
     sub = parser.add_subparsers(dest="command", required=False)
 
@@ -2051,6 +2053,58 @@ def _model_hub_dispatch(args) -> int:
     return lgwks_model_hub._model_hub_list_command(args)
 
 
+class TransformStdout:
+    def __init__(self, expr: str, raw: bool):
+        self.expr = expr
+        self.raw = raw
+        self.buffer = ""
+        self.original_stdout = sys.stdout
+        
+    def write(self, s):
+        self.buffer += s
+        
+    def flush(self):
+        pass
+        
+    def close(self):
+        if not self.buffer.strip():
+            return
+            
+        import lgwks_transform
+        
+        # Try to parse as single JSON or ND-JSON
+        lines = self.buffer.strip().splitlines()
+        results = []
+        try:
+            # First try single JSON parse
+            data = json.loads(self.buffer)
+            res = lgwks_transform.apply_transform(data, self.expr)
+            results.append(res)
+        except json.JSONDecodeError:
+            # Fallback to ND-JSON
+            for line in lines:
+                if not line.strip(): continue
+                try:
+                    data = json.loads(line)
+                    res = lgwks_transform.apply_transform(data, self.expr)
+                    results.append(res)
+                except json.JSONDecodeError:
+                    # Ignore non-JSON lines or just pass them through?
+                    pass
+                    
+        for res in results:
+            if res is None:
+                continue
+            if self.raw and isinstance(res, str):
+                self.original_stdout.write(res + "\n")
+            elif self.raw and isinstance(res, list) and all(isinstance(x, str) for x in res):
+                for x in res:
+                    self.original_stdout.write(x + "\n")
+            else:
+                self.original_stdout.write(json.dumps(res, indent=2 if len(results) == 1 else None) + "\n")
+        
+        self.original_stdout.flush()
+
 def main(argv: list[str] | None = None) -> int:
     parser = build_parser()
     args, unknown = parser.parse_known_args(argv)
@@ -2062,7 +2116,20 @@ def main(argv: list[str] | None = None) -> int:
     if getattr(args, "machine", False):
         os.environ["LGWRS_MACHINE"] = "1"
         os.environ["NO_COLOR"] = "1"
-    return args.func(args)
+        
+    transformer = None
+    if getattr(args, "transform", None):
+        transformer = TransformStdout(args.transform, getattr(args, "raw", False))
+        sys.stdout = transformer
+        
+    try:
+        ret = args.func(args)
+    finally:
+        if transformer:
+            sys.stdout = transformer.original_stdout
+            transformer.close()
+            
+    return ret
 
 
 if __name__ == "__main__":

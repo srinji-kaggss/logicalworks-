@@ -1,5 +1,9 @@
 """lgwks_tokenizer — the Aetherius Neural Tokenizer (ANT).
 
+//note: ANT (ours) is the Aetherius Neural Tokenizer. Unrelated to the 
+//Anthropic 'ant' CLI. Code identifiers use 'atok' or 'ant_tok' to 
+//avoid collision.
+
 Proprietary byte-level BPE tokenizer optimized for 'Space-Time' trajectories.
 Treats code entities, logic-paths, and terminal events as atomic primitives.
 

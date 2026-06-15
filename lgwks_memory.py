@@ -244,7 +244,8 @@ def memory_command(args: argparse.Namespace) -> int:
     if args.memory_command == "init":
         payload = init_project(args.project, args.site, args.goal)
     elif args.memory_command == "remember":
-        text = Path(args.file).read_text(encoding="utf-8") if args.file else args.text
+        import lgwks_inline
+        text = lgwks_inline.get_precedence_payload(expr=args.text, file_at=args.file)
         payload = remember(args.project, text, source=args.source,
                            verbose_embeddings=getattr(args, "verbose_embeddings", False))
     else:

@@ -230,11 +230,16 @@ def _persist(spec: dict, report: dict, transcript: dict) -> Path:
 
 def batch_command(args: argparse.Namespace) -> int:
     # read spec
-    spec: dict
-    if args.file:
-        spec = json.loads(Path(args.file).expanduser().read_text(encoding="utf-8"))
-    else:
-        spec = json.loads(sys.stdin.read())
+    import lgwks_inline
+    raw = lgwks_inline.get_precedence_payload(
+        file_at=args.file,
+        stdin_text=None if sys.stdin.isatty() else sys.stdin.read()
+    )
+    if not raw:
+        print("error: provide --file or pipe stdin", file=sys.stderr)
+        return 2
+        
+    spec = json.loads(raw)
     if spec.get("schema") != BATCH_SCHEMA:
         print(json.dumps({"ok": False, "error_code": "schema_mismatch", "expected": BATCH_SCHEMA}))
         return 2

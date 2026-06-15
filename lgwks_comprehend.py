@@ -168,13 +168,16 @@ class ComprehensionVerifier:
 def comprehend_command(args) -> int:
     """CLI: `lgwks comprehend --unit U1 --file plan.json [--json]`"""
     import json as _json
+    import lgwks_inline
     unit_id = args.unit
-    plan_path = Path(args.file)
-    if not plan_path.exists():
-        print(f"error: plan file not found: {plan_path}", file=sys.stderr)
+    
+    try:
+        raw = lgwks_inline.resolve_payload(f"@{args.file}")
+        artifact = ComprehensionArtifact.from_dict(_json.loads(raw))
+    except Exception as exc:
+        print(f"error: failed to resolve plan: {exc}", file=sys.stderr)
         return 1
-    with open(plan_path, "r", encoding="utf-8") as fh:
-        artifact = ComprehensionArtifact.from_dict(_json.load(fh))
+
     verifier = ComprehensionVerifier()
     verdict = verifier.check(artifact, unit_id)
     if getattr(args, "json", False) or getattr(args, "json", None) is None:

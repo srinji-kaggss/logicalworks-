@@ -256,7 +256,14 @@ def _persist_run(geoexpr: dict, plan: dict, preview: dict, transcript: dict) -> 
 # --- CLI surface -----------------------------------------------------------------------------------------
 
 def _load_geoexpr(args) -> dict:
-    raw = open(args.file, encoding="utf-8").read() if getattr(args, "file", None) else sys.stdin.read()
+    import lgwks_inline
+    raw = lgwks_inline.get_precedence_payload(
+        expr=getattr(args, "expr", None),
+        file_at=getattr(args, "file", None),
+        stdin_text=None if sys.stdin.isatty() else sys.stdin.read()
+    )
+    if not raw:
+        return _err("missing_input", "provide --expr, --file, or pipe stdin")
     try:
         return _ok(json.loads(raw))
     except json.JSONDecodeError as e:
@@ -270,11 +277,12 @@ def _load_raw(args) -> str:
     //why --expr is highest priority: an explicit inline expression string is
     // unambiguous; it avoids reading stdin when the caller is non-interactive.
     """
-    if getattr(args, "expr", None):
-        return args.expr
-    if getattr(args, "file", None):
-        return open(args.file, encoding="utf-8").read()
-    return sys.stdin.read()
+    import lgwks_inline
+    return lgwks_inline.get_precedence_payload(
+        expr=getattr(args, "expr", None),
+        file_at=getattr(args, "file", None),
+        stdin_text=None if sys.stdin.isatty() else sys.stdin.read()
+    )
 
 
 def compile_command(args) -> int:

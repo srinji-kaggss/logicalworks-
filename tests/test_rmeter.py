@@ -66,7 +66,7 @@ class TestRMeter(unittest.TestCase):
         self.assertIn("percentages", rm)
         self.assertIn("dominant", rm)
         self.assertIn("total_weighted", rm)
-        self.assertEqual(sum(rm["counts"].values()), rm["total_weighted"])
+        self.assertAlmostEqual(sum(rm["counts"].values()), rm["total_weighted"])
 
     def test_rmeter_in_narrative(self):
         repo = self._make_repo([

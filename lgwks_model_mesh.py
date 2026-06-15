@@ -24,9 +24,9 @@ from typing import Any
 SCHEMA = "lgwks.model.mesh.v1"
 
 # Allowed vocabularies (supersets are additive; do not narrow without a bump).
-RUNTIMES = frozenset({"mlx", "transformers", "ollama", "coreml", "llama_cpp", "provider_seam"})
+RUNTIMES = frozenset({"mlx", "transformers", "ollama", "coreml", "llama_cpp", "provider_seam", "axiom", "custom"})
 LOCALITIES = frozenset({"local", "cloud"})
-ROLES = frozenset({"embed", "intent", "classify", "extract", "salience", "rerank", "asr", "proposal", "code"})
+ROLES = frozenset({"embed", "intent", "classify", "extract", "salience", "rerank", "asr", "proposal", "code", "identity", "encode"})
 TRUST_CLASSES = frozenset({"deterministic", "sensor", "generative"})
 STATUSES = frozenset({"current_law", "open_slot", "candidate_reference"})
 HEALTH_STATUSES = frozenset({"unknown", "ok", "degraded", "down"})

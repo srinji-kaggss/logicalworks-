@@ -76,12 +76,15 @@ _CENTROID_CACHE_SCHEMA = "lgwks.intent.centroids.v1"
 
 # Authority thresholds (loaded from calibration artifact, H1)
 def _load_thresholds() -> dict[str, float]:
+    from lgwks_config import get_config
+    cfg = get_config().get("intent", {})
+    
     p = Path(__file__).resolve().parent / "store" / "models" / "intent_calibration.json"
     defaults = {
-        "confidence_threshold": 0.55,
-        "full_authority_threshold": 0.85,
+        "confidence_threshold": cfg.get("confidence_threshold", 0.55),
+        "full_authority_threshold": cfg.get("full_authority_threshold", 0.85),
         "lexical_confidence_ceiling": 0.74,
-        "margin_min": 0.02
+        "margin_min": cfg.get("margin_min", 0.02)
     }
     if p.exists():
         try:
@@ -96,6 +99,12 @@ CONFIDENCE_THRESHOLD = _THRESH["confidence_threshold"]
 FULL_AUTHORITY_THRESHOLD = _THRESH["full_authority_threshold"]
 LEXICAL_CONFIDENCE_CEILING = _THRESH["lexical_confidence_ceiling"]
 MARGIN_MIN = _THRESH["margin_min"]
+
+# //why only semantic methods may cross FULL_AUTHORITY_THRESHOLD: a lexical
+# path (feature-hash cosine, keyword overlap) measures surface-form overlap,
+# not meaning. It can pre-fill a schema field as a *suggestion*, but it must
+# never alone unlock execution.
+SEMANTIC_METHODS = frozenset({"coreml", "eye", "mlx"})
 
 # //The Referee Doctrine: Evidence over Vibes.
 # Claims of system state must be backed by deterministic artifacts.

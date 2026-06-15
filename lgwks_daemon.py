@@ -55,6 +55,7 @@ class DaemonPaths:
     lock: Path
     state: Path
     db: Path
+    bus: Path
 
 
 def _paths(repo_root: Path) -> DaemonPaths:
@@ -65,6 +66,7 @@ def _paths(repo_root: Path) -> DaemonPaths:
         lock=root / "daemon.lock.json",
         state=root / "daemon.state.json",
         db=root / "daemon-events.db",
+        bus=root / "daemon-bus.jsonl",
     )
 
 
@@ -554,8 +556,9 @@ def _status_command(args: argparse.Namespace) -> int:
 
 def _doctor_command(args: argparse.Namespace) -> int:
     daemon = SessionDaemon(Path(args.repo))
-    print(json.dumps(daemon.doctor(), indent=2))
-    return 0
+    res = daemon.doctor()
+    print(json.dumps(res, indent=2))
+    return 0 if res.get("ok") else 1
 
 
 def _start_command(args: argparse.Namespace) -> int:
@@ -866,20 +869,24 @@ def _register_worktree_subcommands(ps: Any) -> None:
 
 def add_parser(sub) -> None:
     p = sub.add_parser("daemon", help="background daemon lifecycle shell for the shared referee runtime")
-    p.add_argument("--repo", default=".", help="repo root")
+    p.add_argument("--repo", default=".", help="repo root (legacy placement)")
     ps = p.add_subparsers(dest="daemon_command", required=True)
 
     start = ps.add_parser("start", help="spawn the daemon in the background")
+    start.add_argument("--repo", default=".", help="repo root")
     start.add_argument("--transcript-path", default="", help="optional transcript path override")
     start.set_defaults(func=_start_command)
 
     stop = ps.add_parser("stop", help="stop the background daemon")
+    stop.add_argument("--repo", default=".", help="repo root")
     stop.set_defaults(func=_stop_command)
 
     status = ps.add_parser("status", help="report daemon lock, heartbeat, and event store state")
+    status.add_argument("--repo", default=".", help="repo root")
     status.set_defaults(func=_status_command)
 
     doctor = ps.add_parser("doctor", help="verify daemon runtime prerequisites")
+    doctor.add_argument("--repo", default=".", help="repo root")
     doctor.set_defaults(func=_doctor_command)
 
     enqueue = ps.add_parser("enqueue", help="enqueue a work item from stdin JSON")

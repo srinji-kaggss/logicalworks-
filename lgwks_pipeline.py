@@ -53,27 +53,24 @@ PIPELINE_MANIFEST_SCHEMA = "lgwks.pipeline.manifest.v1"
 
 # ══════════════════════════════════════════════════════════════════════════════
 # CONFIGURABLE PARAMETERS  [see docs/ADR-pipeline-001-tuning.md]
-# All values are provisional first-run defaults. Do NOT inline magic numbers.
-# Every constant is tagged with its ADR section.  Override via env vars.
+# Values loaded from lgwks.config.v1 (Issue 158).
 # ══════════════════════════════════════════════════════════════════════════════
 
-RECALL_K: int = int(os.environ.get("LGWKS_RECALL_K", "2000"))           # [ADR §2.1]
-FAST_RANK_K: int = int(os.environ.get("LGWKS_FAST_RANK_K", "200"))      # [ADR §2.2]
-HEAVY_RANK_K: int = int(os.environ.get("LGWKS_HEAVY_RANK_K", "50"))     # [ADR §2.3]
+from lgwks_config import get_config
+_CFG = get_config()["pipeline"]
 
-DISAMBIGUATION_CONF_THRESHOLD: float = float(                            # [ADR §3.1]
-    os.environ.get("LGWKS_DISAMBIG_CONF_THRESHOLD", "0.72"))
-DISAMBIGUATION_MAX_VARIANTS: int = int(                                  # [ADR §3.2]
-    os.environ.get("LGWKS_DISAMBIG_MAX_VARIANTS", "4"))
+RECALL_K: int = _CFG["recall_k"]
+FAST_RANK_K: int = _CFG["fast_rank_k"]
+HEAVY_RANK_K: int = _CFG["heavy_rank_k"]
 
-NOISE_SCORE_THRESHOLD: float = float(                                    # [ADR §4.1]
-    os.environ.get("LGWKS_NOISE_THRESHOLD", "0.90"))     # //why raised 0.72→0.90: deep-research needs full corpus; only truly broken HTML noise filtered
-DIVERSITY_PENALTY_WEIGHT: float = float(                                 # [ADR §4.2]
-    os.environ.get("LGWKS_DIVERSITY_PENALTY", "0.30"))
-SAME_SOURCE_CAP: int = int(os.environ.get("LGWKS_SAME_SOURCE_CAP", "50"))# [ADR §4.3] //why 5→50: source-cap drops legitimate content for focused corpora
+DISAMBIGUATION_CONF_THRESHOLD: float = _CFG.get("disambig_conf_threshold", 0.72)
+DISAMBIGUATION_MAX_VARIANTS: int = _CFG.get("disambig_max_variants", 4)
 
-MAX_LLM_INVOLVEMENT_RATIO: float = float(                                # [ADR §5.1]
-    os.environ.get("LGWKS_MAX_LLM_RATIO", "0.20"))
+NOISE_SCORE_THRESHOLD: float = _CFG["noise_threshold"]
+DIVERSITY_PENALTY_WEIGHT: float = _CFG["diversity_penalty"]
+SAME_SOURCE_CAP: int = _CFG["same_source_cap"]
+
+MAX_LLM_INVOLVEMENT_RATIO: float = _CFG["max_llm_ratio"]
 
 FAST_RANK_W_BM25: float = 0.40           # [ADR §6.1] — change all weights together
 FAST_RANK_W_FACT_DENSITY: float = 0.20
@@ -81,18 +78,15 @@ FAST_RANK_W_COVERAGE: float = 0.15
 FAST_RANK_W_ENTITY_OVERLAP: float = 0.15
 FAST_RANK_W_RECENCY: float = 0.10
 
-DATASET_BATCH_SIZE: int = int(os.environ.get("LGWKS_BATCH_SIZE", "256"))# [ADR §7.1]
+DATASET_BATCH_SIZE: int = _CFG["batch_size"]
 
-MULTIMODAL_EMBED_MODEL: str = os.environ.get(                           # [ADR §8.1]
-    "LGWKS_MM_EMBED_MODEL", "google/gemini-embedding-2")
+MULTIMODAL_EMBED_MODEL: str = _CFG["mm_embed_model"]
 MULTIMODAL_EMBED_ENDPOINT: str = "https://openrouter.ai/api/v1/embeddings"
-MULTIMODAL_MAX_IMAGE_BYTES: int = int(                                   # [ADR §8.2]
-    os.environ.get("LGWKS_MM_MAX_IMG_BYTES", str(6 * 1024 * 1024)))
+MULTIMODAL_MAX_IMAGE_BYTES: int = _CFG["mm_max_img_bytes"]
 
-COHERENCE_THRESHOLD: float = float(                                      # [ADR §9.1]
-    os.environ.get("LGWKS_COHERENCE_THRESHOLD", "0.65"))
+COHERENCE_THRESHOLD: float = _CFG["coherence_threshold"]
 
-_GEMMA_MODEL: str = os.environ.get("LGWKS_GEMMA_MODEL", "gemma3:1b")
+_GEMMA_MODEL: str = _CFG["gemma_model"]
 
 # ══════════════════════════════════════════════════════════════════════════════
 # DATA TYPES

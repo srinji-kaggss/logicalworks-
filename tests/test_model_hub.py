@@ -26,7 +26,8 @@ class TestModelHub(unittest.TestCase):
     def test_doctor_reports_catalog_and_summary(self):
         with tempfile.TemporaryDirectory() as td:
             model_root = Path(td)
-            tiny = model_root / "tiny-bert"
+            # Create a directory matching a catalog model to simulate presence
+            tiny = model_root / "ModernBERT-base-mlx-4bit"
             tiny.mkdir(parents=True)
             (tiny / "config.json").write_text("{}", encoding="utf-8")
             (tiny / "weights.safetensors").write_text("x", encoding="utf-8")
@@ -36,5 +37,5 @@ class TestModelHub(unittest.TestCase):
         self.assertGreaterEqual(report["summary"]["catalog_models"], 4)
         self.assertEqual(report["summary"]["present_models"], 1)
         names = [row["name"] for row in report["catalog"]]
-        self.assertIn("tiny-bert", names)
+        self.assertIn("ModernBERT-base-mlx-4bit", names)
         self.assertIn("intent_classifier", json.dumps(report))

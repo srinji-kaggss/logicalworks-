@@ -76,8 +76,23 @@ def _validate_slug(slug: str | None) -> str | None:
     if not slug:
         return None
     slug = slug.strip()
+    if slug == ".":
+        import subprocess
+        try:
+            out = subprocess.check_output(["git", "config", "--get", "remote.origin.url"], text=True).strip()
+            # Handle forms: https://github.com/owner/repo.git or git@github.com:owner/repo.git
+            if "github.com" in out:
+                if out.startswith("https://"):
+                    slug = out.split("github.com/")[-1]
+                elif out.startswith("git@"):
+                    slug = out.split("github.com:")[-1]
+                if slug.endswith(".git"):
+                    slug = slug[:-4]
+        except Exception:
+            pass
+
     if not _SLUG_RE.match(slug):
-        raise ValueError(f"invalid repo slug: {slug!r} — expected owner/repo")
+        raise ValueError(f"invalid repo slug: '{slug}' (must be 'owner/repo')")
     return slug
 
 

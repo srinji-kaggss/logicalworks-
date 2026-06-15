@@ -410,16 +410,16 @@ def _repo_for_command(verb: str, repo: Path | None) -> list[str]:
 _DOMAINS: dict[str, list[str]] = {
     # Primary product — the subconscious loop and operator surface
     "Subconscious": ["map", "engine", "session", "solve", "debug", "intent", "doctor",
-                     "spawn", "portal", "do", "agent-os"],
+                     "spawn", "portal", "do", "agent-os", "begin", "tui"],
     # Research and knowledge work — the conscious-layer tools
     "Research":  ["jarvis", "fetch", "refine", "preview", "extract", "convert",
                   "x", "manifest", "login", "cohere", "comprehend", "geo", "public",
                   "akinator", "run", "context", "model-hub", "capture", "jepa",
-                  "workflow"],
+                  "workflow", "probe"],
     "GitHub":    ["gh"],
     "DevOps":    ["repo", "review", "project", "batch", "refactor", "hooks"],
     "System":    ["repl", "initialize", "auth", "keyvault", "foundation",
-                  "aup", "schema", "route", "codebase", "access", "daemon"],
+                  "aup", "schema", "route", "codebase", "access", "daemon", "bulk-harvest"],
     # L0 substrate — ingestion, vector store, contracts (foundational, not the product)
     "Substrate": ["store", "memory", "embed", "axiom", "pipeline", "waste",
                   "entity-graph", "graph", "substrate", "score", "rank", "inbound",

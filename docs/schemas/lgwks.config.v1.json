@@ -1,0 +1,40 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "lgwks.config.v1",
+  "type": "object",
+  "properties": {
+    "schema": { "type": "string", "const": "lgwks.config.v1" },
+    "pipeline": {
+      "type": "object",
+      "properties": {
+        "recall_k": { "type": "integer", "default": 2000 },
+        "fast_rank_k": { "type": "integer", "default": 200 },
+        "heavy_rank_k": { "type": "integer", "default": 50 },
+        "noise_threshold": { "type": "number", "default": 0.90 },
+        "diversity_penalty": { "type": "number", "default": 0.30 },
+        "same_source_cap": { "type": "integer", "default": 50 },
+        "max_llm_ratio": { "type": "number", "default": 0.20 },
+        "batch_size": { "type": "integer", "default": 256 },
+        "mm_embed_model": { "type": "string", "default": "google/gemini-embedding-2" },
+        "mm_max_img_bytes": { "type": "integer", "default": 6291456 },
+        "coherence_threshold": { "type": "number", "default": 0.65 },
+        "gemma_model": { "type": "string", "default": "gemma3:1b" }
+      }
+    },
+    "intent": {
+      "type": "object",
+      "properties": {
+        "confidence_threshold": { "type": "number", "default": 0.55 },
+        "full_authority_threshold": { "type": "number", "default": 0.85 },
+        "margin_min": { "type": "number", "default": 0.02 }
+      }
+    },
+    "model_hub": {
+      "type": "object",
+      "properties": {
+        "default_runtime": { "type": "string", "enum": ["mlx", "coreml", "transformers", "auto"], "default": "auto" }
+      }
+    }
+  },
+  "additionalProperties": false
+}

@@ -626,17 +626,17 @@ class AUPGate:
 # ---------------------------------------------------------------------------
 
 def _aup_check_command(args: argparse.Namespace) -> int:
+    import lgwks_inline
     gate = AUPGate.load()
-    content = ""
-    if getattr(args, "text", None):
-        content = args.text
-    elif getattr(args, "request_file", None):
-        content = Path(args.request_file).read_text(encoding="utf-8")
-    else:
-        if sys.stdin.isatty():
-            print("error: provide --text, --request-file, or pipe stdin", file=sys.stderr)
-            return 2
-        content = sys.stdin.read()
+    
+    content = lgwks_inline.get_precedence_payload(
+        expr=getattr(args, "text", None),
+        file_at=getattr(args, "request_file", None),
+        stdin_text=None if sys.stdin.isatty() else sys.stdin.read()
+    )
+    if not content and sys.stdin.isatty():
+        print("error: provide --text, --request-file, or pipe stdin", file=sys.stderr)
+        return 2
 
     customer_id = getattr(args, "customer_id", "cli-unknown")
     request_type = getattr(args, "request_type", "intent")

@@ -1218,11 +1218,19 @@ def build_manifest() -> dict:
     # Workflow metadata for AI auto-routing
     workflows = _build_workflows()
 
+    # Active config (Issue 158)
+    try:
+        from lgwks_config import get_config
+        config = get_config()
+    except Exception:
+        config = {}
+
     return {
         "manifest": VERSION,
         "tool": "lgwks", "brand": "Logical Works",
         "purpose": "a research co-processor for coding AIs — search·read·prove·ground, with cited evidence",
         "machine_first": True,
+        "config": config,               # active parameters + provenance (Issue 158)
         "verbs": _safe_collect(),
         "workflows": workflows,         # AI-native harness: intent → composed verb chains
         "capabilities": caps,           # live resolver truth, agnostic ids

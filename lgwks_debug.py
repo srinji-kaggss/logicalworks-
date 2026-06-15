@@ -383,8 +383,10 @@ def _render_findings(findings: list[DebugFinding], on: bool) -> list[str]:
 
 # ── command dispatch ─────────────────────────────────────────────────────────
 
+import shlex
+
 def run_command(args: argparse.Namespace) -> int:
-    cmd_parts = list(args.command)
+    cmd_parts = shlex.split(" ".join(args.command))
     cwd = Path(getattr(args, "cwd", ".")).resolve()
     result = debug_command_run(cmd_parts, cwd, timeout=getattr(args, "timeout", 60))
 

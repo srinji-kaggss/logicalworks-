@@ -139,11 +139,10 @@ def _run_review(repo: Path, bots: str, changed: str, ref: str, json_out: bool, l
 
 def _run_aup_check(text: str = "", request_file: str = "", json_out: bool = False) -> PhaseResult:
     import lgwks_aup
+    import lgwks_inline
     t0 = time.time()
     try:
-        content = text
-        if request_file:
-            content = Path(request_file).read_text(encoding="utf-8")
+        content = lgwks_inline.get_precedence_payload(expr=text, file_at=request_file)
         request = {
             "customer_id": "lgwks-do",
             "request_type": "intent",

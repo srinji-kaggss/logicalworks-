@@ -248,8 +248,8 @@ def doctor() -> dict[str, Any]:
             "multiview_package_builder": True,
         },
         "ml_state": {
-            "semantic_eye_up": mh["semantic_eye"]["up"],
-            "coreml_classifier_loaded": mh["intent_classifier"]["coreml_model_loaded"],
+            "semantic_eye_up": mh["intent_classifier"].get("semantic_centroids", False),
+            "coreml_classifier_loaded": mh["intent_classifier"].get("mlx_model_loaded", False),
             "foundation_models": mh["foundation"].get("foundation_models", False),
             "natural_language": mh["foundation"].get("natural_language", False),
         },

@@ -450,6 +450,7 @@ def _parse_generic_code(file: Path, root: Path) -> list[CodeEntity]:
 
 def scan_codebase(root: Path | None = None) -> tuple[list[CodeEntity], list[Relation]]:
     """Scan the codebase and return all entities + relations."""
+    is_default_root = root is None
     root = root or ROOT
     all_entities: list[CodeEntity] = []
     all_relations: list[Relation] = []
@@ -457,7 +458,7 @@ def scan_codebase(root: Path | None = None) -> tuple[list[CodeEntity], list[Rela
     # Identify roots to scan
     roots = [root]
     kernel_path = Path("/Users/srinji/logic-os-kernel")
-    if kernel_path.exists():
+    if is_default_root and kernel_path.exists():
         roots.append(kernel_path)
 
     for r in roots:

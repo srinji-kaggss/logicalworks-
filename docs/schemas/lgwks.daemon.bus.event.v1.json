@@ -1,0 +1,15 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "lgwks.daemon.bus.event.v1",
+  "type": "object",
+  "required": ["schema", "id", "kind", "state", "processed_at", "payload"],
+  "properties": {
+    "schema": { "type": "string", "const": "lgwks.daemon.bus.event.v1" },
+    "id": { "type": "string", "description": "Deterministic event ID" },
+    "kind": { "type": "string", "description": "Type of event, e.g. status, harvest, etc." },
+    "state": { "type": "string", "enum": ["queued", "processed"] },
+    "processed_at": { "type": "string", "format": "date-time" },
+    "payload": { "type": "object", "description": "Event specific payload" }
+  },
+  "additionalProperties": false
+}

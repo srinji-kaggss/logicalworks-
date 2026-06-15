@@ -246,16 +246,15 @@ class RefactorEngine:
         return self.changes
 
 
-def refactor_file(path: Path, operations: list[dict[str, Any]], dry_run: bool = False) -> dict[str, Any]:
-    """Apply refactoring operations to a file."""
-    if not path.exists():
-        return {"ok": False, "error": f"File does not exist: {path}"}
-
+def refactor_file(path_or_at: str | Path, operations: list[dict], dry_run: bool = False) -> dict:
+    """Apply refactoring operations to a file or inlined payload."""
+    import lgwks_inline
     try:
-        source = path.read_text(encoding="utf-8")
-        engine = RefactorEngine(source, filename=str(path))
+        source = lgwks_inline.resolve_payload(str(path_or_at) if isinstance(path_or_at, Path) else f"@{path_or_at}")
+        engine = RefactorEngine(source, filename=str(path_or_at))
     except Exception as e:
-        return {"ok": False, "error": f"Failed to parse source file: {e}"}
+        return {"ok": False, "error": f"Failed to resolve or parse source: {e}"}
+
 
     for op in operations:
         op_type = op.get("op")
@@ -286,7 +285,7 @@ def refactor_file(path: Path, operations: list[dict[str, Any]], dry_run: bool = 
 
 
 def refactor_command(args: argparse.Namespace) -> int:
-    path = Path(args.file)
+    path_or_at = args.file
     ops = []
     if args.op == "rename":
         if not args.old or not args.new:
@@ -306,7 +305,7 @@ def refactor_command(args: argparse.Namespace) -> int:
     elif args.op == "remove_unused_imports":
         ops.append({"op": "remove_unused_imports"})
 
-    res = refactor_file(path, ops, dry_run=args.preview)
+    res = refactor_file(path_or_at, ops, dry_run=args.preview)
     
     if not res["ok"]:
         print(f"[refactor] FAILED: {res.get('error')}", file=sys.stderr)

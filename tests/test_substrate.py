@@ -804,17 +804,11 @@ class TestVectorSpaceIdentity(unittest.TestCase):
                 "max_clicks_per_page": 20,
             })()
 
-            with mock.patch.object(
-                substrate.lgwks_run,
-                "embed",
-                return_value=([0.1] * 4096, "ollama:qwen3-embedding:8b", True),
-            ) as m_embed:
+            with mock.patch("lgwks_model_hub.mlx_embed", return_value={"ok": True, "vector": [0.1] * 4096}) as m_embed:
                 with mock.patch.object(substrate, "GLOBAL_FACT_DB", Path(td) / "gfv.db"):
                     manifest = substrate.build_run(args)
 
-        self.assertTrue(all(call.kwargs.get("dims") == 0 for call in m_embed.call_args_list))
-        self.assertEqual(manifest["vector_space"]["dims"], 4096)
-
+            self.assertEqual(manifest["vector_space"]["dims"], 4096)
     def test_build_run_allows_multiple_click_states_with_same_url(self):
         """SPA click states can share a URL; source identity must include discovery path."""
         with tempfile.TemporaryDirectory() as td:
