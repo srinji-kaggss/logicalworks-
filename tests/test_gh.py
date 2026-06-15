@@ -44,6 +44,27 @@ def test_validate_slug_bad():
         assert "invalid repo slug" in str(e)
 
 
+def test_validate_slug_dot_resolves_origin():
+    # #164.3 — `gh state .` resolves the cwd repo's origin to owner/repo
+    with patch("subprocess.check_output", return_value="https://github.com/acme/widget.git\n"):
+        assert gh._validate_slug(".") == "acme/widget"
+
+
+def test_validate_slug_ssh_origin():
+    with patch("subprocess.check_output", return_value="git@github.com:acme/widget.git\n"):
+        assert gh._validate_slug(".") == "acme/widget"
+
+
+def test_repo_arg_positional_overrides_flag():
+    import argparse
+    # positional (`.`/path/slug) wins over --repo
+    ns = argparse.Namespace(repo_pos="acme/widget", repo="other/repo")
+    assert gh._repo_arg(ns) == "acme/widget"
+    # falls back to --repo when no positional given
+    ns2 = argparse.Namespace(repo_pos=None, repo="other/repo")
+    assert gh._repo_arg(ns2) == "other/repo"
+
+
 def test_validate_number_ok():
     assert gh._validate_number("42") == 42
 

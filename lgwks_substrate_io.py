@@ -92,6 +92,47 @@ def _read_text(path: Path, max_chars: int) -> str:
         return ""
 
 
+def _resolve_run_dir(run_arg: str) -> Path:
+    """Resolve a substrate-run identifier to its export directory.
+
+    A bare name like ``schemas`` previously resolved cwd-relative
+    (``Path("schemas").resolve()``) and silently missed the run under the
+    substrate store — ``query``/``baseline`` then returned empty with no signal.
+
+    Resolution precedence:
+    1. An explicit path (absolute or cwd-relative) that already exists.
+    2. A real run directory named exactly under ``RUN_ROOT``. A *run* is
+       identified by its ``manifest.json``; the bare ``<slug>`` dir is the
+       cumulative gate root (only ``.db`` projections, no JSONL) and must NOT
+       shadow the timestamped run export that ``query`` actually reads.
+    3. A bare project slug → the most recent ``<slug>-<timestamp>`` run export.
+    4. Last resort: the exact ``RUN_ROOT/<name>`` if present (e.g. the gate dir),
+       else the literal path so the caller's own missing-handling reports the
+       name the user actually asked for.
+    """
+    from lgwks_substrate_config import RUN_ROOT
+
+    direct = Path(run_arg)
+    if direct.exists():
+        return direct.resolve()
+
+    exact = RUN_ROOT / run_arg
+    if (exact / "manifest.json").exists():
+        return exact.resolve()
+
+    slug = _slug(run_arg)
+    runs = sorted(
+        (p for p in RUN_ROOT.glob(f"{slug}-*") if (p / "manifest.json").exists()),
+        key=lambda p: p.name,
+    )
+    if runs:
+        return runs[-1].resolve()
+
+    if exact.exists():
+        return exact.resolve()
+    return direct.resolve()
+
+
 def _load_run_manifest(run_dir: Path) -> dict[str, Any]:
     """Load manifest.json from a substrate run directory. Returns empty dict if missing or unreadable."""
     manifest_path = run_dir / "manifest.json"

@@ -995,6 +995,54 @@ class TestVectorSpaceIdentity(unittest.TestCase):
         self.assertTrue(click_rows[2]["click_telemetry"]["is_same_state"])
 
 
+class TestResolveRunDir(unittest.TestCase):
+    """#164/M1 — bare run names must resolve to the real run export under the
+    substrate store, never cwd-relative (silent-empty) and never the cumulative
+    gate dir (which holds only .db projections, no JSONL a query reads)."""
+
+    def _make_run(self, root: Path, name: str, *, manifest: bool = True) -> Path:
+        d = root / name
+        d.mkdir(parents=True, exist_ok=True)
+        if manifest:
+            (d / "manifest.json").write_text("{}", encoding="utf-8")
+        return d
+
+    def test_bare_slug_resolves_latest_real_run_not_gate_dir(self):
+        import lgwks_substrate_io as io
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            # cumulative gate dir (no manifest) must NOT shadow the run exports
+            self._make_run(root, "proj", manifest=False)
+            self._make_run(root, "proj-20260101-000000")
+            latest = self._make_run(root, "proj-20260102-000000")
+            with mock.patch("lgwks_substrate_config.RUN_ROOT", root):
+                resolved = io._resolve_run_dir("proj")
+            self.assertEqual(resolved, latest.resolve())
+
+    def test_explicit_existing_path_wins(self):
+        import lgwks_substrate_io as io
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            run = self._make_run(root, "proj-20260101-000000")
+            with mock.patch("lgwks_substrate_config.RUN_ROOT", root):
+                self.assertEqual(io._resolve_run_dir(str(run)), run.resolve())
+
+    def test_exact_named_run_with_manifest_resolves(self):
+        import lgwks_substrate_io as io
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            run = self._make_run(root, "proj-20260101-000000")
+            with mock.patch("lgwks_substrate_config.RUN_ROOT", root):
+                self.assertEqual(io._resolve_run_dir("proj-20260101-000000"), run.resolve())
+
+    def test_unknown_name_returns_nonexistent_path(self):
+        import lgwks_substrate_io as io
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            with mock.patch("lgwks_substrate_config.RUN_ROOT", root):
+                resolved = io._resolve_run_dir("no-such-run")
+            self.assertFalse(resolved.exists())
+
 
 if __name__ == "__main__":
     unittest.main()
