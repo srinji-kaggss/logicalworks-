@@ -10,7 +10,8 @@
     "note": "Handoff session; no do.run.json"
   },
   "context": {
-    "exists": false
+    "exists": true,
+    "path": "docs/handoff-cli-ergonomics-2026-06-15.md"
   },
   "capabilities": {
     "verb_count": 53,
@@ -26,27 +27,27 @@
     "path": "docs/handoff/2026-06-09.md"
   },
   "provenance": {
-    "git_sha": "553ebe0",
+    "git_sha": "67a9a91",
     "hostname": "srinji-macbook",
     "version": "lgwks.spawn.v1"
   },
   "handoff": {
-    "file": "docs/handoff/2026-06-09.md",
+    "file": "docs/handoff-cli-ergonomics-2026-06-15.md",
     "commits_today": [
-      "683a757",
-      "6bf5dc5",
-      "c400c5b",
-      "553ebe0"
+      "67a9a91"
     ],
-    "active_gaps": 6,
+    "active_gaps": 5,
     "next_action": {
       "priority": "high",
-      "task": "Wire multimodal into substrate pipeline",
+      "task": "Finish daemon JSONL event bus (#160)",
       "subtasks": [
-        "Add with_screenshot=True to _crawl_site() render calls",
-        "Create image chunk rows with chunk_kind=\"image\"",
-        "Call embed_multimodal() for image chunks in build_run()"
-      ]
+        "Implement DaemonBusWriter in lgwks_daemon.py",
+        "Tail daemon-bus.jsonl from tui/src/main.rs with dedupe-by-id",
+        "Expose bus stream to lgwks ... --machine consumer",
+        "Wire stubbed workflow execution to emit/consume bus events"
+      ],
+      "base_branch": "main",
+      "base_sha": "67a9a91"
     }
   }
 }
