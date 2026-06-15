@@ -7,6 +7,7 @@ logs call metrics, and handles graceful fallbacks.
 
 from __future__ import annotations
 
+import fcntl
 import json
 import os
 import time
@@ -21,11 +22,21 @@ from lgwks_clock import now_iso as _ts  # one source of truth for timestamps
 
 
 def _write_meter(repo_path: Path, record: dict) -> None:
-    """Log synthesis metadata to store/synth-meter.jsonl."""
+    """Log synthesis metadata to store/synth-meter.jsonl.
+
+    Hardening (#154 M9): serialize concurrent appends with an exclusive file
+    lock so interleaved writes from parallel synthesis runs cannot tear a JSONL
+    line and silently corrupt the meter (matches the cognition-log pattern).
+    """
     meter_file = repo_path / "store" / "synth-meter.jsonl"
     meter_file.parent.mkdir(parents=True, exist_ok=True)
     with meter_file.open("a", encoding="utf-8") as f:
-        f.write(json.dumps(record) + "\n")
+        fcntl.flock(f.fileno(), fcntl.LOCK_EX)
+        try:
+            f.write(json.dumps(record) + "\n")
+            f.flush()
+        finally:
+            fcntl.flock(f.fileno(), fcntl.LOCK_UN)
 
 
 def run_synthesis(

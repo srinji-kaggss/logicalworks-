@@ -23,34 +23,47 @@ from typing import Any
 REPO_ROOT = Path(__file__).resolve().parent.parent
 MODELS_DIR = REPO_ROOT / "models"
 
+# Supply-chain hardening (#154 H14): every model is pinned to an immutable git
+# commit ("revision"). snapshot_download(revision=...) then refuses to follow a
+# later (possibly malicious) push to the repo's main branch. download() is
+# fail-closed: a model with no `revision` will not be fetched unless the operator
+# explicitly opts in. To refresh a pin, re-resolve the SHA from the HF API
+# (`GET https://huggingface.co/api/models/<repo>` → `.sha`) and update it here.
 _MODEL_CATALOG: dict[str, dict[str, Any]] = {
     "ModernBERT-base-mlx-4bit": {
         "repo": "mlx-community/answerdotai-ModernBERT-base-4bit",
         "license": "Apache-2.0",
+        "revision": "85a8e6f00e7040ef98f692269ca2fcd39b8835e7",
     },
     "liquid-lfm-2.5-1.2b-mlx-4bit": {
         "repo": "mlx-community/LFM2.5-1.2B-Thinking-4bit",
         "license": "LFM-Open-1.0",
+        "revision": "bb77f34e4bef39931a2e2ff2f6def20c9aea1531",
     },
     "Qwen2.5-Omni-3B-Instruct-4bit-mlx": {
         "repo": "giangndm/qwen2.5-omni-3b-mlx-4bit",
         "license": "Apache-2.0",
+        "revision": "d0aa433ec448c8510f065fc6bbe951822c70d5e8",
     },
     "Qwen3-VL-8B-Instruct-4bit": {
         "repo": "mlx-community/Qwen3-VL-8B-Instruct-4bit",
         "license": "Apache-2.0",
+        "revision": "defcdea7cc7a4b0858fea563cbbce171d328e457",
     },
     "OLMo-2-0325-32B-Instruct-4bit": {
         "repo": "mlx-community/OLMo-2-0325-32B-Instruct-4bit",
         "license": "Apache-2.0",
+        "revision": "bcf85817c3502e1f974b5abc586f1fc3f81b1632",
     },
     "Llama-Prompt-Guard-2-86M": {
         "repo": "meta-llama/Llama-Prompt-Guard-2-86M",
         "license": "Llama-3.1",
+        "revision": "a8ded8e697ce7c355e395a0df51f94adb4a2fd27",
     },
     "Qwen3-VL-Embedding-8B": {
         "repo": "nkamiy/Qwen3-VL-Embedding-8B-8bit-mlx",
         "license": "Apache-2.0",
+        "revision": "979992893da6080a0eb8e8c72af6efe124e582fb",
     },
 }
 
@@ -90,14 +103,37 @@ def download(name: str) -> dict[str, Any]:
     if has_config and has_weights:
         return {"ok": True, "path": str(dest), "reason": "already exists"}
 
+    # Supply-chain hardening (#154 H14): refuse to fetch a model that is not
+    # pinned to an immutable commit, unless the operator explicitly accepts the
+    # risk. An unpinned download follows the repo's mutable main branch, which a
+    # compromised/typosquatted repo can repoint to backdoored weights.
+    revision = meta.get("revision")
+    import os as _os
+    allow_unpinned = _os.environ.get("LGWKS_ALLOW_UNPINNED_MODELS") == "1"
+    if not revision and not allow_unpinned:
+        return {
+            "ok": False,
+            "reason": (
+                f"{name} has no pinned revision; refusing unpinned download. "
+                f"Add a 'revision' (commit SHA) to _MODEL_CATALOG, or set "
+                f"LGWKS_ALLOW_UNPINNED_MODELS=1 to accept the supply-chain risk."
+            ),
+        }
+
     dest.mkdir(parents=True, exist_ok=True)
 
     # Primary: huggingface_hub snapshot_download (fast, reliable, handles resume)
     try:
         from huggingface_hub import snapshot_download  # type: ignore[import]
 
-        snapshot_download(repo_id=meta["repo"], local_dir=str(dest), local_dir_use_symlinks=False)
-        return {"ok": True, "path": str(dest), "reason": "downloaded via huggingface_hub"}
+        snapshot_download(
+            repo_id=meta["repo"],
+            revision=revision,  # None only when LGWKS_ALLOW_UNPINNED_MODELS=1
+            local_dir=str(dest),
+            local_dir_use_symlinks=False,
+        )
+        pinned = f"@{revision[:12]}" if revision else " (UNPINNED)"
+        return {"ok": True, "path": str(dest), "reason": f"downloaded via huggingface_hub{pinned}"}
     except ImportError:
         print("huggingface_hub not installed — pip install huggingface-hub", file=sys.stderr)
     except Exception as exc:
@@ -107,8 +143,8 @@ def download(name: str) -> dict[str, Any]:
     try:
         from transformers import AutoTokenizer, AutoModel  # type: ignore[import]
 
-        tokenizer = AutoTokenizer.from_pretrained(meta["repo"])
-        model = AutoModel.from_pretrained(meta["repo"])
+        tokenizer = AutoTokenizer.from_pretrained(meta["repo"], revision=revision)
+        model = AutoModel.from_pretrained(meta["repo"], revision=revision)
         tokenizer.save_pretrained(str(dest))
         model.save_pretrained(str(dest))
         return {"ok": True, "path": str(dest), "reason": "downloaded via transformers"}

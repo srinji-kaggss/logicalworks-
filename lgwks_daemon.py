@@ -19,6 +19,7 @@ import os
 import signal
 import subprocess
 import sys
+import threading
 import time
 from dataclasses import dataclass
 from pathlib import Path
@@ -195,6 +196,10 @@ class WorktreeManager:
     def __init__(self, store: "DaemonEventStore", repo_root: Path):
         self.store = store
         self.repo_root = repo_root.resolve()
+        # Hardening (#154 M11): serialize the check-and-create (and close)
+        # sequence so two concurrent requests for the same session cannot both
+        # pass the "no active worktree" check and create duplicate worktrees.
+        self._create_lock = threading.RLock()
 
     def _worktree_base(self) -> Path:
         base = self.repo_root / "store" / "daemon" / "worktrees"
@@ -273,26 +278,29 @@ class WorktreeManager:
 
     def create(self, tenant_id: str, session_id: str, agent_id: str) -> dict[str, Any]:
         """Create a new worktree for a session, or return the existing one."""
-        active = self.store.list_worktrees(tenant_id, active_only=True)
-        existing = next((w for w in active if w["session_id"] == session_id), None)
-        if existing:
-            return {**existing, "created": False, "reason": "session_already_has_active_worktree"}
+        # Hardening (#154 M11): the check (no active worktree) and the create
+        # must be atomic, else concurrent requests for the same session race.
+        with self._create_lock:
+            active = self.store.list_worktrees(tenant_id, active_only=True)
+            existing = next((w for w in active if w["session_id"] == session_id), None)
+            if existing:
+                return {**existing, "created": False, "reason": "session_already_has_active_worktree"}
 
-        worktree_id = f"wt-{session_id[:8]}-{agent_id[:6]}-{int(time.time())}"
-        branch = f"daemon/{worktree_id}"
-        worktree_path = self._worktree_base() / worktree_id
-        base_sha = self._head_sha()
+            worktree_id = f"wt-{session_id[:8]}-{agent_id[:6]}-{int(time.time())}"
+            branch = f"daemon/{worktree_id}"
+            worktree_path = self._worktree_base() / worktree_id
+            base_sha = self._head_sha()
 
-        rc, out = self._git("worktree", "add", "-b", branch, str(worktree_path))
-        if rc != 0:
-            raise RuntimeError(f"git worktree add failed: {out}")
+            rc, out = self._git("worktree", "add", "-b", branch, str(worktree_path))
+            if rc != 0:
+                raise RuntimeError(f"git worktree add failed: {out}")
 
-        self.store.open_worktree(
-            worktree_id=worktree_id, tenant_id=tenant_id, session_id=session_id,
-            agent_id=agent_id, repo_path=str(self.repo_root),
-            worktree_path=str(worktree_path), branch=branch, base_sha=base_sha,
-        )
-        self._crdt_add(tenant_id, worktree_id)
+            self.store.open_worktree(
+                worktree_id=worktree_id, tenant_id=tenant_id, session_id=session_id,
+                agent_id=agent_id, repo_path=str(self.repo_root),
+                worktree_path=str(worktree_path), branch=branch, base_sha=base_sha,
+            )
+            self._crdt_add(tenant_id, worktree_id)
         return {
             "schema": WORKTREE_SCHEMA,
             "worktree_id": worktree_id, "tenant_id": tenant_id,

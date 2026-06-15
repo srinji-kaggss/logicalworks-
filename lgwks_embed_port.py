@@ -359,6 +359,9 @@ class EmbedPort:
         tmp = _REPO_ROOT / "store" / f"_embed_worker_{self._tier}.py"
         tmp.parent.mkdir(parents=True, exist_ok=True)
         tmp.write_text(script)
+        # Hardening (#154 M10): remember the generated worker script so close()
+        # can remove it instead of leaving stale files in store/.
+        self._worker_script = tmp
 
         proc = subprocess.Popen(
             [_VENV_PYTHON, str(tmp)],
@@ -413,7 +416,14 @@ class EmbedPort:
             finally:
                 Path(tmp_path).unlink(missing_ok=True)
         else:
-            floats = self._rpc({"id": "i", "text": inst, "image_path": str(source)})
+            # Hardening (#154 M2): only forward a real, existing regular file to
+            # the worker subprocess. Rejects directories, device nodes, and
+            # dangling/symlink-to-nonfile paths so a caller cannot probe
+            # arbitrary filesystem locations through the worker.
+            resolved = Path(source).resolve()
+            if not resolved.is_file():
+                raise FileNotFoundError(f"embed_image: not a regular file: {source!r}")
+            floats = self._rpc({"id": "i", "text": inst, "image_path": str(resolved)})
         return _mrl_slice(floats, self._target_dim) if self._target_dim < len(floats) else _l2_normalize(floats)
 
     def embed_video(
@@ -502,6 +512,14 @@ class EmbedPort:
                 self._state.proc.wait(timeout=5)
             except subprocess.TimeoutExpired:
                 self._state.proc.kill()
+        # Hardening (#154 M10): clean up the generated worker script (no leak in store/).
+        script = getattr(self, "_worker_script", None)
+        if script is not None:
+            try:
+                Path(script).unlink(missing_ok=True)
+            except OSError:
+                pass
+            self._worker_script = None
 
     def __enter__(self) -> "EmbedPort":
         return self

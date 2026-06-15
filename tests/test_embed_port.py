@@ -281,20 +281,32 @@ class TestEmbedText(unittest.TestCase):
 # ═══════════════════════════════════════════════════════════════════════════════
 
 class TestEmbedImage(unittest.TestCase):
+    # Hardening (#154 M2): embed_image now requires a real, existing regular file
+    # and forwards the resolved path (closes the arbitrary-path / symlink-escape
+    # surface). These tests therefore stage a real temp file on disk.
     def test_accepts_path_string(self):
         port = _make_port()
         port._rpc = MagicMock(return_value=_unit_vec())
-        port.embed_image("/tmp/test.png")
-        call_payload = port._rpc.call_args[0][0]
-        self.assertIn("image_path", call_payload)
-        self.assertEqual(call_payload["image_path"], "/tmp/test.png")
+        with tempfile.NamedTemporaryFile(suffix=".png") as tf:
+            port.embed_image(tf.name)
+            call_payload = port._rpc.call_args[0][0]
+            self.assertIn("image_path", call_payload)
+            self.assertEqual(call_payload["image_path"], str(Path(tf.name).resolve()))
 
     def test_accepts_path_object(self):
         port = _make_port()
         port._rpc = MagicMock(return_value=_unit_vec())
-        port.embed_image(Path("/tmp/test.png"))
-        call_payload = port._rpc.call_args[0][0]
-        self.assertEqual(call_payload["image_path"], "/tmp/test.png")
+        with tempfile.NamedTemporaryFile(suffix=".png") as tf:
+            port.embed_image(Path(tf.name))
+            call_payload = port._rpc.call_args[0][0]
+            self.assertEqual(call_payload["image_path"], str(Path(tf.name).resolve()))
+
+    def test_rejects_nonexistent_path(self):
+        port = _make_port()
+        port._rpc = MagicMock(return_value=_unit_vec())
+        with self.assertRaises(FileNotFoundError):
+            port.embed_image("/tmp/does-not-exist-lgwks-test.png")
+        self.assertFalse(port._rpc.called)
 
     def test_accepts_bytes_writes_temp_file(self):
         port = _make_port()
@@ -308,7 +320,8 @@ class TestEmbedImage(unittest.TestCase):
 
     def test_returns_normalised_vector(self):
         port = _make_port()
-        vec = port.embed_image("/tmp/test.png")
+        with tempfile.NamedTemporaryFile(suffix=".png") as tf:
+            vec = port.embed_image(tf.name)
         norm = math.sqrt(sum(x * x for x in vec))
         self.assertAlmostEqual(norm, 1.0, places=6)
 

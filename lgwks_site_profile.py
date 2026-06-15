@@ -8,6 +8,7 @@ under `config/sites/` based on target URL hostnames.
 from __future__ import annotations
 
 import json
+import os
 import re
 from pathlib import Path
 from typing import Any
@@ -51,7 +52,15 @@ def load_profile(url_or_host: str) -> dict[str, Any]:
     Falls back to default profile if no matching file exists in `config/sites/`.
     """
     host = _get_host(url_or_host) if "://" in url_or_host else url_or_host.lower()
-    
+
+    # Hardening (#154 M6): a direct hostname is attacker-influenced and bypasses
+    # urlparse. Strip it to the DNS-legal charset so it cannot carry path
+    # separators or `..` and turn the candidate `.exists()` probe into a
+    # file-existence oracle for paths outside config/sites/.
+    if host and not re.fullmatch(r"[A-Za-z0-9.\-]+", host):
+        host = ""
+
+    profiles_root = PROFILES_DIR.resolve()
     # Try exact hostname profile, then parent domains
     profile_path = None
     if host:
@@ -60,6 +69,9 @@ def load_profile(url_or_host: str) -> dict[str, Any]:
         for i in range(len(parts) - 1):
             domain = ".".join(parts[i:])
             candidate = PROFILES_DIR / f"{domain}.json"
+            # Defense in depth: never probe outside the profiles directory.
+            if not str(candidate.resolve()).startswith(str(profiles_root) + os.sep):
+                continue
             if candidate.exists():
                 profile_path = candidate
                 break

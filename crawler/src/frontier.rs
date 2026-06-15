@@ -37,6 +37,33 @@ pub fn registrable_host(raw: &str) -> Option<String> {
     Url::parse(raw).ok()?.host_str().map(|h| h.to_lowercase())
 }
 
+/// True if `host` is a loopback/private/link-local IP literal or a local-only
+/// name. SSRF guard (#154 M12): refuse fetches to internal services (incl. the
+/// cloud metadata endpoint 169.254.169.254, which is link-local) when the
+/// crawler is driven by untrusted input.
+pub fn is_private_host(host: &str) -> bool {
+    let h = host.trim().trim_start_matches('[').trim_end_matches(']');
+    if let Ok(ip) = h.parse::<std::net::IpAddr>() {
+        return match ip {
+            std::net::IpAddr::V4(v4) => {
+                v4.is_loopback() || v4.is_private() || v4.is_link_local()
+                    || v4.is_unspecified() || v4.is_broadcast()
+            }
+            std::net::IpAddr::V6(v6) => {
+                v6.is_loopback()
+                    || v6.is_unspecified()
+                    || (v6.segments()[0] & 0xfe00) == 0xfc00 // unique-local fc00::/7
+                    || (v6.segments()[0] & 0xffc0) == 0xfe80 // link-local fe80::/10
+            }
+        };
+    }
+    let lower = h.to_ascii_lowercase();
+    lower == "localhost"
+        || lower.ends_with(".localhost")
+        || lower.ends_with(".local")
+        || lower.ends_with(".internal")
+}
+
 struct Scored {
     target: Target,
     score: i64,
