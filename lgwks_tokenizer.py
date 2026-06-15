@@ -25,6 +25,12 @@ from typing import Any
 
 import lgwks_hashing
 
+# Entity tokens live in a high, disjoint range (above bytes 0-255, core 256-511,
+# modal 512-1023, and BPE merges 1024+). The token value is the entity's full
+# 32-bit content hash offset by this base.
+ENTITY_TOKEN_BASE = 1_000_000
+
+
 @dataclass
 class TokenizedTrajectory:
     tokens: list[int]
@@ -138,14 +144,20 @@ class AetheriusTokenizer:
         for entity in turn_data.get("entities", []):
             h_hex = lgwks_hashing.blake_id(entity, size=4)
             h = bytes.fromhex(h_hex)
-            tok = 1_000_000 + (int.from_bytes(h, "little") % 10_000_000)
+            # Full 32-bit hash, not `% 10_000_000`. The modulo collapsed a 2^32
+            # space into 10M, multiplying birthday collisions — and a collision
+            # here is a false posting in the token index. The entity range is
+            # disjoint from byte/core/modal/merge tokens.
+            tok = ENTITY_TOKEN_BASE + int.from_bytes(h, "little")
             tokens.append(tok)
             hashes.append(h_hex)
 
-            
-        # 5. Encode Clean Content
+        # 5. Encode Clean Content — byte-level (UTF-8), never codepoint.
+        # `ord(c)` was codepoint-level: any char >255 (e.g. '—' -> 8212) collided
+        # with the core/modal/entity token ranges and corrupted the stream. UTF-8
+        # bytes are always 0-255, matching the byte layer this tokenizer promises.
         tokens.append(self.vocab["[BEG]"])
-        tokens.extend([ord(c) for c in clean_content[:1000]]) # Cap for efficiency
+        tokens.extend(clean_content[:1000].encode("utf-8"))
         tokens.append(self.vocab["[END]"])
         
         return TokenizedTrajectory(tokens=tokens, hashes=hashes, modality_map=m_map)

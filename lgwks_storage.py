@@ -18,6 +18,7 @@ from pathlib import Path
 from typing import Any, Protocol
 
 import lgwks_artifact_tokenized as artifact_mod
+import lgwks_fabric_projection as fp
 import lgwks_sqlite
 import lgwks_substrate_io as io
 import lgwks_tokenizer_registry as tok_reg
@@ -231,9 +232,17 @@ class VectorFabric:
     dedup regardless of which tokenizer named them).
     """
 
+    name = "vector"
+
     def __init__(self, path: Path):
         self.path = path
         self._conn = vec_mod.create_store(path)
+
+    def apply(self, ctx: fp.IngestContext) -> fp.ProjectionResult:
+        if ctx.vector_record is None:
+            return fp.ProjectionResult(self.name, applied=False)
+        inserted = self.upsert(ctx.vector_record)
+        return fp.ProjectionResult(self.name, applied=True, written=1 if inserted else 0)
 
     def upsert(self, record: vec_mod.VectorRecord) -> bool:
         return vec_mod.upsert_record(self._conn, record, admin=vec_mod.ADMIN)
@@ -274,12 +283,21 @@ class TokenIndex:
     CREATE INDEX IF NOT EXISTS idx_postings_artifact ON token_postings(artifact_cid);
     """
 
+    name = "token_index"
+
     def __init__(self, path: Path):
         self.path = path
         path.parent.mkdir(parents=True, exist_ok=True)
         self._conn = lgwks_sqlite.connect(path, check_same_thread=False)
         self._conn.executescript(self._DDL)
         self._conn.commit()
+
+    def apply(self, ctx: fp.IngestContext) -> fp.ProjectionResult:
+        art = ctx.artifact
+        if not ctx.index_tokens or not art.token_stream:
+            return fp.ProjectionResult(self.name, applied=False)
+        written = self.index_tokens(art.tokenization_id, art.artifact_cid, art.token_stream)
+        return fp.ProjectionResult(self.name, applied=True, written=written)
 
     def index_tokens(self, tokenization_id: str, artifact_cid: str, token_stream: tuple[int, ...]) -> int:
         """Insert one posting per token occurrence. Returns count inserted."""
@@ -326,11 +344,19 @@ class GraphFabric:
     callers can begin routing graph writes through the gate.
     """
 
+    name = "graph"
+
     def __init__(self, db_path: Path):
         import lgwks_entity_graph as graph_mod
 
         self.db_path = db_path
         self._db = graph_mod.GraphDB(db_path)
+
+    def apply(self, ctx: fp.IngestContext) -> fp.ProjectionResult:
+        # Phase 1: entity/relation edges are not carried on the bare artifact
+        # envelope yet (extracted + wired in Phase 2 / #165). Registered but inert
+        # so routing graph writes through the gate later is extend-not-refactor.
+        return fp.ProjectionResult(self.name, applied=False)
 
     def upsert_chunk(self, chunk_id: str, doc_id: str, text: str, url: str = "", schema: str = "UNKNOWN", labels: list[str] | None = None) -> None:
         self._db.upsert_chunk(chunk_id, doc_id, text, url=url, schema=schema, labels=labels or [])
@@ -421,12 +447,19 @@ class RelationalProjection:
     CREATE VIRTUAL TABLE IF NOT EXISTS fact_fts USING fts5(fact_id, fact_text, chunk_kind, tokenize='porter unicode61');
     """
 
+    name = "relational"
+
     def __init__(self, path: Path):
         self.path = path
         path.parent.mkdir(parents=True, exist_ok=True)
         self._conn = lgwks_sqlite.connect(path, check_same_thread=False)
         self._conn.executescript(self._DDL)
         self._conn.commit()
+
+    def apply(self, ctx: fp.IngestContext) -> fp.ProjectionResult:
+        # Phase 1: the relational query surface is rebuilt by replaying the tape
+        # (#166), not eagerly written per artifact. Registered but inert.
+        return fp.ProjectionResult(self.name, applied=False)
 
     def close(self) -> None:
         self._conn.close()
@@ -458,23 +491,49 @@ class StorageGate:
         self.graph_fabric = GraphFabric(self.root / "graph.db")
         self.relational = RelationalProjection(self.root / "relational.db")
 
+        # Unified projection registry. ingest_artifact fans every artifact out to
+        # these in registration order, each isolated. A new view (a future
+        # modality, an external index, a caller's own projection) joins here via
+        # register_projection — the gate's ingest path never changes.
+        self._projections: list[fp.Projection] = []
+        for projection in (self.vector_fabric, self.token_index, self.graph_fabric, self.relational):
+            self.register_projection(projection)
+
+    def register_projection(self, projection: fp.Projection) -> None:
+        """Register a derived projection over the tape.
+
+        Every subsequently ingested artifact is routed through it (isolated). This
+        is the system's extension point: adding a view is a registration, never an
+        edit to ingest_artifact. Idempotence is the projection's responsibility so
+        tape replay reconstructs it exactly.
+        """
+        if not (hasattr(projection, "apply") and hasattr(projection, "name")):
+            raise TypeError(f"projection {projection!r} must define .name and .apply(ctx)")
+        self._projections.append(projection)
+
     def ingest_artifact(
         self,
         artifact: artifact_mod.TokenizedArtifact,
         *,
         vector_record: vec_mod.VectorRecord | None = None,
         index_tokens: bool = True,
-    ) -> str:
+    ) -> fp.IngestReceipt:
         """Ingest a canonical tokenized artifact into the State Fabric.
 
-        1. Append to the tenant's Causal Tape (source of record).
-        2. Register in the Global Fact List (content-addressed dedup).
-        3. Optionally persist a linked vector record.
-        4. Optionally index the token stream in TokenIndex.
+        This is THE endpoint: every workflow and command lands here.
 
-        Returns the tape entry_hash.
+        1. Append to the tenant's Causal Tape — the durable source of record and
+           the ONLY step that must succeed. If it raises, nothing was recorded and
+           the caller sees the exception.
+        2. Register in the Global Fact List (content-addressed dedup moat).
+        3. Fan the artifact out to every registered projection, each isolated:
+           a projection that fails is captured in the receipt, never rolling back
+           the tape or blocking siblings (projections are rebuildable by replay).
+
+        Returns an IngestReceipt (truthy iff the tape entry was written; `ok` iff
+        the fact list and all projections also succeeded).
         """
-        # 1. Local Persistence (Source of Record)
+        # 1. Local Persistence (Source of Record) — must succeed.
         meta = {
             "artifact_cid": artifact.artifact_cid,
             "source": artifact.source,
@@ -487,24 +546,32 @@ class StorageGate:
         }
         entry_hash = self.tape.append(artifact.artifact_cid, artifact.capability_id, meta=meta)
 
-        # 2. Global Deduplication (The Moat)
-        # Derive a short human-readable text label from payload_meta when present.
+        results: list[fp.ProjectionResult] = []
+
+        # 2. Global Deduplication (The Moat) — derived from the tape, so isolated:
+        #    a fact-list hiccup must not lose the durable record.
         label = artifact.payload_meta.get("title") or artifact.payload_meta.get("text") or artifact.payload_cid
-        self.fact_list.register_fact(artifact.artifact_cid, label, artifact.modality)
-
-        # 3. Vector projection
-        if vector_record is not None:
-            self.vector_fabric.upsert(vector_record)
-
-        # 4. Token index projection
-        if index_tokens and artifact.token_stream:
-            self.token_index.index_tokens(
-                artifact.tokenization_id, artifact.artifact_cid, artifact.token_stream
+        try:
+            self.fact_list.register_fact(artifact.artifact_cid, label, artifact.modality)
+            results.append(fp.ProjectionResult("global_fact_list", applied=True, written=1))
+        except Exception as exc:  # noqa: BLE001 — derived view; failure is reported, not fatal
+            results.append(
+                fp.ProjectionResult("global_fact_list", applied=False, error=f"{type(exc).__name__}: {exc}")
             )
 
-        return entry_hash
+        # 3. Fan out to registered projections, each fully isolated.
+        ctx = fp.IngestContext(artifact=artifact, vector_record=vector_record, index_tokens=index_tokens)
+        for projection in self._projections:
+            results.append(fp.run_isolated(projection, ctx))
 
-    def ingest_fact(self, fact_cid: str, text: str, modality: str, capability: str, meta: dict | None = None):
+        return fp.IngestReceipt(
+            entry_hash=entry_hash,
+            artifact_cid=artifact.artifact_cid,
+            projections=tuple(results),
+            ok=all(r.ok for r in results),
+        )
+
+    def ingest_fact(self, fact_cid: str, text: str, modality: str, capability: str, meta: dict | None = None) -> fp.IngestReceipt:
         """Backward-compatible fact ingestion (wraps ingest_artifact).
 
         Uses the default word_regex tokenizer so existing callers participate in
@@ -542,10 +609,11 @@ class StorageGate:
     def close(self) -> None:
         self.tape.close()
         self._fact_port.close()
-        self.vector_fabric.close()
-        self.token_index.close()
-        self.graph_fabric.close()
-        self.relational.close()
+        for projection in self._projections:
+            try:
+                projection.close()
+            except Exception:  # noqa: BLE001 — teardown must not raise mid-close
+                pass
 
     def __enter__(self) -> StorageGate:
         return self

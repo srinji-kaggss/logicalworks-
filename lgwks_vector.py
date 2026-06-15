@@ -222,6 +222,28 @@ def require_same_space(a: VectorRecord, b: VectorRecord) -> None:
 # SQLite store
 # ---------------------------------------------------------------------------
 
+def _ensure_v2_columns(conn: sqlite3.Connection) -> None:
+    """Additively migrate a pre-existing v1 vector_records table to v2.
+
+    //why before the DDL: VECTOR_RECORDS_DDL declares the v2 indexes
+    (vr_tokenizer/vr_artifact) over tokenization_id/artifact_cid. On a store
+    created with the v1 schema those columns do not exist, so executing the DDL
+    would raise "no such column" and break *opening* the store — not just
+    writing. We add the columns first so CREATE TABLE IF NOT EXISTS is a no-op
+    and the index DDL then succeeds. Idempotent and safe on a fresh DB (the
+    table won't exist yet, so nothing is altered).
+    """
+    table = conn.execute(
+        "SELECT name FROM sqlite_master WHERE type='table' AND name='vector_records'"
+    ).fetchone()
+    if not table:
+        return
+    existing = {row[1] for row in conn.execute("PRAGMA table_info(vector_records)").fetchall()}
+    for col in ("tokenization_id", "artifact_cid"):
+        if col not in existing:
+            conn.execute(f"ALTER TABLE vector_records ADD COLUMN {col} TEXT")
+
+
 def _connect(path: Path) -> sqlite3.Connection:
     """Open (or create) a vector store with WAL and the vector_records table."""
     try:
@@ -232,6 +254,7 @@ def _connect(path: Path) -> sqlite3.Connection:
         conn.execute("PRAGMA journal_mode=WAL")
         conn.execute("PRAGMA foreign_keys=ON")
         conn.execute("PRAGMA synchronous=NORMAL")
+    _ensure_v2_columns(conn)
     conn.executescript(VECTOR_RECORDS_DDL)
     conn.commit()
     return conn
