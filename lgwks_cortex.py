@@ -79,6 +79,15 @@ class TranscriptCortex:
                 attention=entities[:3], # Simple attention baseline
                 content=content
             )
+            
+            # Layer 3: Neural Tokenization (Aetherius Neural Tokenizer)
+            try:
+                import lgwks_tokenizer as ant
+                tokenizer = ant.AetheriusTokenizer(self.repo_root)
+                tokenized = tokenizer.tokenize_trajectory(ct.to_dict())
+                ct.attention.extend([f"ant:{t}" for t in tokenized.tokens[:5]])
+            except Exception:
+                pass
 
             processed.append(ct)
             
