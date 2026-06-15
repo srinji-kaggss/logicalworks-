@@ -141,6 +141,25 @@ The foundation interfaces are now locked. The next agent extends through these s
 registry. Phase 2/3 extend through it (register a projection, fill an inert one,
 add an `IngestContext` field) and must not refactor the ingest path.
 
+### Consolidation landed in this PR (write + read + first deletion)
+- **Producer wired:** cortex trajectories (ANT) and substrate runs now write through
+  the gate. substrate_run dual-writes the relational + graph projections in parity
+  with (what was) the legacy stores.
+- **Reader landed:** `FabricReader` (`lgwks_fabric_reader.py`) is the unified read
+  surface (FTS / vector / graph / dims / tape replay).
+- **Legacy DELETED:** the per-run `substrate.db` writer `_build_index_db` (zero
+  readers; gate `RelationalProjection.project_run` is the cumulative, parity-tested
+  replacement). Removed from `lgwks_substrate_db`, the `lgwks_substrate` facade, and
+  `substrate_run`; legacy tests updated.
+- **Behavior change (intended):** the relational store is now project-cumulative,
+  not per-run; the frontier table keeps latest-status-per-URL (idempotent) rather
+  than append-all. Cumulative is the chosen model (PII separation is the tenant layer).
+- **Deferred legacy (tracked, NOT deleted — would lose function):**
+  - **#169** — per-run `graph.db` → gate cumulative graph (still feeds `graph.json`/
+    `query --neighbors`; `engine` reads its own `.lgwks/entity_graph.db`, unaffected).
+  - **#170** — `GLOBAL_FACT_DB` fact vectors → gate world/vector tier (write-only
+    today; gate doesn't yet store fact vectors, so kept to avoid silent data loss).
+
 1. **Phase 2 — wire existing writers to `ingest_artifact()`** (#165)
    - `lgwks_substrate_run.py`: route chunks/facts/media to the gate instead of (or in addition to) per-run JSONL/`graph.db`/`substrate.db`. **It already calls `gate.ingest_fact(...)` but still dual-writes legacy `graph.db`/`substrate.db` directly — collapse those onto the gate's projections.**
    - **Fill the inert seams via their `apply(ctx)`:** give `GraphFabric.apply` entity/relation extraction (carry edges in `IngestContext.extras` or `payload_meta`); give `RelationalProjection.apply` the per-artifact row projection — no new ingest plumbing needed, just the two method bodies.

@@ -16,7 +16,6 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 import lgwks_storage
-import lgwks_substrate_db as legacy_db
 
 
 def _rowsets():
@@ -51,21 +50,19 @@ def _counts(path: Path) -> dict[str, int]:
 
 
 class TestProjectRunParity(unittest.TestCase):
-    def test_parity_with_legacy_build_index_db(self):
-        rs = _rowsets()
+    def test_project_run_writes_all_tables(self):
+        """The gate-owned relational projection (which replaced the deleted legacy
+        _build_index_db) writes every table + FTS for a run's rowsets."""
+        rs = _rowsets()  # 1 row per table
         with tempfile.TemporaryDirectory() as td:
-            legacy = Path(td) / "substrate.db"
-            legacy_db._build_index_db(legacy, **rs)
-
             rp = lgwks_storage.RelationalProjection(Path(td) / "relational.db")
             try:
                 rp.project_run(**rs)
             finally:
                 rp.close()
-
-            lc, gc = _counts(legacy), _counts(Path(td) / "relational.db")
+            gc = _counts(Path(td) / "relational.db")
             for table in ("sources", "documents", "chunks", "facts", "vectors", "frontier", "chunk_fts", "fact_fts"):
-                self.assertEqual(gc[table], lc[table], f"row-count mismatch for {table}")
+                self.assertEqual(gc[table], 1, f"expected 1 row in {table}, got {gc[table]}")
 
     def test_fts_is_queryable(self):
         rs = _rowsets()

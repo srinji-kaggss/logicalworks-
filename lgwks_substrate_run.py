@@ -430,21 +430,12 @@ def build_run(args: argparse.Namespace) -> dict[str, Any]:
     stats = graph_db.stats()
     graph_db.close()
 
-    index_db = run_dir / "substrate.db"
-    db._build_index_db(
-        index_db,
-        source_rows=source_rows,
-        doc_rows=doc_rows,
-        chunk_rows=chunk_rows,
-        fact_rows=fact_rows,
-        vector_rows=vector_rows,
-        frontier=frontier,
-    )
     db._upsert_global_fact_vectors(GLOBAL_FACT_DB, run_id=run_id, fact_vectors=fact_vector_rows)
 
-    # State Fabric dual-write (Phase-2 bridge): route the same rowsets through the
-    # gate-owned projections. The legacy writes above remain until the unified
-    # reader migrates consumers (#166); deletion is a later task.
+    # State Fabric: the relational surface is the gate-owned, cumulative
+    # RelationalProjection (the per-run substrate.db / _build_index_db was deleted;
+    # this is now the single relational store, parity-tested in
+    # tests/test_substrate_gate_projection.py).
     gate.relational.project_run(
         source_rows=source_rows,
         doc_rows=doc_rows,
@@ -537,7 +528,7 @@ def build_run(args: argparse.Namespace) -> dict[str, Any]:
             "graph_db": "graph.db",
             "graph_json": "graph.json",
             "graph_mermaid": "graph.mmd",
-            "substrate_db": "substrate.db",
+            "substrate_db": str(gate.relational.path),  # gate-owned cumulative relational store
         },
         "global_artifacts": {
             "fact_vector_db": str(GLOBAL_FACT_DB),

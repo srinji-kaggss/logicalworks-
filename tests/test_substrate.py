@@ -311,33 +311,6 @@ class TestClickDiscovery(unittest.TestCase):
         self.assertEqual(docs[0]["source"], "https://portal.example.com/")
 
 
-class TestBuildIndexDb(unittest.TestCase):
-    def test_allows_duplicate_frontier_urls(self):
-        """frontier table is append-only; duplicate URLs must not crash with UNIQUE constraint."""
-        with tempfile.TemporaryDirectory() as td:
-            db_path = Path(td) / "test.db"
-            substrate._build_index_db(
-                db_path,
-                source_rows=[],
-                doc_rows=[],
-                chunk_rows=[],
-                fact_rows=[],
-                vector_rows=[],
-                frontier=[
-                    {"url": "https://example.com", "depth": 0, "status": "retrying_gate", "discovered_by": "seed"},
-                    {"url": "https://example.com", "depth": 0, "status": "auth_verified", "discovered_by": "seed"},
-                ],
-            )
-            conn = sqlite3.connect(db_path)
-            cur = conn.cursor()
-            cur.execute("SELECT status FROM frontier WHERE url = ? ORDER BY rowid", ("https://example.com",))
-            rows = cur.fetchall()
-            self.assertEqual(len(rows), 2)
-            self.assertEqual(rows[0][0], "retrying_gate")
-            self.assertEqual(rows[1][0], "auth_verified")
-            conn.close()
-
-
 class TestBaselineRun(unittest.TestCase):
     def _write_run(self, root: Path, *, blocked: bool = False) -> Path:
         run_dir = root / "fundserv-run"
