@@ -540,7 +540,17 @@ def build_run(args: argparse.Namespace) -> dict[str, Any]:
 
 
 def query_run(args: argparse.Namespace) -> dict[str, Any]:
-    run_dir = Path(args.run).resolve()
+    run_dir = io._resolve_run_dir(args.run)
+    if not run_dir.exists():
+        return {
+            "schema": "lgwks.substrate.query.v0",
+            "run": str(run_dir),
+            "kind": args.kind,
+            "match": args.match,
+            "rows": [],
+            "error": f"no substrate run resolved for {args.run!r}; "
+            f"list available runs under {config.RUN_ROOT}",
+        }
     if getattr(args, "vector", ""):
         return vector._vector_search(
             run_dir,
@@ -552,23 +562,30 @@ def query_run(args: argparse.Namespace) -> dict[str, Any]:
         )
     rows: list[dict[str, Any]] = []
     path = run_dir / ("facts.jsonl" if args.kind == "facts" else "chunks.jsonl")
-    if path.exists():
-        for line in path.read_text(encoding="utf-8").splitlines():
-            if not line.strip():
-                continue
-            row = json.loads(line)
-            text = row.get("fact_text", row.get("text", ""))
-            if args.match.lower() in text.lower():
-                rows.append(row)
-                if len(rows) >= args.limit:
-                    break
-    payload = {
+    payload: dict[str, Any] = {
         "schema": "lgwks.substrate.query.v0",
         "run": str(run_dir),
         "kind": args.kind,
         "match": args.match,
         "rows": rows,
     }
+    if not path.exists():
+        # The run resolved (e.g. to a cumulative gate dir) but has no JSONL export
+        # for this kind — say so rather than returning a silent empty result.
+        payload["error"] = (
+            f"no {path.name} under {run_dir}; this looks like a gate store without a "
+            f"JSONL export — run `substrate build` for this project to produce one"
+        )
+        return payload
+    for line in path.read_text(encoding="utf-8").splitlines():
+        if not line.strip():
+            continue
+        row = json.loads(line)
+        text = row.get("fact_text", row.get("text", ""))
+        if args.match.lower() in text.lower():
+            rows.append(row)
+            if len(rows) >= args.limit:
+                break
     if args.neighbors:
         # #169: neighbors resolve against the gate's cumulative graph, not a per-run
         # graph.db. The run manifest names the project whose gate owns the graph.
@@ -590,7 +607,7 @@ def query_run(args: argparse.Namespace) -> dict[str, Any]:
 
 
 def baseline_run(args: argparse.Namespace) -> dict[str, Any]:
-    run_dir = Path(args.run).resolve()
+    run_dir = io._resolve_run_dir(args.run)
     manifest = io._load_run_manifest(run_dir)
     facts = io._read_jsonl(run_dir / "facts.jsonl")
     frontier = io._read_jsonl(run_dir / "frontier.jsonl")

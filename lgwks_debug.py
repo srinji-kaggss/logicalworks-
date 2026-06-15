@@ -394,7 +394,7 @@ def run_command(args: argparse.Namespace) -> int:
         print(f"error: blocked — {result.block_reason}", file=sys.stderr)
         return 126
 
-    if getattr(args, "json", False):
+    if getattr(args, "json", False) or ui.machine_mode():
         print(json.dumps({
             "schema": result.schema,
             "command": result.command,
@@ -431,7 +431,7 @@ def last_command(args: argparse.Namespace) -> int:
         print("error: no debug log found — run `lgwks debug <cmd>` first", file=sys.stderr)
         return 1
 
-    if getattr(args, "json", False):
+    if getattr(args, "json", False) or ui.machine_mode():
         print(json.dumps({
             "schema": "lgwks.debug.v0",
             "check": "last",
@@ -460,7 +460,7 @@ def test_command(args: argparse.Namespace) -> int:
     cwd = Path(getattr(args, "cwd", ".")).resolve()
     result = _run_tests(pattern, cwd)
 
-    if getattr(args, "json", False):
+    if getattr(args, "json", False) or ui.machine_mode():
         print(json.dumps({
             "schema": result.schema,
             "command": result.command,

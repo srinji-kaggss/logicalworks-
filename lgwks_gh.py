@@ -76,10 +76,14 @@ def _validate_slug(slug: str | None) -> str | None:
     if not slug:
         return None
     slug = slug.strip()
-    if slug == ".":
+    # Accept "." or a local repo path and resolve its git origin to owner/repo,
+    # so `gh state .` works like every other path-taking verb (#164.3).
+    if slug == "." or Path(slug).is_dir():
         import subprocess
         try:
-            out = subprocess.check_output(["git", "config", "--get", "remote.origin.url"], text=True).strip()
+            out = subprocess.check_output(
+                ["git", "-C", slug, "config", "--get", "remote.origin.url"], text=True
+            ).strip()
             # Handle forms: https://github.com/owner/repo.git or git@github.com:owner/repo.git
             if "github.com" in out:
                 if out.startswith("https://"):
@@ -152,6 +156,12 @@ def _repo_slug_args(repo: str | None) -> list[str]:
     """Return [--repo owner/repo] args if repo is given and valid."""
     validated = _validate_slug(repo)
     return ["--repo", validated] if validated else []
+
+
+def _repo_arg(args: argparse.Namespace) -> str | None:
+    """Resolve the repo selector: an optional positional (`.`/path/slug) wins
+    over `--repo`, so `gh state .` works like every other path-taking verb (#164.3)."""
+    return getattr(args, "repo_pos", None) or getattr(args, "repo", None)
 
 
 # ── data models ──────────────────────────────────────────────────────────────
@@ -613,7 +623,7 @@ def _render_state(state: RepoState, on: bool) -> list[str]:
 # ── command dispatch ─────────────────────────────────────────────────────────
 
 def issues_command(args: argparse.Namespace) -> int:
-    repo = getattr(args, "repo", None)
+    repo = _repo_arg(args)
     try:
         _validate_slug(repo)
     except ValueError as e:
@@ -644,7 +654,7 @@ def issue_command(args: argparse.Namespace) -> int:
     except ValueError as e:
         print(f"error: {e}", file=sys.stderr)
         return 1
-    repo = getattr(args, "repo", None)
+    repo = _repo_arg(args)
     try:
         _validate_slug(repo)
     except ValueError as e:
@@ -687,7 +697,7 @@ def issue_command(args: argparse.Namespace) -> int:
 
 
 def prs_command(args: argparse.Namespace) -> int:
-    repo = getattr(args, "repo", None)
+    repo = _repo_arg(args)
     try:
         _validate_slug(repo)
     except ValueError as e:
@@ -718,7 +728,7 @@ def pr_command(args: argparse.Namespace) -> int:
     except ValueError as e:
         print(f"error: {e}", file=sys.stderr)
         return 1
-    repo = getattr(args, "repo", None)
+    repo = _repo_arg(args)
     try:
         _validate_slug(repo)
     except ValueError as e:
@@ -753,7 +763,7 @@ def pr_command(args: argparse.Namespace) -> int:
 
 
 def state_command(args: argparse.Namespace) -> int:
-    repo = getattr(args, "repo", None)
+    repo = _repo_arg(args)
     try:
         _validate_slug(repo)
     except ValueError as e:
@@ -781,7 +791,7 @@ def state_command(args: argparse.Namespace) -> int:
 
 
 def harden_command(args: argparse.Namespace) -> int:
-    repo = getattr(args, "repo", None)
+    repo = _repo_arg(args)
     try:
         _validate_slug(repo)
     except ValueError as e:
@@ -847,6 +857,7 @@ def add_parser(sub) -> None:
     auth.set_defaults(func=auth_command)
 
     issues = gs.add_parser("issues", help="list issues")
+    issues.add_argument("repo_pos", nargs="?", default=None, help="owner/repo, '.', or a local repo path (overrides --repo)")
     issues.add_argument("--repo", default=None, help="owner/repo (default: inferred from git remote)")
     issues.add_argument("--state", choices=["open", "closed", "all"], default="open")
     issues.add_argument("--label", default=None)
@@ -861,6 +872,7 @@ def add_parser(sub) -> None:
     issue.set_defaults(func=issue_command)
 
     prs = gs.add_parser("prs", help="list PRs")
+    prs.add_argument("repo_pos", nargs="?", default=None, help="owner/repo, '.', or a local repo path (overrides --repo)")
     prs.add_argument("--repo", default=None)
     prs.add_argument("--state", choices=["open", "closed", "merged", "all"], default="open")
     prs.add_argument("--json", action="store_true")
@@ -874,11 +886,13 @@ def add_parser(sub) -> None:
     pr.set_defaults(func=pr_command)
 
     state = gs.add_parser("state", help="repo state map + health score")
+    state.add_argument("repo_pos", nargs="?", default=None, help="owner/repo, '.', or a local repo path (overrides --repo)")
     state.add_argument("--repo", default=None)
     state.add_argument("--json", action="store_true")
     state.set_defaults(func=state_command)
 
     harden = gs.add_parser("harden", help="security scan — CODEOWNERS, secrets, dependabot")
+    harden.add_argument("repo_pos", nargs="?", default=None, help="owner/repo, '.', or a local repo path (overrides --repo)")
     harden.add_argument("--repo", default=None)
     harden.add_argument("--json", action="store_true")
     harden.set_defaults(func=harden_command)
