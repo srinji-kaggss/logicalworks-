@@ -28,6 +28,16 @@ logger = logging.getLogger(__name__)
 _SQLITE_BUSY = 5
 _SQLITE_LOCKED = 6
 
+# Serialise schema migration across connections within a process (#139). Two
+# DaemonEventStore connections initialising the same fresh DB concurrently would
+# both read current_version()==0 and then both run the same DDL + INSERT the same
+# _migrations.version, hitting "UNIQUE constraint failed" / "duplicate column".
+# `executescript` issues an implicit COMMIT, so a BEGIN IMMEDIATE cannot be held
+# across it — this process-level lock is the correct serialisation point; the
+# loser re-reads current_version() under the lock and skips the already-applied
+# migrations. INSERT OR IGNORE below covers the rarer cross-process case.
+_MIGRATION_LOCK = threading.Lock()
+
 
 def _apply_pragmas(
     conn: sqlite3.Connection,
@@ -245,31 +255,40 @@ class MigrationManager:
         Raises:
             RuntimeError: If a migration fails or ordering is violated.
         """
-        self.init()
-        current = self.current_version()
-        prev = current
-        for version, name, sql in migrations:
-            if version <= current:
-                continue
-            if strict_order and version <= prev:
-                raise RuntimeError(
-                    f"Migration version out of order: {version} ({name}) <= previous {prev}"
-                )
-            try:
-                self._conn.executescript(sql)
-                self._conn.execute(
-                    "INSERT INTO _migrations (version, name) VALUES (?, ?)",
-                    (version, name),
-                )
-                self._conn.commit()
-                logger.info("Applied migration %d: %s", version, name)
-                prev = version
-            except sqlite3.Error as exc:
-                self._conn.rollback()
-                logger.error("Migration %d (%s) failed: %s", version, name, exc)
-                raise RuntimeError(
-                    f"Migration {version} ({name}) failed: {exc}"
-                ) from exc
+        # Serialise the whole check-and-apply across connections (#139). Without
+        # this, concurrent first-init of the same DB races on _migrations.
+        with _MIGRATION_LOCK:
+            self.init()
+            current = self.current_version()
+            prev = current
+            for version, name, sql in migrations:
+                if version <= current:
+                    continue
+                if strict_order and version <= prev:
+                    raise RuntimeError(
+                        f"Migration version out of order: {version} ({name}) <= previous {prev}"
+                    )
+                # Re-check under the lock: another connection may have applied this
+                # version after we read current_version(). "Already applied" is
+                # success, not an error.
+                if self.is_applied(version):
+                    prev = version
+                    continue
+                try:
+                    self._conn.executescript(sql)
+                    self._conn.execute(
+                        "INSERT OR IGNORE INTO _migrations (version, name) VALUES (?, ?)",
+                        (version, name),
+                    )
+                    self._conn.commit()
+                    logger.info("Applied migration %d: %s", version, name)
+                    prev = version
+                except sqlite3.Error as exc:
+                    self._conn.rollback()
+                    logger.error("Migration %d (%s) failed: %s", version, name, exc)
+                    raise RuntimeError(
+                        f"Migration {version} ({name}) failed: {exc}"
+                    ) from exc
 
     def is_applied(self, version: int) -> bool:
         """Return True if a specific migration version has been applied."""
