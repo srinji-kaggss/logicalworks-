@@ -16,7 +16,8 @@ from typing import Any
 ROOT = Path(__file__).resolve().parent
 RUN_ROOT = ROOT / "store" / "substrate"
 GLOBAL_ROOT = ROOT / "store" / "substrate-global"
-GLOBAL_FACT_DB = GLOBAL_ROOT / "fact_vectors.db"
+# GLOBAL_FACT_DB removed (#170): fact vectors now accumulate in the gate's
+# world-tier VectorFabric (lgwks_storage.VectorFabric.ingest_fact_vectors).
 
 # ── Exceptions ───────────────────────────────────────────────────────────────
 

@@ -101,8 +101,7 @@ class TestSubstrateBuild(unittest.TestCase):
                     "sem": {"vector": [0.1, 0.2, 0.3], "provider": "ollama:qwen3-embedding:8b", "dims": 3},
                 }
             ):
-                with mock.patch.object(substrate, "GLOBAL_FACT_DB", Path(td) / "global-facts.db"):
-                    manifest = substrate.build_run(args)
+                manifest = substrate.build_run(args)
 
             run_dir = Path(manifest["artifacts"]["root"])
             self.assertTrue((run_dir / "facts.jsonl").exists())
@@ -733,8 +732,7 @@ class TestVectorSpaceIdentity(unittest.TestCase):
                     "sem": {"vector": [0.5, 0.6, 0.7], "provider": "ollama:qwen3-embedding:8b", "dims": 3},
                 }
             ):
-                with mock.patch.object(substrate, "GLOBAL_FACT_DB", Path(td) / "gfv.db"):
-                    manifest = substrate.build_run(args)
+                manifest = substrate.build_run(args)
 
         self.assertIn("vector_space", manifest)
         vs = manifest["vector_space"]
@@ -777,9 +775,8 @@ class TestVectorSpaceIdentity(unittest.TestCase):
                 "max_clicks_per_page": 20,
             })()
 
-            with mock.patch("lgwks_model_hub.mlx_embed", return_value={"ok": True, "vector": [0.1] * 4096}) as m_embed:
-                with mock.patch.object(substrate, "GLOBAL_FACT_DB", Path(td) / "gfv.db"):
-                    manifest = substrate.build_run(args)
+            with mock.patch("lgwks_model_hub.mlx_embed", return_value={"ok": True, "vector": [0.1] * 4096}):
+                manifest = substrate.build_run(args)
 
             self.assertEqual(manifest["vector_space"]["dims"], 4096)
     def test_build_run_allows_multiple_click_states_with_same_url(self):
@@ -832,8 +829,7 @@ class TestVectorSpaceIdentity(unittest.TestCase):
                     with mock.patch.object(substrate.lgwks_browser, "discover_clicks", side_effect=fake_clicks):
                         with mock.patch.object(substrate, "html_to_markdown", side_effect=fake_html_to_markdown):
                             with mock.patch.object(substrate.lgwks_run, "embed", return_value=([0.1] * 4, "deterministic-feature-hash", False)):
-                                with mock.patch.object(substrate, "GLOBAL_FACT_DB", Path(td) / "gfv.db"):
-                                    manifest = substrate.build_run(args)
+                                manifest = substrate.build_run(args)
 
         self.assertEqual(manifest["counts"]["sources"], 2)
         self.assertEqual(manifest["counts"]["documents"], 2)

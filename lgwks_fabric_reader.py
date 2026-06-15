@@ -55,6 +55,10 @@ class FabricReader:
     def graph_neighbors(self, node_id: str, direction: str = "both", rel: str | None = None, limit: int = 100) -> list[dict]:
         return self._gate.graph_fabric.neighbors(node_id, direction=direction, rel=rel, limit=limit)
 
+    def graph_resolve_node(self, query: str) -> tuple[dict[str, Any] | None, str | None]:
+        """Resolve a node label/id against the cumulative graph → (node, err)."""
+        return self._gate.graph_fabric.resolve_node(query)
+
     def graph_stats(self) -> dict[str, Any]:
         return self._gate.graph_fabric.stats()
 
