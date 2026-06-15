@@ -10,7 +10,7 @@ use ratatui::{
     layout::{Constraint, Direction, Layout, Rect},
     style::{Color, Modifier, Style},
     text::{Line, Span},
-    widgets::{Block, Borders, Paragraph, ListItem, List},
+    widgets::{Block, Borders, Paragraph, ListItem, List, Gauge},
     DefaultTerminal, Frame,
 };
 use std::time::{Duration, Instant};
@@ -19,7 +19,7 @@ use std::path::{Path, PathBuf};
 use std::collections::HashMap;
 use tui_input::Input;
 use tui_input::backend::crossterm::EventHandler;
-use crate::models::{DaemonEvent, WorkItem, DaemonStatus, NavModule, WorkflowDef};
+use crate::models::{DaemonEvent, WorkItem, DaemonStatus, NavModule, WorkflowDef, HarvestMetrics};
 use crate::db::Db;
 
 use clap::Parser;
@@ -39,6 +39,12 @@ enum Mode {
     Setup,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Tab {
+    Dashboard,
+    Harvest,
+}
+
 struct App {
     should_quit: bool,
     last_tick: Instant,
@@ -54,8 +60,11 @@ struct App {
     form_input: Input,
     repo_input: Input,
     mode: Mode,
+    selected_tab: Tab,
     status_msg: Option<String>,
     thoughts: Vec<serde_json::Value>,
+    harvest: Option<HarvestMetrics>,
+    terminal_output: Vec<String>,
 }
 
 impl App {
@@ -84,8 +93,11 @@ impl App {
             form_input: Input::default(),
             repo_input: Input::default().with_value(std::env::current_dir().unwrap_or_default().to_string_lossy().to_string()),
             mode,
+            selected_tab: Tab::Dashboard,
             status_msg: None,
             thoughts: Vec::new(),
+            harvest: None,
+            terminal_output: Vec::new(),
         }
     }
 
@@ -95,6 +107,16 @@ impl App {
         self.status.repo_root = root.to_string_lossy().to_string();
         self.mode = Mode::Normal;
         self.status_msg = Some("Repository detected.".to_string());
+    }
+
+    fn get_python_cmd(&self) -> String {
+        if let Some(ref root) = self.repo_root {
+            let venv_python = root.join(".venv").join("bin").join("python");
+            if venv_python.exists() {
+                return venv_python.to_string_lossy().to_string();
+            }
+        }
+        "python3".to_string()
     }
 
     fn update_data(&mut self, db: &Option<Db>) {
@@ -110,6 +132,9 @@ impl App {
             }
             if let Ok(thoughts) = db.get_thoughts(20) {
                 self.thoughts = thoughts;
+            }
+            if let Ok(harvest) = db.get_harvest_metrics() {
+                self.harvest = Some(harvest);
             }
             if self.workflows.is_empty() {
                 if let Ok(workflows) = db.get_workflows() {
@@ -130,6 +155,7 @@ impl App {
         if let (Some(ref wf_name), Some(script_path), Some(repo_root)) = (&self.selected_workflow, &self.script_path, &self.repo_root) {
             let input_val = self.form_input.value().to_string();
             self.status_msg = Some(format!("Executing {}...", wf_name));
+            self.terminal_output.clear();
             
             let mut args = vec![script_path.to_str().unwrap_or("lgwks"), "workflow", wf_name];
             if !input_val.is_empty() {
@@ -140,20 +166,27 @@ impl App {
                 let _ = db.emit_telemetry("control", "workflow_event", "human_message", &format!("Triggered workflow: {}", wf_name));
             }
 
-            let status = Command::new("python3")
+            let output = Command::new(self.get_python_cmd())
                 .args(&args)
                 .current_dir(repo_root)
-                .status();
+                .output();
 
-            match status {
-                Ok(s) if s.success() => {
-                    self.status_msg = Some(format!("Workflow {} completed.", wf_name));
-                }
-                Ok(s) => {
-                    self.status_msg = Some(format!("Error: Process exited with code {}", s));
+            match output {
+                Ok(out) => {
+                    let stdout = String::from_utf8_lossy(&out.stdout);
+                    let stderr = String::from_utf8_lossy(&out.stderr);
+                    for line in stdout.lines().chain(stderr.lines()) {
+                        self.terminal_output.push(line.to_string());
+                    }
+                    if out.status.success() {
+                        self.status_msg = Some(format!("Workflow {} completed.", wf_name));
+                    } else {
+                        self.status_msg = Some(format!("Error: Process exited with code {}", out.status));
+                    }
                 }
                 Err(e) => {
                     self.status_msg = Some(format!("Error: Failed to execute: {}", e));
+                    self.terminal_output.push(format!("Internal Error: {}", e));
                 }
             }
             self.mode = Mode::Normal;
@@ -167,17 +200,20 @@ impl App {
                 let _ = db.emit_telemetry("control", "human_message", "daemon_start", "Starting daemon via TUI");
             }
             
-            let status = Command::new("python3")
+            let output = Command::new(self.get_python_cmd())
                 .args([script_path.to_str().unwrap_or("lgwks"), "daemon", "start"])
                 .current_dir(repo_root)
-                .status();
+                .output();
 
-            match status {
-                Ok(s) if s.success() => {
-                    self.status_msg = Some("Daemon started successfully.".to_string());
-                }
-                Ok(s) => {
-                    self.status_msg = Some(format!("Error: Process exited with code {}", s));
+            match output {
+                Ok(out) => {
+                    if out.status.success() {
+                        self.status_msg = Some("Daemon started successfully.".to_string());
+                    } else {
+                        let stderr = String::from_utf8_lossy(&out.stderr);
+                        self.status_msg = Some(format!("Error starting daemon."));
+                        self.terminal_output.push(stderr.to_string());
+                    }
                 }
                 Err(e) => {
                     self.status_msg = Some(format!("Error: Failed to execute: {}", e));
@@ -193,13 +229,19 @@ impl App {
                 let _ = db.emit_telemetry("control", "human_message", "daemon_stop", "Stopping daemon via TUI");
             }
             
-            let status = Command::new("python3")
+            let output = Command::new(self.get_python_cmd())
                 .args([script_path.to_str().unwrap_or("lgwks"), "daemon", "stop"])
                 .current_dir(repo_root)
-                .status();
+                .output();
 
-            match status {
-                Ok(_) => self.status_msg = Some("Stop command issued.".to_string()),
+            match output {
+                Ok(out) => {
+                    if out.status.success() {
+                        self.status_msg = Some("Stop command issued.".to_string());
+                    } else {
+                        self.status_msg = Some("Error stopping daemon.".to_string());
+                    }
+                }
                 Err(e) => self.status_msg = Some(format!("Error: {}", e)),
             }
         }
@@ -256,6 +298,12 @@ fn run_app(terminal: &mut DefaultTerminal, mut app: App, db: &mut Option<Db>) ->
                         match app.mode {
                             Mode::Normal => match key.code {
                                 KeyCode::Char('q') | KeyCode::Esc => app.should_quit = true,
+                                KeyCode::Tab => {
+                                    app.selected_tab = match app.selected_tab {
+                                        Tab::Dashboard => Tab::Harvest,
+                                        Tab::Harvest => Tab::Dashboard,
+                                    };
+                                }
                                 KeyCode::Char('j') | KeyCode::Down => {
                                     if !app.workflows.is_empty() {
                                         let i = match app.workflow_list_state.selected() {
@@ -362,27 +410,34 @@ fn ui(f: &mut Frame, app: &App) {
         .direction(Direction::Vertical)
         .constraints([
             Constraint::Length(3), // Header
-            Constraint::Min(0),    // Main Content (4 cols)
+            Constraint::Min(0),    // Main Content
             Constraint::Length(1), // Footer
         ])
         .split(f.area());
 
     render_header(f, chunks[0], app);
     
-    let main_chunks = Layout::default()
-        .direction(Direction::Horizontal)
-        .constraints([
-            Constraint::Percentage(20), // Left: Workflows
-            Constraint::Percentage(40), // Center: Active View
-            Constraint::Percentage(20), // Center-Right: Thoughts
-            Constraint::Percentage(20), // Right: Events
-        ])
-        .split(chunks[1]);
+    match app.selected_tab {
+        Tab::Dashboard => {
+            let main_chunks = Layout::default()
+                .direction(Direction::Horizontal)
+                .constraints([
+                    Constraint::Percentage(20), // Left: Workflows
+                    Constraint::Percentage(40), // Center: Active View
+                    Constraint::Percentage(20), // Center-Right: Thoughts
+                    Constraint::Percentage(20), // Right: Events
+                ])
+                .split(chunks[1]);
 
-    render_workflow_sidebar(f, main_chunks[0], app);
-    render_main_area(f, main_chunks[1], app);
-    render_thought_sidebar(f, main_chunks[2], app);
-    render_event_sidebar(f, main_chunks[3], app);
+            render_workflow_sidebar(f, main_chunks[0], app);
+            render_main_area(f, main_chunks[1], app);
+            render_thought_sidebar(f, main_chunks[2], app);
+            render_event_sidebar(f, main_chunks[3], app);
+        }
+        Tab::Harvest => {
+            render_harvest_monitor(f, chunks[1], app);
+        }
+    }
     
     render_footer(f, chunks[2], app);
 }
@@ -392,7 +447,7 @@ fn render_header(f: &mut Frame, area: Rect, app: &App) {
         .direction(Direction::Horizontal)
         .constraints([
             Constraint::Length(35), // Logo + Repo
-            Constraint::Min(0),    // Stats
+            Constraint::Min(0),    // Tabs
             Constraint::Length(40), // Daemon Status
         ])
         .split(area);
@@ -409,16 +464,15 @@ fn render_header(f: &mut Frame, area: Rect, app: &App) {
     .block(Block::default().borders(Borders::BOTTOM).border_style(Style::default().fg(SLATE_DIM)));
     f.render_widget(logo, header_chunks[0]);
 
-    let stats = Paragraph::new(Line::from(vec![
-        Span::styled(" MEM: ", Style::default().fg(SLATE_DIM)),
-        Span::styled("142MB", Style::default().fg(CREAM_DIM)),
-        Span::styled("  QUEUE: ", Style::default().fg(SLATE_DIM)),
-        Span::styled(format!("{}", app.queue.len()), Style::default().fg(EMERALD)),
-        Span::styled("  MODULES: ", Style::default().fg(SLATE_DIM)),
-        Span::styled(format!("{}", app.nav_modules.len()), Style::default().fg(CREAM_DIM)),
+    let dash_style = if app.selected_tab == Tab::Dashboard { Style::default().fg(EMERALD).add_modifier(Modifier::BOLD) } else { Style::default().fg(SLATE_DIM) };
+    let harv_style = if app.selected_tab == Tab::Harvest { Style::default().fg(EMERALD).add_modifier(Modifier::BOLD) } else { Style::default().fg(SLATE_DIM) };
+
+    let tabs = Paragraph::new(Line::from(vec![
+        Span::styled("  [1] DASHBOARD  ", dash_style),
+        Span::styled("  [2] HARVEST MONITOR  ", harv_style),
     ]))
     .block(Block::default().borders(Borders::BOTTOM).border_style(Style::default().fg(SLATE_DIM)));
-    f.render_widget(stats, header_chunks[1]);
+    f.render_widget(tabs, header_chunks[1]);
 
     let status_color = if app.status.alive { EMERALD } else { AMBER };
     let pid_str = app.status.pid.map(|p| p.to_string()).unwrap_or_else(|| "---".to_string());
@@ -494,17 +548,17 @@ fn render_main_area(f: &mut Frame, area: Rect, app: &App) {
         return;
     }
 
+    let chunks = Layout::default()
+        .direction(Direction::Vertical)
+        .constraints([
+            Constraint::Length(4), // Header/Selected Workflow
+            Constraint::Length(3), // Input
+            Constraint::Min(0),    // Output/Details
+        ])
+        .split(area);
+
     if let Some(ref wf_name) = app.selected_workflow {
         if let Some(wf) = app.workflows.get(wf_name) {
-            let chunks = Layout::default()
-                .direction(Direction::Vertical)
-                .constraints([
-                    Constraint::Length(4), // Description
-                    Constraint::Length(3), // Input
-                    Constraint::Min(0),    // Verbs/Details
-                ])
-                .split(area);
-
             let desc = Paragraph::new(format!("\n  {}\n  Budget: {}", wf.description, wf.tokens))
                 .block(Block::default().title(format!(" {} ", wf_name.to_uppercase())).borders(Borders::ALL).border_style(Style::default().fg(EMERALD)))
                 .style(Style::default().fg(CREAM_DIM));
@@ -523,17 +577,93 @@ fn render_main_area(f: &mut Frame, area: Rect, app: &App) {
                 ));
             }
 
-            let verbs: Vec<ListItem> = wf.verbs.iter().map(|v| ListItem::new(format!("  • {}", v))).collect();
-            let details = List::new(verbs)
-                .block(Block::default().title(" VERB CHAIN ").borders(Borders::ALL).border_style(Style::default().fg(SLATE_DIM)))
-                .style(Style::default().fg(SLATE_DIM));
-            f.render_widget(details, chunks[2]);
+            if !app.terminal_output.is_empty() {
+                let items: Vec<ListItem> = app.terminal_output.iter().map(|line| {
+                    ListItem::new(Line::from(vec![
+                        Span::styled(line, Style::default().fg(CREAM_DIM)),
+                    ]))
+                }).collect();
+                let output = List::new(items)
+                    .block(Block::default().title(" PROCESS OUTPUT ").borders(Borders::ALL).border_style(Style::default().fg(SLATE_DIM)))
+                    .style(Style::default().fg(SLATE_DIM));
+                f.render_widget(output, chunks[2]);
+            } else {
+                let verbs: Vec<ListItem> = wf.verbs.iter().map(|v| ListItem::new(format!("  • {}", v))).collect();
+                let details = List::new(verbs)
+                    .block(Block::default().title(" VERB CHAIN ").borders(Borders::ALL).border_style(Style::default().fg(SLATE_DIM)))
+                    .style(Style::default().fg(SLATE_DIM));
+                f.render_widget(details, chunks[2]);
+            }
         }
     } else {
         let welcome = Paragraph::new("\n\n  Select a workflow from the left sidebar\n  to begin research or system operations.\n\n  Press 'S' to start daemon\n  Press 'X' to stop daemon\n  Press 'R' to switch repository")
             .block(Block::default().title(" DASHBOARD ").borders(Borders::ALL).border_style(Style::default().fg(SLATE_DIM)))
             .style(Style::default().fg(CREAM_DIM));
         f.render_widget(welcome, area);
+    }
+}
+
+fn render_harvest_monitor(f: &mut Frame, area: Rect, app: &App) {
+    let chunks = Layout::default()
+        .direction(Direction::Vertical)
+        .constraints([
+            Constraint::Length(10), // Progress Gauges
+            Constraint::Min(0),     // Stream Status
+        ])
+        .margin(2)
+        .split(area);
+
+    if let Some(ref h) = app.harvest {
+        let progress = (h.turns_collected as f64 / h.goal as f64).min(1.0);
+        let gauge = Gauge::default()
+            .block(Block::default().title(" TOTAL TRAJECTORY HARVEST (1M TURN GOAL) ").borders(Borders::ALL).border_style(Style::default().fg(EMERALD)))
+            .gauge_style(Style::default().fg(EMERALD).bg(SLATE_DIM).add_modifier(Modifier::BOLD))
+            .percent((progress * 100.0) as u16)
+            .label(format!("{}/{}", h.turns_collected, h.goal));
+        f.render_widget(gauge, chunks[0]);
+
+        let inner_chunks = Layout::default()
+            .direction(Direction::Horizontal)
+            .constraints([
+                Constraint::Percentage(33),
+                Constraint::Percentage(33),
+                Constraint::Percentage(34),
+            ])
+            .split(Rect::new(chunks[0].x, chunks[0].y + 4, chunks[0].width, 4));
+
+        let c_gauge = Gauge::default()
+            .block(Block::default().title(" COVERAGE (C) ").borders(Borders::ALL).border_style(Style::default().fg(SLATE_DIM)))
+            .gauge_style(Style::default().fg(CREAM).bg(SLATE_DIM))
+            .percent((h.coverage * 100.0) as u16);
+        f.render_widget(c_gauge, inner_chunks[0]);
+
+        let g_gauge = Gauge::default()
+            .block(Block::default().title(" GAP (G) ").borders(Borders::ALL).border_style(Style::default().fg(SLATE_DIM)))
+            .gauge_style(Style::default().fg(AMBER).bg(SLATE_DIM))
+            .percent((h.gap * 100.0) as u16);
+        f.render_widget(g_gauge, inner_chunks[1]);
+
+        let p_gauge = Gauge::default()
+            .block(Block::default().title(" CONFIDENCE (P) ").borders(Borders::ALL).border_style(Style::default().fg(SLATE_DIM)))
+            .gauge_style(Style::default().fg(EMERALD).bg(SLATE_DIM))
+            .percent((h.confidence * 100.0) as u16);
+        f.render_widget(p_gauge, inner_chunks[2]);
+
+        let items: Vec<ListItem> = h.streams.iter().map(|s| {
+            ListItem::new(Line::from(vec![
+                Span::styled(" ● ", Style::default().fg(EMERALD)),
+                Span::styled(s, Style::default().fg(CREAM)),
+                Span::styled(" [TAILING]", Style::default().fg(SLATE_DIM)),
+            ]))
+        }).collect();
+
+        let list = List::new(items)
+            .block(Block::default().title(" VITAL STREAMS ").borders(Borders::ALL).border_style(Style::default().fg(SLATE_DIM)));
+        f.render_widget(list, chunks[1]);
+    } else {
+        let loading = Paragraph::new("\n\n  Waiting for Subconscious Engine metrics...")
+            .style(Style::default().fg(SLATE_DIM));
+        f.render_widget(loading, area);
     }
 }
 
@@ -610,12 +740,12 @@ fn render_footer(f: &mut Frame, area: Rect, app: &App) {
         Span::styled(format!("  {}  ", msg), Style::default().fg(CREAM)),
         Span::styled(" Q ", Style::default().fg(EMERALD).add_modifier(Modifier::BOLD)),
         Span::styled("quit  ", Style::default().fg(CREAM_DIM)),
+        Span::styled(" TAB ", Style::default().fg(EMERALD).add_modifier(Modifier::BOLD)),
+        Span::styled("switch tab  ", Style::default().fg(CREAM_DIM)),
         Span::styled(" J/K ", Style::default().fg(EMERALD).add_modifier(Modifier::BOLD)),
         Span::styled("nav  ", Style::default().fg(CREAM_DIM)),
         Span::styled(" I ", Style::default().fg(EMERALD).add_modifier(Modifier::BOLD)),
         Span::styled("input  ", Style::default().fg(CREAM_DIM)),
-        Span::styled(" R ", Style::default().fg(EMERALD).add_modifier(Modifier::BOLD)),
-        Span::styled("repo  ", Style::default().fg(CREAM_DIM)),
         Span::styled(" ENTER ", Style::default().fg(EMERALD).add_modifier(Modifier::BOLD)),
         Span::styled("run  ", Style::default().fg(CREAM_DIM)),
     ]);

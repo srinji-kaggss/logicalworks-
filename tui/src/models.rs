@@ -63,3 +63,13 @@ pub struct NavModule {
 pub struct NavMapIndex {
     pub modules: HashMap<String, NavModule>,
 }
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct HarvestMetrics {
+    pub turns_collected: u32,
+    pub goal: u32,
+    pub coverage: f32,
+    pub gap: f32,
+    pub confidence: f32,
+    pub streams: Vec<String>,
+}

@@ -24,21 +24,33 @@ REPO_ROOT = Path(__file__).resolve().parent.parent
 MODELS_DIR = REPO_ROOT / "models"
 
 _MODEL_CATALOG: dict[str, dict[str, Any]] = {
-    "distilbert-base-uncased": {
-        "repo": "distilbert-base-uncased",
+    "ModernBERT-base-mlx-4bit": {
+        "repo": "mlx-community/answerdotai-ModernBERT-base-4bit",
         "license": "Apache-2.0",
     },
-    "tiny-bert": {
-        "repo": "prajjwal1/bert-tiny",
+    "liquid-lfm-2.5-1.2b-mlx-4bit": {
+        "repo": "mlx-community/LFM2.5-1.2B-Thinking-4bit",
+        "license": "LFM-Open-1.0",
+    },
+    "Qwen2.5-Omni-3B-Instruct-4bit-mlx": {
+        "repo": "giangndm/qwen2.5-omni-3b-mlx-4bit",
         "license": "Apache-2.0",
     },
-    "neobert": {
-        "repo": "chandar-lab/NeoBERT",
-        "license": "MIT",
+    "Qwen3-VL-8B-Instruct-4bit": {
+        "repo": "mlx-community/Qwen3-VL-8B-Instruct-4bit",
+        "license": "Apache-2.0",
     },
-    "codebert-base": {
-        "repo": "microsoft/codebert-base",
-        "license": "MIT",
+    "OLMo-2-0325-32B-Instruct-4bit": {
+        "repo": "mlx-community/OLMo-2-0325-32B-Instruct-4bit",
+        "license": "Apache-2.0",
+    },
+    "Llama-Prompt-Guard-2-86M": {
+        "repo": "meta-llama/Llama-Prompt-Guard-2-86M",
+        "license": "Llama-3.1",
+    },
+    "Qwen3-VL-Embedding-8B": {
+        "repo": "nkamiy/Qwen3-VL-Embedding-8B-8bit-mlx",
+        "license": "Apache-2.0",
     },
 }
 

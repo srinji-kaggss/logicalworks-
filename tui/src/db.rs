@@ -1,7 +1,7 @@
 use anyhow::{Result, anyhow};
 use rusqlite::Connection;
 use std::path::{Path, PathBuf};
-use crate::models::{DaemonEvent, WorkItem, DaemonStatus, NavMapIndex, WorkflowDef};
+use crate::models::{DaemonEvent, WorkItem, DaemonStatus, NavMapIndex, WorkflowDef, HarvestMetrics};
 use std::fs;
 use std::collections::HashMap;
 
@@ -132,7 +132,6 @@ impl Db {
             return Ok(vec![]);
         }
         
-        // Find newest cognition file
         let mut entries = fs::read_dir(cognition_dir)?
             .filter_map(|e| e.ok())
             .filter(|e| e.file_name().to_string_lossy().ends_with(".jsonl"))
@@ -154,22 +153,65 @@ impl Db {
         }
     }
 
+    pub fn get_harvest_metrics(&self) -> Result<HarvestMetrics> {
+        let store_dir = self.repo_root.join("store");
+        let cortex_dir = store_dir.join("cortex");
+        let cognition_dir = store_dir.join("cognition");
+        
+        let mut turns = 0;
+        
+        // Count from store/cortex (*.cortex.jsonl)
+        if let Ok(entries) = fs::read_dir(&cortex_dir) {
+            for entry in entries.filter_map(|e| e.ok()) {
+                if entry.file_name().to_string_lossy().ends_with(".cortex.jsonl") {
+                    if let Ok(content) = fs::read_to_string(entry.path()) {
+                        turns += content.lines().count() as u32;
+                    }
+                }
+            }
+        }
+
+        // Count from store/cognition (*.cognition.jsonl)
+        if let Ok(entries) = fs::read_dir(&cognition_dir) {
+            for entry in entries.filter_map(|e| e.ok()) {
+                if entry.file_name().to_string_lossy().ends_with(".cognition.jsonl") {
+                    if let Ok(content) = fs::read_to_string(entry.path()) {
+                        turns += content.lines().count() as u32;
+                    }
+                }
+            }
+        }
+
+        let goal = 1_000_000;
+        let coverage = (turns as f32 / goal as f32).min(1.0);
+        let gap = 1.0 - coverage;
+
+        Ok(HarvestMetrics {
+            turns_collected: turns,
+            goal,
+            coverage,
+            gap,
+            confidence: 0.92, // Placeholder until P-Engine lands
+            streams: vec![
+                "cognition.jsonl".into(),
+                "learning-records.jsonl".into(),
+                "token-ledger.jsonl".into(),
+                "daemon-events.db".into(),
+                "fleet-audit.jsonl".into(),
+                "transcript.jsonl".into(),
+            ],
+        })
+    }
+
     pub fn emit_telemetry(&self, lane: &str, kind: &str, scope: &str, payload_msg: &str) -> Result<()> {
         let tenant_id = format!("repo:{}", self.repo_root.file_name().unwrap_or_default().to_string_lossy());
-        
-        let payload = serde_json::json!({
-            "message": payload_msg,
-        });
+        let payload = serde_json::json!({ "message": payload_msg });
 
         let mut child = std::process::Command::new("python3")
             .args([
                 self.script_path.to_str().unwrap_or("lgwks"), "daemon", "emit",
-                "--lane", lane,
-                "--kind", kind,
-                "--scope", scope,
-                "--tenant", &tenant_id,
-                "--session-id", "tui_session",
-                "--agent-id", "tui",
+                "--lane", lane, "--kind", kind, "--scope", scope,
+                "--tenant", &tenant_id, "--session-id", "tui_session", "--agent-id", "tui",
             ])
             .current_dir(&self.repo_root)
             .stdin(std::process::Stdio::piped())
@@ -180,7 +222,6 @@ impl Db {
             let _ = stdin.write_all(payload.to_string().as_bytes());
         }
         let _ = child.wait();
-
         Ok(())
     }
 }

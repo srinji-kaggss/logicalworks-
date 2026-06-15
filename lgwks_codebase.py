@@ -38,14 +38,18 @@ DB_DIR.mkdir(parents=True, exist_ok=True)
 _SCHEMA = "lgwks.codebase.v0"
 
 # File extensions we index
-CODE_EXTS = {".py", ".js", ".ts", ".tsx", ".go", ".rs", ".java", ".c", ".cpp", ".h", ".hpp"}
+CODE_EXTS = {
+    ".py", ".js", ".mjs", ".ts", ".tsx", ".go", ".rs", ".java", ".c", ".cpp", ".h", ".hpp",
+    ".cs", ".rb", ".php", ".sh", ".swift", ".kt", ".kts", ".scala", ".lua", ".pl", ".pm",
+    ".sql", ".r", ".dart", ".zig", ".clj", ".cljs", ".hs", ".ex", ".exs", ".erl",
+}
 DOC_EXTS = {".md", ".rst", ".txt"}
-CONFIG_EXTS = {".json", ".yaml", ".yml", ".toml", ".ini", ".cfg"}
+CONFIG_EXTS = {".json", ".yaml", ".yml", ".toml", ".ini", ".cfg", ".xml", ".dockerfile"}
 ALL_INDEX_EXTS = CODE_EXTS | DOC_EXTS | CONFIG_EXTS
 
-SKIP_DIRS = {".git", "node_modules", "__pycache__", ".venv", "venv", "target",
+SKIP_DIRS = {".git", "node_modules", "__pycache__", ".venv", ".venv-models", "venv", "target",
                ".next", "dist", "build", "store", "docs", ".claude", ".config"}
-SKIP_FILES = {"*.pyc", "*.so", "*.dylib", "*.egg-info"}
+SKIP_FILES = {"*.pyc", "*.so", "*.dylib", "*.egg-info", "*.bin", "*.lock"}
 
 # ---------------------------------------------------------------------------
 # Data structures
@@ -54,7 +58,7 @@ SKIP_FILES = {"*.pyc", "*.so", "*.dylib", "*.egg-info"}
 @dataclass
 class CodeEntity:
     id: str
-    kind: str       # function | class | module | method | doc | config
+    kind: str       # function | class | module | method | doc | config | struct | trait | enum | entity
     name: str
     file: str
     line_start: int
@@ -197,6 +201,66 @@ def _parse_python(file: Path, root: Path) -> list[CodeEntity]:
     return entities
 
 
+def _parse_rust(file: Path, root: Path) -> list[CodeEntity]:
+    """Parse a Rust file into entities (structs, enums, functions, traits)."""
+    try:
+        source = file.read_text(encoding="utf-8")
+    except Exception:
+        return []
+
+    lines = source.splitlines()
+    entities: list[CodeEntity] = []
+
+    # Simple regex-based parsing for Rust
+    patterns = [
+        (r'pub\s+struct\s+([a-zA-Z0-9_]+)', "struct"),
+        (r'pub\s+enum\s+([a-zA-Z0-9_]+)', "enum"),
+        (r'pub\s+fn\s+([a-zA-Z0-9_]+)', "function"),
+        (r'pub\s+trait\s+([a-zA-Z0-9_]+)', "trait"),
+        (r'impl(?:\s+<[^>]+>)?\s+([a-zA-Z0-9_]+)', "impl"),
+    ]
+
+    for i, line in enumerate(lines, 1):
+        for pattern, kind in patterns:
+            match = re.search(pattern, line)
+            if match:
+                name = match.group(1)
+                # Find doc comments above
+                doc_lines = []
+                for k in range(i - 2, -1, -1):
+                    if lines[k].strip().startswith("///") or lines[k].strip().startswith("//!"):
+                        doc_lines.insert(0, lines[k].strip().lstrip("/! "))
+                    else:
+                        break
+                
+                entity = CodeEntity(
+                    id=_entity_id(file, kind, name, i),
+                    kind=kind,
+                    name=name,
+                    file=_rel_path(file, root),
+                    line_start=i,
+                    line_end=i + 5,  # heuristic
+                    text=line.strip(),
+                    docstring="\n".join(doc_lines),
+                    hash=_content_hash(line),
+                )
+                entities.append(entity)
+
+    # Module entity
+    module_entity = CodeEntity(
+        id=_entity_id(file, "module", file.stem, 1),
+        kind="module",
+        name=file.stem,
+        file=_rel_path(file, root),
+        line_start=1,
+        line_end=len(lines),
+        text=source[:2000],
+        hash=_content_hash(source),
+    )
+    entities.append(module_entity)
+    return entities
+
+
 def _parse_doc(file: Path, root: Path) -> list[CodeEntity]:
     """Parse a markdown/text file into chunk entities."""
     try:
@@ -331,28 +395,92 @@ def _should_index(path: Path) -> bool:
     return True
 
 
+def _parse_generic_code(file: Path, root: Path) -> list[CodeEntity]:
+    """Generic regex-based parser for most programming languages."""
+    try:
+        source = file.read_text(encoding="utf-8")
+    except Exception:
+        return []
+
+    lines = source.splitlines()
+    entities: list[CodeEntity] = []
+
+    # Common patterns across many languages
+    patterns = [
+        (r'\b(?:class|struct|interface|trait|enum)\s+([a-zA-Z0-9_]+)', "entity"),
+        (r'\b(?:fn|func|function|def|sub)\s+([a-zA-Z0-9_]+)', "function"),
+        (r'\b(?:task|workflow|contract|module)\s+([a-zA-Z0-9_]+)', "module"),
+    ]
+
+    for i, line in enumerate(lines, 1):
+        for pattern, kind in patterns:
+            match = re.search(pattern, line)
+            if match:
+                name = match.group(1)
+                # Heuristic: skip keywords or common noise
+                if name in ("main", "self", "this", "pub", "private", "protected"):
+                    continue
+
+                entity = CodeEntity(
+                    id=_entity_id(file, kind, name, i),
+                    kind=kind,
+                    name=name,
+                    file=_rel_path(file, root),
+                    line_start=i,
+                    line_end=i + 10,  # heuristic chunk
+                    text=line.strip(),
+                    hash=_content_hash(line),
+                )
+                entities.append(entity)
+
+    # Add module-level entity
+    module_entity = CodeEntity(
+        id=_entity_id(file, "module", file.stem, 1),
+        kind="module",
+        name=file.stem,
+        file=_rel_path(file, root),
+        line_start=1,
+        line_end=len(lines),
+        text=source[:2000],
+        hash=_content_hash(source),
+    )
+    entities.append(module_entity)
+    return entities
+
+
 def scan_codebase(root: Path | None = None) -> tuple[list[CodeEntity], list[Relation]]:
     """Scan the codebase and return all entities + relations."""
     root = root or ROOT
     all_entities: list[CodeEntity] = []
     all_relations: list[Relation] = []
 
-    for path in sorted(root.rglob("*")):
-        if not path.is_file() or not _should_index(path):
-            continue
+    # Identify roots to scan
+    roots = [root]
+    kernel_path = Path("/Users/srinji/logic-os-kernel")
+    if kernel_path.exists():
+        roots.append(kernel_path)
 
-        if path.suffix == ".py":
-            entities = _parse_python(path, root)
-        elif path.suffix in DOC_EXTS:
-            entities = _parse_doc(path, root)
-        elif path.suffix in CONFIG_EXTS:
-            entities = _parse_config(path, root)
-        else:
-            continue
+    for r in roots:
+        for path in sorted(r.rglob("*")):
+            if not path.is_file() or not _should_index(path):
+                continue
 
-        relations = _extract_relations(entities)
-        all_entities.extend(entities)
-        all_relations.extend(relations)
+            if path.suffix == ".py":
+                entities = _parse_python(path, r)
+            elif path.suffix == ".rs":
+                entities = _parse_rust(path, r)
+            elif path.suffix in DOC_EXTS:
+                entities = _parse_doc(path, r)
+            elif path.suffix in CONFIG_EXTS:
+                entities = _parse_config(path, r)
+            elif path.suffix in CODE_EXTS:
+                entities = _parse_generic_code(path, r)
+            else:
+                continue
+
+            relations = _extract_relations(entities)
+            all_entities.extend(entities)
+            all_relations.extend(relations)
 
     return all_entities, all_relations
 

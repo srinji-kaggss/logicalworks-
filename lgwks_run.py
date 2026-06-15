@@ -545,18 +545,28 @@ def embed(
     dims: int | None = None,
 ) -> tuple[list[float] | None, str, bool]:
     """Returns (vector, provider, is_semantic). is_semantic gates L2 edge labelling.
-    provider 'auto'|'ollama' tries the real local Eye (qwen3-embedding via Ollama) → semantic vector.
+    provider 'auto'|'mlx' tries the real local Eye (Qwen3-VL-Embedding-8B via MLX) → semantic vector.
     provider 'openrouter-vl' tries the remote multimodal Eye through OpenRouter.
     Falls back to deterministic feature-hash (NOT semantic)."""
     if not embed_on:
         return None, "none", False
-    if provider in ("auto", "ollama"):
-        import lgwks_ollama
-        lgwks_ollama.ensure_eye_model()      # pull the local Eye on first use (no-op if present/down)
-        vec = lgwks_ollama.embed_one(text)
-        if vec is not None:
-            target_dims = DIMS if dims is None else dims
-            return lgwks_ollama.slice_mrl(vec, target_dims), f"ollama:{lgwks_ollama.EYE_MODEL}", True
+    if provider in ("auto", "mlx"):
+        # //why: The 2026 stack uses MLX-native Qwen3-VL-Embedding-8B as the primary Eye.
+        # It replaces the legacy Ollama path to achieve sub-millisecond ANE latency.
+        try:
+            import lgwks_model_hub as hub
+            # The Eye is our universal multimodal embedding space
+            eye_model = "Qwen3-VL-Embedding-8B"
+            res = hub.mlx_embed(text, model_name=eye_model)
+            if res["ok"]:
+                vec = res["vector"]
+                target_dims = DIMS if dims is None else dims
+                # MRL (Matryoshka Representation Learning) allows safe truncation
+                if len(vec) > target_dims:
+                    vec = vec[:target_dims]
+                return vec, f"mlx:{eye_model}", True
+        except Exception:
+            pass # fallback to deterministic
     if provider == "openrouter-vl":
         import lgwks_openrouter_embed
         chosen = model or lgwks_openrouter_embed.DEFAULT_MODEL
@@ -609,19 +619,19 @@ def embed_dual(
     det_vec = _deterministic_embed(text, dims=DIMS)
     det = {"vector": det_vec, "provider": "deterministic-feature-hash", "dims": DIMS}
 
-    # ── semantic: TEXT embeds locally via ollama qwen3-embedding:8b (4096-d) ──
-    # //why: Director routing (2026-06-09) — text uses the free local Eye; only
-    # image/video go to the paid media endpoint (lgwks_multimodal.embed_media).
-    # `model` is ignored for text (it selected the now-retired openrouter/apple
-    # fallbacks); kept in the signature for caller back-compat.
+    # ── semantic: TEXT embeds locally via MLX (Qwen3-VL-Embedding-8B) ──
     sem = None
-    import lgwks_ollama
-    if lgwks_ollama.ensure_eye_model():
-        full = lgwks_ollama.embed_one(text)
-        if full is not None:
-            sem = {"vector": full, "provider": f"ollama:{lgwks_ollama.EYE_MODEL}", "dims": len(full)}
+    try:
+        import lgwks_model_hub as hub
+        eye_model = "Qwen3-VL-Embedding-8B"
+        res = hub.mlx_embed(text, model_name=eye_model)
+        if res["ok"]:
+            vec = res["vector"]
+            sem = {"vector": vec, "provider": f"mlx:{eye_model}", "dims": len(vec)}
+    except Exception:
+        pass
 
-    # never-block: if ollama is down (or LGWKS_NO_MODELS in CI), sem stays None and
+    # never-block: if MLX is down (or LGWKS_NO_MODELS in CI), sem stays None and
     # the deterministic 256-d vector is the audit fallback — always present, zero
     # infra dependency (see docstring). Every caller guards `if dual["sem"]` before
     # writing semantic rows (lgwks_substrate_run.py:246,278). The prior code raised

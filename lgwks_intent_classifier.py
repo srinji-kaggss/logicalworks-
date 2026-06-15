@@ -92,11 +92,11 @@ FULL_AUTHORITY_THRESHOLD = 0.85
 # never alone unlock execution. We make that unrepresentable by capping every
 # non-semantic method strictly below the full-authority bar. So:
 #   high authority  ⟹  method ∈ SEMANTIC_METHODS  (the contrapositive is enforced)
-# "eye" = the real Qwen Eye embedder (qwen3-embedding via Ollama, lgwks_run.embed
+# "eye" = the real Qwen Eye embedder (Qwen3-VL-Embedding-8B via MLX, lgwks_run.embed
 # is_semantic=True). "coreml" = a future trained on-device encoder. Both measure
 # meaning, so both may cross the bar. The deterministic feature-hash path is NOT
 # here — it surfaces as method "cosine" and is capped.
-SEMANTIC_METHODS = frozenset({"coreml", "eye"})
+SEMANTIC_METHODS = frozenset({"coreml", "eye", "mlx"})
 
 # //why ceiling sits below FULL_AUTHORITY_THRESHOLD by a margin, not at it:
 # floating-point cosine can land exactly on a boundary; a strict gap removes

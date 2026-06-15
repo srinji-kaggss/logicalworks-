@@ -55,17 +55,21 @@ class TranscriptCortex:
             return []
 
         # Tail the last 50 turns with content
-        raw_turns = lgwks_transcript.tail(transcript_path, n=50, include_content=True)
+        # PRD-06: "deterministic extraction first, BERT salience when 05 lands"
+        import lgwks_intent_classifier as ic
+        clf = ic.IntentClassifier.load()
         processed: list[CortexTurn] = []
+
+        raw_turns = lgwks_transcript.tail(transcript_path, n=50, include_content=True)
 
         for turn in raw_turns:
             content = turn.get("content", "")
-            
-            # Layer 2: Business Logic (Deterministic Extraction)
-            # PRD-06: "deterministic extraction first, BERT salience when 05 lands"
+
+            # Layer 2: Business Logic (ModernBERT Salience)
             entities = self._extract_entities(content)
-            intent = self._classify_intent(content)
-            
+            res = clf.classify(content)
+            intent = res.label
+
             ct = CortexTurn(
                 turn_id=turn["turn_id"],
                 session_id=session_id,
@@ -75,6 +79,7 @@ class TranscriptCortex:
                 attention=entities[:3], # Simple attention baseline
                 content=content
             )
+
             processed.append(ct)
             
             # Layer 4: Audit (Telemetry)

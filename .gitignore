@@ -35,3 +35,5 @@ findings_final.json
 
 # local model runtime venv (3.11 — torch/transformers for T-TORCH)
 .venv-models/
+models/
+store/
