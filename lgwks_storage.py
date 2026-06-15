@@ -367,6 +367,16 @@ class GraphFabric:
     def upsert_edge(self, src: str, dst: str, rel: str, attrs: dict | None = None) -> None:
         self._db.upsert_edge(src, dst, rel, attrs)
 
+    def ingest_chunks(self, chunks: list[dict[str, Any]]) -> None:
+        """Route a batch of chunk rows into the wrapped entity graph.
+
+        Mirrors the direct graph write in lgwks_substrate_run; idempotent because
+        GraphDB upserts nodes/edges by id. Commits internally.
+        """
+        import lgwks_entity_graph as graph_mod
+
+        graph_mod.ingest_chunks(self._db, chunks)
+
     def commit(self) -> None:
         self._db.commit()
 
@@ -457,9 +467,83 @@ class RelationalProjection:
         self._conn.commit()
 
     def apply(self, ctx: fp.IngestContext) -> fp.ProjectionResult:
-        # Phase 1: the relational query surface is rebuilt by replaying the tape
-        # (#166), not eagerly written per artifact. Registered but inert.
+        # The relational surface is populated in bulk per run via project_run()
+        # (the Phase-2 bridge below); per-artifact replay projection lands in #166.
         return fp.ProjectionResult(self.name, applied=False)
+
+    def project_run(
+        self,
+        *,
+        source_rows: list[dict[str, Any]],
+        doc_rows: list[dict[str, Any]],
+        chunk_rows: list[dict[str, Any]],
+        fact_rows: list[dict[str, Any]],
+        vector_rows: list[dict[str, Any]],
+        frontier: list[dict[str, Any]],
+    ) -> None:
+        """Gate-owned equivalent of lgwks_substrate_db._build_index_db.
+
+        Writes a run's relational rowsets into the durable, gate-owned store.
+        Idempotent: PK tables use INSERT OR IGNORE; each FTS row is inserted only
+        when its base row is newly inserted (rowcount==1); frontier (no PK) is
+        keyed delete-then-insert by url. Unlike the legacy per-run db it never
+        DROPs — the gate store is shared and durable. .get() defaults tolerate the
+        media-triple fact shape that lacks chunk/text fields.
+        """
+        conn = self._conn
+        conn.executescript(self._DDL)
+        conn.executemany(
+            "INSERT OR IGNORE INTO sources(source_id, source, title, discovered_by, depth) VALUES(?,?,?,?,?)",
+            [(r["source_id"], r.get("source"), r.get("title"), r.get("discovered_by"), r.get("depth")) for r in source_rows],
+        )
+        conn.executemany(
+            "INSERT OR IGNORE INTO documents(document_id, source_id, title, source, word_count) VALUES(?,?,?,?,?)",
+            [(r["document_id"], r.get("source_id"), r.get("title"), r.get("source"), r.get("word_count")) for r in doc_rows],
+        )
+        for r in chunk_rows:
+            cur = conn.execute(
+                "INSERT OR IGNORE INTO chunks(chunk_id, document_id, source, url, text, stem_text, hash, "
+                "fact_score, chunk_kind, position, tokenization_id, artifact_cid) VALUES(?,?,?,?,?,?,?,?,?,?,?,?)",
+                (r["chunk_id"], r.get("document_id"), r.get("source"), r.get("url"), r.get("text"),
+                 r.get("stem_text"), r.get("hash"), r.get("fact_score"), r.get("chunk_kind"),
+                 r.get("position"), r.get("tokenization_id"), r.get("artifact_cid")),
+            )
+            if cur.rowcount == 1:
+                conn.execute(
+                    "INSERT INTO chunk_fts(chunk_id, text, stem_text, source) VALUES(?,?,?,?)",
+                    (r["chunk_id"], r.get("text", ""), r.get("stem_text", ""), r.get("source", "")),
+                )
+        for r in fact_rows:
+            cur = conn.execute(
+                "INSERT OR IGNORE INTO facts(fact_id, chunk_id, document_id, fact_text, fact_score, "
+                "chunk_kind, tokenization_id, artifact_cid) VALUES(?,?,?,?,?,?,?,?)",
+                (r["fact_id"], r.get("chunk_id"), r.get("document_id"), r.get("fact_text"),
+                 r.get("fact_score"), r.get("chunk_kind"), r.get("tokenization_id"), r.get("artifact_cid")),
+            )
+            if cur.rowcount == 1:
+                conn.execute(
+                    "INSERT INTO fact_fts(fact_id, fact_text, chunk_kind) VALUES(?,?,?)",
+                    (r["fact_id"], r.get("fact_text", ""), r.get("chunk_kind", "")),
+                )
+        conn.executemany(
+            "INSERT OR IGNORE INTO vectors(vector_id, chunk_id, document_id, provider, is_semantic, dims, "
+            "vector_text, vector_json, fact_score, chunk_kind, tokenization_id, artifact_cid) VALUES(?,?,?,?,?,?,?,?,?,?,?,?)",
+            [(r["vector_id"], r.get("chunk_id"), r.get("document_id"), r.get("provider"),
+              int(bool(r.get("is_semantic"))), r.get("dims"), r.get("vector_text"),
+              io._json_cell(r.get("vector")), r.get("fact_score"), r.get("chunk_kind"),
+              r.get("tokenization_id"), r.get("artifact_cid")) for r in vector_rows],
+        )
+        for r in frontier:
+            url = r.get("url")
+            if not url:
+                continue
+            conn.execute("DELETE FROM frontier WHERE url = ?", (url,))
+            conn.execute(
+                "INSERT INTO frontier(url, depth, status, reason, discovered_by, links_found) VALUES(?,?,?,?,?,?)",
+                (url, r.get("depth", 0), r.get("status", ""), r.get("reason", ""),
+                 r.get("discovered_by", ""), r.get("links_found", 0)),
+            )
+        conn.commit()
 
     def close(self) -> None:
         self._conn.close()

@@ -442,6 +442,19 @@ def build_run(args: argparse.Namespace) -> dict[str, Any]:
     )
     db._upsert_global_fact_vectors(GLOBAL_FACT_DB, run_id=run_id, fact_vectors=fact_vector_rows)
 
+    # State Fabric dual-write (Phase-2 bridge): route the same rowsets through the
+    # gate-owned projections. The legacy writes above remain until the unified
+    # reader migrates consumers (#166); deletion is a later task.
+    gate.relational.project_run(
+        source_rows=source_rows,
+        doc_rows=doc_rows,
+        chunk_rows=chunk_rows,
+        fact_rows=fact_rows,
+        vector_rows=vector_rows,
+        frontier=frontier,
+    )
+    gate.graph_fabric.ingest_chunks(graph_input_rows)
+
     _unique_providers = dict(provider_counts)
     _unique_dims: set[int] = {row["dims"] for row in vector_rows if row.get("dims")}
     # Dual-vector runs (det 256-d + sem 4096-d) are intentionally bilingual, not ambiguous.
@@ -531,6 +544,7 @@ def build_run(args: argparse.Namespace) -> dict[str, Any]:
         },
     }
     (run_dir / "manifest.json").write_text(json.dumps(manifest, indent=2, sort_keys=True), encoding="utf-8")
+    gate.close()
     return manifest
 
 
