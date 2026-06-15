@@ -7,7 +7,6 @@ into focused sub-modules:
   - lgwks_substrate_io       file I/O, JSONL/JSON, manifest loading
   - lgwks_substrate_text     chunking, scoring, stemming, fact extraction
   - lgwks_substrate_crawl    web crawl engine, auth gates, frontier
-  - lgwks_substrate_db       SQLite index DB, global fact vector upserts
   - lgwks_substrate_vector   vector search, vector space identity
   - lgwks_substrate_run      build/query/baseline orchestration, CLI parsers
 
@@ -33,7 +32,6 @@ from lgwks_substrate_config import (
     CODE_RE,
     EmbeddingProviderUnavailable,
     FrontierList,
-    GLOBAL_FACT_DB,
     GLOBAL_ROOT,
     NARRATIVE_TERMS,
     NUMERIC_RE,
@@ -49,6 +47,9 @@ from lgwks_substrate_config import (
     UPCOMING_EFFECTIVE_DATE,
     VERSION_BUCKETS,
 )
+
+# Note: GLOBAL_FACT_DB / lgwks_substrate_db were removed (#170); fact vectors now
+# accumulate in the gate's world-tier VectorFabric (lgwks_storage).
 
 # I/O layer
 from lgwks_substrate_io import (
@@ -83,11 +84,6 @@ from lgwks_substrate_crawl import (
     _frontier_status_counts,
     _looks_like_login_gate,
     _should_discover_clicks,
-)
-
-# DB layer
-from lgwks_substrate_db import (
-    _upsert_global_fact_vectors,
 )
 
 # Vector layer
@@ -125,7 +121,6 @@ __all__ = [
     "ROOT",
     "RUN_ROOT",
     "GLOBAL_ROOT",
-    "GLOBAL_FACT_DB",
     "TEXT_EXT",
     "SKIP_DIRS",
     "NUMERIC_RE",
@@ -165,8 +160,6 @@ __all__ = [
     "_crawl_site",
     "_crawl_map",
     "_frontier_status_counts",
-    # DB
-    "_upsert_global_fact_vectors",
     # Vector
     "_dot",
     "_provider_matches_vector_space",

@@ -22,12 +22,10 @@ import lgwks_sqlite
 import lgwks_storage
 import lgwks_substrate_config as config
 import lgwks_substrate_crawl as crawl
-import lgwks_substrate_db as db
 import lgwks_substrate_io as io
 import lgwks_substrate_text as text
 import lgwks_substrate_vector as vector
-import lgwks_entity_graph as entity_graph
-from lgwks_substrate_config import EmbeddingProviderUnavailable, RUN_ROOT, GLOBAL_FACT_DB, UPCOMING_EFFECTIVE_DATE, VERSION_BUCKETS
+from lgwks_substrate_config import EmbeddingProviderUnavailable, RUN_ROOT, UPCOMING_EFFECTIVE_DATE, VERSION_BUCKETS
 
 
 def _parse_iso_date(value: str) -> date:
@@ -420,17 +418,20 @@ def build_run(args: argparse.Namespace) -> dict[str, Any]:
         io._emit_jsonl(run_dir / "frontier.jsonl", frontier)
         io._emit_json(run_dir / "crawl_map.json", crawl._crawl_map(frontier))
 
-    db_path = run_dir / "graph.db"
-    graph_db = entity_graph.GraphDB(db_path)
-    entity_graph.ingest_chunks(graph_db, graph_input_rows)
+    # State Fabric: the entity graph is the gate-owned, cumulative GraphFabric
+    # projection (the per-run graph.db was removed in #169). Exports + stats are
+    # sourced from the cumulative graph; `query --neighbors` reads it via the gate.
+    gate.graph_fabric.ingest_chunks(graph_input_rows)
     graph_json = run_dir / "graph.json"
     graph_mmd = run_dir / "graph.mmd"
-    graph_db.export_json(graph_json)
-    graph_db.export_mermaid(graph_mmd)
-    stats = graph_db.stats()
-    graph_db.close()
+    gate.graph_fabric.export_json(graph_json)
+    gate.graph_fabric.export_mermaid(graph_mmd)
+    stats = gate.graph_fabric.stats()
 
-    db._upsert_global_fact_vectors(GLOBAL_FACT_DB, run_id=run_id, fact_vectors=fact_vector_rows)
+    # State Fabric: fact embedding vectors accumulate in the gate's world-tier
+    # VectorFabric (the cross-run GLOBAL_FACT_DB was removed in #170). Idempotent
+    # by content-address, so re-ingesting an identical fact vector is a no-op.
+    gate.vector_fabric.ingest_fact_vectors(fact_vector_rows)
 
     # State Fabric: the relational surface is the gate-owned, cumulative
     # RelationalProjection (the per-run substrate.db / _build_index_db was deleted;
@@ -444,7 +445,6 @@ def build_run(args: argparse.Namespace) -> dict[str, Any]:
         vector_rows=vector_rows,
         frontier=frontier,
     )
-    gate.graph_fabric.ingest_chunks(graph_input_rows)
 
     _unique_providers = dict(provider_counts)
     _unique_dims: set[int] = {row["dims"] for row in vector_rows if row.get("dims")}
@@ -525,13 +525,13 @@ def build_run(args: argparse.Namespace) -> dict[str, Any]:
             "vectors": "vectors.jsonl",
             "frontier": "frontier.jsonl" if frontier else "",
             "crawl_map": "crawl_map.json" if frontier else "",
-            "graph_db": "graph.db",
+            "graph_db": str(gate.graph_fabric.db_path),  # gate-owned cumulative graph store
             "graph_json": "graph.json",
             "graph_mermaid": "graph.mmd",
             "substrate_db": str(gate.relational.path),  # gate-owned cumulative relational store
         },
         "global_artifacts": {
-            "fact_vector_db": str(GLOBAL_FACT_DB),
+            "fact_vector_db": str(gate.vector_fabric.path),  # gate world-tier vector store (#170)
         },
     }
     (run_dir / "manifest.json").write_text(json.dumps(manifest, indent=2, sort_keys=True), encoding="utf-8")
@@ -570,16 +570,22 @@ def query_run(args: argparse.Namespace) -> dict[str, Any]:
         "rows": rows,
     }
     if args.neighbors:
-        graph_db = entity_graph.GraphDB(run_dir / "graph.db")
+        # #169: neighbors resolve against the gate's cumulative graph, not a per-run
+        # graph.db. The run manifest names the project whose gate owns the graph.
+        import lgwks_fabric_reader as reader_mod
+
+        manifest = io._load_run_manifest(run_dir)
+        project = manifest.get("project") or run_dir.name
+        gate, reader = reader_mod.open_reader(project)
         try:
-            node, err = entity_graph._resolve_single_node(graph_db, args.neighbors)
+            node, err = reader.graph_resolve_node(args.neighbors)
             if err:
                 payload["graph_error"] = err
             else:
                 payload["node"] = node
-                payload["neighbors"] = graph_db.neighbors(node["node_id"], limit=args.limit)
+                payload["neighbors"] = reader.graph_neighbors(node["node_id"], limit=args.limit)
         finally:
-            graph_db.close()
+            gate.close()
     return payload
 
 

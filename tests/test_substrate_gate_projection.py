@@ -7,6 +7,7 @@ GraphFabric.ingest_chunks populates the entity graph.
 
 from __future__ import annotations
 
+import json
 import sqlite3
 import sys
 import tempfile
@@ -109,6 +110,43 @@ class TestGraphFabricIngest(unittest.TestCase):
                 # idempotent re-ingest keeps chunk count stable
                 gf.ingest_chunks(graph_rows)
                 self.assertEqual(gf._db.stats()["chunks"], 1)
+            finally:
+                gf.close()
+
+
+class TestGraphFabricExportResolve(unittest.TestCase):
+    """#169 — exports + node resolution are sourced from the gate's cumulative
+    GraphFabric (the per-run graph.db was removed; substrate_run + query --neighbors
+    target the gate)."""
+
+    def test_export_json_and_mermaid_from_cumulative_graph(self):
+        rows = [{
+            "chunk_id": "chunk-1", "document_id": "doc-1", "url": "http://x",
+            "text": "Acme Corp filed form T2033 with the CRA.", "hash": "h1", "schema": "PROSE",
+        }]
+        with tempfile.TemporaryDirectory() as td:
+            gf = lgwks_storage.GraphFabric(Path(td) / "graph.db")
+            try:
+                gf.ingest_chunks(rows)
+                jpath = Path(td) / "graph.json"
+                mpath = Path(td) / "graph.mmd"
+                gf.export_json(jpath)
+                gf.export_mermaid(mpath)
+                self.assertTrue(jpath.exists() and mpath.exists())
+                data = json.loads(jpath.read_text())
+                self.assertEqual(set(data.keys()), {"nodes", "edges", "stats"})
+                # export stats agree with the live gate stats (single source)
+                self.assertEqual(data["stats"], gf.stats())
+            finally:
+                gf.close()
+
+    def test_resolve_node_missing_returns_error(self):
+        with tempfile.TemporaryDirectory() as td:
+            gf = lgwks_storage.GraphFabric(Path(td) / "graph.db")
+            try:
+                node, err = gf.resolve_node("does-not-exist")
+                self.assertIsNone(node)
+                self.assertIn("no node matches", err or "")
             finally:
                 gf.close()
 

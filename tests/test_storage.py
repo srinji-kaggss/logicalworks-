@@ -325,5 +325,84 @@ class TestProjectionRegistry(unittest.TestCase):
                 gate.close()
 
 
+class TestVectorFabricFactVectors(unittest.TestCase):
+    """#170 — fact embedding vectors fold into the gate's world-tier VectorFabric
+    (replacing the deleted GLOBAL_FACT_DB / _upsert_global_fact_vectors)."""
+
+    @staticmethod
+    def _rows():
+        # Same fact_hash, two providers/spaces (deterministic d3 + semantic d3):
+        # both must persist as distinct content-addressed records under one source.
+        return [
+            {"fact_hash": "fh-1", "fact_text": "alpha beta", "provider": "deterministic-feature-hash",
+             "dims": 3, "vector": [0.1, 0.2, 0.3], "fact_score": 0.5, "chunk_kind": "rule"},
+            {"fact_hash": "fh-1", "fact_text": "alpha beta", "provider": "ollama:qwen3-embedding:8b",
+             "dims": 3, "vector": [0.4, 0.5, 0.6], "fact_score": 0.5, "chunk_kind": "rule"},
+        ]
+
+    def test_ingest_writes_world_tier_records_queryable_by_source(self):
+        with tempfile.TemporaryDirectory() as td:
+            vf = lgwks_storage.VectorFabric(Path(td) / "vector_records.db")
+            try:
+                inserted = vf.ingest_fact_vectors(self._rows())
+                self.assertEqual(inserted, 2)
+                recs = vf.query_by_source("fh-1")
+                self.assertEqual(len(recs), 2)
+                # world-tier accumulation: shared across tenants
+                self.assertTrue(all(r.tenant == vec_mod.WORLD_TENANT for r in recs))
+                # deterministic + semantic land in distinct, never-cross-compared spaces
+                self.assertEqual(
+                    {r.space_id for r in recs},
+                    {"deterministic-feature-hash:d3", "ollama:qwen3-embedding:8b:d3"},
+                )
+            finally:
+                vf.close()
+
+    def test_ingest_is_idempotent(self):
+        with tempfile.TemporaryDirectory() as td:
+            vf = lgwks_storage.VectorFabric(Path(td) / "vector_records.db")
+            try:
+                self.assertEqual(vf.ingest_fact_vectors(self._rows()), 2)
+                # second pass: identical content-addressed vectors → nothing new
+                self.assertEqual(vf.ingest_fact_vectors(self._rows()), 0)
+                self.assertEqual(len(vf.query_by_source("fh-1")), 2)
+            finally:
+                vf.close()
+
+    def test_ingested_vectors_survive_close_and_reopen(self):
+        """Durability regression: a same-connection query can see uncommitted rows,
+        so the world-tier write must be committed before close or it is lost on
+        gate teardown (the bug the dogfood run caught)."""
+        with tempfile.TemporaryDirectory() as td:
+            path = Path(td) / "vector_records.db"
+            vf = lgwks_storage.VectorFabric(path)
+            vf.ingest_fact_vectors(self._rows())
+            vf.close()
+            reopened = lgwks_storage.VectorFabric(path)
+            try:
+                self.assertEqual(len(reopened.query_by_source("fh-1")), 2)
+            finally:
+                reopened.close()
+
+    def test_zero_and_empty_vectors_are_skipped(self):
+        with tempfile.TemporaryDirectory() as td:
+            vf = lgwks_storage.VectorFabric(Path(td) / "vector_records.db")
+            try:
+                rows = [
+                    {"fact_hash": "z", "fact_text": "z", "provider": "deterministic", "dims": 3,
+                     "vector": [0.0, 0.0, 0.0], "fact_score": 0.0, "chunk_kind": "rule"},
+                    {"fact_hash": "e", "fact_text": "e", "provider": "deterministic", "dims": 0,
+                     "vector": [], "fact_score": 0.0, "chunk_kind": "rule"},
+                    {"fact_hash": "ok", "fact_text": "ok", "provider": "deterministic", "dims": 2,
+                     "vector": [0.3, 0.4], "fact_score": 0.1, "chunk_kind": "rule"},
+                ]
+                # zero + empty skipped (cannot normalize); the valid one persists.
+                self.assertEqual(vf.ingest_fact_vectors(rows), 1)
+                self.assertEqual(len(vf.query_by_source("ok")), 1)
+                self.assertEqual(vf.query_by_source("z"), [])
+            finally:
+                vf.close()
+
+
 if __name__ == "__main__":
     unittest.main()

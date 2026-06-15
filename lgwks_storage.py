@@ -270,10 +270,53 @@ class VectorFabric:
         if ctx.vector_record is None:
             return fp.ProjectionResult(self.name, applied=False)
         inserted = self.upsert(ctx.vector_record)
+        self._conn.commit()  # durable per-artifact (vec_mod.upsert_record doesn't commit)
         return fp.ProjectionResult(self.name, applied=True, written=1 if inserted else 0)
 
     def upsert(self, record: vec_mod.VectorRecord) -> bool:
+        """Insert one record (idempotent by cid). Does NOT commit — batch callers
+        commit once; the single-write apply() path commits for itself."""
         return vec_mod.upsert_record(self._conn, record, admin=vec_mod.ADMIN)
+
+    def ingest_fact_vectors(self, fact_vectors: list[dict[str, Any]], *, tenant: str = vec_mod.WORLD_TENANT) -> int:
+        """World-tier accumulation of fact embedding vectors (#170).
+
+        Replaces the deleted lgwks_substrate_db._upsert_global_fact_vectors /
+        GLOBAL_FACT_DB. Each row carries fact_hash, fact_text, provider, dims,
+        vector, fact_score, chunk_kind. We content-address each embedding into a
+        VectorRecord (tenant defaults to the shared 'world' tier per
+        ARCH-two-db-multitenant) and upsert idempotently: re-ingesting an identical
+        fact vector is a no-op — that IS the cumulative/dedup semantic the old
+        seen_count column approximated. The fact TEXT + seen_count already live in
+        the Global Fact List; this stores the embedding the gate previously dropped.
+
+        space_id keys on provider+dims so deterministic (e.g. d256) and semantic
+        (e.g. d4096) vectors land in distinct, never-cross-compared spaces (§I1).
+        Zero/empty vectors are skipped (cannot be L2-normalized). Returns the count
+        of newly inserted records.
+        """
+        inserted = 0
+        for row in fact_vectors:
+            floats = list(row.get("vector") or [])
+            if not floats:
+                continue
+            provider = row.get("provider") or "unknown"
+            dims = int(row.get("dims") or len(floats))
+            try:
+                record = vec_mod.encode_record(
+                    floats,
+                    modality="text",
+                    space_id=f"{provider}:d{dims}",
+                    tenant=tenant,
+                    source_cid=row["fact_hash"],
+                )
+            except vec_mod.VectorError:
+                # zero vector / contract violation — skip, don't poison the batch.
+                continue
+            if self.upsert(record):
+                inserted += 1
+        self._conn.commit()  # one commit per batch (upsert doesn't commit)
+        return inserted
 
     def query_by_source(self, source_cid: str, *, space_id: str | None = None) -> list[vec_mod.VectorRecord]:
         return vec_mod.query_by_source(self._conn, source_cid, space_id=space_id, admin=vec_mod.ADMIN)
@@ -412,6 +455,25 @@ class GraphFabric:
 
     def neighbors(self, node_id: str, direction: str = "both", rel: str | None = None, limit: int = 100) -> list[dict]:
         return self._db.neighbors(node_id, direction=direction, rel=rel, limit=limit)
+
+    def resolve_node(self, query: str) -> tuple[dict[str, Any] | None, str | None]:
+        """Resolve a node label/id against the cumulative graph (returns (node, err)).
+
+        Gate-owned wrapper over lgwks_entity_graph._resolve_single_node so callers
+        (query --neighbors) target the gate graph, not a per-run graph.db (#169).
+        """
+        import lgwks_entity_graph as graph_mod
+
+        return graph_mod._resolve_single_node(self._db, query)
+
+    def export_json(self, out_path: Path) -> None:
+        """Dump the cumulative graph to JSON (git-sync artifact). Replaces the
+        per-run graph.db export now that the gate graph is the single source (#169)."""
+        self._db.export_json(out_path)
+
+    def export_mermaid(self, out_path: Path, max_edges: int = 80) -> None:
+        """Export the cumulative graph as a Mermaid flowchart (human-readable)."""
+        self._db.export_mermaid(out_path, max_edges=max_edges)
 
     def stats(self) -> dict[str, Any]:
         return self._db.stats()

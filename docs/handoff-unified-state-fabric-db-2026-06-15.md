@@ -154,14 +154,24 @@ add an `IngestContext` field) and must not refactor the ingest path.
 - **Behavior change (intended):** the relational store is now project-cumulative,
   not per-run; the frontier table keeps latest-status-per-URL (idempotent) rather
   than append-all. Cumulative is the chosen model (PII separation is the tenant layer).
-- **Deferred legacy (tracked, NOT deleted — would lose function):**
-  - **#169** — per-run `graph.db` → gate cumulative graph (still feeds `graph.json`/
-    `query --neighbors`; `engine` reads its own `.lgwks/entity_graph.db`, unaffected).
-  - **#170** — `GLOBAL_FACT_DB` fact vectors → gate world/vector tier (write-only
-    today; gate doesn't yet store fact vectors, so kept to avoid silent data loss).
+- **Legacy DELETED (follow-up PR — graph + fact-vector consolidation):**
+  - **#169 DONE** — per-run `graph.db` removed. `substrate_run` ingests into the
+    gate's cumulative `GraphFabric` and sources `graph.json`/`graph.mmd`/stats from
+    it; `query --neighbors` resolves against the gate via `FabricReader`
+    (`GraphFabric.export_json`/`export_mermaid`/`resolve_node` are the new seams).
+    `engine` reads its own `.lgwks/entity_graph.db` — unaffected.
+  - **#170 DONE** — `GLOBAL_FACT_DB` + `lgwks_substrate_db` module removed. Fact
+    embedding vectors now accumulate in the gate's world-tier `VectorFabric` via
+    `VectorFabric.ingest_fact_vectors` (tenant=`world`, content-addressed, idempotent;
+    deterministic/semantic land in distinct `provider:dN` spaces). `GLOBAL_FACT_DB`
+    constant + facade exports removed.
+  - **Durability fix (caught by dogfood):** `VectorFabric` writes now commit
+    (`vec_mod.upsert_record` doesn't) — `apply()` commits per-artifact,
+    `ingest_fact_vectors` once per batch — so vectors survive `gate.close()`. This was
+    a latent gap: `VectorFabric` had no substrate-flow writers before #170.
 
 1. **Phase 2 — wire existing writers to `ingest_artifact()`** (#165)
-   - `lgwks_substrate_run.py`: route chunks/facts/media to the gate instead of (or in addition to) per-run JSONL/`graph.db`/`substrate.db`. **It already calls `gate.ingest_fact(...)` but still dual-writes legacy `graph.db`/`substrate.db` directly — collapse those onto the gate's projections.**
+   - `lgwks_substrate_run.py`: the legacy per-run `graph.db`/`substrate.db` and the cross-run `GLOBAL_FACT_DB` are now **gone** — relational, graph, and fact-vectors all route through the gate's projections (`project_run` / `graph_fabric.ingest_chunks` / `vector_fabric.ingest_fact_vectors`). Remaining Phase-2 work: move the per-artifact projection into `apply(ctx)` (see next bullet) and emit chunk/media as `ingest_artifact` envelopes rather than the current bulk `project_run` bridge. JSONL mirrors stay as human-readable exports.
    - **Fill the inert seams via their `apply(ctx)`:** give `GraphFabric.apply` entity/relation extraction (carry edges in `IngestContext.extras` or `payload_meta`); give `RelationalProjection.apply` the per-artifact row projection — no new ingest plumbing needed, just the two method bodies.
    - `lgwks_ingest.py`: classify with `lgwks.modality.item.v1`, tokenize with ANT, emit artifacts to the gate.
    - `lgwks_run.py`: emit `embeddings.jsonl` + `prevector.graph.json` as artifacts.
