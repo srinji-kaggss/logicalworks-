@@ -52,12 +52,29 @@ impl Engine {
                 }
             };
 
+            // SSRF guard (#154 M12): refuse loopback/private/link-local hosts
+            // when configured. Keeps an untrusted seed from reaching internal
+            // services or the cloud metadata endpoint.
+            if self.cfg.block_private_hosts && crate::frontier::is_private_host(&host) {
+                result.frontier.push(entry(&target, FrontierStatus::Blocked, Some("private/internal host blocked"), 0));
+                result.stats.errors += 1;
+                continue;
+            }
+
             // robots: load once per host (honest UA), cache.
             if !robots_cache.contains_key(&host) {
                 let rules = self.load_robots(&target.url, &host).await;
                 robots_cache.insert(host.clone(), rules);
             }
-            let rules = robots_cache.get(&host).unwrap();
+            // Just inserted above when absent, but never panic the crawl loop on a miss (#154 M13).
+            let rules = match robots_cache.get(&host) {
+                Some(r) => r,
+                None => {
+                    result.frontier.push(entry(&target, FrontierStatus::Error, Some("robots cache miss"), 0));
+                    result.stats.errors += 1;
+                    continue;
+                }
+            };
 
             if self.cfg.respect_robots && !rules.allowed(&target.url) {
                 result.frontier.push(entry(&target, FrontierStatus::RobotsDisallowed, None, 0));

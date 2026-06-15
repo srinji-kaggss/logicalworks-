@@ -353,6 +353,7 @@ class DaemonEventStore:
         session_id: str | None = None,
         agent_id: str | None = None,
         limit: int = 100,
+        conn=None,
     ) -> list[dict[str, Any]]:
         params: list[Any] = [tenant_id]
         where = ["tenant_id=?"]
@@ -363,7 +364,7 @@ class DaemonEventStore:
             where.append("agent_id=?")
             params.append(agent_id)
         params.append(max(1, limit))
-        rows = self._conn.execute(
+        rows = (conn or self._conn).execute(
             f"""
             SELECT raw_json
             FROM daemon_events
@@ -375,8 +376,8 @@ class DaemonEventStore:
         ).fetchall()
         return [json.loads(row[0]) for row in rows]
 
-    def list_session_heads(self, *, tenant_id: str) -> list[dict[str, Any]]:
-        rows = self._conn.execute(
+    def list_session_heads(self, *, tenant_id: str, conn=None) -> list[dict[str, Any]]:
+        rows = (conn or self._conn).execute(
             """
             SELECT tenant_id, agent_id, session_id, first_event_id, last_event_id, event_count,
                    last_ts, last_lane, last_kind, last_scope
@@ -506,8 +507,8 @@ class DaemonEventStore:
             conn.execute("ROLLBACK")
             raise
 
-    def queue_depth(self, tenant_id: str) -> dict[str, Any]:
-        rows = self._conn.execute(
+    def queue_depth(self, tenant_id: str, conn=None) -> dict[str, Any]:
+        rows = (conn or self._conn).execute(
             "SELECT status, COUNT(*) FROM daemon_work_queue WHERE tenant_id=? GROUP BY status",
             (tenant_id,),
         ).fetchall()
@@ -545,15 +546,31 @@ class DaemonEventStore:
         supplied (#124 retrieval, #120 allowed_capabilities), keeping the packet
         valid and deterministic under partial availability.
         """
-        events = self.list_events(
-            tenant_id=tenant_id, session_id=session_id, agent_id=agent_id, limit=event_limit
-        )
-        heads = self.list_session_heads(tenant_id=tenant_id)
+        # Hardening (#154 M8): the three core reads (events, session heads, queue
+        # depth) must reflect ONE consistent point-in-time, or a writer committing
+        # mid-build yields a briefing that mixes pre-/post-commit state. We take a
+        # dedicated read connection and wrap the reads in a single deferred read
+        # transaction: under WAL the first SELECT pins a snapshot the rest share,
+        # without blocking writers. A snapshot connection (not self._conn) avoids a
+        # "transaction within a transaction" clash with concurrent BEGIN IMMEDIATE
+        # writers on the shared connection.
+        snap = lgwks_sqlite.connect(self.path, check_same_thread=False)
+        snap.isolation_level = None
+        try:
+            snap.execute("BEGIN")
+            events = self.list_events(
+                tenant_id=tenant_id, session_id=session_id, agent_id=agent_id,
+                limit=event_limit, conn=snap,
+            )
+            heads = self.list_session_heads(tenant_id=tenant_id, conn=snap)
+            depth = self.queue_depth(tenant_id, conn=snap)
+            snap.execute("COMMIT")
+        finally:
+            snap.close()
         head = next(
             (h for h in heads if h["session_id"] == session_id and h["agent_id"] == agent_id),
             None,
         )
-        depth = self.queue_depth(tenant_id)
 
         # #124 retrieval (graph/vector hits) — provider-fed, empty when absent.
         # Pass a COPY of events: a provider must not be able to mutate the packet's

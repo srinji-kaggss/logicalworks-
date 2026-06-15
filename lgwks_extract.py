@@ -17,8 +17,10 @@ from __future__ import annotations
 
 import re
 import ipaddress
+import os
 import socket
 import subprocess
+import tempfile
 import urllib.error
 import urllib.parse
 import urllib.request
@@ -244,13 +246,26 @@ def extract(target: str, max_chars: int = 8000) -> dict:
     elif ext in _OFFICE_EXT:
         kind = "office"
         local = target
+        staged_tmp: str | None = None
         if is_url:  # markitdown needs a file → stage it
             raw = _download(target)
             if raw:
-                tmp = Path(f"/tmp/lgwks-extract{ext}")
-                tmp.write_bytes(raw)
-                local = str(tmp)
-        text = _office(local, max_chars)
+                # Hardening (#154 M1): use a private, unpredictable temp file
+                # (0600, random name) instead of a fixed /tmp/lgwks-extract path,
+                # and remove it afterward — closes the symlink/predictable-path
+                # race and the disk leak.
+                fd, staged_tmp = tempfile.mkstemp(prefix="lgwks-extract-", suffix=ext)
+                with os.fdopen(fd, "wb") as fh:
+                    fh.write(raw)
+                local = staged_tmp
+        try:
+            text = _office(local, max_chars)
+        finally:
+            if staged_tmp:
+                try:
+                    os.unlink(staged_tmp)
+                except OSError:
+                    pass
     elif ext in _TEXT_EXT and not is_url:
         kind = "text"
         text = _trim(Path(target).read_text(errors="replace"), max_chars) if Path(target).exists() else ""

@@ -428,7 +428,19 @@ def discover_clicks(
                         page.goto(url, wait_until="domcontentloaded", timeout=30000)
                         page.wait_for_timeout(wait_ms)
                         page.evaluate(_click_candidates_js())
-                        selector = f"[data-lgwks-click-id='{cand['id']}']"
+                        # Hardening (#154 M5): our injected JS only ever assigns
+                        # non-negative integer ids (out.length). Reject anything
+                        # else so a malicious page cannot smuggle a CSS-selector
+                        # fragment through cand['id'] to widen/redirect the click.
+                        cand_id = str(cand.get("id", ""))
+                        if not cand_id.isdigit():
+                            rows.append({
+                                "ok": False, "status": "error", "url": url, "final_url": "",
+                                "reason": "rejected non-integer click id", "candidate": cand,
+                            })
+                            metrics["attempts"] += 1
+                            continue
+                        selector = f"[data-lgwks-click-id='{cand_id}']"
                         before = page.url
                         popup = None
                         def on_popup(p):

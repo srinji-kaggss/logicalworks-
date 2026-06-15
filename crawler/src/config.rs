@@ -36,6 +36,11 @@ pub struct CrawlConfig {
     /// Stay on the seed's registrable host unless true.
     pub allow_offsite: bool,
     pub respect_robots: bool,
+    /// Refuse to fetch loopback/private/link-local IP literals and local-only
+    /// names (localhost, *.local, *.internal). SSRF guard (#154 M12) for when
+    /// the crawler is driven by untrusted URLs. Default true; disable only for
+    /// trusted internal crawls.
+    pub block_private_hosts: bool,
     pub stealth: StealthLevel,
     /// Minimum delay between requests to the same host, in ms (politeness floor).
     pub min_host_delay_ms: u64,
@@ -61,6 +66,7 @@ impl Default for CrawlConfig {
             max_depth: 3,
             allow_offsite: false,
             respect_robots: true,
+            block_private_hosts: true,
             stealth: StealthLevel::Honest,
             min_host_delay_ms: 500,
             max_body_bytes: 8 * 1024 * 1024,
