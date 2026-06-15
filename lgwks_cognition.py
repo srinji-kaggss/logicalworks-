@@ -15,8 +15,10 @@ lgwks_promote). Each entry chains on the previous hash; the chain head proves th
 
 from __future__ import annotations
 
+import fcntl
 import hashlib
 import json
+import os
 import time
 from pathlib import Path
 
@@ -45,82 +47,131 @@ class CognitionLog:
         self.stream = stream
         self._path = _log_path(stream)
         self._key, self._mode = (key, "provided") if key is not None else lgwks_sign.signing_key()
-        self._prev = self._tail_hash()
 
     def _tail_hash(self) -> str:
         """Recover the chain head from disk so a new process continues the same chain."""
         if not self._path.exists():
             return _GENESIS
         last = _GENESIS
-        for line in self._path.read_text(encoding="utf-8").splitlines():
-            line = line.strip()
-            if not line:
-                continue
-            try:
-                last = json.loads(line)["hash"]
-            except (json.JSONDecodeError, KeyError):
-                continue
+        with self._path.open("r", encoding="utf-8") as f:
+            for line in f:
+                line = line.strip()
+                if not line:
+                    continue
+                try:
+                    last = json.loads(line)["hash"]
+                except (json.JSONDecodeError, KeyError):
+                    continue
         return last
 
     def append(self, kind: str, data: dict) -> dict:
-        """Append one chained, signed entry. kind must be known (no silent free-form). Returns the entry."""
+        """Append one chained, signed entry. kind must be known. Returns the entry."""
         if kind not in _KINDS:
             raise ValueError(f"unknown cognition kind {kind!r}; known: {sorted(_KINDS)}")
-        if self._path.exists() and not self.verify():
-            raise ValueError(f"refusing to append to broken cognition chain: {self.stream}")
+        
         self._path.parent.mkdir(parents=True, exist_ok=True)
-        rec = {"seq": self._next_seq(), "ts": time.time(), "kind": kind, "data": data, "prev": self._prev}
-        core = json.dumps(rec, sort_keys=True, separators=(",", ":"))
-        rec["hash"] = hashlib.sha256(core.encode("utf-8")).hexdigest()
-        rec["sig"] = lgwks_sign.mac(rec["hash"], self._key) if self._key else ""
-        with self._path.open("a", encoding="utf-8") as f:
-            f.write(json.dumps(rec, sort_keys=True) + "\n")
-        self._prev = rec["hash"]
-        return rec
+        # Ensure file exists for locking
+        self._path.touch(exist_ok=True)
+        
+        with self._path.open("a+", encoding="utf-8") as f:
+            # Advisory lock (exclusive, blocking)
+            fcntl.flock(f.fileno(), fcntl.LOCK_EX)
+            try:
+                # 1. Verify chain head under lock
+                if not self.verify_under_lock(f):
+                    raise ValueError(f"refusing to append to broken cognition chain: {self.stream}")
+                
+                # 2. Get current head and sequence
+                f.seek(0)
+                lines = f.readlines()
+                seq = len(lines)
+                prev = _GENESIS
+                if lines:
+                    try:
+                        prev = json.loads(lines[-1])["hash"]
+                    except (json.JSONDecodeError, KeyError):
+                        pass
 
-    def _next_seq(self) -> int:
-        return len(self._read_raw())
+                # 3. Build record
+                rec = {"seq": seq, "ts": time.time(), "kind": kind, "data": data, "prev": prev}
+                core = json.dumps(rec, sort_keys=True, separators=(",", ":"))
+                rec["hash"] = hashlib.sha256(core.encode("utf-8")).hexdigest()
+                rec["sig"] = lgwks_sign.mac(rec["hash"], self._key) if self._key else ""
+                
+                # 4. Write
+                f.seek(0, 2) # seek to end
+                f.write(json.dumps(rec, sort_keys=True) + "\n")
+                f.flush()
+                os.fsync(f.fileno())
+                return rec
+            finally:
+                fcntl.flock(f.fileno(), fcntl.LOCK_UN)
 
     def _read_raw(self) -> list[dict]:
         if not self._path.exists():
             return []
         out = []
-        for line in self._path.read_text(encoding="utf-8").splitlines():
-            line = line.strip()
-            if line:
-                try:
-                    out.append(json.loads(line))
-                except json.JSONDecodeError:
-                    continue
+        with self._path.open("r", encoding="utf-8") as f:
+            fcntl.flock(f.fileno(), fcntl.LOCK_SH)
+            try:
+                for line in f:
+                    line = line.strip()
+                    if line:
+                        try:
+                            out.append(json.loads(line))
+                        except json.JSONDecodeError:
+                            continue
+            finally:
+                fcntl.flock(f.fileno(), fcntl.LOCK_UN)
         return out
 
     def verify(self) -> bool:
-        """Re-walk the chain: each entry's hash recomputes and its prev matches the predecessor. With a
-        keyed signer, also verify the HMAC. Any break ⇒ False (tamper / corruption)."""
-        prev = _GENESIS
+        """Verify the integrity of the entire chain."""
         if not self._path.exists():
             return True
-        for line in self._path.read_text(encoding="utf-8").splitlines():
+        with self._path.open("r", encoding="utf-8") as f:
+            fcntl.flock(f.fileno(), fcntl.LOCK_SH)
+            try:
+                return self.verify_under_lock(f)
+            finally:
+                fcntl.flock(f.fileno(), fcntl.LOCK_UN)
+
+    def verify_under_lock(self, f) -> bool:
+        """Internal verify logic assuming file is already locked."""
+        f.seek(0)
+        prev_hash = _GENESIS
+        for i, line in enumerate(f):
             line = line.strip()
-            if not line:
-                continue
+            if not line: continue
             try:
                 rec = json.loads(line)
-            except json.JSONDecodeError:
+                actual_hash = rec.pop("hash")
+                sig = rec.pop("sig", "")
+                
+                # Verify body fields match core set
+                body = {k: rec[k] for k in ("seq", "ts", "kind", "data", "prev") if k in rec}
+                if set(body) != {"seq", "ts", "kind", "data", "prev"}:
+                    return False
+
+                # 1. Verify sequence
+                if rec["seq"] != i: return False
+                
+                # 2. Verify link
+                if rec["prev"] != prev_hash: return False
+                
+                # 3. Verify hash
+                core = json.dumps(body, sort_keys=True, separators=(",", ":"))
+                expected_hash = hashlib.sha256(core.encode("utf-8")).hexdigest()
+                if actual_hash != expected_hash: return False
+                
+                # 4. Verify signature (if keyed)
+                if self._key and sig:
+                    if not lgwks_sign.verify(actual_hash, sig, self._key):
+                        return False
+                
+                prev_hash = actual_hash
+            except (json.JSONDecodeError, KeyError):
                 return False
-            body = {k: rec[k] for k in ("seq", "ts", "kind", "data", "prev") if k in rec}
-            if set(body) != {"seq", "ts", "kind", "data", "prev"}:
-                return False
-            if rec.get("kind") not in _KINDS:
-                return False
-            core = json.dumps(body, sort_keys=True, separators=(",", ":"))
-            if hashlib.sha256(core.encode("utf-8")).hexdigest() != rec.get("hash"):
-                return False
-            if rec.get("prev") != prev:
-                return False
-            if self._key and rec.get("sig") and not lgwks_sign.verify(rec["hash"], rec["sig"], self._key):
-                return False
-            prev = rec["hash"]
         return True
 
     def corpus(self, kind: str = "intent_commit") -> list[dict]:
@@ -128,6 +179,7 @@ class CognitionLog:
         if not self.verify():
             raise ValueError(f"refusing to read corpus from broken cognition chain: {self.stream}")
         return [r["data"] for r in self._read_raw() if r.get("kind") == kind]
+
 
 
 def status(stream: str = "main") -> dict:

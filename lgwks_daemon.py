@@ -78,8 +78,16 @@ def _read_json(path: Path) -> dict[str, Any] | None:
 
 
 def _write_json(path: Path, payload: dict[str, Any]) -> None:
+    """Atomic JSON write via temp file + replace."""
     path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(json.dumps(payload, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+    tmp = path.with_suffix(f".{os.getpid()}.tmp")
+    try:
+        tmp.write_text(json.dumps(payload, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+        os.replace(tmp, path)
+    except Exception:
+        if tmp.exists():
+            tmp.unlink()
+        raise
 
 
 def _rm_if_exists(path: Path) -> None:
@@ -454,13 +462,24 @@ class SessionDaemon:
     def run_forever(self, *, transcript_path: str | None = None) -> int:
         self.paths.root.mkdir(parents=True, exist_ok=True)
         _cleanup_stale_lock(self.paths)
-        existing = _read_json(self.paths.lock)
-        if existing and _pid_alive(int(existing.get("pid", 0) or 0)):
-            raise RuntimeError(f"daemon already running with pid {existing['pid']}")
-
+        
+        # HARDEN: Atomic lock creation (O_CREAT | O_EXCL) to prevent TOCTOU race (H8)
         transcript = (transcript_path or os.environ.get("LGWKS_TRANSCRIPT_PATH", "")).strip()
         pid = os.getpid()
-        _write_json(self.paths.lock, _lock_payload(pid=pid, repo_root=self.paths.repo_root, transcript_path=transcript))
+        payload = _lock_payload(pid=pid, repo_root=self.paths.repo_root, transcript_path=transcript)
+        content = json.dumps(payload, indent=2, sort_keys=True) + "\n"
+        
+        try:
+            fd = os.open(self.paths.lock, os.O_CREAT | os.O_EXCL | os.O_WRONLY)
+            with os.fdopen(fd, "w", encoding="utf-8") as f:
+                f.write(content)
+        except FileExistsError:
+            existing = _read_json(self.paths.lock)
+            if existing and _pid_alive(int(existing.get("pid", 0) or 0)):
+                raise RuntimeError(f"daemon already running with pid {existing['pid']}")
+            # If not alive, something is weird (stale lock wasn't reaped)
+            _rm_if_exists(self.paths.lock)
+            raise RuntimeError("daemon lock exists but process is dead; try again (stale lock cleared)")
 
         running = True
         tenant_id = f"repo:{self.paths.repo_root.name}"

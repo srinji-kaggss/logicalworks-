@@ -24,7 +24,36 @@ def _extract(target: str, max_chars: int) -> dict:
     return lgwks_extract.extract(target, max_chars=max_chars)
 
 
+def _is_safe_path(target: str, repo_root: Path, allow_absolute: bool = False) -> bool:
+    """Check if path is safe to read/write."""
+    if not target: return False
+    # 1. Block URLs - let lgwks_extract handle them if it wants, 
+    # but we only validate local files here.
+    if target.startswith(("http://", "https://", "ftp://")):
+        return True
+    
+    p = Path(target)
+    # 2. Absolute path check
+    if p.is_absolute():
+        return allow_absolute
+
+    # 3. Traversal check (..)
+    try:
+        resolved = (repo_root / p).resolve()
+        if not str(resolved).startswith(str(repo_root.resolve())):
+            return False
+    except Exception:
+        return False
+        
+    return True
+
+
 def extract_command(args) -> int:
+    repo_root = Path(__file__).resolve().parent
+    if not _is_safe_path(args.target, repo_root, getattr(args, "allow_absolute", False)):
+        print(f"error: blocked path (outside repo or absolute): {args.target}", file=sys.stderr)
+        return 1
+
     doc = _extract(args.target, getattr(args, "max_chars", 8000))
     if getattr(args, "json", False):
         print(json.dumps(doc, ensure_ascii=False, indent=2))
@@ -40,6 +69,16 @@ def convert_command(args) -> int:
     """Any source → text/markdown/json. The extraction IS the conversion (everything lands as text);
     --to json wraps it with provenance, md/txt emit the body. Honest scope: this normalises TO text
     formats, it does not re-render INTO binary formats (no txt→docx) — that would be a different tool."""
+    repo_root = Path(__file__).resolve().parent
+    if not _is_safe_path(args.source, repo_root, getattr(args, "allow_absolute", False)):
+        print(f"error: blocked path (outside repo or absolute): {args.source}", file=sys.stderr)
+        return 1
+    
+    if getattr(args, "out", None):
+        if not _is_safe_path(args.out, repo_root, getattr(args, "allow_absolute", False)):
+            print(f"error: blocked output path (outside repo or absolute): {args.out}", file=sys.stderr)
+            return 1
+
     doc = _extract(args.source, getattr(args, "max_chars", 20000))
     if not doc["ok"]:
         print(f"convert: could not read {args.source!r} (kind={doc['kind']})", file=sys.stderr)

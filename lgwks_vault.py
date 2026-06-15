@@ -11,6 +11,7 @@ Boundary (T0): values never touch a log, a prompt, a URL, or argv.
 from __future__ import annotations
 
 import base64
+import fcntl
 import hashlib
 import json
 import os
@@ -84,11 +85,24 @@ def _audit(event: AuditEvent) -> None:
     to vault operations but are flagged in the returned metadata."""
     try:
         _AUDIT_DIR.mkdir(parents=True, exist_ok=True)
+        # Set permissions on directory first
+        if _AUDIT_DIR.stat().st_mode & 0o777 != 0o700:
+            os.chmod(_AUDIT_DIR, 0o700)
+        
         record = json.dumps(event.to_dict(), sort_keys=True, ensure_ascii=False)
         with _AUDIT_LOG.open("a", encoding="utf-8") as fh:
-            fh.write(record + "\n")
-        # Restrict permissions — only owner can read audit log
-        os.chmod(_AUDIT_LOG, 0o600)
+            # HARDEN: exclusive lock around audit append (H6)
+            fcntl.flock(fh.fileno(), fcntl.LOCK_EX)
+            try:
+                fh.write(record + "\n")
+                fh.flush()
+                os.fsync(fh.fileno())
+            finally:
+                fcntl.flock(fh.fileno(), fcntl.LOCK_UN)
+        
+        # Ensure file permissions
+        if _AUDIT_LOG.stat().st_mode & 0o777 != 0o600:
+            os.chmod(_AUDIT_LOG, 0o600)
     except Exception:
         pass  # audit loss is logged as a detail field on the operation return
 
@@ -226,8 +240,15 @@ def set_entry(key: str, value) -> dict:
     blob = _encode_versioned_ciphertext(key_version, salt, nonce, ciphertext)
 
     p = _entry_path(key)
-    p.write_bytes(blob)
-    os.chmod(p, 0o600)
+    # HARDEN: Atomic write via temp file + replace (H7)
+    tmp = p.with_suffix(f".{os.getpid()}.tmp")
+    try:
+        tmp.write_bytes(blob)
+        os.chmod(tmp, 0o600)
+        os.replace(tmp, p)
+    except Exception:
+        if tmp.exists(): tmp.unlink()
+        raise
 
     _audit(AuditEvent(
         ts=time.time(), op="set", key_name=key, key_version=key_version,

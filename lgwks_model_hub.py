@@ -241,9 +241,9 @@ def mlx_embed(text: str, model_name: str = "ModernBERT-base-mlx-4bit") -> dict[s
         # Create a 256-d vector from the hash
         import numpy as np
         vec = np.frombuffer(h * 8, dtype=np.float32)[:256].tolist()
-        return {"ok": True, "vector": vec, "reason": "mlx-resident"}
+        return {"ok": True, "vector": vec, "reason": "mlx-placeholder", "is_semantic": False}
     except Exception as exc:
-        return {"ok": False, "vector": [], "reason": f"mlx error: {exc}"}
+        return {"ok": False, "vector": [], "reason": f"mlx error: {exc}", "is_semantic": False}
 
 
 def doctor() -> dict[str, Any]:

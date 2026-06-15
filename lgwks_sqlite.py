@@ -55,9 +55,14 @@ def _apply_pragmas(
                 mode,
             )
 
+def get_db(path: str | Path, **kwargs: Any) -> sqlite3.Connection:
+    """Convenience alias for connect()."""
+    return connect(path, **kwargs)
+
 
 def connect(
     path: str | Path,
+...
     *,
     check_same_thread: bool = True,
     max_retries: int = 3,

@@ -499,8 +499,11 @@ def fetch(url: str, max_chars: int = 6000) -> str:
     """Page → text, bounded. Delegates to the extract port (crwl → curl → real-browser escalation on a
     JS/bot wall), so a SPA or bot-walled page is no longer a silent empty. Falls back to crwl if extract
     is unavailable. The Tongue reads facts, not a whole page."""
+    import lgwks_extract
+    if not lgwks_extract._remote_allowed(url):
+        return f"[refused: SSRF block] {url}"
+
     try:
-        import lgwks_extract
         doc = lgwks_extract.extract(url, max_chars=max_chars)
         if doc.get("ok"):
             text = doc["text"]

@@ -28,6 +28,7 @@ from __future__ import annotations
 import json
 import math
 import os
+import re
 import sqlite3
 import subprocess
 import sys
@@ -537,12 +538,24 @@ def migrate_json_embeddings(
         from axiom.cid import compute_cid as _cc  # type: ignore[import]
         return _cc(ident.encode())
 
+    # HARDEN: Validate identifiers to prevent SQL injection (C4)
+    def _validate_ident(s: str) -> str:
+        if not re.fullmatch(r"[a-zA-Z0-9_]+", s):
+            raise ValueError(f"malicious SQL identifier: {s!r}")
+        return s
+
+    _validate_ident(table)
+    _validate_ident(id_col)
+    _validate_ident(embedding_col)
+    _validate_ident(type_col)
+
     src = sqlite3.connect(str(src_db))
     dst_conn = create_store(dst_db)
 
+    # Use double-quotes for identifiers in the query (extra safety)
     rows = src.execute(
-        f"SELECT {id_col}, {type_col}, {embedding_col} "
-        f"FROM {table} WHERE {embedding_col} IS NOT NULL"
+        f'SELECT "{id_col}", "{type_col}", "{embedding_col}" '
+        f'FROM "{table}" WHERE "{embedding_col}" IS NOT NULL'
     ).fetchall()
 
     inserted = skipped = 0

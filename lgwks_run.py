@@ -564,7 +564,7 @@ def embed(
                 # MRL (Matryoshka Representation Learning) allows safe truncation
                 if len(vec) > target_dims:
                     vec = vec[:target_dims]
-                return vec, f"mlx:{eye_model}", True
+                return vec, f"mlx:{eye_model}", res.get("is_semantic", True)
         except Exception:
             pass # fallback to deterministic
     if provider == "openrouter-vl":

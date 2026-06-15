@@ -22,8 +22,10 @@ No LLM calls. No internet. Fail closed on parse errors.
 from __future__ import annotations
 
 import ast
+import fcntl
 import hashlib
 import json
+import os
 import re
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
@@ -96,19 +98,45 @@ class Baseline:
         if not self.path:
             return
         self.path.parent.mkdir(parents=True, exist_ok=True)
-        data = {
-            "updated_at": _ts(),
-            "findings": [
-                {
-                    "fp": _finding_fingerprint(f),
-                    "kind": f["kind"],
-                    "file": f["links"]["file"],
-                    "dismiss_count": 0,  # fresh run, reset counters
+        
+        # Ensure file exists for locking
+        self.path.touch(exist_ok=True)
+        
+        with self.path.open("r+") as f:
+            # Advisory lock across read-modify-write
+            fcntl.flock(f.fileno(), fcntl.LOCK_EX)
+            try:
+                # Merge existing dismissal counts if any
+                f.seek(0)
+                try:
+                    existing_data = json.loads(f.read())
+                    existing_fps = {item["fp"]: item for item in existing_data.get("findings", [])}
+                except Exception:
+                    existing_fps = {}
+
+                current_findings = []
+                for f_item in findings:
+                    fp = _finding_fingerprint(f_item)
+                    # Preserve count if it was seen before
+                    count = existing_fps.get(fp, {}).get("dismiss_count", 0)
+                    current_findings.append({
+                        "fp": fp,
+                        "kind": f_item["kind"],
+                        "file": f_item["links"]["file"],
+                        "dismiss_count": count,
+                    })
+
+                data = {
+                    "updated_at": _ts(),
+                    "findings": current_findings,
                 }
-                for f in findings
-            ],
-        }
-        self.path.write_text(json.dumps(data, indent=2), encoding="utf-8")
+                
+                # Atomic write via temp file + replace
+                tmp = self.path.with_suffix(f".{os.getpid()}.tmp")
+                tmp.write_text(json.dumps(data, indent=2), encoding="utf-8")
+                os.replace(tmp, self.path)
+            finally:
+                fcntl.flock(f.fileno(), fcntl.LOCK_UN)
 
 
 # ── Taint tracker (Layer 2) ───────────────────────────────────────────────

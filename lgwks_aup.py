@@ -17,6 +17,7 @@ Defense-in-Depth (Issue #56):
 
 from __future__ import annotations
 
+import fcntl
 import hashlib
 import json
 import math
@@ -311,15 +312,22 @@ class _RefusalLog:
         line = json.dumps(record, sort_keys=True, ensure_ascii=False) + "\n"
         try:
             with self._path.open("a", encoding="utf-8") as fh:
-                fh.write(line)
-                fh.flush()
-                os.fsync(fh.fileno())
+                # HARDEN: exclusive lock around append (H5)
+                fcntl.flock(fh.fileno(), fcntl.LOCK_EX)
+                try:
+                    fh.write(line)
+                    fh.flush()
+                    os.fsync(fh.fileno())
+                finally:
+                    fcntl.flock(fh.fileno(), fcntl.LOCK_UN)
         except OSError:
             # //why fallback: if the governance dir is read-only (container,
             # CI, restricted environment), we must not crash the gate. The
             # buffer is drained on the next successful write or on explicit
             # flush_to_disk().
-            self._buffer.append(record)
+            # HARDEN: Cap buffer to prevent memory DoS (M7)
+            if len(self._buffer) < 1000:
+                self._buffer.append(record)
 
     def read(self) -> list[dict]:
         records: list[dict] = []

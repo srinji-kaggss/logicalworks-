@@ -502,10 +502,12 @@ def route_command(args: argparse.Namespace) -> int:
 
     # Auto-execute if --yes and we have a next_cmd
     if getattr(args, "yes", False) and result.next_cmd:
-        if result.next_cmd_risk == "destructive":
-            print(f"\n  → BLOCKED: destructive command requires explicit confirmation, not --yes")
+        # HARDEN: Only auto-execute 'read' commands. Mutate/Destructive require manual intervention (H2).
+        if result.next_cmd_risk in ("mutate", "destructive"):
+            print(f"\n  → BLOCKED: {result.next_cmd_risk} command requires explicit confirmation, not --yes")
             print(f"     run manually: {result.next_cmd}")
             return 126
+        
         print(f"\n  → executing: {result.next_cmd}")
         try:
             p = subprocess.run(shlex.split(result.next_cmd), shell=False, cwd=str(cwd))

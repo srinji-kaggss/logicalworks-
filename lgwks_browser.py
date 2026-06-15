@@ -269,39 +269,41 @@ def render(url: str, max_chars: int = 8000, *, use_session: bool = False,
             if browser_engine == "chromium":
                 launch_kwargs["args"] = ["--disable-blink-features=AutomationControlled"]
             browser = engine.launch(**launch_kwargs)
-            ctx_kwargs: dict = {
-                "user_agent": user_agent or _UA, "locale": "en-CA",
-                "timezone_id": "America/Toronto",
-                "viewport": {"width": 1366, "height": 900},
-                "storage_state": storage,                    # the user's session, iff present
-            }
-            if extra_headers:
-                ctx_kwargs["extra_http_headers"] = extra_headers
-            ctx = browser.new_context(**ctx_kwargs)
-            # Defense-in-depth: always route via handler to block SSRF subresources/redirects
-            ctx.route("**/*", _route_handler(lock_host, auth_headers))
+            try:
+                ctx_kwargs: dict = {
+                    "user_agent": user_agent or _UA, "locale": "en-CA",
+                    "timezone_id": "America/Toronto",
+                    "viewport": {"width": 1366, "height": 900},
+                    "storage_state": storage,                    # the user's session, iff present
+                }
+                if extra_headers:
+                    ctx_kwargs["extra_http_headers"] = extra_headers
+                ctx = browser.new_context(**ctx_kwargs)
+                # Defense-in-depth: always route via handler to block SSRF subresources/redirects
+                ctx.route("**/*", _route_handler(lock_host, auth_headers))
 
-            page = ctx.new_page()
+                page = ctx.new_page()
 
-            page.goto(url, wait_until="domcontentloaded", timeout=30000)
-            page.wait_for_timeout(wait_ms)                   # let client JS render
-            html = page.content()
-            out = {"ok": True, "text": _text_from(html, max_chars), "reason": f"rendered:{browser_engine}"}
-            if with_html:
-                out["html"] = html                           # the DOM the browser saw — parse links here
-            if with_screenshot:
-                try:
-                    raw = page.screenshot(type="png", full_page=False)
-                    if raw:
-                        import lgwks_multimodal as mm
-                        b64, mime = mm._resize_and_encode(raw, max_dim=mm._MAX_IMG_DIM, fmt="PNG")
-                        out["screenshot_b64"] = b64
-                        out["screenshot_mime"] = mime
-                except Exception:
-                    out["screenshot_b64"] = None
-                    out["screenshot_mime"] = None
-            browser.close()
-            return out
+                page.goto(url, wait_until="domcontentloaded", timeout=30000)
+                page.wait_for_timeout(wait_ms)                   # let client JS render
+                html = page.content()
+                out = {"ok": True, "text": _text_from(html, max_chars), "reason": f"rendered:{browser_engine}"}
+                if with_html:
+                    out["html"] = html                           # the DOM the browser saw — parse links here
+                if with_screenshot:
+                    try:
+                        raw = page.screenshot(type="png", full_page=False)
+                        if raw:
+                            import lgwks_multimodal as mm
+                            b64, mime = mm._resize_and_encode(raw, max_dim=mm._MAX_IMG_DIM, fmt="PNG")
+                            out["screenshot_b64"] = b64
+                            out["screenshot_mime"] = mime
+                    except Exception:
+                        out["screenshot_b64"] = None
+                        out["screenshot_mime"] = None
+                return out
+            finally:
+                browser.close()
     except Exception as e:
         return {"ok": False, "text": "", "reason": f"render failed: {type(e).__name__}"}
 
@@ -393,97 +395,97 @@ def discover_clicks(
             if browser_engine == "chromium":
                 launch_kwargs["args"] = ["--disable-blink-features=AutomationControlled"]
             browser = engine.launch(**launch_kwargs)
-            ctx = browser.new_context(
-                user_agent=_UA, locale="en-CA", timezone_id="America/Toronto",
-                viewport={"width": 1366, "height": 900},
-                storage_state=storage,
-            )
-            if auth_headers:
-                ctx.route("**/*", _route_handler(lock_host, auth_headers))
+            try:
+                ctx = browser.new_context(
+                    user_agent=_UA, locale="en-CA", timezone_id="America/Toronto",
+                    viewport={"width": 1366, "height": 900},
+                    storage_state=storage,
+                )
+                if auth_headers:
+                    ctx.route("**/*", _route_handler(lock_host, auth_headers))
 
-            seed = ctx.new_page()
-            seed.goto(url, wait_until="domcontentloaded", timeout=30000)
-            seed.wait_for_timeout(wait_ms)
-            seed_text = _text_from(seed.content(), 120_000)
-            scored_candidates = [
-                (cand, _click_candidate_score(cand))
-                for cand in seed.evaluate(_click_candidates_js())
-            ]
-            candidates = [
-                cand
-                for cand, score in sorted(scored_candidates, key=lambda item: item[1], reverse=True)
-                if score > 0
-            ][:max_clicks]
-            seed.close()
-            metrics = {"attempts": 0, "ok": 0, "novel": 0, "same_state": 0, "timeouts": 0}
+                seed = ctx.new_page()
+                seed.goto(url, wait_until="domcontentloaded", timeout=30000)
+                seed.wait_for_timeout(wait_ms)
+                seed_text = _text_from(seed.content(), 120_000)
+                scored_candidates = [
+                    (cand, _click_candidate_score(cand))
+                    for cand in seed.evaluate(_click_candidates_js())
+                ]
+                candidates = [
+                    cand
+                    for cand, score in sorted(scored_candidates, key=lambda item: item[1], reverse=True)
+                    if score > 0
+                ][:max_clicks]
+                seed.close()
+                metrics = {"attempts": 0, "ok": 0, "novel": 0, "same_state": 0, "timeouts": 0}
 
-            for cand in candidates:
-                page = ctx.new_page()
-                try:
-                    page.goto(url, wait_until="domcontentloaded", timeout=30000)
-                    page.wait_for_timeout(wait_ms)
-                    page.evaluate(_click_candidates_js())
-                    selector = f"[data-lgwks-click-id='{cand['id']}']"
-                    before = page.url
-                    popup = None
-                    def on_popup(p):
-                        nonlocal popup
-                        popup = p
-                    page.on("popup", on_popup)
+                for cand in candidates:
+                    page = None
+                    target_page = None
                     try:
-                        page.locator(selector).click(timeout=5000)
-                        page.wait_for_timeout(1000)
-                        target_page = popup if popup else page
+                        page = ctx.new_page()
+                        page.goto(url, wait_until="domcontentloaded", timeout=30000)
+                        page.wait_for_timeout(wait_ms)
+                        page.evaluate(_click_candidates_js())
+                        selector = f"[data-lgwks-click-id='{cand['id']}']"
+                        before = page.url
+                        popup = None
+                        def on_popup(p):
+                            nonlocal popup
+                            popup = p
+                        page.on("popup", on_popup)
                         try:
-                            target_page.wait_for_load_state("domcontentloaded", timeout=15000)
-                        except Exception:
-                            pass
-                        target_page.wait_for_timeout(wait_ms)
+                            page.locator(selector).click(timeout=5000)
+                            page.wait_for_timeout(1000)
+                            target_page = popup if popup else page
+                            try:
+                                target_page.wait_for_load_state("domcontentloaded", timeout=15000)
+                            except Exception:
+                                pass
+                            target_page.wait_for_timeout(wait_ms)
+                        finally:
+                            page.remove_listener("popup", on_popup)
+                        
+                        html = target_page.content()
+                        text = _text_from(html, 120_000)
+                        status = "no_access" if NO_ACCESS_RE.search(text) else "ok"
+                        rows.append({
+                            "ok": status == "ok",
+                            "status": status,
+                            "url": before,
+                            "final_url": target_page.url,
+                            "text": text,
+                            "html": html,
+                            "html_len": len(html),
+                            "candidate": cand,
+                        })
+                        metrics["attempts"] += 1
+                        outcome = _classify_click_outcome(url, seed_text, rows[-1])
+                        if outcome["ok"]: metrics["ok"] += 1
+                        if outcome["timeout"]: metrics["timeouts"] += 1
+                        if outcome["same_url"] and outcome["same_text"]:
+                            metrics["same_state"] += 1
+                        else:
+                            metrics["novel"] += 1
+                    except Exception as exc:
+                        rows.append({
+                            "ok": False, "status": "error", "url": url, "final_url": "",
+                            "reason": f"click failed: {type(exc).__name__}", "candidate": cand,
+                        })
+                        metrics["attempts"] += 1
+                        outcome = _classify_click_outcome(url, seed_text, rows[-1])
+                        if outcome["timeout"]: metrics["timeouts"] += 1
                     finally:
-                        page.remove_listener("popup", on_popup)
-                    html = target_page.content()
-                    text = _text_from(html, 120_000)
-                    status = "no_access" if NO_ACCESS_RE.search(text) else "ok"
-                    rows.append({
-                        "ok": status == "ok",
-                        "status": status,
-                        "url": before,
-                        "final_url": target_page.url,
-                        "text": text,
-                        "html": html,
-                        "html_len": len(html),
-                        "candidate": cand,
-                    })
-                    metrics["attempts"] += 1
-                    outcome = _classify_click_outcome(url, seed_text, rows[-1])
-                    if outcome["ok"]:
-                        metrics["ok"] += 1
-                    if outcome["timeout"]:
-                        metrics["timeouts"] += 1
-                    if outcome["same_url"] and outcome["same_text"]:
-                        metrics["same_state"] += 1
-                    else:
-                        metrics["novel"] += 1
-                    if target_page is not page:
-                        target_page.close()
-                except Exception as exc:
-                    rows.append({
-                        "ok": False,
-                        "status": "error",
-                        "url": url,
-                        "final_url": "",
-                        "reason": f"click failed: {type(exc).__name__}",
-                        "candidate": cand,
-                    })
-                    metrics["attempts"] += 1
-                    outcome = _classify_click_outcome(url, seed_text, rows[-1])
-                    if outcome["timeout"]:
-                        metrics["timeouts"] += 1
-                finally:
-                    page.close()
-                if _should_stop_click_discovery(metrics):
-                    break
-            browser.close()
+                        if target_page and target_page is not page:
+                            target_page.close()
+                        if page:
+                            page.close()
+                    
+                    if _should_stop_click_discovery(metrics):
+                        break
+            finally:
+                browser.close()
     except Exception as exc:
         return [{"ok": False, "status": "error", "url": url, "reason": f"click discovery failed: {type(exc).__name__}"}]
     return rows

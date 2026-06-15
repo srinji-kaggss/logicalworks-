@@ -110,8 +110,28 @@ class RefactorEngine:
                     if argument.arg in type_map and argument.annotation is None:
                         type_str = type_map[argument.arg]
                         try:
-                            # Parse type_str into an expression node
+                            # HARDEN: Validate type_str AST to prevent code execution (H12)
                             parsed_expr = ast.parse(type_str, mode="eval").body
+                            
+                            def _is_safe_type_node(n: ast.AST) -> bool:
+                                # Allow: int, str, List[int], dict[str, Any], int | str
+                                if isinstance(n, ast.Name): return True
+                                if isinstance(n, ast.Attribute): return _is_safe_type_node(n.value)
+                                if isinstance(n, ast.Subscript):
+                                    return _is_safe_type_node(n.value) and _is_safe_type_node(n.slice)
+                                if isinstance(n, ast.Constant) and n.value is None: return True
+                                if isinstance(n, ast.Constant) and isinstance(n.value, str): return True
+                                if isinstance(n, ast.BinOp) and isinstance(n.op, ast.BitOr):
+                                    return _is_safe_type_node(n.left) and _is_safe_type_node(n.right)
+                                if isinstance(n, ast.Tuple):
+                                    return all(_is_safe_type_node(elt) for n in n.elts)
+                                if isinstance(n, ast.List):
+                                    return all(_is_safe_type_node(elt) for n in n.elts)
+                                return False
+
+                            if not _is_safe_type_node(parsed_expr):
+                                raise ValueError(f"dangerous type annotation: {type_str}")
+
                             argument.annotation = parsed_expr
                             self.engine.changes.append({
                                 "type": "add_annotation",
@@ -120,7 +140,10 @@ class RefactorEngine:
                                 "line": getattr(argument, "lineno", node.lineno)
                             })
                         except Exception:
-                            # Fallback to simple name node on parse failure
+                            # Fallback to simple name node (which is safe as it's just a string name)
+                            # or just skip if it was marked dangerous
+                            if not re.fullmatch(r"[a-zA-Z0-9_\[\],\. |]+", type_str):
+                                continue # too risky to even try Name(id=...)
                             argument.annotation = ast.Name(id=type_str, ctx=ast.Load())
 
         AnnotationTransformer(self).visit(self.tree)

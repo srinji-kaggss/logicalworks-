@@ -87,9 +87,15 @@ def classify_argv(argv: tuple[str, ...], repo: Path) -> dict[str, Any]:
             idx = argv.index("-c")
             if idx + 1 < len(argv):
                 code = argv[idx + 1]
-                for dangerous in ("import os", "import subprocess", "import shutil", "eval(", "exec("):
-                    if dangerous in code:
-                        return {"risk": "blocked", "reason": f"dangerous code in {cmd_name} -c"}
+                # HARDEN: Block dangerous substrings and bypasses
+                dangerous_patterns = (
+                    "import os", "import subprocess", "import shutil", "eval(", "exec(",
+                    "__import__", "getattr", "setattr", "delattr", "builtin", "pty"
+                )
+                code_lower = code.lower()
+                for dangerous in dangerous_patterns:
+                    if dangerous in code_lower:
+                        return {"risk": "blocked", "reason": f"dangerous pattern '{dangerous}' in {cmd_name} -c"}
         return {"risk": "safe"}
     
     if cmd_name == "git":
