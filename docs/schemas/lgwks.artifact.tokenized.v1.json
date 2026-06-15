@@ -1,0 +1,67 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "lgwks.artifact.tokenized.v1",
+  "description": "Canonical tokenized artifact envelope. Every lgwks output (research, run, ingest, substrate, daemon_event, project_artifact) is emitted as one artifact on the Causal Tape; vector, graph, FTS, and relational tables are projections over these artifacts. The tokenization_id links the artifact to a registered tokenizer/analyzer, making the DB tokenizer-aware.",
+  "type": "object",
+  "required": [
+    "schema", "artifact_cid", "tenant_id", "source", "modality",
+    "tokenization_id", "token_stream", "payload_cid", "capability_id", "timestamp"
+  ],
+  "additionalProperties": false,
+  "properties": {
+    "schema": {
+      "type": "string",
+      "enum": ["lgwks.artifact.tokenized.v1"]
+    },
+    "artifact_cid": {
+      "type": "string",
+      "minLength": 1,
+      "description": "Content-addressed identifier for the canonical artifact bytes (b2b256)",
+      "pattern": "^b2b256:[a-f0-9]+$"
+    },
+    "tenant_id": {
+      "type": "string",
+      "minLength": 1
+    },
+    "source": {
+      "type": "string",
+      "enum": ["research", "run", "ingest", "substrate", "daemon_event", "project_artifact"]
+    },
+    "run_id": { "type": "string" },
+    "session_id": { "type": "string" },
+    "modality": {
+      "type": "string",
+      "enum": ["text", "image", "video", "audio", "terminal", "reasoning"]
+    },
+    "tokenization_id": {
+      "type": "string",
+      "minLength": 1,
+      "description": "Reference to a registered tokenizer/analyzer (e.g. word_regex:v1 or aetherius:v0)"
+    },
+    "token_stream": {
+      "type": "array",
+      "items": { "type": "integer" }
+    },
+    "payload_cid": {
+      "type": "string",
+      "minLength": 1,
+      "description": "Content-addressed identifier for the raw payload bytes"
+    },
+    "payload_meta": {
+      "type": "object",
+      "description": "Human-readable lineage: title, url, position, parent doc, mime, etc."
+    },
+    "capability_id": {
+      "type": "string",
+      "minLength": 1
+    },
+    "timestamp": {
+      "type": "number",
+      "description": "Seconds since epoch when the artifact was produced"
+    },
+    "prev_hash": {
+      "type": "string",
+      "description": "Previous tape entry hash; genesis for the first artifact in a tenant chain"
+    }
+  }
+}

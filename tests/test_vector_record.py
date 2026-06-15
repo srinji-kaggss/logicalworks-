@@ -241,5 +241,33 @@ class TestValidation(unittest.TestCase):
                           tenant="t", source_cid="b2b256:" + "a" * 64)
 
 
+class TestVectorRecordV2Metadata(unittest.TestCase):
+    def test_v2_fields_roundtrip(self):
+        conn = sqlite3.connect(":memory:")
+        conn.executescript(vmod.VECTOR_RECORDS_DDL)
+        r = encode_record(
+            _vec(),
+            modality="text",
+            space_id="sp:v2",
+            tenant="t",
+            source_cid="b2b256:" + "a" * 64,
+            tokenization_id="word_regex:v1",
+            artifact_cid="b2b256:" + "b" * 64,
+        )
+        upsert_record(conn, r, admin=vmod.ADMIN)
+        r2 = get_record(conn, r.cid, admin=vmod.ADMIN)
+        self.assertIsNotNone(r2)
+        self.assertEqual(r2.tokenization_id, "word_regex:v1")
+        self.assertEqual(r2.artifact_cid, "b2b256:" + "b" * 64)
+
+    def test_v2_fields_not_in_cid(self):
+        """Same bytes with different tokenization_id/artifact_cid must dedup."""
+        base = dict(modality="text", space_id="sp:v2", tenant="t",
+                    source_cid="b2b256:" + "a" * 64)
+        r1 = encode_record(_vec(), tokenization_id="a:v1", artifact_cid="b2b256:00", **base)
+        r2 = encode_record(_vec(), tokenization_id="b:v1", artifact_cid="b2b256:11", **base)
+        self.assertEqual(r1.cid, r2.cid)
+
+
 if __name__ == "__main__":
     unittest.main()

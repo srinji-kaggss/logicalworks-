@@ -6,7 +6,9 @@ import unittest
 from pathlib import Path
 from unittest import mock
 
+import lgwks_artifact_tokenized as artifact_mod
 import lgwks_storage
+import lgwks_vector as vec_mod
 
 
 class MemoryFactListPort:
@@ -143,6 +145,92 @@ class TestGlobalFactListPort(unittest.TestCase):
 
         self.assertTrue(port.initialized)
         self.assertEqual(facts.lookup("cid-1")["seen_count"], 2)
+
+
+class TestStorageGateArtifactIngest(unittest.TestCase):
+    def test_ingest_artifact_appends_to_tape(self):
+        with tempfile.TemporaryDirectory() as td:
+            gate = lgwks_storage.StorageGate(Path(td), tenant_id="tenant-a")
+            try:
+                artifact = artifact_mod.build_artifact(
+                    tenant_id="tenant-a",
+                    source="ingest",
+                    modality="text",
+                    tokenization_id=gate.tokenizers.default_word_regex_id(),
+                    token_stream=[1, 2, 3],
+                    payload_cid="b2b256:" + "a" * 64,
+                    payload_meta={"title": "hello"},
+                    capability_id="cap:ingest",
+                    timestamp=1234567890.0,
+                )
+                entry = gate.ingest_artifact(artifact)
+                self.assertTrue(entry)
+                self.assertIsNotNone(gate.fact_list.lookup(artifact.artifact_cid))
+            finally:
+                gate.close()
+
+    def test_ingest_artifact_with_vector(self):
+        with tempfile.TemporaryDirectory() as td:
+            gate = lgwks_storage.StorageGate(Path(td), tenant_id="tenant-a")
+            try:
+                artifact = artifact_mod.build_artifact(
+                    tenant_id="tenant-a",
+                    source="ingest",
+                    modality="text",
+                    tokenization_id=gate.tokenizers.default_word_regex_id(),
+                    token_stream=[],
+                    payload_cid="b2b256:" + "b" * 64,
+                    capability_id="cap:ingest",
+                    timestamp=1234567890.0,
+                )
+                vec = vec_mod.encode_record(
+                    [0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8],
+                    modality="text",
+                    space_id="test:d8",
+                    tenant="tenant-a",
+                    source_cid=artifact.payload_cid,
+                    tokenization_id=artifact.tokenization_id,
+                    artifact_cid=artifact.artifact_cid,
+                )
+                gate.ingest_artifact(artifact, vector_record=vec)
+                records = gate.vector_fabric.query_by_source(artifact.payload_cid)
+                self.assertEqual(len(records), 1)
+                self.assertEqual(records[0].artifact_cid, artifact.artifact_cid)
+                self.assertEqual(records[0].tokenization_id, artifact.tokenization_id)
+            finally:
+                gate.close()
+
+    def test_ingest_artifact_indexes_tokens(self):
+        with tempfile.TemporaryDirectory() as td:
+            gate = lgwks_storage.StorageGate(Path(td), tenant_id="tenant-a")
+            try:
+                artifact = artifact_mod.build_artifact(
+                    tenant_id="tenant-a",
+                    source="ingest",
+                    modality="text",
+                    tokenization_id=gate.tokenizers.default_word_regex_id(),
+                    token_stream=[10, 20, 30],
+                    payload_cid="b2b256:" + "c" * 64,
+                    capability_id="cap:ingest",
+                    timestamp=1234567890.0,
+                )
+                gate.ingest_artifact(artifact)
+                postings = gate.token_index.query_artifact_tokens(artifact.artifact_cid)
+                self.assertEqual(len(postings), 3)
+                tokens = [p[1] for p in postings]
+                self.assertEqual(tokens, [10, 20, 30])
+            finally:
+                gate.close()
+
+    def test_ingest_fact_backward_compatible(self):
+        with tempfile.TemporaryDirectory() as td:
+            gate = lgwks_storage.StorageGate(Path(td), tenant_id="tenant-a")
+            try:
+                entry = gate.ingest_fact("cid-fact-1", "some text", "text", "cap:test")
+                self.assertTrue(entry)
+                self.assertIsNotNone(gate.fact_list.lookup("cid-fact-1"))
+            finally:
+                gate.close()
 
 
 if __name__ == "__main__":
