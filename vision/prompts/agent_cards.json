@@ -5,32 +5,77 @@
     {
       "id": "orchestrator",
       "label": "Orchestrator",
-      "capabilities": ["plan", "spawn_peer", "synthesize", "issue_gate"],
-      "spawns": ["architect", "coder", "hacker", "qa-refiner"]
+      "capabilities": [
+        "plan",
+        "spawn_peer",
+        "synthesize",
+        "issue_gate"
+      ],
+      "spawns": [
+        "architect",
+        "coder",
+        "hacker",
+        "qa-refiner"
+      ]
     },
     {
       "id": "architect",
       "label": "Architect",
-      "capabilities": ["design", "adr", "risk_model", "spawn_peer"],
-      "spawns": ["coder", "hacker", "qa-refiner"]
+      "capabilities": [
+        "design",
+        "adr",
+        "risk_model",
+        "spawn_peer"
+      ],
+      "spawns": [
+        "coder",
+        "hacker",
+        "qa-refiner"
+      ]
     },
     {
       "id": "coder",
       "label": "Coder",
-      "capabilities": ["implement", "test", "refactor", "spawn_peer"],
-      "spawns": ["architect", "hacker", "qa-refiner"]
+      "capabilities": [
+        "implement",
+        "test",
+        "refactor",
+        "spawn_peer"
+      ],
+      "spawns": [
+        "architect",
+        "hacker",
+        "qa-refiner"
+      ]
     },
     {
       "id": "hacker",
       "label": "Hacker",
-      "capabilities": ["adversarial_review", "trust_boundary_review", "spawn_peer"],
-      "spawns": ["architect", "coder", "qa-refiner"]
+      "capabilities": [
+        "adversarial_review",
+        "trust_boundary_review",
+        "spawn_peer"
+      ],
+      "spawns": [
+        "architect",
+        "coder",
+        "qa-refiner"
+      ]
     },
     {
       "id": "qa-refiner",
       "label": "QA Refiner",
-      "capabilities": ["acceptance", "evidence", "regression_review", "spawn_peer"],
-      "spawns": ["architect", "coder", "hacker"]
+      "capabilities": [
+        "acceptance",
+        "evidence",
+        "regression_review",
+        "spawn_peer"
+      ],
+      "spawns": [
+        "architect",
+        "coder",
+        "hacker"
+      ]
     }
   ]
 }

@@ -194,6 +194,31 @@ def headers_for_url(url: str) -> dict[str, str]:
     return dict(policy["headers"])
 
 
+def pending_handoffs() -> list[dict]:
+    """Return all 'needs_auth' requests that haven't been 'locked' or 'skipped' yet."""
+    if not REQUESTS.exists():
+        return []
+    
+    # Simple state tracking over the append-only log
+    status: dict[str, dict] = {}
+    for line in REQUESTS.read_text(encoding="utf-8").splitlines():
+        line = line.strip()
+        if not line: continue
+        try:
+            rec = json.loads(line)
+            host = rec.get("host")
+            if not host: continue
+            if rec.get("event") == "needs_auth":
+                status[host] = rec
+            elif rec.get("event") in ("lock", "skip"):
+                status.pop(host, None)
+        except Exception:
+            continue
+            
+    # Also check the locks registry for already resolved sites
+    resolved = _active_sites()
+    return [r for host, r in status.items() if host not in resolved]
+
 def note_auth_failure(url: str, status: int) -> None:
     if status in {401, 403}:
         request_keyring(url, reason="remote returned auth failure", status=status)

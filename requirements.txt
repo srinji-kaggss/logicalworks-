@@ -8,3 +8,5 @@ jsonschema>=4.0
 cbor2>=5.4          # I5: canonical CBOR for MDL canonicalization
 zstandard>=0.21     # I5: MDL compression + dictionary training
 numpy>=1.24         # I10: deterministic 3-D viz projection (lgwks_viz_project)
+curl_cffi
+nodriver
