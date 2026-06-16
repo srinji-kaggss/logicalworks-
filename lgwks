@@ -1188,409 +1188,157 @@ def build_parser() -> argparse.ArgumentParser:
     parser.set_defaults(func=_home_dispatch)
     sub = parser.add_subparsers(dest="command", required=False)
 
-    # begin — "I'm starting X": the Grand Unified Entrypoint. Starts session + engine.
+    # ── CANONICAL AGENT SHORTCUTS ───────────────────────────────────────────
+
+    # begin — Grand Unified Entrypoint
     beg = sub.add_parser("begin", help="start a task: begin session + subconscious engine")
     beg.add_argument("goal", help="what you are trying to achieve")
     beg.add_argument("--repo", default=".", help="repo path")
     beg.add_argument("--json", action="store_true", help="structured machine-first transition packet")
     beg.set_defaults(func=_begin_dispatch)
 
-    # probe — "Check my gut": subtle AI guidance. Runs engine on current intent.
-    prb = sub.add_parser("probe", help="check gut: run engine on current intent (subtle guidance)")
+    # probe — "Check my gut"
+    prb = sub.add_parser("probe", help="check gut: run engine on current intent")
     prb.add_argument("intent", help="current intent text")
     prb.add_argument("--repo", default=".", help="repo path")
     prb.set_defaults(func=_probe_dispatch)
 
-    # bulk-harvest — "The Great Accumulation": ingest everything from everywhere.
-    bulk = sub.add_parser("bulk-harvest", help="ingest historical .claude/.gemini/.codex transcripts")
+    # do — unified orchestrator
+    import lgwks_do
+    lgwks_do.add_parser(sub)
+
+    # wf-run — complex workflow DSL
+    import lgwks_dsl
+    lgwks_dsl.add_parser(sub)
+
+    # x — multiply intent
+    mult = sub.add_parser("x", help="multiply intent: 'git {status,log,diff}' → runs the chain")
+    mult.add_argument("expr", help="product expression with {a,b,c} axes")
+    mult.add_argument("--yes", action="store_true", help="non-interactive approve")
+    mult.add_argument("--json", action="store_true", help="structured plan/results")
+    mult.set_defaults(func=_multiply_dispatch)
+
+    # bulk-harvest — "The Great Accumulation"
+    bulk = sub.add_parser("bulk-harvest", help="ingest historical transcripts")
     bulk.add_argument("--repo", default=".", help="repo root")
     bulk.add_argument("--limit", type=int, help="max turns to ingest")
     bulk.set_defaults(func=_bulk_harvest_dispatch)
 
-    jarvis = sub.add_parser("jarvis", help="deterministic research graph crawler")
-    jarvis_sub = jarvis.add_subparsers(dest="jarvis_command", required=True)
-    crawl = jarvis_sub.add_parser("crawl", help="crawl a website or keyword frontier")
-    crawl.add_argument("source", nargs="?", help="website URL or keyword seed")
-    crawl.add_argument("keyword_terms", nargs="*", help="additional newline/comma/semicolon-delimited keywords")
-    crawl.add_argument("--keywords", help="newline/comma/semicolon-delimited keywords")
-    crawl.add_argument("--prompt", default="map the machine-state understanding", help="research intent")
-    crawl.add_argument("--name", help="run name prefix")
-    crawl.add_argument("--max-pages", type=int, default=12)
-    crawl.add_argument("--max-depth", type=int, default=2)
-    crawl.add_argument("--workers", type=int, default=2)
-    crawl.add_argument("--include-external", action="store_true")
-    crawl.add_argument("--search-expansion", action="store_true", help="use googler site: expansion for URL+keyword crawls")
-    crawl.add_argument("--chunk-words", type=int, default=450)
-    crawl.add_argument("--chunk-overlap", type=int, default=70)
-    crawl.add_argument("--max-terms", type=int, default=120)
-    crawl.add_argument("--compress-limit", type=int, default=96)
-    crawl.add_argument("--similarity-threshold", type=float, default=0.72)
-    crawl.add_argument("--estimate-only", action="store_true")
-    # Engine selector: substrate (default for URL crawls) | legacy (original Jarvis path).
-    crawl.add_argument(
-        "--engine",
-        choices=["substrate", "legacy"],
-        default="substrate",
-        help=(
-            "crawl engine to use for URL sources. 'substrate' (default) routes through the "
-            "auth-aware substrate mapping runtime (lgwks_substrate.build_run). 'legacy' uses "
-            "the original Jarvis threaded fetch path. Keyword-only crawls always use legacy."
-        ),
-    )
-    # Auth / browser passthrough flags for substrate engine.
-    crawl.add_argument(
-        "--login-if-needed", action=argparse.BooleanOptionalAction, default=True,
-        help="(substrate engine) detect auth walls and prompt for a browser session",
-    )
-    crawl.add_argument(
-        "--login-url", default="",
-        help="(substrate engine) explicit login URL; defaults to target URL when auth detected",
-    )
-    crawl.add_argument(
-        "--auth-selector", default=None, dest="auth_selector",
-        help="(substrate engine) optional CSS selector for post-auth success detection on SPAs",
-    )
-    crawl.add_argument(
-        "--chromium", dest="chromium", action="store_true", default=False,
-        help="(substrate engine) use Chromium instead of WebKit for browser sessions",
-    )
-    crawl.add_argument(
-        "--embed-provider",
-        choices=["auto", "ollama", "openrouter-vl", "deterministic", "apple-local"],
-        default="deterministic",
-        help=(
-            "(substrate engine) embedding provider for URL crawls. Defaults to "
-            "deterministic to preserve Jarvis' local, machine-readable behavior; "
-            "use 'auto', 'ollama', or 'apple-local' to opt into semantic local embeddings."
-        ),
-    )
-    crawl.add_argument(
-        "--embed-model",
-        default="",
-        help="(substrate engine) optional explicit embedding model id",
-    )
-    crawl.add_argument(
-        "--click-discovery", action="store_true", default=False,
-        help="(substrate engine) deterministically click visible controls and record no-access/dead branches",
-    )
-    crawl.add_argument(
-        "--max-clicks-per-page", type=int, default=20,
-        help="(substrate engine) max visible controls to click per rendered page when --click-discovery is enabled",
-    )
-    crawl.add_argument(
-        "--crawl-mode", choices=["link-only", "link-then-click", "click-heavy"], default="link-then-click",
-        help="(substrate engine) crawl mode: link-only, link-then-click (default), or click-heavy",
-    )
-    crawl.set_defaults(func=crawl_command)
-    remap = jarvis_sub.add_parser("remap-db", help="upgrade an existing run database to the current Jarvis schema")
-    remap.add_argument("run_dir")
-    remap.set_defaults(func=remap_db_command)
+    # ── T0: SCHEMA ──────────────────────────────────────────────────────────
+    t0 = sub.add_parser("schema", help="T0: schema registry and contracts")
+    t0_sub = t0.add_subparsers(dest="schema_cmd", required=True)
+    import lgwks_schema; lgwks_schema.add_parser(t0_sub)
+    man = t0_sub.add_parser("manifest", help="machine-readable contract")
+    man.add_argument("--json", action="store_true", default=True)
+    man.add_argument("--render", action="store_true", help="human view")
+    man.set_defaults(func=_manifest_dispatch)
 
-    # manifest — the machine-first contract: one JSON an agent reads instead of docs (AI discovery).
-    # --json is the default (and accept the flag for caller intent); --render is the human view.
-    manifest = sub.add_parser("manifest", help="machine-readable contract (verbs, capabilities, schema)")
-    manifest.add_argument("--json", action="store_true", help="structured (default; flag exists for caller intent)")
-    manifest.add_argument("--render", action="store_true", help="human view instead of JSON")
-    manifest.add_argument("--for-agent", action="store_true", help="compact capability matrix for AI consumption")
-    manifest.set_defaults(func=_manifest_dispatch)
+    # ── T1: EXTRACTION ──────────────────────────────────────────────────────
+    t1 = sub.add_parser("extract", help="T1: data extraction and ingestion")
+    t1_sub = t1.add_subparsers(dest="extract_cmd", required=True)
+    import lgwks_crawl; lgwks_crawl.add_parser(t1_sub)
+    
+    file_p = t1_sub.add_parser("file", help="read any file/URL → text")
+    file_p.add_argument("target", help="URL or local path")
+    file_p.add_argument("--json", action="store_true")
+    file_p.set_defaults(func=_extract_dispatch)
+    
+    import lgwks_public; lgwks_public.add_parser(t1_sub)
+    import lgwks_embed; lgwks_embed.add_parser(t1_sub)
+    import lgwks_capture; lgwks_capture.add_parser(t1_sub)
+    import lgwks_foundation; lgwks_foundation.add_parser(t1_sub)
+    import lgwks_bulk_harvest; lgwks_bulk_harvest.add_parser(t1_sub)
 
-    # preview — dry-run brace/expression strings: show plan + risk verdict, no execution (T0 safe).
-    preview = sub.add_parser("preview", help="dry-run a brace expression — risk verdict, no execution")
-    preview.add_argument("expr", help="brace or lgwks-expression string to preview")
-    preview.add_argument("--json", action="store_true", help="emit HumanPreview JSON instead of TTY render")
-    preview.set_defaults(func=_preview_dispatch)
+    # ── T2: CLASSIFICATION ──────────────────────────────────────────────────
+    t2 = sub.add_parser("classify", help="T2: entity and world-model classification")
+    t2_sub = t2.add_subparsers(dest="classify_cmd", required=True)
+    import lgwks_entity_graph; lgwks_entity_graph.add_parser(t2_sub)
+    import lgwks_jepa; lgwks_jepa.add_parser(t2_sub)
 
-    # extract — read ANY format (pdf·docx·xlsx·pptx·html·csv·md) → text. Read-only, no tokens.
-    extract = sub.add_parser("extract", help="read any file/URL → text")
-    extract.add_argument("target", help="URL or local file path")
-    extract.add_argument("--json", action="store_true", help="structured {source,kind,ok,text}")
-    extract.add_argument("--max-chars", type=int, default=8000, dest="max_chars")
-    extract.set_defaults(func=_extract_dispatch)
+    # ── T3: REASONING ───────────────────────────────────────────────────────
+    t3 = sub.add_parser("reason", help="T3: subconscious engine and research loops")
+    t3_sub = t3.add_subparsers(dest="reason_cmd", required=True)
+    import lgwks_engine; lgwks_engine.add_parser(t3_sub)
+    import lgwks_pipeline; lgwks_pipeline.add_parser(t3_sub)
+    import lgwks_memory; lgwks_memory.add_parser(t3_sub)
+    import lgwks_intent; lgwks_intent.add_parser(t3_sub)
+    import lgwks_intent_router; lgwks_intent_router.add_parser(t3_sub)
 
-    # convert — any source → text/markdown/json artifact (the read-anything port, materialised).
-    convert = sub.add_parser("convert", help="any source → text/md/json")
-    convert.add_argument("source", help="URL or local file path")
-    convert.add_argument("--to", choices=["txt", "md", "json"], default="txt")
-    convert.add_argument("--out", help="write to file (default: stdout)")
-    convert.add_argument("--max-chars", type=int, default=20000, dest="max_chars")
-    convert.set_defaults(func=_convert_dispatch)
+    # ── T4: PROJECTION ──────────────────────────────────────────────────────
+    t4 = sub.add_parser("project", help="T4: latent-space projection and telemetry")
+    t4_sub = t4.add_subparsers(dest="project_cmd", required=True)
+    import lgwks_viz_project; lgwks_viz_project.add_parser(t4_sub)
 
-    # x — multiply intent: one product expression → a command chain, one confirmation, runs them all.
-    mult = sub.add_parser("x", help="multiply intent: 'git {status,log,diff}' → runs the chain")
-    mult.add_argument("expr", help="product expression with {a,b,c} axes (cartesian across braces)")
-    mult.add_argument("--yes", action="store_true", help="non-interactive approve (read-only chains)")
-    mult.add_argument("--force", action="store_true", help="allow destructive commands non-interactively")
-    mult.add_argument("--allow-unknown", action="store_true", dest="allow_unknown",
-                      help="allow unknown commands non-interactively after --yes")
-    mult.add_argument("--dry-run", action="store_true", dest="dry_run", help="show the expanded chain, run nothing")
-    mult.add_argument("--keep-going", action="store_true", dest="keep_going", help="continue after a failure")
-    mult.add_argument("--json", action="store_true", help="structured plan/results")
-    mult.add_argument("--plan-only", action="store_true", dest="plan_only", help="with --json: emit plan, don't run")
-    mult.set_defaults(func=_multiply_dispatch)
+    # ── T5: SCORING ─────────────────────────────────────────────────────────
+    t5 = sub.add_parser("score", help="T5: relationship scoring (RESCAL/MDL)")
+    t5_sub = t5.add_subparsers(dest="score_cmd", required=True)
+    import lgwks_score; lgwks_score.add_parser(t5_sub)
+    import lgwks_rank; lgwks_rank.add_parser(t5_sub)
+    import lgwks_cohere; lgwks_cohere.add_parser(t5_sub)
+    import lgwks_inbound; lgwks_inbound.add_parser(t5_sub)
 
-    # refine — the Machine (Tier-E): classify intent, detect gaps, score specificity, abstain-or-proceed.
-    refine = sub.add_parser("refine", help="machine intent refinement (class·gaps·specificity·abstain)")
-    refine.add_argument("intent", help="raw intent to refine")
-    refine.add_argument("--agent", action="store_true", help="caller is an agent (auto-inject quality keywords)")
-    refine.add_argument("--depth", type=float, default=0.5, help="0..1 — higher demands more specificity")
-    refine.add_argument("--render", action="store_true", help="human view instead of JSON")
-    refine.set_defaults(func=_refine_dispatch, json=True)
+    # ── T6: STATE ───────────────────────────────────────────────────────────
+    t6 = sub.add_parser("state", help="T6: durable state and context fabric")
+    t6_sub = t6.add_subparsers(dest="state_cmd", required=True)
+    import lgwks_crdt; lgwks_crdt.add_parser(t6_sub)
+    import lgwks_run; lgwks_run.add_parser(t6_sub)
+    import lgwks_context; lgwks_context.add_parser(t6_sub)
+    import lgwks_spawn; lgwks_spawn.add_parser(t6_sub)
 
-    # store — the data trust boundary: status of the three at-rest stores (untrusted/cognition/intent).
-    store = sub.add_parser("store", help="status of the three data stores (cache·cognition·vault)")
-    store.add_argument("--json", action="store_true", help="structured status")
-    store.set_defaults(func=_store_dispatch)
+    # ── T7: PROOF ───────────────────────────────────────────────────────────
+    t7 = sub.add_parser("proof", help="T7: provenance and forensic proof")
+    t7_sub = t7.add_subparsers(dest="proof_cmd", required=True)
+    import lgwks_axiom; lgwks_axiom.add_parser(t7_sub)
+    import lgwks_solve; 
+    sol = t7_sub.add_parser("solve", help="prove what happened")
+    sol.add_argument("target", nargs="?", default="git")
+    sol.add_argument("--thought", default="")
+    sol.set_defaults(func=_solve_dispatch)
+    import lgwks_repo; lgwks_repo.add_parser(t7_sub)
 
-    # memory — deterministic project context chain. This is the local "remember everything" surface.
-    import lgwks_memory
-    lgwks_memory.add_parser(sub)
+    # ── T8: GOVERN ──────────────────────────────────────────────────────────
+    t8 = sub.add_parser("govern", help="T8: safety gates and capability access")
+    t8_sub = t8.add_subparsers(dest="govern_cmd", required=True)
+    import lgwks_aup; lgwks_aup.add_parser(t8_sub)
+    import lgwks_admission; lgwks_admission.add_parser(t8_sub)
+    import lgwks_access; lgwks_access.add_parser(t8_sub)
+    import lgwks_capability; lgwks_capability.add_parser(t8_sub)
+    import lgwks_keyvault; lgwks_keyvault.add_parser(t8_sub)
 
-    # public — open-license source search. Public web is not enough; every result carries license basis.
-    import lgwks_public
-    lgwks_public.add_parser(sub)
+    # ── OPS ─────────────────────────────────────────────────────────────────
+    ops = sub.add_parser("ops", help="system operations and management")
+    ops_sub = ops.add_subparsers(dest="ops_cmd", required=True)
+    import lgwks_daemon; lgwks_daemon.add_parser(ops_sub)
+    import lgwks_hooks; lgwks_hooks.add_parser(ops_sub)
+    import lgwks_project; lgwks_project.add_parser(ops_sub)
+    import lgwks_workflows; lgwks_workflows.add_parser(ops_sub)
+    import lgwks_batch; lgwks_batch.add_parser(ops_sub)
+    import lgwks_debug; lgwks_debug.add_parser(ops_sub)
+    import lgwks_gh; lgwks_gh.add_parser(ops_sub)
+    import lgwks_agent_os; lgwks_agent_os.add_parser(ops_sub)
+    import lgwks_codebase; lgwks_codebase.add_parser(ops_sub)
+    import lgwks_model_hub; lgwks_model_hub.add_parser(ops_sub)
+    
+    doc = ops_sub.add_parser("doctor", help="verify install health")
+    doc.set_defaults(func=_doctor_dispatch)
 
-    # embed — deterministic local folder vector vault, with per-folder sub-vaults.
-    import lgwks_embed
-    lgwks_embed.add_parser(sub)
+    # ── HUMAN ───────────────────────────────────────────────────────────────
+    hum = sub.add_parser("human", help="interactive and human-only management verbs")
+    hum_sub = hum.add_subparsers(dest="human_command", required=True)
 
-    # batch — schema-validated batch execution for real shell commands.
-    import lgwks_batch
-    lgwks_batch.add_parser(sub)
-
-    # project — one-prompt orchestrator: identify/spec now, deploy executor next.
-    import lgwks_project
-    lgwks_project.add_parser(sub)
-
-    # geo — geometric-CLI translator: typed GeoExpr -> argv plan, the compiler behind `lgwks x`.
-    import lgwks_geoexpr
-    lgwks_geoexpr.add_parser(sub)
-
-    # comprehend — the Comprehension Gate (Intention × Understanding)
-    import lgwks_comprehend
-    lgwks_comprehend.add_parser(sub)
-
-    # cohere — Coherence Engine pipeline G0→G1→G3→G2
-    import lgwks_cohere
-    lgwks_cohere.add_parser(sub)
-
-    # login — capture a user-consented browser session for one host. Secrets/cookies stay in the
-    # host-scoped Playwright storage file and are only reused for that same host.
-    login = sub.add_parser("login", help="save a host-scoped browser session (human logs in)")
-    login.add_argument("target", help="login URL or shorthand: linkedin")
-    login.add_argument("--selector", dest="success_selector", default=None,
-                       help="CSS selector for post-auth element (auto-detected for SPAs if omitted)")
-    login.add_argument("--engine", choices=["chromium", "webkit"], default="chromium",
-                       help="browser engine (webkit for Safari-cookie sites)")
-    login.add_argument("--manual", action="store_true",
-                       help="save session after you press Enter in the terminal; useful for OTP, passkeys, and magic links")
+    login = hum_sub.add_parser("login", help="save a host-scoped browser session")
+    login.add_argument("target")
     login.set_defaults(func=_login_dispatch)
 
-    # solve — "I have this mess/thought: prove what happened." The first real-world experience.
-    solve = sub.add_parser("solve", help="prove what happened (currently: git)")
-    solve.add_argument("target", nargs="?", default="git", help="what to solve (currently: git)")
-    solve.add_argument("--thought", default="", help="your worry/claim — 'prove this for me'")
-    solve.add_argument("--repo", default=".", help="path to the repo (default: cwd)")
-    solve.add_argument("--json", action="store_true", help="structured output with CSL-JSON provenance")
-    solve.add_argument("--frontier", type=float, metavar="0..1", help="settled(0) <-> frontier(1)")
-    solve.add_argument("--lens", type=float, metavar="-1..1", help="philosophy(-1) <-> science(+1)")
-    solve.add_argument("--depth", type=float, metavar="0..1", help="shallow(0) <-> deep(1)")
-    solve.set_defaults(func=_solve_dispatch)
+    hum_tui = hum_sub.add_parser("tui", help="launch Rust TUI")
+    hum_tui.set_defaults(func=_tui_dispatch)
 
-    # repo — lifecycle hygiene: audit, recover, cleanup, merge, handoff, graph
-    import lgwks_repo
-    lgwks_repo.add_parser(sub)
+    hum_repl = hum_sub.add_parser("repl", help="interactive readline harness")
+    hum_repl.add_argument("--repo", default=".")
+    hum_repl.set_defaults(func=_repl_dispatch)
 
-    # review — graph-aware code review + proposed git actions
-    import lgwks_review
-    lgwks_review.add_parser(sub)
-
-    # session — session boundary analyzer (begin / end / summary)
-    import lgwks_session
-    lgwks_session.add_parser(sub)
-
-    # fetch — single-page browser fetch/extract. `crawl` remains as a compatibility alias.
-    import lgwks_crawl
-    lgwks_crawl.add_parser(sub)
-
-    # gh — GitHub surface: issues, PRs, state maps, hardening, what's next
-    import lgwks_gh
-    lgwks_gh.add_parser(sub)
-
-    # debug — automated debugging: run, parse, propose fix
-    import lgwks_debug
-    lgwks_debug.add_parser(sub)
-
-    # intent — schema-driven intent router: declare, probe, act
-    import lgwks_intent
-    lgwks_intent.add_parser(sub)
-
-    # portal — deterministic project/portal keys and coding-agent context packets
-    import lgwks_portal
-    lgwks_portal.add_parser(sub)
-
-    # capture — unified operator-facing capture compiler over substrate + portal
-    import lgwks_capture
-    lgwks_capture.add_parser(sub)
-
-    # jepa — multi-view package surface over capture + portal
-    import lgwks_jepa
-    lgwks_jepa.add_parser(sub)
-
-    # entity-graph — offline document entity graph builder (T1 regex / T2 CoreML / T3 Foundation Models)
-    import lgwks_entity_graph
-    lgwks_entity_graph.add_parser(sub)
-
-    # graph — deterministic code-graph queries (impact, complexity, path, Cypher-like)
-    import lgwks_graph
-    lgwks_graph.add_graph_parser(sub)
-
-    # substrate — deterministic crawl+vector substrate for local/web content
-    import lgwks_substrate
-    lgwks_substrate.add_parser(sub)
-
-    # pipeline — unified ingestion+ranking spine (crawl→qualify→embed→rank→pack)
-    import lgwks_pipeline
-    lgwks_pipeline.add_parser(sub)
-
-    # refactor — deterministic AST-based code refactoring
-    import lgwks_refactor
-    lgwks_refactor.add_parser(sub)
-
-    # axiom — verified byte-layer harness and narration/emission divergence checks
-    import lgwks_axiom
-    lgwks_axiom.add_parser(sub)
-
-
-    # hooks — comprehensive audit-first hook system: lifecycle events, registry, audit log
-    import lgwks_hooks
-    lgwks_hooks.add_parser(sub)
-
-    # agent-os — fleet startup/bootstrap/doctor surface (Issue #1)
-    import lgwks_agent_os
-    lgwks_agent_os.add_parser(sub)
-
-    # aup — acceptable use policy runtime gate (Issue #56)
-    import lgwks_aup
-    lgwks_aup.add_parser(sub)
-
-    # workflow — unified AI workflow harness
-    import lgwks_workflows
-    lgwks_workflows.add_parser(sub)
-
-    # do — unified orchestrator: code, research, govern, cleanup, ship
-    import lgwks_do
-    lgwks_do.add_parser(sub)
-
-    # spawn — AI-AI handoff packet assembler
-    import lgwks_spawn
-    lgwks_spawn.add_parser(sub)
-
-    # schema — schema registry for next-agent discovery
-    import lgwks_schema
-    lgwks_schema.add_parser(sub)
-
-    # score — deterministic schema scoring (I5: RESCAL order-3 + MDL)
-    import lgwks_score
-    lgwks_score.add_parser(sub)
-
-    # rank — cubic node centrality + AI-discrepancy δ (I6)
-    import lgwks_rank
-    lgwks_rank.add_parser(sub)
-
-    # inbound — L5 consumer pack: RRF fusion + reflex token budget (I7)
-    import lgwks_inbound
-    lgwks_inbound.add_parser(sub)
-
-    # admission — token-bucket admission + queue (I8)
-    import lgwks_admission
-    lgwks_admission.add_parser(sub)
-
-    # capability — capability-token tenant isolation (I8)
-    import lgwks_capability
-    lgwks_capability.add_parser(sub)
-
-    # access — capability-port access router (#98 / #99)
-    import lgwks_access
-    lgwks_access.add_parser(sub)
-
-    # crdt — CRDT state merge: G-Set / OR-Set / LWW (I9)
-    import lgwks_crdt
-    lgwks_crdt.add_parser(sub)
-
-    # viz-project — deterministic 3-D viz projection, decoupled (I10)
-    import lgwks_viz_project
-    lgwks_viz_project.add_parser(sub)
-
-    # waste — waste ledger: proof context-optimisation works (I11)
-    import lgwks_waste
-    lgwks_waste.add_parser(sub)
-
-    # map — U1 capability map: rank lgwks verbs by relevance to an intent
-    import lgwks_map
-    lgwks_map.add_parser(sub)
-
-    # daemon — background lifecycle shell for the shared referee runtime
-    import lgwks_daemon
-    lgwks_daemon.add_parser(sub)
-
-    # engine — U6 subconscious engine: produce §6 schema for a prompt
-    import lgwks_engine
-    lgwks_engine.add_parser(sub)
-
-    # route — deterministic intent router (tiny-bert + heuristic fallback)
-    import lgwks_intent_router
-    lgwks_intent_router.add_parser(sub)
-
-    # codebase — semantic codebase database for AI-native code understanding
-    import lgwks_codebase
-    lgwks_codebase.add_parser(sub)
-
-    # auth — auth-vault CLI (Issue #7)
-    auth = sub.add_parser("auth", help="capability vault (refs only; secrets stay in Keychain)")
-    auth.set_defaults(func=_auth_dispatch, _passthrough=True)
-
-    # akinator — curious research interface / autonomous deep-research driver
-    akinator = sub.add_parser("akinator", help="curious research interface and auto deep-research driver")
-    akinator.set_defaults(func=_akinator_dispatch, _passthrough=True)
-
-    # run — post-gate execution spine and universal run management
-    import lgwks_run
-    lgwks_run.add_parser(sub)
-
-    # context — spawn context pack assembler for autonomous runs
-    import lgwks_context
-    lgwks_context.add_parser(sub)
-
-    # foundation — on-device Foundation/NaturalLanguage extraction surface
-    import lgwks_foundation
-    lgwks_foundation.add_parser(sub)
-
-    # keyvault — runtime API-key resolution/store seam
-    import lgwks_keyvault
-    lgwks_keyvault.add_parser(sub)
-
-    # model-hub — repo-resident model catalog/convert/train entrypoint
-    import lgwks_model_hub
-    lgwks_model_hub.add_parser(sub)
-
-    # doctor — self-test: verify environment, deps, models, and PATH
-    doctor = sub.add_parser("doctor", help="self-test: verify install health")
-    doctor.set_defaults(func=_doctor_dispatch)
-
-    # tui — high-performance Rust TUI (the "pop up" cockpit)
-    tui_p = sub.add_parser("tui", help="launch the high-performance daemon cockpit (Rust TUI)")
-    tui_p.set_defaults(func=_tui_dispatch)
-
-    # repl — interactive readline harness (history, completion, inline queries)
-    repl = sub.add_parser("repl", help="interactive readline harness (history, tab completion, inline queries)")
-    repl.add_argument("--repo", default=".", help="repo path to load graph context from")
-    repl.set_defaults(func=_repl_dispatch)
-
-    # initialize — first-time human setup: verify deps, create dirs, install browsers, print next steps
-    init = sub.add_parser("initialize", help="first-time setup: verify deps, install browsers, create dirs")
-    init.add_argument("--skip-browser-install", action="store_true", help="skip playwright browser install (assume already done)")
-    init.add_argument("--auto-install", action="store_true", help="opt in to network installs (pip + playwright browsers); default is report-only for supply-chain safety")
-    init.set_defaults(func=_initialize_dispatch)
+    hum_init = hum_sub.add_parser("initialize", help="first-time setup")
+    hum_init.set_defaults(func=_initialize_dispatch)
 
     return parser
 

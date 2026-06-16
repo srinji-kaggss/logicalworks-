@@ -2,8 +2,8 @@
 
 Three extraction tiers (always graceful-degrade):
   T1: regex enumeration lookup (always runs, zero deps)
-  T2: CoreML text classifier (optional; needs lgwks_coreml + a trained .mlpackage)
-  T3: Foundation Models structured extraction (optional; macOS 26+, M4+, on-device)
+  T2: CoreML text classifier (DEFERRED: ignore model feedback for now)
+  T3: Foundation Models structured extraction (DEFERRED: ignore model feedback for now)
 
 Output: SQLite DB (nodes + edges + chunks) + JSON export for git sync.
 No cloud, no remote inference, no HuggingFace, no Ollama. All local.
@@ -33,16 +33,11 @@ import lgwks_sqlite
 # ── entity taxonomy ───────────────────────────────────────────────────────────
 
 ENTITY_TYPES = (
-    "ACCOUNT",       # registered/non-registered account (RRSP, RRIF, TFSA …)
-    "PLAN_TYPE",     # the plan registration type label
-    "TRANSACTION",   # a single transaction instance
-    "TX_TYPE",       # transaction type (Purchase, Redemption, Switch, Transfer …)
-    "FUND",          # a specific fund (code + series)
-    "FUNDSERV_CODE", # network message code (NFS, NFR, NSW, TR01, TR02 …)
-    "PARTICIPANT",   # actor: client, advisor, dealer, sponsor
-    "FORM",          # regulatory form (T2033, T4RSP …)
-    "SETTLEMENT",    # settlement record
-    "AMOUNT",        # dollar/unit quantity extracted from text
+    "EMAIL",         # email address
+    "URL",           # web address
+    "IP_ADDRESS",    # IPv4/v6 address
+    "UUID",          # standard UUIDs
+    "MONEY",         # dollar/unit quantity
     "DATE",          # date mention
     "IMAGE",         # visual evidence (PNG, JPG, etc.)
     "VIDEO",         # video evidence (MP4, etc.)
@@ -51,22 +46,21 @@ ENTITY_TYPES = (
 
 # ── T1 regex patterns ─────────────────────────────────────────────────────────
 
-_PLAN_TYPES = re.compile(
-    r"\b(RRSP|Spousal RRSP|sRRSP|RRIF|TFSA|LIRA|LRSP|LIF|RLIF|PRIF|RESP|PRPP|SPP|RPP|NONREG|Non-Reg(?:istered)?)\b",
-    re.IGNORECASE,
+_EMAILS = re.compile(
+    r"\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Z|a-z]{2,}\b"
 )
-_FUNDSERV_CODES = re.compile(
-    r"\b(NFS|NFR|NSW|TR0[12]|ATON|PAC|SWP|SWI|SWO)\b",
+_URLS = re.compile(
+    r"\b(?:https?|ftp)://[^\s/$.?#].[^\s]*\b"
 )
-_FORMS = re.compile(
-    r"\b(T2033|T2030|T4RSP|T4RIF|T2151|T2220|T1036)\b",
+_IPS = re.compile(
+    r"\b(?:[0-9]{1,3}\.){3}[0-9]{1,3}\b"
 )
-_ACCOUNT_STRUCTURES = re.compile(
-    r"\b(Client[\s-]?Name|Nominee|Omnibus)\b",
-    re.IGNORECASE,
+_UUIDS = re.compile(
+    r"\b[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\b",
+    re.IGNORECASE
 )
-_AMOUNTS = re.compile(
-    r"\$\s*[\d,]+(?:\.\d{1,2})?|\b\d[\d,]*(?:\.\d+)?\s*(?:units?|%)\b",
+_MONEY = re.compile(
+    r"\$\s*[\d,]+(?:\.\d{1,2})?|\b\d[\d,]*(?:\.\d+)?\s*(?:USD|EUR|GBP)\b",
     re.IGNORECASE,
 )
 _DATES = re.compile(
@@ -86,20 +80,20 @@ def extract_mentions(text: str) -> list[EntityMention]:
     """T1: enumerate all entity mentions in text via regex."""
     mentions: list[EntityMention] = []
 
-    for m in _PLAN_TYPES.finditer(text):
-        mentions.append(EntityMention("PLAN_TYPE", m.group(), m.start(), m.end()))
+    for m in _EMAILS.finditer(text):
+        mentions.append(EntityMention("EMAIL", m.group(), m.start(), m.end()))
 
-    for m in _FUNDSERV_CODES.finditer(text):
-        mentions.append(EntityMention("FUNDSERV_CODE", m.group(), m.start(), m.end()))
+    for m in _URLS.finditer(text):
+        mentions.append(EntityMention("URL", m.group(), m.start(), m.end()))
 
-    for m in _FORMS.finditer(text):
-        mentions.append(EntityMention("FORM", m.group(), m.start(), m.end()))
+    for m in _IPS.finditer(text):
+        mentions.append(EntityMention("IP_ADDRESS", m.group(), m.start(), m.end()))
 
-    for m in _ACCOUNT_STRUCTURES.finditer(text):
-        mentions.append(EntityMention("PARTICIPANT", m.group(), m.start(), m.end()))
+    for m in _UUIDS.finditer(text):
+        mentions.append(EntityMention("UUID", m.group(), m.start(), m.end()))
 
-    for m in _AMOUNTS.finditer(text):
-        mentions.append(EntityMention("AMOUNT", m.group(), m.start(), m.end()))
+    for m in _MONEY.finditer(text):
+        mentions.append(EntityMention("MONEY", m.group(), m.start(), m.end()))
 
     for m in _DATES.finditer(text):
         mentions.append(EntityMention("DATE", m.group(), m.start(), m.end()))
@@ -107,6 +101,7 @@ def extract_mentions(text: str) -> list[EntityMention]:
     # Sort by position so callers can read them in-order
     mentions.sort(key=lambda e: e.start)
     return mentions
+
 
 
 # ── SQLite graph DB ───────────────────────────────────────────────────────────

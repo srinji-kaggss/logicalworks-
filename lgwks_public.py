@@ -153,9 +153,15 @@ def search_public(query: str, source: str = "all", limit: int = 5) -> dict:
             errors[name] = "unknown source"
             continue
         try:
+            # Still pass limit to individual runners as a hint, but we'll global cap later
             records.extend(fn(query, limit))
         except Exception as exc:
             errors[name] = type(exc).__name__
+    
+    # Global cap after collecting from all sources
+    if len(records) > limit:
+        records = records[:limit]
+
     # relevance gate: label honestly, never silent canon-as-relevance
     records = _label_records(records, query)
     return {

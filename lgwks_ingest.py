@@ -174,7 +174,7 @@ def _is_wall(r: dict[str, Any]) -> bool:
 
 
 def _embed_text(body: str) -> dict[str, Any]:
-    """det 256-d hash (always) + Qwen semantic sliced to TARGET_DIMS (None if ollama down)."""
+    """det 256-d hash (always) + Qwen semantic (DEFERRED: ignore model feedback for now)."""
     dual = lgwks_run.embed_dual(body, embed_on=True)
     sem = dual.get("sem")
     if sem and sem.get("vector"):
