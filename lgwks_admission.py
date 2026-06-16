@@ -425,6 +425,32 @@ def add_parser(sub) -> None:
                         help=f"queue max Q_max (default: {DEFAULT_Q_MAX})")
     info_p.set_defaults(func=_cmd_info)
 
+    chk = sp.add_parser("check", help="test live admission check")
+    chk.add_argument("--tenant", default="guest", help="tenant id")
+    chk.add_argument("--weight", type=float, default=1.0, help="request weight")
+    chk.add_argument("--json", action="store_true", help="output json")
+    chk.set_defaults(func=_cmd_check)
+
+def _cmd_check(args) -> int:
+    import json as _json
+    bucket, queue, _ = make_admission_gate()
+    res = admission_decision(
+        tenant_id=args.tenant,
+        bucket=bucket,
+        queue=queue,
+        req_weight=args.weight
+    )
+    if getattr(args, "json", False):
+        print(_json.dumps({
+            "admitted": res.admitted,
+            "status": res.status,
+            "latency_ms": res.latency_ms
+        }, indent=2))
+        return 0 if res.admitted else 1
+    print(f"Admission for tenant '{args.tenant}' weight={args.weight}: {res.status} (latency: {res.latency_ms:.1f}ms)")
+    return 0 if res.admitted else 1
+
+
 
 def _cmd_info(args) -> int:
     import json as _json

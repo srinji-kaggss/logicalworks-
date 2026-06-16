@@ -465,6 +465,8 @@ def _do_research_inline(args: argparse.Namespace) -> int:
         click_discovery=False,
         max_clicks_per_page=20,
         crawl_mode="link-then-click",
+        research=True,                  # ── Trigger co-scientist harness ──
+        research_rounds=6,
     )
     try:
         manifest = lgwks_substrate.build_run(sub_args)
@@ -865,6 +867,8 @@ def _do_prove(args: argparse.Namespace) -> int:
 
 def _do_extract(args: argparse.Namespace) -> int:
     import lgwks_files
+    # Map 'source' from the workflow namespace to 'target' for the files command
+    args.target = getattr(args, "source", None)
     return lgwks_files.extract_command(args)
 
 
@@ -1023,7 +1027,7 @@ def list_workflows(json_out: bool = False) -> int:
 
 def add_parser(sub) -> None:
     # === workflow harness (exact subcommands) ===
-    p = sub.add_parser("workflow", aliases=["wf"],
+    p = sub.add_parser("workflow",
         help="unified AI workflow harness: research, code, govern, cleanup, ship, prove, ...")
     wf_sub = p.add_subparsers(dest="workflow_subcommand", required=True, help="workflow kind")
 
@@ -1050,7 +1054,7 @@ def add_parser(sub) -> None:
     research.set_defaults(func=workflow_command)
 
     # deep-research
-    deep = wf_sub.add_parser("deep-research", aliases=["deep"], help="multi-source synthesis with cross-reference")
+    deep = wf_sub.add_parser("deep-research", help="multi-source synthesis with cross-reference")
     deep.add_argument("query", nargs="?", default="", help="research query or URL")
     deep.add_argument("--sources", type=int, default=3, help="number of sources to crawl")
     deep.add_argument("--depth", type=int, default=2, help="crawl depth per source")
@@ -1059,7 +1063,7 @@ def add_parser(sub) -> None:
     deep.set_defaults(func=workflow_command)
 
     # quick-scan
-    scan = wf_sub.add_parser("quick-scan", aliases=["scan", "peek"], help="fast AUP + single-page inspect")
+    scan = wf_sub.add_parser("quick-scan", help="fast AUP + single-page inspect")
     scan.add_argument("query", nargs="?", default="", help="URL to inspect")
     scan.add_argument("--max-chars", type=int, default=4000, help="max chars to extract")
     _common_flags(scan)
@@ -1130,25 +1134,25 @@ def add_parser(sub) -> None:
     compare.set_defaults(func=workflow_command)
 
     # audit-trail
-    audit = wf_sub.add_parser("audit-trail", aliases=["audit"], help="pull git history and generate audit report")
+    audit = wf_sub.add_parser("audit-trail", help="pull git history and generate audit report")
     audit.add_argument("--repo", default=".", help="path to repo")
     audit.add_argument("--commits", type=int, default=10, help="number of commits to audit")
     _common_flags(audit)
     audit.set_defaults(func=workflow_command)
 
     # health-check
-    health = wf_sub.add_parser("health-check", aliases=["health", "doctor"], help="env integrity + manifest sanity")
+    health = wf_sub.add_parser("health-check", help="env integrity + manifest sanity")
     _common_flags(health)
     health.set_defaults(func=workflow_command)
 
     # onboard
-    onboard = wf_sub.add_parser("onboard", aliases=["setup", "init"], help="first-time machine setup")
+    onboard = wf_sub.add_parser("onboard", help="first-time machine setup")
     onboard.add_argument("--skip-browser", action="store_true", help="skip browser install")
     _common_flags(onboard)
     onboard.set_defaults(func=workflow_command)
 
     # migration-check
-    migrate = wf_sub.add_parser("migration-check", aliases=["migration", "upgrade-check"], help="compare versions for breaking changes")
+    migrate = wf_sub.add_parser("migration-check", help="compare versions for breaking changes")
     migrate.add_argument("--repo", default=".", help="path to repo")
     migrate.add_argument("--from-ref", default="HEAD~1", help="from ref")
     migrate.add_argument("--to-ref", default="HEAD", help="to ref")

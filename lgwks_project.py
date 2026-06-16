@@ -95,7 +95,7 @@ def add_parser(sub) -> None:
     plan.add_argument("--tokens-per-cycle", type=int, default=DEFAULT_TOKENS)
     plan.add_argument("--json", action="store_true", help="structured output")
     plan.set_defaults(func=plan_command)
-    deploy = ps.add_parser("run", aliases=["deploy", "research"], help="run the one-prompt research orchestrator")
+    deploy = ps.add_parser("run", help="run the one-prompt research orchestrator")
     deploy.add_argument("project")
     deploy.add_argument("--prompt", default="")
     deploy.add_argument("--reasoning-cycles", type=int)

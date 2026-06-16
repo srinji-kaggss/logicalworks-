@@ -162,13 +162,15 @@ def index_command(args: argparse.Namespace) -> int:
     path = Path(args.path)
     if path.is_dir():
         index_path = path / "index.json"
+        if not index_path.exists():
+            index_path = path / "manifest.json"
     else:
         index_path = path
-    
+
     if not index_path.exists():
-        print(json.dumps({"ok": False, "error": f"not found: {index_path}"}), file=sys.stderr)
+        print(json.dumps({"ok": False, "error": f"not found: {path} (checked index.json and manifest.json)"}), file=sys.stderr)
         return 1
-        
+
     try:
         index = json.loads(index_path.read_text(encoding="utf-8"))
         print(json.dumps(index, indent=2, sort_keys=True))

@@ -172,7 +172,8 @@ def comprehend_command(args) -> int:
     unit_id = args.unit
     
     try:
-        raw = lgwks_inline.resolve_payload(f"@{args.file}")
+        from pathlib import Path
+        raw = Path(args.file).read_text(encoding="utf-8")
         artifact = ComprehensionArtifact.from_dict(_json.loads(raw))
     except Exception as exc:
         print(f"error: failed to resolve plan: {exc}", file=sys.stderr)

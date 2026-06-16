@@ -84,7 +84,7 @@ def _read_context(args: argparse.Namespace) -> str:
     stdin_blob = getattr(args, "stdin_text", "")
     if stdin_blob:
         parts.append(stdin_blob)
-    return "\n\n".join(p for p in parts if p.strip()).strip()
+    return "\n\n".join(str(p) for p in parts if p and str(p).strip()).strip()
 
 
 def _rank_candidates(graph: lgwks_graph.Graph, intent: str, limit: int = 8) -> list[dict[str, Any]]:
@@ -92,14 +92,15 @@ def _rank_candidates(graph: lgwks_graph.Graph, intent: str, limit: int = 8) -> l
     pr = graph.pagerank() if graph.nodes else {}
     rows: list[dict[str, Any]] = []
     for node in graph.nodes.values():
-        hay = " ".join(
+        components = (
             [node.id]
             + list(node.imports)
             + list(node.defines)
             + list(node.variables)
             + list(node.calls)
             + list(node.config_keys)
-        ).lower()
+        )
+        hay = " ".join(str(c) for c in components if c).lower()
         overlap = sorted(tok for tok in toks if tok in hay)
         if not overlap and toks:
             continue

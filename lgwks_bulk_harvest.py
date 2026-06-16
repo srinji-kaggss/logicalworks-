@@ -59,9 +59,12 @@ def bulk_harvest(repo_root: Path, limit: int | None = None) -> dict[str, Any]:
             import lgwks_hashing
             session_id = f"hist-{lgwks_hashing.blake_id(str(path), size=6)}"
             
-            # Process WHOLE file (n=0) for historical data
+            # Process up to the remaining limit
+            n_turns = 0
+            if limit:
+                n_turns = max(1, limit - total_turns)
 
-            turns = cortex.process_transcript(path, session_id, n=0)
+            turns = cortex.process_transcript(path, session_id, n=n_turns)
             if turns:
                 file_count += 1
                 total_turns += len(turns)

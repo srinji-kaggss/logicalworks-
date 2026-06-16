@@ -139,19 +139,17 @@ def cohere(subject: str | Path, crate_dir: Path, rules_path: Path | None = None)
 
 def cohere_command(args) -> int:
     """CLI: `lgwks cohere --file candidate.rs --crate-dir /path/to/crate [--json]`"""
-    import lgwks_inline
-    try:
-        subject = lgwks_inline.resolve_payload(f"@{args.file}")
-    except Exception as exc:
-        print(f"error: failed to resolve file: {exc}", file=sys.stderr)
+    file_path = Path(args.file).resolve()
+    if not file_path.exists():
+        print(f"error: file not found: {args.file}", file=sys.stderr)
         return 1
-        
+
     crate_dir = Path(args.crate_dir)
     if not crate_dir.exists():
         print(f"error: crate directory not found: {crate_dir}", file=sys.stderr)
         return 1
-    # Pass the subject (str or path-like if resolved to a string) to cohere.
-    ok, verdicts, report = cohere(subject, crate_dir)
+    # Pass the subject Path to cohere.
+    ok, verdicts, report = cohere(file_path, crate_dir)
     if getattr(args, "json", False):
         print(json.dumps({
             "shippable": ok,

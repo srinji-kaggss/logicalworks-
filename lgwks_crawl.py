@@ -175,7 +175,9 @@ def crawl_command(args: argparse.Namespace) -> int:
     out.append("")
     out.append(f"  manifest: {run_dir / 'manifest.json'}")
     out.append(f"  run_dir:  {run_dir}")
-    out.append("", ui.footer("lgwks · fetch", on=on), "")
+    out.append("")
+    out.append("  " + ui.footer("lgwks · fetch", on=on))
+    out.append("")
     print("\n".join(out))
     return 0
 
@@ -183,10 +185,9 @@ def crawl_command(args: argparse.Namespace) -> int:
 def add_parser(sub) -> None:
     p = sub.add_parser(
         "fetch",
-        aliases=["crawl"],
         help="single-page browser fetch/extract — routes through substrate.build_run(max_pages=1)",
     )
-    p.add_argument("url", help="target URL")
+    p.add_argument("url", help="URL to fetch")
     p.add_argument("--max-chars", type=int, default=8000, help="max text chars to extract")
     p.add_argument("--wait", type=int, default=2000, help="ms to wait after load (ignored; substrate manages)")
     p.add_argument("--html", action="store_true", help="ignored; substrate manages")

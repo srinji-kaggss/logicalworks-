@@ -239,6 +239,41 @@ def add_parser(sub) -> None:
     info_p = sp.add_parser("info", help="show projection constants and decoupling guarantee")
     info_p.set_defaults(func=_cmd_info)
 
+    run_p = sp.add_parser("run", help="run deterministic projection on stub inputs")
+    run_p.add_argument("--json", action="store_true", help="output json")
+    run_p.set_defaults(func=_cmd_run)
+
+def _cmd_run(args) -> int:
+    import json as _json
+    import struct
+    import hashlib
+    # Stub generic vectors for CLI testing (in real usage these come from the embedding vault)
+    dim = 256
+    def _stub_vec_bytes(s): 
+        v = [0.0]*dim
+        h = hashlib.sha256(s.encode()).digest()
+        for i in range(dim): v[i] = (h[i % 32] / 255.0) - 0.5
+        norm = sum(x*x for x in v)**0.5 or 1.0
+        return b''.join(struct.pack('f', x/norm) for x in v)
+
+    stubs = [("A", _stub_vec_bytes("A")), ("B", _stub_vec_bytes("B")), ("C", _stub_vec_bytes("C"))]
+    vecs = [b for _, b in stubs]
+    try:
+        axes = fit_axes(vecs)
+        out = []
+        for name, b in stubs:
+            pt = project(b, axes)
+            out.append({"name": name, "point": list(pt)})
+        if getattr(args, "json", False):
+            print(_json.dumps({"schema": SCHEMA_PROJECTION, "axes": axes.to_dict(), "points": out}, indent=2))
+        else:
+            print(f"Computed axes for {len(stubs)} vectors:")
+            for pt in out:
+                print(f"  {pt['name']}: {pt['point']}")
+        return 0
+    except Exception as exc:
+        print(f"error projecting: {exc}", file=sys.stderr)
+        return 1
 
 def _cmd_info(args) -> int:
     import json as _json

@@ -326,6 +326,42 @@ def add_parser(sub) -> None:
     ls.add_argument("--json", action="store_true")
     ls.set_defaults(func=_cmd_relations)
 
+    r = sp.add_parser("run", help="score an extracted relationship")
+    r.add_argument("--i", required=True, help="i_cid")
+    r.add_argument("--k", required=True, help="relation key")
+    r.add_argument("--j", required=True, help="j_cid")
+    r.add_argument("--json", action="store_true")
+    r.set_defaults(func=_cmd_run)
+
+def _cmd_run(args) -> int:
+    import json as _json
+    import sys as _sys
+    # Stub generic vectors for CLI testing (in real usage these come from the embedding vault)
+    dim = 256
+    import math
+    def _stub_vec(s): 
+        # Fake deterministic vector from string for CLI demonstration
+        import hashlib
+        v = [0.0]*dim
+        h = hashlib.sha256(s.encode()).digest()
+        for i in range(dim): v[i] = (h[i % 32] / 255.0) - 0.5
+        norm = math.sqrt(sum(x*x for x in v)) or 1.0
+        return [x/norm for x in v]
+
+    v_i = _stub_vec(args.i)
+    v_j = _stub_vec(args.j)
+
+    try:
+        res = score_triple(v_i, args.k, v_j)
+        if getattr(args, "json", False):
+            print(_json.dumps({"i": args.i, "k": args.k, "j": args.j, "score": res}, indent=2))
+        else:
+            print(f"Score for {args.i} -[{args.k}]-> {args.j}: {res:.6f}")
+        return 0
+    except KeyError:
+        print(f"error: unknown relation {args.k!r}", file=_sys.stderr)
+        return 1
+
 
 def _cmd_relations(args) -> int:
     import json as _json

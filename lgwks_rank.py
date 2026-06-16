@@ -145,7 +145,9 @@ def build_tensor(
                          "confidence_score": float, "weight": float, ...}
     """
     # Build node index — stable order (insertion order from nodes list).
-    node_ids: list[str] = [n["id"] for n in graph.get("nodes", [])]
+    # //why: substrate uses 'node_id', but some older graphs use 'id'
+    node_ids: list[str] = [n.get("node_id", n.get("id", "")) for n in graph.get("nodes", [])]
+    node_ids = [nid for nid in node_ids if nid] # filter empty
     idx: dict[str, int] = {nid: i for i, nid in enumerate(node_ids)}
     n = len(node_ids)
 

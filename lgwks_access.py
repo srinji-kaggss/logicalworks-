@@ -376,6 +376,65 @@ def add_parser(sub) -> None:
     promote_cmd.add_argument("--json", action="store_true", help="structured output")
     promote_cmd.set_defaults(func=_access_promote_command)
 
+    verify_cmd = ps.add_parser("verify", help="verify a raw capability token")
+    verify_cmd.add_argument("--token", required=True, help="JSON string or @file")
+    verify_cmd.add_argument("--json", action="store_true", help="structured output")
+    verify_cmd.set_defaults(func=_access_verify_command)
+
+
+def _access_verify_command(args) -> int:
+    import json as _json
+    import lgwks_ui as ui
+    import lgwks_inline
+    from lgwks_capability import CapabilityToken
+
+    on = ui.color_on()
+    try:
+        raw = lgwks_inline.resolve_payload(args.token)
+        data = _json.loads(raw)
+        
+        tenant = data.get("tenant")
+        if not tenant:
+            raise ValueError("Token missing 'tenant' field")
+            
+        token = CapabilityToken(
+            tenant=tenant,
+            nonce=data["nonce"],
+            scopes=frozenset(data["scopes"]),
+            signature=data["signature"]
+        )
+        
+        # In HmacCapabilityPort, the token is verified using the key stored in the keychain.
+        # So we resolve the key for this tenant and then verify.
+        port = HmacCapabilityPort()
+        key = port._load_key(tenant)
+        if not key:
+            raise ValueError(f"No capability key found in keychain for tenant {tenant!r}")
+            
+        handle = HmacCapToken(token=token, key=key)
+        verified = port.verify(handle, key)
+        scopes = sorted(verified.scopes)
+        
+        if getattr(args, "json", False):
+            print(_json.dumps({
+                "tenant": tenant,
+                "scopes": scopes,
+                "cap_ref": verified.cap_ref,
+                "verified": True
+            }, indent=2))
+        else:
+            print(ui.spine(ui.fg("capability token verified", ui.EMERALD, on=on), on=on))
+            print(ui.twig(f"tenant: {tenant}", 1, "info", on=on))
+            print(ui.twig(f"scopes: {scopes}", 1, "info", on=on))
+            print(ui.twig(f"cap_ref (nonce): {verified.cap_ref}", 1, "info", on=on))
+        return 0
+    except Exception as exc:
+        if getattr(args, "json", False):
+            print(_json.dumps({"error": str(exc), "verified": False}, indent=2))
+        else:
+            print(ui.spine(ui.fg(f"error: {exc}", ui.RUST, on=on), on=on), file=sys.stderr)
+        return 1
+
 
 def _access_resolve_command(args) -> int:
     """Resolve capability for tenant."""
