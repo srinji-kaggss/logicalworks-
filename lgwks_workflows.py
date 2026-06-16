@@ -36,7 +36,7 @@ Workflows:
 from __future__ import annotations
 
 import argparse
-import hashlib
+import lgwks_hashing
 import json
 import os
 import re
@@ -48,6 +48,7 @@ from pathlib import Path
 from typing import Any
 
 import lgwks_ui as ui
+from lgwks_phase import PhaseResult, verdict_from_phases  # canonical phase/verdict (one source of truth)
 from lgwks_repo import _is_repo
 
 
@@ -194,18 +195,6 @@ def _workflow_for_intent(text: str) -> str | None:
 # ---------------------------------------------------------------------------
 
 @dataclass
-class PhaseResult:
-    name: str
-    ok: bool
-    exit_code: int
-    findings_count: int = 0
-    message: str = ""
-    artifact: dict[str, Any] = field(default_factory=dict)
-    tokens_used: int = 0       # estimated tokens for this phase
-    cost_cents: float = 0.0    # estimated cost (0 for on-device, >0 for API calls)
-
-
-@dataclass
 class WorkflowRun:
     schema: str = "lgwks.workflow.run.v1"
     workflow: str = ""
@@ -255,19 +244,6 @@ class WorkflowRun:
 from lgwks_clock import now_iso as _now  # one source of truth for timestamps (was Z-suffixed; now +00:00)
 
 
-def _verdict_from_phases(phases: list[PhaseResult]) -> str:
-    codes = [p.exit_code for p in phases]
-    if any(c == 3 for c in codes):
-        return "deny"
-    if any(c == 1 for c in codes):
-        return "danger"
-    if any(c == 2 for c in codes):
-        return "degraded"
-    if any(c == 4 for c in codes):
-        return "error"
-    return "pass"
-
-
 # ---------------------------------------------------------------------------
 # Prompt caching layer — content-addressed memoization
 # ---------------------------------------------------------------------------
@@ -279,7 +255,7 @@ _CACHE_TTL_SECONDS = int(os.environ.get("LGWKS_CACHE_TTL", 3600))  # 1 hour defa
 def _cache_key(workflow: str, args: dict[str, Any]) -> str:
     """Deterministic hash of workflow name + normalized args."""
     payload = json.dumps({"wf": workflow, "args": args}, sort_keys=True, separators=(",", ":"))
-    return hashlib.blake2b(payload.encode(), digest_size=16).hexdigest()
+    return lgwks_hashing.blake_id(payload, 16)
 
 
 def _cached_run(key: str) -> WorkflowRun | None:
@@ -509,7 +485,7 @@ def _do_research_inline(args: argparse.Namespace) -> int:
             run.phases.append(PhaseResult(name="synthesize:spawn", ok=False, exit_code=2, message=str(exc)))
 
     run.exit_code = max(p.exit_code for p in run.phases)
-    run.verdict = _verdict_from_phases(run.phases)
+    run.verdict = verdict_from_phases(run.phases)
     run.duration_sec = time.time() - t0
     run.finished_at = _now()
     return _emit(run, json_out)
@@ -629,7 +605,7 @@ def _do_deep_research(args: argparse.Namespace) -> int:
         run.phases.append(p4)
 
     run.exit_code = max(p.exit_code for p in run.phases)
-    run.verdict = _verdict_from_phases(run.phases)
+    run.verdict = verdict_from_phases(run.phases)
     run.duration_sec = time.time() - t0; run.finished_at = _now()
     return _emit(run, json_out)
 
@@ -719,7 +695,7 @@ def _do_quick_scan(args: argparse.Namespace) -> int:
         run.phases.append(PhaseResult(name="substrate:quick-scan", ok=False, exit_code=2, message="quick-scan needs a URL"))
 
     run.exit_code = max(p.exit_code for p in run.phases)
-    run.verdict = _verdict_from_phases(run.phases)
+    run.verdict = verdict_from_phases(run.phases)
     run.duration_sec = time.time() - t0; run.finished_at = _now()
     return _emit(run, json_out)
 
@@ -746,7 +722,7 @@ def _do_audit_trail(args: argparse.Namespace) -> int:
     run.phases.append(p1)
 
     run.exit_code = max(p.exit_code for p in run.phases)
-    run.verdict = _verdict_from_phases(run.phases)
+    run.verdict = verdict_from_phases(run.phases)
     run.duration_sec = time.time() - t0; run.finished_at = _now()
     return _emit(run, json_out)
 
@@ -770,7 +746,7 @@ def _do_health_check(args: argparse.Namespace) -> int:
     run.phases.append(p2)
 
     run.exit_code = max(p.exit_code for p in run.phases)
-    run.verdict = _verdict_from_phases(run.phases)
+    run.verdict = verdict_from_phases(run.phases)
     run.duration_sec = time.time() - t0; run.finished_at = _now()
     return _emit(run, json_out)
 
@@ -808,7 +784,7 @@ def _do_onboard(args: argparse.Namespace) -> int:
     run.phases.append(p2)
 
     run.exit_code = max(p.exit_code for p in run.phases)
-    run.verdict = _verdict_from_phases(run.phases)
+    run.verdict = verdict_from_phases(run.phases)
     run.duration_sec = time.time() - t0; run.finished_at = _now()
     return _emit(run, json_out)
 
@@ -835,7 +811,7 @@ def _do_migration_check(args: argparse.Namespace) -> int:
     run.phases.append(p1)
 
     run.exit_code = max(p.exit_code for p in run.phases)
-    run.verdict = _verdict_from_phases(run.phases)
+    run.verdict = verdict_from_phases(run.phases)
     run.duration_sec = time.time() - t0; run.finished_at = _now()
     return _emit(run, json_out)
 

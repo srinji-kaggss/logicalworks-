@@ -3,20 +3,18 @@ lgwks_pipeline — unified ingestion and ranking spine.
 
 Wires together existing lgwks modules:
   - lgwks_substrate.build_run()    — crawl + chunk + embed + entity graph
-  - lgwks_run.embed()              — provider chain (Ollama → apple-local → deterministic)
+  - lgwks_run.embed()              — provider chain (apple-local → deterministic)
   - lgwks_run._deterministic_embed()
-  - lgwks_embed._tokens(), _chunks(), _cos(), _embedding()
+  - lgwks_embed._embedding()
   - lgwks_entity_graph.extract_mentions(), GraphDB
   - lgwks_intent_classifier.IntentClassifier
   - lgwks_jepa.build_package()
-  - lgwks_ollama.embed_one(), slice_mrl()
   - lgwks_apple.embed_one()
   - lgwks_keyvault.get_secret()
 
 Novel additions (not elsewhere in the codebase):
   - Multi-stage ranking: Recall → FastRank → HeavyRank → Rerank
   - Noise quarantine with PCA summary embedding
-  - Gemma 1B disambiguation gate (LLM-capped)
   - google/gemini-embedding-2 multimodal seam (private, OpenRouter)
   - Provenance tagging: math | ml | llm | mm per chunk
   - pipeline_manifest.json as world-model artifact for downstream consumers
@@ -63,14 +61,9 @@ RECALL_K: int = _CFG["recall_k"]
 FAST_RANK_K: int = _CFG["fast_rank_k"]
 HEAVY_RANK_K: int = _CFG["heavy_rank_k"]
 
-DISAMBIGUATION_CONF_THRESHOLD: float = _CFG.get("disambig_conf_threshold", 0.72)
-DISAMBIGUATION_MAX_VARIANTS: int = _CFG.get("disambig_max_variants", 4)
-
 NOISE_SCORE_THRESHOLD: float = _CFG["noise_threshold"]
 DIVERSITY_PENALTY_WEIGHT: float = _CFG["diversity_penalty"]
 SAME_SOURCE_CAP: int = _CFG["same_source_cap"]
-
-MAX_LLM_INVOLVEMENT_RATIO: float = _CFG["max_llm_ratio"]
 
 FAST_RANK_W_BM25: float = 0.40           # [ADR §6.1] — change all weights together
 FAST_RANK_W_FACT_DENSITY: float = 0.20
@@ -85,8 +78,6 @@ MULTIMODAL_EMBED_ENDPOINT: str = "https://openrouter.ai/api/v1/embeddings"
 MULTIMODAL_MAX_IMAGE_BYTES: int = _CFG["mm_max_img_bytes"]
 
 COHERENCE_THRESHOLD: float = _CFG["coherence_threshold"]
-
-_GEMMA_MODEL: str = _CFG["gemma_model"]
 
 # ══════════════════════════════════════════════════════════════════════════════
 # DATA TYPES
@@ -161,20 +152,6 @@ def _vec_mean(vecs: list[list[float]]) -> list[float]:
             result[i] += x
     n = len(vecs)
     return [x / n for x in result]
-
-
-def _weighted_centroid(
-    vecs: list[list[float]], weights: list[float]
-) -> list[float]:
-    if not vecs:
-        return []
-    total = sum(weights) or 1.0
-    dims = len(vecs[0])
-    result = [0.0] * dims
-    for v, w in zip(vecs, weights):
-        for i, x in enumerate(v):
-            result[i] += x * w / total
-    return _l2_norm(result)
 
 
 def _first_principal_component(vecs: list[list[float]]) -> list[float]:
@@ -332,14 +309,9 @@ def entity_overlap_score(
 # ══════════════════════════════════════════════════════════════════════════════
 
 def _resolve_text_provider() -> str:
-    if os.environ.get("LGWKS_NO_MODELS"):
+    from lgwks_model_port import models_suppressed
+    if models_suppressed():
         return "deterministic"
-    try:
-        import lgwks_ollama
-        if lgwks_ollama.is_up():
-            return "auto"   # lgwks_run.embed() auto = ollama → deterministic
-    except Exception:
-        pass
     try:
         import lgwks_apple
         if lgwks_apple.is_available():
@@ -609,7 +581,7 @@ def _iter_dir_chunks(
         yield from _iter_substrate_dir(root, batch_size)
         return
 
-    import lgwks_embed
+    import lgwks_substrate_text as _st  # canonical chunking (one source of truth)
     batch: list[PipelineChunk] = []
     for path in sorted(root.rglob("*")):
         if any(part in _SKIP_DIRS for part in path.parts):
@@ -641,8 +613,8 @@ def _iter_dir_chunks(
                 text = path.read_text(encoding="utf-8", errors="replace")
             except OSError:
                 continue
-            # Reuse lgwks_embed._chunks() for consistent chunking
-            for idx, chunk_text in enumerate(lgwks_embed._chunks(text)):
+            # Canonical chunking (one source of truth)
+            for idx, chunk_text in enumerate(_st._chunk_text(text, size=420, overlap=70)):
                 batch.append(PipelineChunk(
                     chunk_id=_chunk_id(str(path), chunk_text, idx),
                     source_id=str(path), source_type="file",
@@ -670,97 +642,16 @@ def iter_dataset(
     elif p.suffix.lower() == ".csv":
         yield from _iter_csv_chunks(p, batch_size)
     elif p.exists():
-        import lgwks_embed
+        import lgwks_substrate_text as _st  # canonical chunking (one source of truth)
         text = p.read_text(encoding="utf-8", errors="replace")
         batch = [
             PipelineChunk(
                 chunk_id=_chunk_id(str(p), c, i),
                 source_id=str(p), source_type="file", text=c,
             )
-            for i, c in enumerate(lgwks_embed._chunks(text))
+            for i, c in enumerate(_st._chunk_text(text, size=420, overlap=70))
         ]
         yield batch, {}
-
-
-# ══════════════════════════════════════════════════════════════════════════════
-# STAGE 4: DISAMBIGUATION — Gemma 1B constrained paraphrase, LLM-capped
-# ══════════════════════════════════════════════════════════════════════════════
-
-_DISAMBIG_PROMPT = (
-    "Rephrase the following text in exactly {n} different ways, each emphasizing "
-    "a different plausible interpretation. Output only the {n} rephrased sentences "
-    "separated by newlines, nothing else:\n\n{text}"
-)
-
-
-def _gemma_paraphrase(text: str, n: int = DISAMBIGUATION_MAX_VARIANTS) -> list[str]:
-    """Local Gemma 1B via Ollama.  Falls back silently to [] if unavailable."""
-    if os.environ.get("LGWKS_NO_MODELS"):
-        return []
-    try:
-        import lgwks_ollama
-        if not lgwks_ollama.is_up():
-            return []
-    except Exception:
-        return []
-
-    import lgwks_ollama
-    prompt = _DISAMBIG_PROMPT.format(n=n, text=text[:1200])
-    body = json.dumps({
-        "model": _GEMMA_MODEL,
-        "prompt": prompt,
-        "stream": False,
-        "options": {"temperature": 0.25, "top_p": 0.85, "num_predict": 512},
-    }).encode("utf-8")
-    req = urllib.request.Request(
-        f"{lgwks_ollama.HOST}/api/generate",
-        data=body,
-        headers={"Content-Type": "application/json"},
-    )
-    try:
-        with urllib.request.urlopen(req, timeout=30) as resp:
-            data = json.loads(resp.read().decode("utf-8"))
-        raw = data.get("response", "")
-        variants = [v.strip() for v in raw.strip().split("\n") if v.strip()]
-        return variants[:n]
-    except Exception:
-        return []
-
-
-def disambiguate_chunk(
-    chunk: PipelineChunk,
-    classifier_confidence: float,
-    text_provider: str,
-    dims: int | None = None,
-) -> EmbedResult:
-    """Gemma paraphrase → weighted centroid, or direct embed if confidence is high."""
-    needs = classifier_confidence < DISAMBIGUATION_CONF_THRESHOLD
-    variants: list[str] = _gemma_paraphrase(chunk.text) if needs else []
-
-    if variants:
-        all_texts = [chunk.text] + variants
-        results = [embed_text(t, text_provider, dims=dims) for t in all_texts]
-        vecs = [v for v, _, _ in results]
-        weights = [2.0] + [1.0] * len(variants)
-        agg = _weighted_centroid(vecs, weights)
-        return EmbedResult(
-            chunk_id=chunk.chunk_id,
-            vector=agg, dims=len(agg),
-            provider=results[0][1], is_semantic=results[0][2],
-            signal_path="llm",
-            interpretation_variants=variants,
-        )
-
-    vec, prov, sem = (
-        embed_multimodal(chunk.text, chunk.image_b64, chunk.image_mime)
-        if chunk.image_b64
-        else embed_text(chunk.text, text_provider, dims=dims)
-    )
-    return EmbedResult(
-        chunk_id=chunk.chunk_id, vector=vec, dims=len(vec),
-        provider=prov, is_semantic=sem,
-        signal_path="mm" if chunk.image_b64 else ("ml" if sem else "math"),
-    )
 
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -1104,12 +995,9 @@ def _parameter_snapshot() -> dict[str, Any]:
         "RECALL_K": RECALL_K,
         "FAST_RANK_K": FAST_RANK_K,
         "HEAVY_RANK_K": HEAVY_RANK_K,
-        "DISAMBIGUATION_CONF_THRESHOLD": DISAMBIGUATION_CONF_THRESHOLD,
-        "DISAMBIGUATION_MAX_VARIANTS": DISAMBIGUATION_MAX_VARIANTS,
         "NOISE_SCORE_THRESHOLD": NOISE_SCORE_THRESHOLD,
         "DIVERSITY_PENALTY_WEIGHT": DIVERSITY_PENALTY_WEIGHT,
         "SAME_SOURCE_CAP": SAME_SOURCE_CAP,
-        "MAX_LLM_INVOLVEMENT_RATIO": MAX_LLM_INVOLVEMENT_RATIO,
         "FAST_RANK_W_BM25": FAST_RANK_W_BM25,
         "FAST_RANK_W_FACT_DENSITY": FAST_RANK_W_FACT_DENSITY,
         "FAST_RANK_W_COVERAGE": FAST_RANK_W_COVERAGE,
@@ -1118,7 +1006,6 @@ def _parameter_snapshot() -> dict[str, Any]:
         "DATASET_BATCH_SIZE": DATASET_BATCH_SIZE,
         "MULTIMODAL_EMBED_MODEL": MULTIMODAL_EMBED_MODEL,
         "COHERENCE_THRESHOLD": COHERENCE_THRESHOLD,
-        "GEMMA_MODEL": _GEMMA_MODEL,
         "adr": "docs/ADR-pipeline-001-tuning.md",
     }
 
@@ -1231,44 +1118,6 @@ def run_pipeline(args: argparse.Namespace) -> dict[str, Any]:
             providers_used[er.provider] = providers_used.get(er.provider, 0) + 1
 
     print(f"[stage 3] embedded={len(embeds)}, providers={providers_used}", file=sys.stderr)
-
-    # ── Stage 4: Disambiguate — LLM-capped ────────────────────────────────────
-    print(f"[stage 4] disambiguation ...", file=sys.stderr)
-    llm_budget = int(len(all_chunks) * MAX_LLM_INVOLVEMENT_RATIO)
-    llm_used = 0
-
-    try:
-        from lgwks_intent_classifier import IntentClassifier
-        clf = IntentClassifier.load()
-        has_clf = True
-    except Exception:
-        has_clf = False
-
-    for chunk in all_chunks:
-        er = embeds.get(chunk.chunk_id)
-        if er is None:
-            continue
-        # Skip disambiguation for substrate-reused vectors (already embedded correctly)
-        if er.provider == "substrate:reused":
-            continue
-        confidence = 1.0
-        if has_clf:
-            try:
-                result = clf.classify(chunk.text)
-                confidence = float(result.confidence)
-            except Exception:
-                pass
-        if confidence < DISAMBIGUATION_CONF_THRESHOLD and llm_used < llm_budget:
-            new_er = disambiguate_chunk(chunk, confidence, text_provider, dims=embed_dims)
-            embeds[chunk.chunk_id] = new_er
-            if new_er.signal_path == "llm":
-                llm_used += 1
-                providers_used[new_er.provider] = providers_used.get(new_er.provider, 0) + 1
-
-    llm_ratio = round(llm_used / max(len(all_chunks), 1), 4)
-    if llm_ratio > MAX_LLM_INVOLVEMENT_RATIO:
-        warnings.append(f"llm_cap_exceeded:{llm_ratio:.1%}")
-    print(f"[stage 4] llm_used={llm_used} ({llm_ratio:.1%})", file=sys.stderr)
 
     # ── Stage 5: Recall ───────────────────────────────────────────────────────
     print(f"[stage 5] recall k={RECALL_K} ...", file=sys.stderr)

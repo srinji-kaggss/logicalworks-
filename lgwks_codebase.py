@@ -17,7 +17,6 @@ from __future__ import annotations
 
 import argparse
 import ast
-import hashlib
 import json
 import math
 import re
@@ -30,6 +29,7 @@ from pathlib import Path
 from typing import Any
 
 import lgwks_embed
+import lgwks_vecmath  # canonical vector math (one source of truth)
 
 ROOT = Path(__file__).resolve().parent
 DB_DIR = ROOT / "store" / "codebase"
@@ -108,7 +108,7 @@ def _rel_path(path: Path, root: Path) -> str:
 
 def _entity_id(file: Path, kind: str, name: str, line: int) -> str:
     base = f"{file}:{kind}:{name}:{line}"
-    return hashlib.sha256(base.encode()).hexdigest()[:16]
+    return _content_hash(base)
 
 
 def _parse_python(file: Path, root: Path) -> list[CodeEntity]:
@@ -617,7 +617,7 @@ def search(query: str, top_k: int = 5, kind_filter: str | None = None) -> list[d
             continue
         if not e.embedding:
             continue
-        score = lgwks_embed._cos(query_vec, e.embedding)
+        score = lgwks_vecmath.dot(query_vec, e.embedding)
         results.append((score, e))
 
     results.sort(key=lambda x: -x[0])

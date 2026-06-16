@@ -23,7 +23,7 @@ from __future__ import annotations
 
 import ast
 import fcntl
-import hashlib
+import lgwks_hashing
 import json
 import os
 import re
@@ -67,7 +67,7 @@ def _finding_fingerprint(rec: dict) -> str:
             None
         ),
     }, sort_keys=True, separators=(",", ":"))
-    return hashlib.sha256(payload.encode()).hexdigest()[:16]
+    return lgwks_hashing.content_id(payload)
 
 
 class Baseline:
@@ -325,7 +325,7 @@ from lgwks_clock import now_iso as _ts  # one source of truth for timestamps
 
 
 def _run_seed(repo: str) -> str:
-    return hashlib.sha256(f"code_hacker:{repo}".encode()).hexdigest()[:12]
+    return artifacts.run_seed(_BOT, repo)
 
 
 def _make(
@@ -347,21 +347,12 @@ def _make(
     # breaks replay/determinism (doctrine T4) and diffing. The finding fingerprint
     # already excludes the timestamp; now the timestamp itself is stamped ONCE per
     # run() and threaded down, so a run over unchanged code is byte-reproducible.
-    return {
-        "schema": artifacts.BOT_RECORD_SCHEMA,
-        "run_id": run_id,
-        "bot": _BOT,
-        "target": {"kind": "file", "id": file},
-        "kind": kind,
-        "summary": summary,
-        "severity": severity,
-        "confidence": confidence,
-        "status": "open",
-        "evidence": evidence,
-        "links": {"repo": repo, "file": file, "symbol": symbol},
-        "tags": tags,
-        "created_at": created_at or _ts(),
-    }
+    return artifacts.make_record(
+        bot=_BOT, run_id=run_id, kind=kind, summary=summary, severity=severity,
+        confidence=confidence, evidence=evidence, tags=tags, target_id=file,
+        links={"repo": repo, "file": file, "symbol": symbol},
+        created_at=created_at,
+    )
 
 
 def _failure_record(run_id: str, repo: str, file: str, reason: str,

@@ -21,6 +21,7 @@ import sys
 import time
 from pathlib import Path
 
+import lgwks_cli_introspect as _cli  # canonical parser introspection + verb→domain taxonomy
 import lgwks_ui as ui
 from lgwks_ui import (CREAM, CREAM_DIM, EMERALD, EMERALD_DIM, MUTED, SLATE, SLATE_DIM, AMBER, fg)
 
@@ -215,33 +216,16 @@ def _bucket_order(verb: str) -> tuple[int, str]:
 
 def _live_hints() -> list[tuple[str, str]]:
     # //why: the only source of truth is the live parser; if we can't read it, emit nothing
-    # (no fake hints that drift again). `lgwks` is a script (no .py suffix), so load it via
-    # SourceFileLoader and register the module in sys.modules BEFORE exec (Python 3.14
-    # dataclass() needs sys.modules[__name__] for @dataclass-decorated classes).
+    # (no fake hints that drift again). Parser-loading + sub-action lookup are the canonical
+    # lgwks_cli_introspect primitives; this function keeps only its own bucket-ordered shaping.
     try:
-        import importlib.util
-        from importlib.machinery import SourceFileLoader
-        from pathlib import Path as _P
-        loader = SourceFileLoader("lgwks_cli", str(_P(__file__).resolve().parent / "lgwks"))
-        spec = importlib.util.spec_from_loader("lgwks_cli", loader)
-        mod = importlib.util.module_from_spec(spec)
-        sys.modules.setdefault("lgwks_cli", mod)
-        loader.exec_module(mod)
-        parser = mod.build_parser()
+        parser = _cli.load_parser()
     except Exception:
         return []
-    sub_action = None
-    for action in parser._actions:
-        if action.dest == "command":
-            sub_action = action
-            break
+    sub_action = _cli.command_action(parser)
     if sub_action is None or not getattr(sub_action, "choices", None):
         return []
-    # //why: argparse keeps the per-verb help on the subparser action (`_choices_actions`),
-    # not on the inner ArgumentParser objects (their `description` is None when only `help=`
-    # was passed). Build a name→help map once, then iterate `sub_action.choices` for the
-    # actual subparser instances (some callers may rely on those being real parsers).
-    help_by_name: dict[str, str] = {ca.dest: (ca.help or "").strip() for ca in sub_action._choices_actions}
+    help_by_name = _cli.help_by_name(sub_action)
     ordered: list[tuple[str, str]] = []
     for name in sorted(sub_action.choices.keys(), key=_bucket_order):
         help_text = help_by_name.get(name, "")
@@ -407,24 +391,7 @@ def _repo_for_command(verb: str, repo: Path | None) -> list[str]:
     return []
 
 
-_DOMAINS: dict[str, list[str]] = {
-    # Primary product — the subconscious loop and operator surface
-    "Subconscious": ["map", "engine", "session", "solve", "debug", "intent", "doctor",
-                     "spawn", "portal", "do", "agent-os", "begin", "tui"],
-    # Research and knowledge work — the conscious-layer tools
-    "Research":  ["jarvis", "fetch", "refine", "preview", "extract", "convert",
-                  "x", "manifest", "login", "cohere", "comprehend", "geo", "public",
-                  "akinator", "run", "context", "model-hub", "capture", "jepa",
-                  "workflow", "probe"],
-    "GitHub":    ["gh"],
-    "DevOps":    ["repo", "review", "project", "batch", "refactor", "hooks"],
-    "System":    ["repl", "initialize", "auth", "keyvault", "foundation",
-                  "aup", "schema", "route", "codebase", "access", "daemon", "bulk-harvest"],
-    # L0 substrate — ingestion, vector store, contracts (foundational, not the product)
-    "Substrate": ["store", "memory", "embed", "axiom", "pipeline", "waste",
-                  "entity-graph", "graph", "substrate", "score", "rank", "inbound",
-                  "admission", "capability", "crdt", "viz-project"],
-}
+_DOMAINS = _cli.DOMAINS  # canonical verb→domain taxonomy (shared with lgwks_repl)
 
 
 def _quick_actions_for_repo(repo: Path | None) -> list[tuple[str, str, str, list[str]]]:
@@ -444,73 +411,9 @@ def _quick_actions_for_repo(repo: Path | None) -> list[tuple[str, str, str, list
     return actions
 
 
-def _build_command_tree() -> dict[str, dict[str, Any]]:
-    """Introspect the live parser and return {verb: {"help": ..., "subcommands": {...}}}.
-    Subcommands are only captured one level deep — that's the lgwks CLI structure."""
-    try:
-        import importlib.util
-        from importlib.machinery import SourceFileLoader
-        from pathlib import Path as _P
-        loader = SourceFileLoader("lgwks_cli", str(_P(__file__).resolve().parent / "lgwks"))
-        spec = importlib.util.spec_from_loader("lgwks_cli", loader)
-        mod = importlib.util.module_from_spec(spec)
-        sys.modules.setdefault("lgwks_cli", mod)
-        loader.exec_module(mod)
-        parser = mod.build_parser()
-    except Exception:
-        return {}
-
-    # Find top-level subparsers
-    sub_action = None
-    for action in parser._actions:
-        if action.dest == "command":
-            sub_action = action
-            break
-    if sub_action is None or not getattr(sub_action, "choices", None):
-        return {}
-
-    help_by_name: dict[str, str] = {ca.dest: (ca.help or "").strip() for ca in sub_action._choices_actions}
-    tree: dict[str, dict[str, Any]] = {}
-
-    for name, subparser in sub_action.choices.items():
-        help_text = help_by_name.get(name, "")
-        # Skip aliases (e.g. crawl is an alias for fetch). Aliases have empty help text.
-        if not help_text:
-            continue
-        node: dict[str, Any] = {"help": help_text}
-        # Detect sub-subparsers (e.g. jarvis → crawl, gh → issue).
-        # //why: argparse uses `choices` for both subparsers AND --choices flags. The only
-        # reliable discriminator is `_choices_actions`, which exists exclusively on _SubParsersAction.
-        sub_sub = None
-        for a in subparser._actions:
-            if getattr(a, "dest", None) and hasattr(a, "_choices_actions") and hasattr(a, "choices") and a.choices:
-                sub_sub = a
-                break
-        if sub_sub:
-            sub_help = {ca.dest: (ca.help or "").strip() for ca in getattr(sub_sub, "_choices_actions", [])}
-            choices = sub_sub.choices
-            if isinstance(choices, dict):
-                choice_keys = choices.keys()
-            else:
-                choice_keys = choices
-            node["subcommands"] = {
-                sc_name: {"help": sub_help.get(sc_name, "")}
-                for sc_name in choice_keys
-            }
-        tree[name] = node
-    return tree
-
-
-def _domain_for(verb: str) -> str:
-    for domain, verbs in _DOMAINS.items():
-        # exact match first
-        if verb in verbs:
-            return domain
-        # prefix match for nested verbs (e.g. "agent-os bootstrap" → "agent-os")
-        for v in verbs:
-            if verb.startswith(v + " "):
-                return domain
-    return "Other"
+# Canonical: introspect the live parser → {verb: {help, subcommands}}; verb→domain map.
+_build_command_tree = _cli.command_tree
+_domain_for = _cli.domain_for
 
 
 def _ask(prompt: str, on: bool) -> str:

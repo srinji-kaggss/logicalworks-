@@ -24,27 +24,15 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
+import lgwks_substrate_io as _io  # canonical filesystem slug (one source of truth)
 import lgwks_ui as ui
+from lgwks_phase import PhaseResult, verdict_from_phases  # canonical phase/verdict (one source of truth)
 from lgwks_repo import _is_repo
-
-
-def _slugify(text: str) -> str:
-    return re.sub(r"[^\w-]+", "-", text.lower()).strip("-").replace("--", "-")[:64]
 
 
 # ---------------------------------------------------------------------------
 # Result types
 # ---------------------------------------------------------------------------
-
-@dataclass
-class PhaseResult:
-    name: str
-    ok: bool
-    exit_code: int
-    findings_count: int = 0
-    message: str = ""
-    artifact: dict[str, Any] = field(default_factory=dict)
-
 
 @dataclass
 class DoRun:
@@ -207,7 +195,7 @@ def _do_code(args: argparse.Namespace) -> int:
     run.phases.append(p1)
 
     run.exit_code = max(p.exit_code for p in run.phases)
-    run.verdict = _verdict_from_phases(run.phases)
+    run.verdict = verdict_from_phases(run.phases)
     run.duration_sec = time.time() - t0
     run.finished_at = _now()
     return _emit(run, json_out)
@@ -236,7 +224,7 @@ def _do_research(args: argparse.Namespace) -> int:
         import lgwks_substrate
         sub_args = argparse.Namespace(
             target=query,
-            project=_slugify(query),
+            project=_io._slug(query),
             source_type="auto",
             max_pages=12,
             max_depth=getattr(args, "depth", 1),
@@ -289,7 +277,7 @@ def _do_research(args: argparse.Namespace) -> int:
             import lgwks_substrate
             sub_args = argparse.Namespace(
                 target=resolved_url,
-                project=_slugify(query),
+                project=_io._slug(query),
                 source_type="auto",
                 max_pages=12,
                 max_depth=getattr(args, "depth", 1),
@@ -331,7 +319,7 @@ def _do_research(args: argparse.Namespace) -> int:
     run.phases.append(p2)
 
     run.exit_code = max(p.exit_code for p in run.phases)
-    run.verdict = _verdict_from_phases(run.phases)
+    run.verdict = verdict_from_phases(run.phases)
     run.duration_sec = time.time() - t0
     run.finished_at = _now()
     return _emit(run, json_out)
@@ -367,7 +355,7 @@ def _do_govern(args: argparse.Namespace) -> int:
     run.phases.append(p2)
 
     run.exit_code = max(p.exit_code for p in run.phases)
-    run.verdict = _verdict_from_phases(run.phases)
+    run.verdict = verdict_from_phases(run.phases)
     run.duration_sec = time.time() - t0
     run.finished_at = _now()
     return _emit(run, json_out)
@@ -396,7 +384,7 @@ def _do_cleanup(args: argparse.Namespace) -> int:
         run.phases.append(p2)
 
     run.exit_code = max(p.exit_code for p in run.phases)
-    run.verdict = _verdict_from_phases(run.phases)
+    run.verdict = verdict_from_phases(run.phases)
     run.duration_sec = time.time() - t0
     run.finished_at = _now()
     return _emit(run, json_out)
@@ -423,7 +411,7 @@ def _do_ship(args: argparse.Namespace) -> int:
     run.phases.append(p2)
 
     run.exit_code = max(p.exit_code for p in run.phases)
-    run.verdict = _verdict_from_phases(run.phases)
+    run.verdict = verdict_from_phases(run.phases)
     run.duration_sec = time.time() - t0
     run.finished_at = _now()
     return _emit(run, json_out)
@@ -448,19 +436,6 @@ def _run_refactor(repo: Path, task: str, changed: str = "", json_out: bool = Fal
         return PhaseResult(name=f"refactor:{task}", ok=False, exit_code=2, message=str(exc))
     dur = time.time() - t0
     return PhaseResult(name=f"refactor:{task}", ok=(code == 0), exit_code=code, message="pass" if code == 0 else "degraded", artifact={"duration_sec": round(dur, 3)})
-
-
-def _verdict_from_phases(phases: list[PhaseResult]) -> str:
-    codes = [p.exit_code for p in phases]
-    if any(c == 3 for c in codes):
-        return "deny"
-    if any(c == 1 for c in codes):
-        return "danger"
-    if any(c == 2 for c in codes):
-        return "degraded"
-    if any(c == 4 for c in codes):
-        return "error"
-    return "pass"
 
 
 def _emit(run: DoRun, json_out: bool) -> int:

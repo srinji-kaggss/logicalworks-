@@ -13,17 +13,15 @@ import urllib.error
 import urllib.request
 
 import lgwks_keyvault
+import lgwks_openrouter
 
 ENDPOINT = "https://openrouter.ai/api/v1/embeddings"
 DEFAULT_MODEL = os.environ.get("LGWKS_EYE_REMOTE_MODEL", "nvidia/llama-nemotron-embed-vl-1b-v2:free")
 _REFERER = "https://logicalworks.ca"
 _TITLE = "Logical Works - lgwks substrate eye"
 
-
-def is_configured() -> bool:
-    if os.environ.get("LGWKS_NO_MODELS"):
-        return False
-    return lgwks_keyvault.is_configured("openrouter")
+# Same OpenRouter provider, same kill-switch + keyvault check — one source of truth.
+is_configured = lgwks_openrouter.is_configured
 
 
 def embed_one(
@@ -33,7 +31,8 @@ def embed_one(
     input_type: str = "search_document",
     timeout: int = 60,
 ) -> list[float] | None:
-    if os.environ.get("LGWKS_NO_MODELS"):
+    from lgwks_model_port import models_suppressed
+    if models_suppressed():
         return None
     key, _ = lgwks_keyvault.get_secret("openrouter")
     if not key:

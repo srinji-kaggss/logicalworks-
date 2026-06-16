@@ -121,11 +121,15 @@ def test_suggest_commands_no_match():
 
 
 def test_live_commands_non_empty():
-    """L0: dynamic command discovery must find at least the commands we know exist."""
+    """L0: dynamic command discovery must find at least the commands we know exist.
+
+    #218 consolidated the 70-verb surface; `jarvis` folded into `crawl` and the
+    discovery source is the live CLI introspection (no external `gh` alias).
+    """
     cmds = repl._live_commands()
-    assert "gh" in cmds
+    assert "crawl" in cmds
     assert "solve" in cmds
-    assert "jarvis" in cmds
+    assert "graph" in cmds
 
 
 def test_repl_welcome_hint_shown():

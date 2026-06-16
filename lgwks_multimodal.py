@@ -30,14 +30,14 @@ from typing import Any
 import lgwks_keyvault
 
 # ── Swappable media-embedding endpoint ────────────────────────────────────────
-# Image + video embed into ONE shared space here; text embeds locally via ollama
-# (lgwks_ollama, qwen3-embedding:8b). Default endpoint is google/gemini-embedding-2
+# Image + video embed into ONE shared space here; text embeds locally via
+# lgwks_run (apple-local / deterministic). Default endpoint is google/gemini-embedding-2
 # over OpenRouter. To swap to a self-hosted Qwen3-VL endpoint later, set the three
 # env vars below — callers never change.
-# //why: cost routing (Director, 2026-06-09). Text is free on local ollama; only
-# the paid multimodal model ever sees image/video. The endpoint is a config seam,
-# not a code dependency, so make→buy→self-host is one env change, not a refactor.
-# NOTE: text (ollama, 4096-d) and media (gemini, 3072-d) are DIFFERENT vector
+# //why: cost routing (Director, 2026-06-09). Text is free on local/deterministic
+# embedding; only the paid multimodal model ever sees image/video. The endpoint is a
+# config seam, not a code dependency, so make→buy→self-host is one env change.
+# NOTE: text (local, 4096-d) and media (gemini, 3072-d) are DIFFERENT vector
 # spaces — cross-modal cosine retrieval is not valid until both share one model.
 _MM_MODEL = os.environ.get("LGWKS_EMBED_MEDIA_MODEL", "google/gemini-embedding-2")
 _MM_ENDPOINT = os.environ.get("LGWKS_EMBED_MEDIA_ENDPOINT", "https://openrouter.ai/api/v1/embeddings")
@@ -166,7 +166,7 @@ def embed_media(
     """Embed an image and/or a video into the shared media space via the swappable
     endpoint (default google/gemini-embedding-2 over OpenRouter).
 
-    Media-only by design: text is embedded locally via ollama (lgwks_ollama) and is
+    Media-only by design: text is embedded locally via lgwks_run and is
     NOT sent here — only `caption` (alt/surrounding context, kept tiny) rides along
     to ground the media vector. //why: cost — the paid model only ever sees media.
 
@@ -209,7 +209,8 @@ def embed_media(
         return out
 
     # Hermetic kill-switch (CI/tests) and unconfigured-key both degrade to det only.
-    if os.environ.get("LGWKS_NO_MODELS"):
+    from lgwks_model_port import models_suppressed
+    if models_suppressed():
         out["error"] = "LGWKS_NO_MODELS set — deterministic fingerprint only"
         return out
     key = _mm_key()
@@ -276,7 +277,7 @@ def embed_multimodal(
 ) -> dict[str, Any]:
     """Back-compat shim → embed_media(). The `text` arg is treated as the caption
     (grounding context), NOT sent as a billable text embedding. //why: callers
-    predating the text=ollama / media=gemini split still pass (text, image)."""
+    predating the text=local / media=gemini split still pass (text, image)."""
     return embed_media(
         image_b64=image_b64,
         image_mime=image_mime,

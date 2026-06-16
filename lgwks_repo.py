@@ -21,7 +21,7 @@ import sys
 import tempfile
 from collections import Counter
 from dataclasses import dataclass, field
-from datetime import datetime, timezone
+import lgwks_clock
 from pathlib import Path
 from typing import Any
 
@@ -386,7 +386,7 @@ def repo_handoff(repo: Path) -> dict[str, Any]:
     """Machine-readable handoff report with six-zeros invariant."""
     findings, health = repo_audit(repo)
     severe = [f for f in findings if f.severity == "danger"]
-    now = datetime.now(timezone.utc).isoformat()
+    now = lgwks_clock.now_iso()
     return {
         "schema": "lgwks.repo.handoff.v0",
         "repo": str(repo),

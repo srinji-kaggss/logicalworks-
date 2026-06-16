@@ -24,6 +24,7 @@ from __future__ import annotations
 
 import argparse
 import hashlib
+import lgwks_hashing
 import ipaddress
 import json
 import re
@@ -605,8 +606,8 @@ def _shared_embed_port() -> Any | None:
     the live port and the unavailable verdict so callers pay the tier-probe once.
     """
     global _SHARED_EMBED_PORT, _EMBED_PORT_UNAVAILABLE
-    import os
-    if os.environ.get("LGWKS_NO_MODELS"):
+    from lgwks_model_port import models_suppressed
+    if models_suppressed():
         return None
     if _EMBED_PORT_UNAVAILABLE:
         return None
@@ -777,7 +778,7 @@ def execute_plan(plan: RunPlan, dry: bool = False, synthetic: dict[str, str] | N
         log.append("fetch", {"url": safe_url, "status": res.status, "error": res.error})
         if res.status != "ok" or not res.text.strip():
             continue
-        doc_id = f"doc-{hashlib.sha256((url + res.text).encode()).hexdigest()[:12]}"
+        doc_id = f"doc-{lgwks_hashing.content_id(url + res.text, 12)}"
         docs.append({"id": doc_id, "url": url, "words": len(res.text.split())})
         embed_prov = "deterministic" if dry else "auto"   # dry == hermetic, no external calls
         for ci, chunk in enumerate(_chunk(res.text)):
@@ -802,10 +803,10 @@ def execute_plan(plan: RunPlan, dry: bool = False, synthetic: dict[str, str] | N
     uncertainty = round(1.0 - 0.5 * coverage - 0.5 * info, 4)
     log.append("L3_uncertainty", {"coverage": coverage, "information": round(info, 4), "uncertainty": uncertainty})
     # L4: a node with no falsifier and only the floor tier is not promotable -> quarantine.
+    from lgwks_substrate_io import _emit_jsonl
     quarantine = [n for n in nodes.values() if n["falsifier"] is None]
     if quarantine:
-        (out_dir / "quarantine.jsonl").write_text(
-            "\n".join(json.dumps(n, sort_keys=True) for n in quarantine) + "\n", encoding="utf-8")
+        _emit_jsonl(out_dir / "quarantine.jsonl", quarantine)
         log.append("L4_quarantine", {"count": len(quarantine), "reason": "no falsifier/tier — human review"})
 
     # 6 — pre-vector export (graph-schema/2-shaped; splice-and-dice / canvas viz).
@@ -816,8 +817,7 @@ def execute_plan(plan: RunPlan, dry: bool = False, synthetic: dict[str, str] | N
         "math": {"coverage": coverage, "uncertainty": uncertainty},
     }, indent=2, sort_keys=True), encoding="utf-8")
     if embeddings:                          # the objective vector cache (default-on; empty if --no-embed)
-        (out_dir / "embeddings.jsonl").write_text(
-            "\n".join(json.dumps(e, sort_keys=True) for e in embeddings) + "\n", encoding="utf-8")
+        _emit_jsonl(out_dir / "embeddings.jsonl", embeddings)
         log.append("vector_cache", {"count": len(embeddings), "provider": embed_provider})
     log.append("run_end", {"documents": len(docs), "nodes": len(nodes), "edges": len(edges)})
 

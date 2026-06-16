@@ -16,7 +16,6 @@ by the same conservative classifier `lgwks x` uses (reused, not reinvented — a
 
 from __future__ import annotations
 
-import hashlib
 import json
 import shlex
 import sys
@@ -60,7 +59,7 @@ def _err(error_code: str, detail: str):
     return {"ok": False, "error_code": error_code, "detail": detail}
 
 
-from lgwks_hashing import canonical_id as _sha  # canonical-JSON object id (one source of truth)
+from lgwks_hashing import canonical_id as _sha, digest as _digest  # canonical object/text ids (one source of truth)
 
 
 def validate_geoexpr(obj) -> dict:
@@ -201,7 +200,7 @@ def _embed_record(kind: str, item_id: str, text: str) -> dict:
         "schema": SCHEMA_EMBEDDING,
         "kind": kind,
         "item_id": item_id,
-        "text_sha256": hashlib.sha256(text.encode("utf-8")).hexdigest(),
+        "text_sha256": _digest(text),
         "embedding_model": "deterministic-feature-hash-v1",
         "dimensions": EMBED_DIMS,
         "embedding": lgwks_embed._embedding(text, EMBED_DIMS),
@@ -256,9 +255,8 @@ def _persist_run(geoexpr: dict, plan: dict, preview: dict, transcript: dict) -> 
     ]
     for i, r in enumerate(transcript["results"]):
         embeddings.append(_embed_record("result", f"{plan['plan_id']}:{i}", r.get("out", "") or r["verb"]))
-    with (run_dir / "artifact-embeddings.jsonl").open("w", encoding="utf-8") as fh:
-        for row in embeddings:
-            fh.write(json.dumps(row, sort_keys=True) + "\n")
+    from lgwks_substrate_io import _emit_jsonl
+    _emit_jsonl(run_dir / "artifact-embeddings.jsonl", embeddings)
     return run_dir
 
 

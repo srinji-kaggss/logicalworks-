@@ -259,9 +259,38 @@ def _signature() -> str:
     return f"◆ lgwks · solve/git — forged by Logical Claude with Codex · integrity:{mode} {tag}".rstrip()
 
 
+_THOUGHT_STOP = {
+    "the", "a", "an", "is", "are", "was", "were", "in", "at", "of", "to", "for",
+    "and", "or", "this", "that", "my", "me", "you", "your", "it", "on", "with",
+    "do", "did", "does", "can", "should", "would", "have", "has", "had", "be",
+}
+
+
 def _evidence_answers_thought(thought: str, findings: list[Finding]) -> bool:
-    """Always return True to allow general context to answer specific thoughts."""
-    return True
+    """Deterministic relatedness gate: does the proven evidence bear on the thought?
+
+    Returns True when the thought shares a meaningful token with the findings
+    (the narrator may answer), False when the thought is unrelated to anything
+    proven — so solve_git abstains instead of confabulating an answer from
+    evidence that does not actually address the question.
+    """
+    import re
+    t_tokens = {
+        w for w in re.findall(r"[a-z0-9]+", thought.lower())
+        if len(w) >= 3 and w not in _THOUGHT_STOP
+    }
+    if not t_tokens:
+        return True  # no specific thought to relate against — let context answer
+    corpus: list[str] = []
+    for f in findings:
+        corpus.append(f.what or "")
+        corpus.append(getattr(f, "next_step", "") or "")
+        for ev in getattr(f, "evidence", None) or []:
+            corpus.append(getattr(ev, "title", "") or "")
+            corpus.append(getattr(ev, "command", "") or "")
+            corpus.append(getattr(ev, "note", "") or "")
+    c_tokens = {w for w in re.findall(r"[a-z0-9]+", " ".join(corpus).lower()) if len(w) >= 3}
+    return bool(t_tokens & c_tokens)
 
 
 def solve_git(repo: Path, thought: str = "", as_json: bool = False, steer: Steering | None = None,
@@ -374,6 +403,17 @@ def add_dials(p) -> None:
     p.add_argument("--quiet", action="store_true", help="suppress all progress/animation prints on stderr")
     p.add_argument("--no-anim", action="store_true", dest="no_anim", help="alias for --quiet")
     p.add_argument("--timeout", type=int, default=20, help="maximum command/API execution time in seconds")
+
+
+def add_parser(sub) -> None:
+    """Register the top-level `solve` verb on the lgwks CLI."""
+    p = sub.add_parser("solve", help="prove a git worry deterministically (diagnose → relate → narrate)")
+    p.add_argument("target", nargs="?", default="git", help="what to solve (currently: git)")
+    p.add_argument("--thought", default="", help="your worry/claim — 'prove this for me'")
+    p.add_argument("--repo", default=".", help="path to the repo (default: cwd)")
+    p.add_argument("--json", action="store_true", help="structured output with CSL-JSON provenance")
+    add_dials(p)
+    p.set_defaults(func=solve_command)
 
 
 def main(argv: list[str] | None = None) -> int:

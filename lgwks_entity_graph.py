@@ -18,7 +18,7 @@ fabricating, exactly once, in one place.
 
 from __future__ import annotations
 
-import hashlib
+import lgwks_hashing
 import json
 import re
 import sqlite3
@@ -158,7 +158,7 @@ class GraphDB:
         return value
 
     def _edge_id(self, src: str, dst: str, rel: str) -> str:
-        return hashlib.sha256(f"{src}|{dst}|{rel}".encode()).hexdigest()[:16]
+        return lgwks_hashing.content_id(f"{src}|{dst}|{rel}")
 
     def _membership_sink(self) -> crdt.JsonFileSink:
         return crdt.JsonFileSink(self._crdt_path)
@@ -260,7 +260,7 @@ class GraphDB:
         schema: str = "UNKNOWN",
         labels: list[str] | None = None,
     ) -> None:
-        h = hashlib.sha256(text.encode()).hexdigest()[:16]
+        h = lgwks_hashing.content_id(text)
         self._conn.execute(
             "INSERT OR REPLACE INTO chunks (chunk_id, doc_id, url, text, hash, schema, labels) "
             "VALUES (?, ?, ?, ?, ?, ?, ?)",

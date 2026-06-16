@@ -25,7 +25,7 @@ unchanged (back-compat) and existing readers are not broken. The new axes are:
 from __future__ import annotations
 
 import argparse
-import hashlib
+import lgwks_hashing
 import json
 import re
 import sys
@@ -94,7 +94,7 @@ def _canonical_body(record: dict[str, Any]) -> str:
 
 def _event_id_for(record: dict[str, Any]) -> str:
     body = _canonical_body(record)
-    digest = hashlib.blake2b(body.encode("utf-8"), digest_size=16).hexdigest()
+    digest = lgwks_hashing.blake_id(body, 16)
     return f"evt-{digest}"
 
 

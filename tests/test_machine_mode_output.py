@@ -64,7 +64,7 @@ class TestMachineModeJarvisCrawlEstimate(unittest.TestCase):
 
     def test_stdout_is_parseable_json(self):
         proc = _run(
-            "--machine", "jarvis", "crawl",
+            "--machine", "crawl",
             "https://example.com",
             "--max-pages", "3",
             "--estimate-only",
@@ -76,7 +76,7 @@ class TestMachineModeJarvisCrawlEstimate(unittest.TestCase):
 
     def test_stdout_has_no_ansi_codes(self):
         proc = _run(
-            "--machine", "jarvis", "crawl",
+            "--machine", "crawl",
             "https://example.com",
             "--estimate-only",
         )
@@ -87,7 +87,7 @@ class TestMachineModeJarvisCrawlEstimate(unittest.TestCase):
 
     def test_stdout_is_not_empty(self):
         proc = _run(
-            "--machine", "jarvis", "crawl",
+            "--machine", "crawl",
             "https://example.com",
             "--estimate-only",
         )
@@ -96,7 +96,7 @@ class TestMachineModeJarvisCrawlEstimate(unittest.TestCase):
     def test_no_progress_noise_before_json(self):
         """Stdout must start directly with '{', no preamble."""
         proc = _run(
-            "--machine", "jarvis", "crawl",
+            "--machine", "crawl",
             "https://example.com",
             "--estimate-only",
         )
@@ -193,10 +193,7 @@ class TestMachineModeSubstrateQueryDeterministic(unittest.TestCase):
         with tempfile.TemporaryDirectory() as td:
             run_dir = self._make_deterministic_run(td)
             proc = _run(
-                "--machine", "substrate", "query", run_dir,
-                "--vector", "machine language substrate",
-                "--embed-provider", "deterministic",
-                "--limit", "2",
+                "--machine", "state", "run", "index", run_dir,
                 env_extra={"LGWKS_SUBSTRATE_ROOT": td},
             )
         # A mismatch or empty-vector result will still return JSON.
@@ -208,9 +205,7 @@ class TestMachineModeSubstrateQueryDeterministic(unittest.TestCase):
         with tempfile.TemporaryDirectory() as td:
             run_dir = self._make_deterministic_run(td)
             proc = _run(
-                "--machine", "substrate", "query", run_dir,
-                "--vector", "language",
-                "--embed-provider", "deterministic",
+                "--machine", "state", "run", "index", run_dir,
                 env_extra={"LGWKS_SUBSTRATE_ROOT": td},
             )
         self.assertFalse(
@@ -222,9 +217,7 @@ class TestMachineModeSubstrateQueryDeterministic(unittest.TestCase):
         with tempfile.TemporaryDirectory() as td:
             run_dir = self._make_deterministic_run(td)
             proc = _run(
-                "--machine", "substrate", "query", run_dir,
-                "--vector", "language",
-                "--embed-provider", "deterministic",
+                "--machine", "state", "run", "index", run_dir,
                 env_extra={"LGWKS_SUBSTRATE_ROOT": td},
             )
         self.assertTrue(
@@ -261,12 +254,12 @@ class TestMachineModeAppleLocalSubstrateMap(unittest.TestCase):
         """
         with tempfile.TemporaryDirectory() as td:
             proc = _run(
-                "--machine", "substrate", "map",
+                "--machine", "crawl",
                 "https://example.com",
+                "--engine", "substrate",
                 "--embed-provider", "apple-local",
                 "--max-pages", "0",
                 "--max-depth", "0",
-                "--no-login-if-needed",
                 env_extra={"LGWKS_SUBSTRATE_ROOT": td},
                 timeout=60,
             )
@@ -296,12 +289,12 @@ class TestMachineModeAppleLocalSubstrateMap(unittest.TestCase):
         """Even when apple-local is skipped, no ANSI must reach stdout."""
         with tempfile.TemporaryDirectory() as td:
             proc = _run(
-                "--machine", "substrate", "map",
+                "--machine", "crawl",
                 "https://example.com",
+                "--engine", "substrate",
                 "--embed-provider", "apple-local",
                 "--max-pages", "0",
                 "--max-depth", "0",
-                "--no-login-if-needed",
                 env_extra={"LGWKS_SUBSTRATE_ROOT": td},
                 timeout=60,
             )
@@ -313,9 +306,9 @@ class TestMachineModeAppleLocalSubstrateMap(unittest.TestCase):
             target = Path(td) / "sample.txt"
             target.write_text("machine first substrate text for apple local embedding", encoding="utf-8")
             proc = _run(
-                "--machine", "substrate", "map",
+                "--machine", "crawl",
                 str(target),
-                "--source-type", "file",
+                "--engine", "substrate",
                 "--embed-provider", "apple-local",
                 env_extra={"LGWKS_SUBSTRATE_ROOT": td},
                 timeout=60,
@@ -343,8 +336,8 @@ class TestJarvisCrawlMachineModeDefaultDeterministic(unittest.TestCase):
 
     def test_jarvis_keyword_estimate_only_stdout_is_json(self):
         proc = _run(
-            "--machine", "jarvis", "crawl",
-            "--keywords", "RRSP retirement",
+            "--machine", "crawl",
+            "RRSP retirement",
             "--estimate-only",
         )
         self.assertEqual(proc.returncode, 0, f"stderr: {proc.stderr!r}")
@@ -353,15 +346,15 @@ class TestJarvisCrawlMachineModeDefaultDeterministic(unittest.TestCase):
 
     def test_jarvis_keyword_estimate_no_ansi(self):
         proc = _run(
-            "--machine", "jarvis", "crawl",
-            "--keywords", "RRSP retirement",
+            "--machine", "crawl",
+            "RRSP retirement",
             "--estimate-only",
         )
         self.assertFalse(_has_ansi(proc.stdout))
 
     def test_jarvis_url_estimate_only_stdout_is_json(self):
         proc = _run(
-            "--machine", "jarvis", "crawl",
+            "--machine", "crawl",
             "https://example.com",
             "--max-pages", "1",
             "--estimate-only",

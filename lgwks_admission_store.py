@@ -134,10 +134,7 @@ class DurableAdmissionQueue:
 
     # -- capability gate -------------------------------------------------
     def _verified_tenant(self, token: lgwks_capability.CapabilityToken) -> str:
-        # Raises CapabilityError on bad sig / empty / world / missing scope.
-        return lgwks_capability.require_scope(
-            token, lgwks_capability.TENANT_RW, lambda t: t, self._key
-        )
+        return lgwks_capability.verified_tenant(token, self._key)
 
     def _active_tenants(self, conn: sqlite3.Connection) -> int:
         row = conn.execute(

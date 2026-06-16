@@ -17,7 +17,7 @@ All routing decisions are logged with confidence scores for audit.
 from __future__ import annotations
 
 import argparse
-import hashlib
+import lgwks_hashing
 import json
 import sys
 import time
@@ -124,7 +124,7 @@ def classify(text: str) -> dict[str, Any]:
         }
     """
     t0 = time.time()
-    input_hash = hashlib.sha256(text.encode("utf-8")).hexdigest()[:16]
+    input_hash = lgwks_hashing.content_id(text)
 
     router = _get_router()
     if router is not None:

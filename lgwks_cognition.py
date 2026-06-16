@@ -16,7 +16,7 @@ lgwks_promote). Each entry chains on the previous hash; the chain head proves th
 from __future__ import annotations
 
 import fcntl
-import hashlib
+import lgwks_hashing
 import json
 import os
 import time
@@ -35,7 +35,7 @@ def _log_path(stream: str) -> Path:
     safe = _STREAM_SAFE.sub("-", stream.strip().lower()).strip(".-")
     if not safe:
         raise ValueError("cognition stream name cannot be empty")
-    suffix = hashlib.sha256(stream.encode("utf-8")).hexdigest()[:12]
+    suffix = lgwks_hashing.content_id(stream, 12)
     return _DIR / f"{safe}-{suffix}.cognition.jsonl"
 
 
@@ -95,7 +95,7 @@ class CognitionLog:
                 # 3. Build record
                 rec = {"seq": seq, "ts": time.time(), "kind": kind, "data": data, "prev": prev}
                 core = json.dumps(rec, sort_keys=True, separators=(",", ":"))
-                rec["hash"] = hashlib.sha256(core.encode("utf-8")).hexdigest()
+                rec["hash"] = lgwks_hashing.digest(core)
                 rec["sig"] = lgwks_sign.mac(rec["hash"], self._key) if self._key else ""
                 
                 # 4. Write
@@ -161,7 +161,7 @@ class CognitionLog:
                 
                 # 3. Verify hash
                 core = json.dumps(body, sort_keys=True, separators=(",", ":"))
-                expected_hash = hashlib.sha256(core.encode("utf-8")).hexdigest()
+                expected_hash = lgwks_hashing.digest(core)
                 if actual_hash != expected_hash: return False
                 
                 # 4. Verify signature (if keyed)

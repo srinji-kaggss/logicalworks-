@@ -21,8 +21,9 @@ the chosen model's window while the vector cache (live mode) holds the long-term
 
 from __future__ import annotations
 
+import argparse
 import concurrent.futures
-import hashlib
+import lgwks_hashing
 import json
 import re
 from dataclasses import dataclass, replace
@@ -231,7 +232,7 @@ class AutoResult:
 
 
 def _run_id(cfg: AutoConfig) -> str:
-    h = hashlib.sha256(f"{cfg.objective}|{cfg.start}".encode()).hexdigest()[:8]
+    h = lgwks_hashing.content_id(f"{cfg.objective}|{cfg.start}", 8)
     return f"auto-{h}"
 
 
@@ -259,6 +260,36 @@ def _canon(obj) -> str:
     return json.dumps(obj, sort_keys=True, separators=(",", ":"))
 
 
+def _verify_ledger(ledger: Path, key: bytes) -> bool:
+    """Replay the hash-chained rounds ledger (L5) and report whether it is intact.
+
+    Mirror of the producer in run_auto: each record's MAC is
+    ``lgwks_sign.mac(prev_hash + _canon(record-without-hash), key)`` and its ``prev``
+    field links to the previous record's hash, genesis-rooted. Any mutated field,
+    reordered line, or broken link recomputes to a different MAC → False. A missing
+    ledger is treated as not-intact (False), never as silently verified.
+    """
+    if not ledger.exists():
+        return False
+    prev = "genesis"
+    try:
+        for line in ledger.read_text(encoding="utf-8").splitlines():
+            line = line.strip()
+            if not line:
+                continue
+            rec = json.loads(line)
+            stored = rec.get("hash")
+            if stored is None or rec.get("prev") != prev:
+                return False
+            body = {k: v for k, v in rec.items() if k != "hash"}
+            if lgwks_sign.mac(prev + _canon(body), key) != stored:
+                return False
+            prev = stored
+    except Exception:
+        return False
+    return True
+
+
 def _write_json(path: Path, payload: dict) -> None:
     path.write_text(json.dumps(payload, indent=2, sort_keys=True) + "\n", encoding="utf-8")
 
@@ -276,7 +307,7 @@ def _write_axiom_envelope(out_dir: Path, cfg: AutoConfig) -> Path:
         "crawl_mode": cfg.crawl_mode,
         "max_pages": cfg.max_pages,
         "fanout": cfg.fanout,
-        "guide_sha256": hashlib.sha256(cfg.guide_text.encode("utf-8")).hexdigest() if cfg.guide_text else "",
+        "guide_sha256": lgwks_hashing.digest(cfg.guide_text) if cfg.guide_text else "",
     }
     path = out_dir / "axiom.json"
     _write_json(path, payload)
@@ -360,10 +391,15 @@ def _write_report(out_dir: Path, cfg: AutoConfig, stop: str, surviving: list[str
             continue
         reason = json.loads(reason_path.read_text())
         sources = json.loads(sources_path.read_text()) if sources_path.exists() else []
+        think_md = rdir / "think.md"
+        if think_md.exists():
+            frontier_val = reason.get("frontier_in", "") or think_md.read_text().split("## frontier in\n", 1)[-1].splitlines()[0]
+        else:
+            frontier_val = ""
         parts += [
             "",
             f"### {rdir.name}",
-            f"- Frontier: {reason.get('frontier_in', '') or (rdir / 'think.md').read_text().split('## frontier in\\n', 1)[-1].splitlines()[0] if (rdir / 'think.md').exists() else ''}",
+            f"- Frontier: {frontier_val}",
             f"- Mode: {reason.get('mode', '')}",
             f"- Surviving: {', '.join(reason.get('surviving', [])) or 'none'}",
             f"- Learnings: {'; '.join(reason.get('learnings', [])) or 'none'}",

@@ -593,6 +593,72 @@ def write_jsonl(path: Path, rows: Iterable[dict]):
             fh.write(json.dumps(row, sort_keys=True, ensure_ascii=False) + "\n")
 
 
+def _import_substrate():
+    """Seam: import the substrate auth-aware runtime lazily (patchable in tests)."""
+    import lgwks_substrate as _sub
+    return _sub
+
+
+def _crawl_via_substrate(args: argparse.Namespace) -> dict:
+    """Bridge (#34): delegate a URL crawl to the substrate auth-aware mapping runtime.
+
+    Maps Jarvis crawl args onto lgwks_substrate.build_run() args and returns a
+    Jarvis-compatible summary dict. The substrate module is fetched through the
+    _import_substrate() seam so tests can mock it without touching the network.
+    """
+    sub = _import_substrate()
+    run_name = args.name or slugify(args.source)
+
+    # Build a synthetic Namespace that satisfies substrate's build_run contract.
+    sub_args = argparse.Namespace(
+        target=args.source,
+        project=run_name,
+        source_type="auto",
+        max_pages=args.max_pages,
+        max_depth=args.max_depth,
+        max_files=250,
+        max_chars=120_000,
+        chunk_words=getattr(args, "chunk_words", 320),
+        chunk_overlap=getattr(args, "chunk_overlap", 48),
+        fact_threshold=0.6,
+        embed_provider=getattr(args, "embed_provider", "deterministic"),
+        embed_model=getattr(args, "embed_model", ""),
+        login_if_needed=getattr(args, "login_if_needed", True),
+        login_url=getattr(args, "login_url", ""),
+        success_selector=getattr(args, "auth_selector", None),
+        max_auto_bypass_attempts=3,
+        max_auth_handoffs=3,
+        browser_engine=("chromium" if getattr(args, "chromium", False) else "webkit"),
+        click_discovery=bool(getattr(args, "click_discovery", False)),
+        max_clicks_per_page=int(getattr(args, "max_clicks_per_page", 20)),
+        crawl_mode=getattr(args, "crawl_mode", "link-then-click"),
+    )
+    try:
+        manifest = sub.build_run(sub_args)
+    except Exception as exc:
+        # Surface substrate failures (e.g. embedding provider unavailable) as the
+        # canonical structured error manifest rather than crashing the bridge.
+        if exc.__class__.__name__ == "EmbeddingProviderUnavailable":
+            return sub._provider_unavailable_payload(sub_args, exc)
+        raise
+    arts = manifest.get("artifacts", {})
+    root = arts.get("root", "")
+
+    return {
+        "schema": "lgwks.jarvis.substrate_crawl.v0",
+        "engine": "substrate",
+        "run_id": manifest.get("run_id", ""),
+        "target": manifest.get("target", args.source),
+        "substrate_manifest": str(Path(root) / "manifest.json") if root else "",
+        "crawl_map": str(Path(root) / arts["crawl_map"]) if arts.get("crawl_map") and root else "",
+        "substrate_db": str(Path(root) / arts["substrate_db"]) if arts.get("substrate_db") and root else "",
+        "graph_json": str(Path(root) / arts["graph_json"]) if arts.get("graph_json") and root else "",
+        "counts": manifest.get("counts", {}),
+        "embedding": manifest.get("embedding", {}),
+        "auth": manifest.get("auth", {}),
+    }
+
+
 def crawl_command(args: argparse.Namespace) -> int:
     keywords = parse_keywords(args.keyword_terms, args.keywords)
     source = args.source
@@ -602,6 +668,15 @@ def crawl_command(args: argparse.Namespace) -> int:
     if getattr(args, "estimate_only", False):
         print(json.dumps({"estimated_seconds": estimate, "estimated_minutes": round(estimate / 60, 2)}, indent=2))
         return 0
+
+    # --- Engine dispatch (#34): URL sources default to the substrate auth-aware
+    # runtime; --engine legacy or keyword-only sources stay on the deterministic
+    # Jarvis crawler below. ---
+    engine = getattr(args, "engine", "substrate")
+    if source and engine != "legacy":
+        payload = _crawl_via_substrate(args)
+        print(json.dumps(payload, indent=2))
+        return 0 if payload.get("ok", True) else 1
 
     run_dir = RUN_ROOT / run_id
     raw_dir = run_dir / "raw"

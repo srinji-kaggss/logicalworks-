@@ -20,6 +20,8 @@ import shutil
 import subprocess
 import sys
 import time
+
+import lgwks_clock
 from dataclasses import asdict, dataclass
 from pathlib import Path
 from typing import Any
@@ -155,10 +157,6 @@ class NarrationHole:
     nearest_known: tuple[str, ...]
 
 
-def _utc() -> str:
-    return time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
-
-
 from lgwks_hashing import content_id as _sha  # canonical content-id (one source of truth)
 
 
@@ -180,7 +178,7 @@ def write_run_index(root: Path, run_id: str, artifacts: list[dict[str, str]]) ->
     index.setdefault("schema", "lgwks.axiom.run_index.v0")
     index.setdefault("run_id", run_id)
     index.setdefault("root", str(root))
-    index.setdefault("created_at", _utc())
+    index.setdefault("created_at", lgwks_clock.now_iso())
     existing_artifacts = index.get("artifacts", [])
     if not isinstance(existing_artifacts, list):
         existing_artifacts = []
@@ -484,10 +482,8 @@ def build_narration_artifact(
         },
     }
     (root / "narration.json").write_text(json.dumps(artifact, indent=2, sort_keys=True), encoding="utf-8")
-    (root / "narration-emissions.jsonl").write_text(
-        "\n".join(json.dumps(e, sort_keys=True) for e in emissions) + "\n",
-        encoding="utf-8",
-    )
+    from lgwks_substrate_io import _emit_jsonl
+    _emit_jsonl(root / "narration-emissions.jsonl", emissions)
     (root / "narration-fabric-log.json").write_text(
         json.dumps(artifact["fabric"], indent=2, sort_keys=True),
         encoding="utf-8",
@@ -620,7 +616,7 @@ def build_capture(
     packet = {
         "schema": SCHEMA,
         "run_id": run_id,
-        "created_at": _utc(),
+        "created_at": lgwks_clock.now_iso(),
         "repo": str(repo),
         "intent": intent,
         "paths": {
@@ -640,7 +636,8 @@ def build_capture(
         },
         "emissions": emissions,
     }
-    (root / "emissions.jsonl").write_text("\n".join(json.dumps(e, sort_keys=True) for e in emissions) + "\n", encoding="utf-8")
+    from lgwks_substrate_io import _emit_jsonl
+    _emit_jsonl(root / "emissions.jsonl", emissions)
     (root / "fabric-log.json").write_text(json.dumps(packet["fabric"], indent=2, sort_keys=True), encoding="utf-8")
     (root / "packet.json").write_text(json.dumps(packet, indent=2, sort_keys=True), encoding="utf-8")
     

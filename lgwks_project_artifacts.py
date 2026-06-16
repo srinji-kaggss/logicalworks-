@@ -37,6 +37,7 @@ from collections import Counter
 from pathlib import Path
 from typing import Any, Optional
 
+import lgwks_clock
 import lgwks_cycle
 
 ROOT = Path(__file__).resolve().parent
@@ -75,7 +76,7 @@ MAPPER_ROLE_COUNT = len(MAPPER_ROLES)
 
 def _slug(value: str) -> str:
     safe = re.sub(r"[^a-z0-9._-]+", "-", value.lower()).strip(".-") or "project"
-    return f"{safe}-{hashlib.sha256(value.encode()).hexdigest()[:12]}"
+    return f"{safe}-{content_id(value, 12)}"
 
 
 def _terms(text: str) -> list[str]:
@@ -102,7 +103,7 @@ def _embedding(text: str, dims: int = EMBED_DIMS) -> list[float]:
     return [round(v / norm, 6) for v in vec]
 
 
-from lgwks_hashing import digest as _sha  # canonical full digest (one source of truth)
+from lgwks_hashing import digest as _sha, content_id  # canonical text/id hashing (one source of truth)
 
 
 def _clamp(value: Optional[int], default: int, low: int, high: int) -> int:
@@ -311,6 +312,58 @@ BOT_REGISTRY_DEFAULT = {
     "slop_math",
     "stress",
 }
+
+
+def run_seed(bot: str, repo: str) -> str:
+    """Deterministic 12-char run id for a bot scanning a repo (replay-stable).
+
+    One source of truth — every bot lane derives its run id this way; do not
+    re-spell ``sha256(f"{bot}:{repo}")[:12]`` per module.
+    """
+    return content_id(f"{bot}:{repo}", 12)
+
+
+def make_record(
+    *,
+    bot: str,
+    run_id: str,
+    kind: str,
+    summary: str,
+    severity: str,
+    confidence: float,
+    evidence: list[dict],
+    tags: list[str],
+    links: dict,
+    target_id: str,
+    target_kind: str = "file",
+    world_refs: Optional[list[dict]] = None,
+    created_at: Optional[str] = None,
+) -> dict:
+    """Canonical ``lgwks.bot.record.v1`` builder — one source of truth for every bot lane.
+
+    Each bot supplies its own ``links`` / ``world_refs`` / ``target``; the shared
+    skeleton (schema id, ``status="open"``, timestamp default) is built here. ``created_at``
+    is injectable so a run over unchanged code is byte-reproducible — stamp it once per
+    run() and thread it down rather than calling the clock per finding (doctrine T4).
+    """
+    rec = {
+        "schema": BOT_RECORD_SCHEMA,
+        "run_id": run_id,
+        "bot": bot,
+        "target": {"kind": target_kind, "id": target_id},
+        "kind": kind,
+        "summary": summary,
+        "severity": severity,
+        "confidence": confidence,
+        "status": "open",
+        "evidence": evidence,
+        "links": links,
+        "tags": tags,
+        "created_at": created_at or lgwks_clock.now_iso(),
+    }
+    if world_refs is not None:
+        rec["world_refs"] = world_refs
+    return rec
 
 
 def _is_str(v) -> bool:
@@ -666,7 +719,7 @@ def _normalized_record_id(record: dict) -> str:
         "target": record.get("target", {}),
         "primary_evidence": _record_primary_evidence(record),
     }
-    return "finding:" + hashlib.sha256(_stable_json(base).encode("utf-8")).hexdigest()[:16]
+    return "finding:" + content_id(_stable_json(base))
 
 
 def _normalize_bot_record(record: dict) -> dict:
@@ -796,7 +849,7 @@ def reduce_bot_records(
         clusters_by_key.setdefault(_cluster_key(finding), []).append(finding["record_id"])
         if "contradiction" in finding["kind"] or "contradiction" in finding.get("tags", []):
             contradictions.append({
-                "id": "ctr:" + hashlib.sha256(finding["record_id"].encode("utf-8")).hexdigest()[:12],
+                "id": "ctr:" + content_id(finding["record_id"], 12),
                 "subject": finding["target"]["id"],
                 "finding_id": finding["record_id"],
                 "current_confidence": finding["confidence"],
@@ -930,7 +983,7 @@ def build_jepa_package(
         "cluster_ids": [c["cluster_id"] for c in clusters],
         "prior": prior_package_refs or [],
     }
-    package_id = "pkg:" + hashlib.sha256(_stable_json(package_seed).encode("utf-8")).hexdigest()[:16]
+    package_id = "pkg:" + content_id(_stable_json(package_seed))
 
     links_index = {
         "schema": "lgwks.links.index.v1",
