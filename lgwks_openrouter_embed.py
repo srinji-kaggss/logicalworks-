@@ -31,7 +31,8 @@ def embed_one(
     input_type: str = "search_document",
     timeout: int = 60,
 ) -> list[float] | None:
-    if os.environ.get("LGWKS_NO_MODELS"):
+    from lgwks_model_port import models_suppressed
+    if models_suppressed():
         return None
     key, _ = lgwks_keyvault.get_secret("openrouter")
     if not key:

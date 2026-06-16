@@ -311,8 +311,8 @@ def _assumption_signal(prompt: str, *, classify_fn=None) -> Optional[RiskSignal]
     it escalates to confirmation, it does not get silently killed. Returns None (signal
     absent, graceful) when the classifier is unavailable/errors or LGWKS_NO_MODELS is set
     — never blocks the conscious channel (INV-6)."""
-    import os
-    if classify_fn is None and os.environ.get("LGWKS_NO_MODELS"):
+    from lgwks_model_port import models_suppressed
+    if classify_fn is None and models_suppressed():
         return None
     try:
         ir = decode(prompt, classify_fn=classify_fn)

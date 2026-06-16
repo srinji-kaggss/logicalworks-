@@ -606,8 +606,8 @@ def _shared_embed_port() -> Any | None:
     the live port and the unavailable verdict so callers pay the tier-probe once.
     """
     global _SHARED_EMBED_PORT, _EMBED_PORT_UNAVAILABLE
-    import os
-    if os.environ.get("LGWKS_NO_MODELS"):
+    from lgwks_model_port import models_suppressed
+    if models_suppressed():
         return None
     if _EMBED_PORT_UNAVAILABLE:
         return None

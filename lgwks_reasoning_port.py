@@ -64,7 +64,8 @@ def _olmo_available() -> bool:
 
 def resolve_backend() -> str:
     """Pick the reasoning backend. Safe default is agent_handoff (never fabricate)."""
-    if os.environ.get("LGWKS_NO_MODELS"):
+    from lgwks_model_port import models_suppressed
+    if models_suppressed():
         return "agent_handoff"
     forced = os.environ.get("LGWKS_REASONING_BACKEND", "auto").lower()
     if forced == "agent":

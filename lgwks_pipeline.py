@@ -309,7 +309,8 @@ def entity_overlap_score(
 # ══════════════════════════════════════════════════════════════════════════════
 
 def _resolve_text_provider() -> str:
-    if os.environ.get("LGWKS_NO_MODELS"):
+    from lgwks_model_port import models_suppressed
+    if models_suppressed():
         return "deterministic"
     try:
         import lgwks_apple

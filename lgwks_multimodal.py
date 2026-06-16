@@ -209,7 +209,8 @@ def embed_media(
         return out
 
     # Hermetic kill-switch (CI/tests) and unconfigured-key both degrade to det only.
-    if os.environ.get("LGWKS_NO_MODELS"):
+    from lgwks_model_port import models_suppressed
+    if models_suppressed():
         out["error"] = "LGWKS_NO_MODELS set — deterministic fingerprint only"
         return out
     key = _mm_key()

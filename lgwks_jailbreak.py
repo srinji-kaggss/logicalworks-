@@ -26,7 +26,6 @@ Verdicts map to the attenuation ladder (graceful degradation, not a hard wall):
 and `assess` are the new graded surface the U6 engine now calls.
 """
 
-import os
 import re
 
 # ── Back-compat surface (unchanged; external callers may still use these) ──────
@@ -99,7 +98,8 @@ def _ml_injection_score(prompt: str):
     Qwen3-Embedding here, scoring `prompt`. Must honor LGWKS_NO_MODELS and
     fail-closed-to-floor on any error (never block the conscious channel — INV-6).
     """
-    if os.environ.get("LGWKS_NO_MODELS"):
+    from lgwks_model_port import models_suppressed
+    if models_suppressed():
         return None
     _ = prompt  # seam input for the future Prompt-Guard / embedding head
     return None  # no injection sensor wired yet — deterministic floor governs

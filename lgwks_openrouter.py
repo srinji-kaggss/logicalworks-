@@ -45,7 +45,8 @@ _TITLE = "Logical Works - lgwks research instrument"   # ASCII only: HTTP header
 
 def is_configured() -> bool:
     """Cloud Tongue is available only if a key resolves AND the kill-switch is off."""
-    if os.environ.get("LGWKS_NO_MODELS"):   # hermetic kill-switch (tests/CI) — forces fallback
+    from lgwks_model_port import models_suppressed
+    if models_suppressed():   # hermetic kill-switch (tests/CI) — forces fallback
         return False
     return lgwks_keyvault.is_configured("openrouter")
 
@@ -123,7 +124,8 @@ def generate_json(prompt: str, schema_hint: str, model: str | None = None,
     """Forced-JSON cloud generation (the Tongue). Tries the preferred model then rotates through free
     fallbacks on retryable errors. Returns parsed dict, or None to signal deterministic fallback.
     Never logs the error body (it may echo the key)."""
-    if os.environ.get("LGWKS_NO_MODELS"):
+    from lgwks_model_port import models_suppressed
+    if models_suppressed():
         return None
     key, _ = lgwks_keyvault.get_secret("openrouter")
     if not key:
