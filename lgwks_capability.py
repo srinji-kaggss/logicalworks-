@@ -217,6 +217,17 @@ def require_scope(
     return query_fn(token.tenant)
 
 
+def verified_tenant(token: CapabilityToken, key: bytes) -> str:
+    """Validate the token carries TENANT_RW and return its tenant id.
+
+    The capability-FIRST gate shared by every per-tenant lane (admission L3 and
+    its DB-backed twin): raises CapabilityError on bad sig / empty / world /
+    missing scope, otherwise echoes the verified tenant. One source of truth — do
+    not re-spell `require_scope(token, TENANT_RW, lambda t: t, key)` at call sites.
+    """
+    return require_scope(token, TENANT_RW, lambda t: t, key)
+
+
 def make_tenant_filter(token: CapabilityToken) -> Callable[[list], list]:
     """Return a filter that keeps own-tenant ⊕ world rows, drops every other tenant.
 

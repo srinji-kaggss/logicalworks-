@@ -415,15 +415,16 @@ _DOMAINS: dict[str, list[str]] = {
     "Research":  ["jarvis", "fetch", "refine", "preview", "extract", "convert",
                   "x", "manifest", "login", "cohere", "comprehend", "geo", "public",
                   "akinator", "run", "context", "model-hub", "capture", "jepa",
-                  "workflow", "probe"],
+                  "workflow", "probe", "research", "crawl", "wf-run"],
     "GitHub":    ["gh"],
     "DevOps":    ["repo", "review", "project", "batch", "refactor", "hooks"],
     "System":    ["repl", "initialize", "auth", "keyvault", "foundation",
-                  "aup", "schema", "route", "codebase", "access", "daemon", "bulk-harvest"],
+                  "aup", "schema", "route", "codebase", "access", "daemon", "bulk-harvest",
+                  "gate", "ops", "human"],
     # L0 substrate — ingestion, vector store, contracts (foundational, not the product)
     "Substrate": ["store", "memory", "embed", "axiom", "pipeline", "waste",
                   "entity-graph", "graph", "substrate", "score", "rank", "inbound",
-                  "admission", "capability", "crdt", "viz-project"],
+                  "admission", "capability", "crdt", "viz-project", "state"],
 }
 
 

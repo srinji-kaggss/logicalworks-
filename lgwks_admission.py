@@ -313,11 +313,7 @@ class TenantAdmissionGate:
         return lane
 
     def _verified_tenant(self, token: lgwks_capability.CapabilityToken) -> str:
-        # require_scope raises CapabilityError on bad sig / empty / world / missing
-        # scope, and returns query_fn(tenant) on success. We just echo the tenant.
-        return lgwks_capability.require_scope(
-            token, lgwks_capability.TENANT_RW, lambda t: t, self._key
-        )
+        return lgwks_capability.verified_tenant(token, self._key)
 
     def fair_ceiling(self) -> int:
         """Per-tenant in-flight ceiling ⌈c / active_tenants⌉ (≥ 1)."""
@@ -426,29 +422,30 @@ def add_parser(sub) -> None:
     info_p.set_defaults(func=_cmd_info)
 
     chk = sp.add_parser("check", help="test live admission check")
-    chk.add_argument("--tenant", default="guest", help="tenant id")
-    chk.add_argument("--weight", type=float, default=1.0, help="request weight")
+    chk.add_argument("--cid", default="cli-check", help="correlation id for the test request")
     chk.add_argument("--json", action="store_true", help="output json")
     chk.set_defaults(func=_cmd_check)
 
 def _cmd_check(args) -> int:
     import json as _json
     bucket, queue, _ = make_admission_gate()
-    res = admission_decision(
-        tenant_id=args.tenant,
-        bucket=bucket,
-        queue=queue,
-        req_weight=args.weight
-    )
+    res = admission_decision(cid=args.cid, bucket=bucket, queue=queue)
+    admitted = isinstance(res, Admitted)
     if getattr(args, "json", False):
-        print(_json.dumps({
-            "admitted": res.admitted,
-            "status": res.status,
-            "latency_ms": res.latency_ms
-        }, indent=2))
-        return 0 if res.admitted else 1
-    print(f"Admission for tenant '{args.tenant}' weight={args.weight}: {res.status} (latency: {res.latency_ms:.1f}ms)")
-    return 0 if res.admitted else 1
+        out = {"admitted": admitted, "status": res.status, "cid": res.cid}
+        if isinstance(res, Rejected429):
+            out["reason"] = res.reason
+            out["retry_after"] = res.retry_after
+        print(_json.dumps(out, indent=2))
+        return 0 if admitted else 1
+    if admitted:
+        print(f"Admission for cid '{res.cid}': {res.status}")
+    else:
+        print(
+            f"Admission for cid '{res.cid}': {res.status} "
+            f"({res.reason}, retry_after={res.retry_after:.2f}s)"
+        )
+    return 0 if admitted else 1
 
 
 
