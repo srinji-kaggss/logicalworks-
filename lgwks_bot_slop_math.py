@@ -15,7 +15,7 @@ No LLM calls. No internet. All findings are lgwks.bot.record.v1 records.
 from __future__ import annotations
 
 import ast
-import hashlib
+import lgwks_hashing
 import re
 from collections import defaultdict
 from pathlib import Path
@@ -36,7 +36,7 @@ _TODO_RE = re.compile(r"#\s*(TODO|FIXME|PLANNED|XXX|HACK)(?:\(([^)]+)\))?:?\s*(.
 
 
 def _run_id(bot: str, repo: str) -> str:
-    return f"slop-math:{bot}:" + hashlib.sha256(f"{bot}:{repo}".encode()).hexdigest()[:10]
+    return f"slop-math:{bot}:" + lgwks_hashing.content_id(f"{bot}:{repo}", 10)
 
 
 def _make(
@@ -143,7 +143,7 @@ def run_s1_graph_anomaly(graph: Any, repo: str = "", run_id: Optional[str] = Non
             evidence=[{"type": "edge", "name": "cycle_members", "value": ", ".join(sorted(group)[:6])}],
             tags=["graph", "cycle", "s1"],
             file=group[0] if group else None,
-            target_kind="concept", target_id=f"cycle:{hashlib.sha256(cycle_id.encode()).hexdigest()[:8]}",
+            target_kind="concept", target_id=f"cycle:{lgwks_hashing.content_id(cycle_id, 8)}",
         ))
 
     # instability_hotspot

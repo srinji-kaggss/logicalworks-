@@ -17,6 +17,7 @@ from __future__ import annotations
 import argparse
 import fcntl
 import hashlib
+import lgwks_hashing
 import json
 import os
 import time
@@ -37,7 +38,7 @@ from lgwks_lexicon import STOP_EN as _STOP  # canonical stopword set (was a loca
 
 def _project_id(project: str) -> str:
     safe = _SAFE.sub("-", project.strip().lower()).strip(".-") or "project"
-    suffix = hashlib.sha256(project.encode("utf-8")).hexdigest()[:12]
+    suffix = lgwks_hashing.content_id(project, 12)
     return f"{safe}-{suffix}"
 
 
@@ -189,7 +190,7 @@ def embedding(text: str, dims: int = 128) -> list[float]:
 
 
 def remember(project: str, text: str, source: str = "conversation", verbose_embeddings: bool = False) -> dict:
-    rec = append(project, "conversation", {"source": source, "text_sha256": hashlib.sha256(text.encode()).hexdigest()})
+    rec = append(project, "conversation", {"source": source, "text_sha256": lgwks_hashing.digest(text)})
     th = themes(text)
     append(project, "theme", {"source_seq": rec["seq"], "themes": th})
     th_display = []

@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import argparse
 import hashlib
+import lgwks_hashing
 import json
 import math
 import re
@@ -32,13 +33,13 @@ import lgwks_vecmath as _vm           # canonical vector math (one source of tru
 
 def _project_id(project: str) -> str:
     safe = SAFE.sub("-", project.strip().lower()).strip(".-") or "project"
-    return f"{safe}-{hashlib.sha256(project.encode()).hexdigest()[:12]}"
+    return f"{safe}-{lgwks_hashing.content_id(project, 12)}"
 
 
 def _folder_id(root: Path, folder: Path) -> str:
     rel = "." if folder == root else str(folder.relative_to(root))
     safe = SAFE.sub("-", rel.lower()).strip(".-") or "root"
-    return f"{safe}-{hashlib.sha256(rel.encode()).hexdigest()[:12]}"
+    return f"{safe}-{lgwks_hashing.content_id(rel, 12)}"
 
 
 def _tokens(text: str) -> list[str]:
@@ -102,7 +103,7 @@ def build_vault(root_path: str, project: str, keywords: list[str], cycles: int =
             text = _io._read_text(path, max_chars)
             if not text:
                 continue
-            raw_hash = hashlib.sha256(text.encode("utf-8", errors="ignore")).hexdigest()
+            raw_hash = lgwks_hashing.digest(text)
             for idx, chunk in enumerate(_st._chunk_text(text, size=CHUNK_WORDS, overlap=CHUNK_OVERLAP)):
                 vec = _embedding(chunk)
                 score = round(_vm.dot(focus_vec, vec), 6)
@@ -118,7 +119,7 @@ def build_vault(root_path: str, project: str, keywords: list[str], cycles: int =
                     "folder": str(path.parent.relative_to(root)) if path.parent != root else ".",
                     "chunk": idx,
                     "sha256": raw_hash,
-                    "chunk_sha256": hashlib.sha256(chunk.encode("utf-8", errors="ignore")).hexdigest(),
+                    "chunk_sha256": lgwks_hashing.digest(chunk),
                     "score": score,
                     "focus": focus,
                     "embedding_model": "deterministic-feature-hash-v1",

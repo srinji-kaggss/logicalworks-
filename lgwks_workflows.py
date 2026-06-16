@@ -36,7 +36,7 @@ Workflows:
 from __future__ import annotations
 
 import argparse
-import hashlib
+import lgwks_hashing
 import json
 import os
 import re
@@ -255,7 +255,7 @@ _CACHE_TTL_SECONDS = int(os.environ.get("LGWKS_CACHE_TTL", 3600))  # 1 hour defa
 def _cache_key(workflow: str, args: dict[str, Any]) -> str:
     """Deterministic hash of workflow name + normalized args."""
     payload = json.dumps({"wf": workflow, "args": args}, sort_keys=True, separators=(",", ":"))
-    return hashlib.blake2b(payload.encode(), digest_size=16).hexdigest()
+    return lgwks_hashing.blake_id(payload, 16)
 
 
 def _cached_run(key: str) -> WorkflowRun | None:

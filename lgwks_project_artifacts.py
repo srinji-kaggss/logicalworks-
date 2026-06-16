@@ -76,7 +76,7 @@ MAPPER_ROLE_COUNT = len(MAPPER_ROLES)
 
 def _slug(value: str) -> str:
     safe = re.sub(r"[^a-z0-9._-]+", "-", value.lower()).strip(".-") or "project"
-    return f"{safe}-{hashlib.sha256(value.encode()).hexdigest()[:12]}"
+    return f"{safe}-{content_id(value, 12)}"
 
 
 def _terms(text: str) -> list[str]:
@@ -103,7 +103,7 @@ def _embedding(text: str, dims: int = EMBED_DIMS) -> list[float]:
     return [round(v / norm, 6) for v in vec]
 
 
-from lgwks_hashing import digest as _sha  # canonical full digest (one source of truth)
+from lgwks_hashing import digest as _sha, content_id  # canonical text/id hashing (one source of truth)
 
 
 def _clamp(value: Optional[int], default: int, low: int, high: int) -> int:
@@ -320,7 +320,7 @@ def run_seed(bot: str, repo: str) -> str:
     One source of truth — every bot lane derives its run id this way; do not
     re-spell ``sha256(f"{bot}:{repo}")[:12]`` per module.
     """
-    return hashlib.sha256(f"{bot}:{repo}".encode()).hexdigest()[:12]
+    return content_id(f"{bot}:{repo}", 12)
 
 
 def make_record(
@@ -719,7 +719,7 @@ def _normalized_record_id(record: dict) -> str:
         "target": record.get("target", {}),
         "primary_evidence": _record_primary_evidence(record),
     }
-    return "finding:" + hashlib.sha256(_stable_json(base).encode("utf-8")).hexdigest()[:16]
+    return "finding:" + content_id(_stable_json(base))
 
 
 def _normalize_bot_record(record: dict) -> dict:
@@ -849,7 +849,7 @@ def reduce_bot_records(
         clusters_by_key.setdefault(_cluster_key(finding), []).append(finding["record_id"])
         if "contradiction" in finding["kind"] or "contradiction" in finding.get("tags", []):
             contradictions.append({
-                "id": "ctr:" + hashlib.sha256(finding["record_id"].encode("utf-8")).hexdigest()[:12],
+                "id": "ctr:" + content_id(finding["record_id"], 12),
                 "subject": finding["target"]["id"],
                 "finding_id": finding["record_id"],
                 "current_confidence": finding["confidence"],
@@ -983,7 +983,7 @@ def build_jepa_package(
         "cluster_ids": [c["cluster_id"] for c in clusters],
         "prior": prior_package_refs or [],
     }
-    package_id = "pkg:" + hashlib.sha256(_stable_json(package_seed).encode("utf-8")).hexdigest()[:16]
+    package_id = "pkg:" + content_id(_stable_json(package_seed))
 
     links_index = {
         "schema": "lgwks.links.index.v1",

@@ -23,7 +23,7 @@ Grammar (from spec):
 
 from __future__ import annotations
 
-import hashlib
+import lgwks_hashing
 import json
 import re
 from pathlib import Path
@@ -325,7 +325,7 @@ def _canonicalise(ast: ExprAST) -> str:
 
 
 def _plan_id(canonical: str) -> str:
-    return hashlib.sha256(canonical.encode("utf-8")).hexdigest()
+    return lgwks_hashing.digest(canonical)
 
 
 # ---------------------------------------------------------------------------

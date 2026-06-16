@@ -12,7 +12,7 @@ from __future__ import annotations
 
 import argparse
 import ast
-import hashlib
+import lgwks_hashing
 import json
 import os
 import re
@@ -461,7 +461,7 @@ def review_command(args: argparse.Namespace) -> int:
     # 2. Run selected bots
     all_findings = []
     ts = time.strftime("%Y%m%d-%H%M%S", time.gmtime())
-    run_id = f"run:{ts}:" + hashlib.sha256(str(repo).encode()).hexdigest()[:8]
+    run_id = f"run:{ts}:" + lgwks_hashing.content_id(str(repo), 8)
 
     # Legacy static check findings map to BOT_RECORD_SCHEMA
     legacy_artifact = review_repo(repo, getattr(args, "ref", "HEAD"))

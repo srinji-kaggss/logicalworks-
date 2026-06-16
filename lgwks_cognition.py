@@ -17,6 +17,7 @@ from __future__ import annotations
 
 import fcntl
 import hashlib
+import lgwks_hashing
 import json
 import os
 import time
@@ -35,7 +36,7 @@ def _log_path(stream: str) -> Path:
     safe = _STREAM_SAFE.sub("-", stream.strip().lower()).strip(".-")
     if not safe:
         raise ValueError("cognition stream name cannot be empty")
-    suffix = hashlib.sha256(stream.encode("utf-8")).hexdigest()[:12]
+    suffix = lgwks_hashing.content_id(stream, 12)
     return _DIR / f"{safe}-{suffix}.cognition.jsonl"
 
 

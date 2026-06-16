@@ -14,7 +14,7 @@ DiD layers:
 from __future__ import annotations
 
 import ast
-import hashlib
+import lgwks_hashing
 import json
 import re as _re
 import sys
@@ -739,7 +739,7 @@ def _detect_unindexed_languages(paths: list[str], indexed_paths: set[str]) -> li
 # ── extraction from repo ─────────────────────────────────────────────────────
 
 def _file_hash(content: str) -> str:
-    return hashlib.sha256(content.encode("utf-8")).hexdigest()[:16]
+    return lgwks_hashing.content_id(content)
 
 
 def _walk_calls(node: ast.AST) -> set[str]:

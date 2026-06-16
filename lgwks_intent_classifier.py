@@ -49,7 +49,7 @@ L5 industry parallel: Apple's on-device intent classification (SiriKit),
 
 from __future__ import annotations
 
-import hashlib
+import lgwks_hashing
 import json
 import time
 from dataclasses import dataclass, field
@@ -394,7 +394,7 @@ def _verb_signature(verbs: list[dict]) -> str:
         [[v.get("verb", ""), v.get("intent", "")] for v in verbs],
         sort_keys=True, separators=(",", ":"),
     )
-    return hashlib.sha256(payload.encode("utf-8")).hexdigest()[:16]
+    return lgwks_hashing.content_id(payload)
 
 
 def _probe_embedder_tag() -> str:

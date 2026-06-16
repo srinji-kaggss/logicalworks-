@@ -23,7 +23,7 @@ from __future__ import annotations
 
 import ast
 import fcntl
-import hashlib
+import lgwks_hashing
 import json
 import os
 import re
@@ -67,7 +67,7 @@ def _finding_fingerprint(rec: dict) -> str:
             None
         ),
     }, sort_keys=True, separators=(",", ":"))
-    return hashlib.sha256(payload.encode()).hexdigest()[:16]
+    return lgwks_hashing.content_id(payload)
 
 
 class Baseline:

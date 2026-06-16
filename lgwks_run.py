@@ -24,6 +24,7 @@ from __future__ import annotations
 
 import argparse
 import hashlib
+import lgwks_hashing
 import ipaddress
 import json
 import re
@@ -777,7 +778,7 @@ def execute_plan(plan: RunPlan, dry: bool = False, synthetic: dict[str, str] | N
         log.append("fetch", {"url": safe_url, "status": res.status, "error": res.error})
         if res.status != "ok" or not res.text.strip():
             continue
-        doc_id = f"doc-{hashlib.sha256((url + res.text).encode()).hexdigest()[:12]}"
+        doc_id = f"doc-{lgwks_hashing.content_id(url + res.text, 12)}"
         docs.append({"id": doc_id, "url": url, "words": len(res.text.split())})
         embed_prov = "deterministic" if dry else "auto"   # dry == hermetic, no external calls
         for ci, chunk in enumerate(_chunk(res.text)):

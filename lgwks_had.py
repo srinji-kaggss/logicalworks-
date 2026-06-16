@@ -22,7 +22,7 @@ TypedIntentIR + AssumptionLedgerEntry.
 
 from __future__ import annotations
 
-import hashlib
+import lgwks_hashing
 import math
 import re
 from dataclasses import dataclass, field
@@ -121,7 +121,7 @@ class TypedIntentIR:
 
 
 def _request_id(utterance: str) -> str:
-    return "req-" + hashlib.sha256(utterance.encode("utf-8")).hexdigest()[:12]
+    return "req-" + lgwks_hashing.content_id(utterance, 12)
 
 
 def _softmax(xs: list[float], *, temp: float = 0.05) -> list[float]:

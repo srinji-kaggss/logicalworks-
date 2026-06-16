@@ -23,7 +23,7 @@ from __future__ import annotations
 
 import argparse
 import concurrent.futures
-import hashlib
+import lgwks_hashing
 import json
 import re
 from dataclasses import dataclass, replace
@@ -232,7 +232,7 @@ class AutoResult:
 
 
 def _run_id(cfg: AutoConfig) -> str:
-    h = hashlib.sha256(f"{cfg.objective}|{cfg.start}".encode()).hexdigest()[:8]
+    h = lgwks_hashing.content_id(f"{cfg.objective}|{cfg.start}", 8)
     return f"auto-{h}"
 
 
@@ -307,7 +307,7 @@ def _write_axiom_envelope(out_dir: Path, cfg: AutoConfig) -> Path:
         "crawl_mode": cfg.crawl_mode,
         "max_pages": cfg.max_pages,
         "fanout": cfg.fanout,
-        "guide_sha256": hashlib.sha256(cfg.guide_text.encode("utf-8")).hexdigest() if cfg.guide_text else "",
+        "guide_sha256": lgwks_hashing.digest(cfg.guide_text) if cfg.guide_text else "",
     }
     path = out_dir / "axiom.json"
     _write_json(path, payload)

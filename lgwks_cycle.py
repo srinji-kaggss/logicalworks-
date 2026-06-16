@@ -7,7 +7,7 @@ ledger that AI workers can replay and humans can audit.
 
 from __future__ import annotations
 
-import hashlib
+import lgwks_hashing
 import json
 import time
 from pathlib import Path
@@ -20,7 +20,7 @@ from lgwks_substrate_config import SLUG_SCRUB_RE as SAFE  # one source of truth
 
 def project_id(project: str) -> str:
     safe = SAFE.sub("-", project.strip().lower()).strip(".-") or "project"
-    return f"{safe}-{hashlib.sha256(project.encode('utf-8')).hexdigest()[:12]}"
+    return f"{safe}-{lgwks_hashing.content_id(project, 12)}"
 
 
 def canon(record: dict) -> str:
@@ -68,7 +68,7 @@ def verify_cycles(path: Path, key: bytes | None = None) -> dict:
 
 
 def prompt_ref(prompt: str) -> str:
-    return "prompt-sha256:" + hashlib.sha256(prompt.encode("utf-8")).hexdigest()
+    return "prompt-sha256:" + lgwks_hashing.digest(prompt)
 
 
 def deploy_dir(root: Path, project: str) -> Path:

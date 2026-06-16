@@ -8,7 +8,7 @@ On embedder failure → CANNOT_DECIDE (excluded from score aggregation, NOT a 0 
 
 from __future__ import annotations
 
-import hashlib
+import lgwks_hashing
 import sys
 from pathlib import Path
 from typing import Any
@@ -46,7 +46,7 @@ class IdiomVerifier:
                 if not text.strip():
                     notes.append(f"skipped empty file: {p}")
                     continue
-                digest = hashlib.sha256(text.encode("utf-8")).hexdigest()
+                digest = lgwks_hashing.digest(text)
                 if digest in seen_hashes:
                     notes.append(f"skipped duplicate content: {p}")
                     continue

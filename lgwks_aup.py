@@ -18,7 +18,7 @@ Defense-in-Depth (Issue #56):
 from __future__ import annotations
 
 import fcntl
-import hashlib
+import lgwks_hashing
 import json
 import math
 import os
@@ -41,7 +41,7 @@ import lgwks_vecmath  # canonical vector math (one source of truth)
 # //why: customer_id is a PII surface; we anonymise by SHA-256 before logging.
 # The log is public; names must never appear.
 def _anonymise(customer_id: str) -> str:
-    return hashlib.sha256(f"lgwks-aup:{customer_id}".encode("utf-8")).hexdigest()[:16]
+    return lgwks_hashing.content_id(f"lgwks-aup:{customer_id}")
 
 
 # ---------------------------------------------------------------------------
@@ -466,7 +466,7 @@ class AUPGate:
         t0 = time.time()
         customer_id = str(request.get("customer_id", "unknown"))
         customer_anon = _anonymise(customer_id)
-        request_hash = hashlib.sha256(self._canonical_request(request).encode("utf-8")).hexdigest()[:32]
+        request_hash = lgwks_hashing.content_id(self._canonical_request(request), 32)
 
         # Layer 1 — entry validation
         valid, reason = self._validate_request(request)

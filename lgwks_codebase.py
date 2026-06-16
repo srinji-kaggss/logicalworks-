@@ -17,7 +17,6 @@ from __future__ import annotations
 
 import argparse
 import ast
-import hashlib
 import json
 import math
 import re
@@ -109,7 +108,7 @@ def _rel_path(path: Path, root: Path) -> str:
 
 def _entity_id(file: Path, kind: str, name: str, line: int) -> str:
     base = f"{file}:{kind}:{name}:{line}"
-    return hashlib.sha256(base.encode()).hexdigest()[:16]
+    return _content_hash(base)
 
 
 def _parse_python(file: Path, root: Path) -> list[CodeEntity]:
