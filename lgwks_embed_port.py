@@ -26,7 +26,6 @@ Schema id: lgwks.embed.port.v1
 from __future__ import annotations
 
 import json
-import math
 import os
 import re
 import sqlite3
@@ -264,10 +263,13 @@ for line in sys.stdin:
 # ---------------------------------------------------------------------------
 
 def _l2_normalize(floats: list[float]) -> list[float]:
-    n = math.sqrt(sum(x * x for x in floats))
-    if n < 1e-12:
-        raise EmbedDimError("zero vector — cannot normalise")
-    return [x / n for x in floats]
+    # Canonical L2 math (lgwks_vecmath); translate its zero error to this layer's
+    # EmbedDimError so the public contract is unchanged but the math lives in ONE place.
+    import lgwks_vecmath
+    try:
+        return lgwks_vecmath.l2_normalize(floats, on_zero="raise")
+    except lgwks_vecmath.ZeroVectorError as exc:
+        raise EmbedDimError("zero vector — cannot normalise") from exc
 
 
 def _mrl_slice(floats: list[float], k: int) -> list[float]:

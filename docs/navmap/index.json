@@ -1255,7 +1255,7 @@
       "has_cli": true,
       "has_tests": true,
       "integration": "integrated",
-      "last_commit_days": 3,
+      "last_commit_days": 4,
       "loc": 295,
       "owning_issue": "#72",
       "packet": "I8",
@@ -1770,13 +1770,14 @@
     "lgwks_embed_port": {
       "deps": [
         "axiom",
+        "lgwks_vecmath",
         "lgwks_vector"
       ],
       "has_cli": false,
       "has_tests": true,
       "integration": "integrated",
       "last_commit_days": 0,
-      "loc": 685,
+      "loc": 687,
       "owning_issue": null,
       "packet": "I4",
       "purpose": "embedder runtime (lgwks.embed.port.v1).",
@@ -2449,13 +2450,14 @@
     },
     "lgwks_jarvis": {
       "deps": [
-        "lgwks_sqlite"
+        "lgwks_sqlite",
+        "lgwks_vecmath"
       ],
       "has_cli": true,
       "has_tests": false,
       "integration": "integrated",
       "last_commit_days": 0,
-      "loc": 1137,
+      "loc": 1139,
       "owning_issue": null,
       "packet": null,
       "purpose": "legacy deterministic research graph crawler.",
@@ -2651,7 +2653,7 @@
       "has_cli": false,
       "has_tests": true,
       "integration": "integrated",
-      "last_commit_days": null,
+      "last_commit_days": 0,
       "loc": 300,
       "owning_issue": null,
       "packet": null,
@@ -3030,12 +3032,14 @@
       "used_by": []
     },
     "lgwks_rank": {
-      "deps": [],
+      "deps": [
+        "lgwks_vecmath"
+      ],
       "has_cli": true,
       "has_tests": true,
       "integration": "integrated",
       "last_commit_days": 0,
-      "loc": 542,
+      "loc": 541,
       "owning_issue": null,
       "packet": "I6",
       "purpose": "cubic node centrality (Z-eigenpair) + AI-discrepancy \u03b4 (I6).",
@@ -3208,13 +3212,14 @@
         "lgwks_multimodal",
         "lgwks_openrouter_embed",
         "lgwks_search",
-        "lgwks_sign"
+        "lgwks_sign",
+        "lgwks_vecmath"
       ],
       "has_cli": true,
       "has_tests": false,
       "integration": "integrated",
       "last_commit_days": 0,
-      "loc": 859,
+      "loc": 855,
       "owning_issue": null,
       "packet": null,
       "purpose": "the post-gate execution spine (Issue #7, ADR-001).",
@@ -3914,29 +3919,35 @@
       "has_tests": false,
       "integration": "integrated",
       "last_commit_days": 1,
-      "loc": 40,
+      "loc": 82,
       "owning_issue": null,
       "packet": null,
       "purpose": "the single source of truth for vector similarity math.",
       "staleness": "active",
       "subsystem": "Unclassified (triage)",
       "used_by": [
+        "lgwks_embed_port",
         "lgwks_engine",
         "lgwks_intent_classifier",
+        "lgwks_jarvis",
         "lgwks_pipeline",
-        "lgwks_urlrisk"
+        "lgwks_rank",
+        "lgwks_run",
+        "lgwks_urlrisk",
+        "lgwks_vector"
       ]
     },
     "lgwks_vector": {
       "deps": [
         "axiom",
-        "lgwks_sqlite"
+        "lgwks_sqlite",
+        "lgwks_vecmath"
       ],
       "has_cli": false,
       "has_tests": false,
       "integration": "integrated",
       "last_commit_days": 0,
-      "loc": 543,
+      "loc": 546,
       "owning_issue": null,
       "packet": "I1",
       "purpose": "vector-space + cid contract (lgwks.vector.record.v1).",
@@ -4294,7 +4305,7 @@
       "orphan": 4,
       "staling": 6
     },
-    "loc": 58171,
+    "loc": 58215,
     "modules": 172
   }
 }

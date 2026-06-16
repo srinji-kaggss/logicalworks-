@@ -207,17 +207,16 @@ def build_tensor(
 # ---------------------------------------------------------------------------
 
 
-def _l2_norm(v: list[float]) -> float:
-    return math.sqrt(sum(x * x for x in v))
+# L2 math is the canonical vecmath primitive — these are thin local aliases so the
+# call sites read naturally; the implementation (incl. zero-handling) lives in ONE place.
+import lgwks_vecmath as _vm
+
+_l2_norm = _vm.l2_norm
 
 
 def _normalize(v: list[float]) -> list[float]:
     """L2-normalize v. Returns v unchanged (all zeros) if norm < 1e-12."""
-    n = _l2_norm(v)
-    if n < 1e-12:
-        return v
-    inv_n = 1.0 / n
-    return [x * inv_n for x in v]
+    return _vm.l2_normalize(v, on_zero="keep")
 
 
 def _sparse_matvec(

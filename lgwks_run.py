@@ -26,7 +26,6 @@ import argparse
 import hashlib
 import ipaddress
 import json
-import math
 import re
 import socket
 import sys
@@ -534,7 +533,8 @@ def _deterministic_embed(text: str, dims: int = DIMS) -> list[float]:
     for tok in toks:
         d = hashlib.blake2b(tok.encode(), digest_size=8).digest()
         vec[int.from_bytes(d[:4], "big") % dims] += 1.0 if d[4] % 2 == 0 else -1.0
-    norm = math.sqrt(sum(v * v for v in vec)) or 1.0
+    import lgwks_vecmath
+    norm = lgwks_vecmath.l2_norm(vec) or 1.0  # canonical L2 norm (one source of truth)
     return [round(v / norm, 6) for v in vec]
 
 
@@ -587,10 +587,6 @@ def embed(
         return None, "apple-local:unavailable", False
     # MLX path lands here in the migration (also semantic). Until a real provider answers:
     return _deterministic_embed(text), "deterministic-feature-hash", False
-
-
-class EmbeddingProviderUnavailable(RuntimeError):
-    """Raised when an embedding provider is explicitly requested but unavailable."""
 
 
 # Shared multimodal embedder. The Eye (Qwen3-VL-Embedding-8B) embeds text, images

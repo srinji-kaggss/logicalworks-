@@ -13,7 +13,6 @@ Schema id: lgwks.vector.record.v1
 
 from __future__ import annotations
 
-import math
 import sqlite3
 import struct
 import sys
@@ -94,16 +93,20 @@ def _pack_f32(floats: list[float]) -> bytes:
     return struct.pack(f">{len(floats)}f", *floats)
 
 
-def _norm_l2(floats: list[float]) -> float:
-    return math.sqrt(sum(x * x for x in floats))
+import lgwks_vecmath as _vm
+
+_norm_l2 = _vm.l2_norm  # canonical L2 norm — one source of truth (lgwks_vecmath)
 
 
 def _normalize(floats: list[float]) -> tuple[list[float], float]:
-    """Return (normalized_floats, original_norm). Raises on zero-vector."""
-    n = _norm_l2(floats)
+    """Return (normalized_floats, original_norm). Raises on zero-vector.
+
+    Keeps this layer's (vec, norm)+VectorError contract while the math itself lives
+    in lgwks_vecmath, so it cannot drift from the other normalisers."""
+    n = _vm.l2_norm(floats)
     if n < 1e-12:
         raise VectorError("cannot normalize zero vector")
-    return [x / n for x in floats], n
+    return _vm.l2_normalize(floats, on_zero="raise"), n
 
 
 def _canonical_bytes(

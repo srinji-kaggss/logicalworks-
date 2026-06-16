@@ -114,9 +114,11 @@ def deterministic_embedding(text: str, dims: int = DEFAULT_DIMS) -> list[float]:
 
 
 def cosine(a: list[float], b: list[float]) -> float:
-    if not a or not b:
-        return 0.0
-    return sum(x * y for x, y in zip(a, b))
+    # Canonical cosine (lgwks_vecmath) — this used to be a bare dot product, which
+    # conflates magnitude with similarity for the non-unit Eye vectors fed here.
+    # Routed to the one source of truth so it can never drift again.
+    import lgwks_vecmath
+    return lgwks_vecmath.cosine(a, b)
 
 
 def query_variants(keywords: list[str]) -> list[str]:
