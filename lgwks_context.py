@@ -130,11 +130,8 @@ def write_pack(run_dir: Path) -> Path | None:
     raw = cdir / "raw"
     
     if not rounds:
-        # Produce a baseline context pack even without rounds
-        cdir.mkdir(parents=True, exist_ok=True)
-        ctx_path = cdir / "CONTEXT.md"
-        ctx_path.write_text(f"# Context: {run_dir.name}\n(No rounds found)\n", encoding="utf-8")
-        return ctx_path
+        # Nothing to pack: assemble() is empty, so write nothing and signal None.
+        return None
 
     rounds.sort(key=lambda r: r["n"])
     raw.mkdir(parents=True, exist_ok=True)

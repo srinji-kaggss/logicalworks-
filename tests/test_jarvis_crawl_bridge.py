@@ -18,18 +18,13 @@ from unittest import mock
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-import importlib.machinery
-import importlib.util
-
-# Load the lgwks script as a module (it has no .py extension).
+# The crawl→substrate bridge engine (#34) lives in lgwks_jarvis; the canonical
+# `crawl` verb (lgwks_crawl) owns the user-facing flag surface and delegates to
+# it. Behavioral tests exercise the engine directly; parser-registration tests
+# inspect the canonical verb's source.
 here = os.path.dirname(os.path.abspath(__file__))
-_lgwks_path = os.path.join(os.path.dirname(here), "lgwks")
-_loader = importlib.machinery.SourceFileLoader("_lgwks_bridge_test", _lgwks_path)
-_spec = importlib.util.spec_from_loader("_lgwks_bridge_test", _loader)
-assert _spec is not None
-_lgwks = importlib.util.module_from_spec(_spec)
-sys.modules["_lgwks_bridge_test"] = _lgwks
-_loader.exec_module(_lgwks)
+import lgwks_jarvis as _lgwks
+_lgwks_path = os.path.join(os.path.dirname(here), "lgwks_crawl.py")
 
 
 # ---------------------------------------------------------------------------
@@ -386,11 +381,11 @@ class TestParserRegistration(unittest.TestCase):
         import re
         src = Path(_lgwks_path).read_text(encoding="utf-8")
         block = re.search(
-            r'crawl\s*=\s*jarvis_sub\.add_parser\("crawl".*?crawl\.set_defaults',
+            r'crawl\s*=\s*sub\.add_parser\(\s*"crawl".*?crawl\.set_defaults',
             src,
             re.DOTALL,
         )
-        self.assertIsNotNone(block, "could not locate the crawl parser block in lgwks")
+        self.assertIsNotNone(block, "could not locate the crawl parser block in lgwks_crawl")
         assert block is not None
         return block.group(0)
 
@@ -421,21 +416,23 @@ class TestParserRegistration(unittest.TestCase):
 # ---------------------------------------------------------------------------
 
 class TestManifestListsJarvisCrawl(unittest.TestCase):
+    # #218 consolidated `jarvis crawl` into the canonical `crawl` verb; the
+    # substrate bridge contract now lives on `crawl`.
     def test_jarvis_crawl_in_manifest(self):
         import lgwks_manifest as man
         m = man.build_manifest()
         verb_names = {v["verb"] for v in m["verbs"]}
-        self.assertIn("jarvis crawl", verb_names)
+        self.assertIn("crawl", verb_names)
 
     def test_jarvis_crawl_metadata_mentions_substrate(self):
         import lgwks_manifest as man
-        meta = man._VERB_META.get("jarvis crawl", {})
+        meta = man._VERB_META.get("crawl", {})
         intent = meta.get("intent", "")
         self.assertIn("substrate", intent.lower(), "manifest intent must mention substrate engine")
 
     def test_jarvis_crawl_metadata_mentions_engine_arg(self):
         import lgwks_manifest as man
-        meta = man._VERB_META.get("jarvis crawl", {})
+        meta = man._VERB_META.get("crawl", {})
         args = meta.get("args", {})
         self.assertIn("--engine", args)
 

@@ -523,16 +523,9 @@ class TestJarvisCrawlDefaultRemainsLegacy(unittest.TestCase):
 
     def test_jarvis_crawl_keyword_does_not_use_apple_local(self):
         """Keyword-only legacy crawl must not touch lgwks_apple."""
-        import importlib.machinery
-        import importlib.util
-        here = os.path.dirname(os.path.abspath(__file__))
-        lgwks_path = os.path.join(os.path.dirname(here), "lgwks")
-        loader = importlib.machinery.SourceFileLoader("_lgwks_jc_test", lgwks_path)
-        spec = importlib.util.spec_from_loader("_lgwks_jc_test", loader)
-        assert spec is not None
-        mod = importlib.util.module_from_spec(spec)
-        sys.modules["_lgwks_jc_test"] = mod
-        loader.exec_module(mod)
+        # #218 relocated the crawl engine (crawl_command + _import_substrate +
+        # build_seed_urls) from the monolithic lgwks entrypoint into lgwks_jarvis.
+        import lgwks_jarvis as mod
 
         import argparse
         # Keyword-only, legacy path: source=None engine=substrate → stays legacy

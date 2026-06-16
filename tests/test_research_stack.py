@@ -253,11 +253,12 @@ class TestManifest(unittest.TestCase):
         sys.modules[spec.name] = mod
         loader.exec_module(mod)
         live = man._collect_verbs()
-        for expected in ("manifest", "extract", "convert", "solve", "x", "refine", "store",
-                         "jarvis crawl", "memory init", "project plan", "geo compile",
-                         "agent-os bootstrap", "auth", "akinator", "run crawl", "context", "foundation",
-                         "portal build", "capture build",
-                         "keyvault check", "model-hub list"):
+        # #218 consolidated the flat 70-verb surface into nested canonical verbs.
+        # These are the live leaf verbs the consolidated CLI must still expose.
+        for expected in ("crawl", "solve", "research", "review", "x",
+                         "route refine", "ops workflow extract", "ops agent-os bootstrap",
+                         "state run crawl", "state context", "repo audit", "graph viz",
+                         "do code"):
             self.assertIn(expected, live, f"{expected!r} must appear in the live verb surface")
         m = man.build_manifest()
         manifest_names = {v["verb"] for v in m["verbs"]}
@@ -282,16 +283,18 @@ class TestManifest(unittest.TestCase):
 
     def test_missing_metadata_is_loud_not_silent(self):
         import lgwks_manifest as man
-        saved = man._VERB_META.get("manifest")
+        # `crawl` is a live verb with metadata; drop it and the manifest must
+        # surface the gap loudly, never silently omit the verb.
+        saved = man._VERB_META.get("crawl")
         try:
-            man._VERB_META.pop("manifest", None)
+            man._VERB_META.pop("crawl", None)
             m = man.build_manifest()
-            entry = next(v for v in m["verbs"] if v["verb"] == "manifest")
+            entry = next(v for v in m["verbs"] if v["verb"] == "crawl")
             self.assertEqual(entry["intent"], "(no metadata)")
             self.assertEqual(entry["tokens"], "(no metadata)")
         finally:
             if saved is not None:
-                man._VERB_META["manifest"] = saved
+                man._VERB_META["crawl"] = saved
 
     def test_manifest_default_emits_parseable_json(self):
         import argparse
@@ -324,21 +327,24 @@ class TestManifest(unittest.TestCase):
         self.assertIn("manifest", out)
 
     def test_manifest_args_line_reflects_registered_flags(self):
+        # #218 consolidated the standalone `manifest` verb; the parser↔_VERB_META
+        # drift-guard now rides the canonical `crawl` verb (registered in
+        # lgwks_crawl.py), whose substrate flags must match its manifest metadata.
         import re as _re
         import lgwks_manifest as man
         here = os.path.dirname(os.path.abspath(__file__))
-        src = Path(os.path.join(os.path.dirname(here), "lgwks")).read_text(encoding="utf-8")
-        m_block = _re.search(r'manifest\s*=\s*sub\.add_parser\(\s*"manifest"(.*?)manifest\.set_defaults',
+        src = Path(os.path.join(os.path.dirname(here), "lgwks_crawl.py")).read_text(encoding="utf-8")
+        m_block = _re.search(r'crawl\s*=\s*sub\.add_parser\(\s*"crawl"(.*?)crawl\.set_defaults',
                              src, _re.DOTALL)
-        self.assertIsNotNone(m_block, "could not locate the manifest parser block in lgwks")
+        self.assertIsNotNone(m_block, "could not locate the crawl parser block in lgwks_crawl")
         assert m_block is not None
         registered = set(_re.findall(r'add_argument\(\s*"(--[\w-]+)"', m_block.group(1)))
-        self.assertIn("--json", registered, "--json must be registered on the manifest subparser")
-        self.assertIn("--render", registered)
-        # _VERB_META["manifest"]["args"] must name both flags (drift guard)
-        manifest_meta = man._VERB_META.get("manifest", {})
-        self.assertIn("--json", manifest_meta.get("args", {}))
-        self.assertIn("--render", manifest_meta.get("args", {}))
+        self.assertIn("--engine", registered, "--engine must be registered on the crawl subparser")
+        self.assertIn("--embed-provider", registered)
+        # _VERB_META["crawl"]["args"] must name the flags (drift guard)
+        crawl_meta = man._VERB_META.get("crawl", {})
+        self.assertIn("--engine", crawl_meta.get("args", {}))
+        self.assertIn("--embed-provider", crawl_meta.get("args", {}))
 
 
 class TestAuthRuntime(unittest.TestCase):
@@ -1176,29 +1182,22 @@ class TestUnifiedCliPackaging(unittest.TestCase):
         loader.exec_module(mod)
         return mod
 
-    def test_run_wrapper_forwards_flag_arguments(self):
+    # #218 consolidated the standalone akinator wrapper into the unified
+    # `research` orchestrator — its autonomous "20-questions" loop is now
+    # `research --deep`. These verify the live consolidated CLI registers the
+    # capability and parses its flags through the canonical parser, rather than
+    # a separate passthrough wrapper.
+    def test_research_verb_is_live(self):
+        import lgwks_cli_introspect as cli
+        self.assertIn("research", cli.command_names())
+
+    def test_research_deep_flag_parses_through_unified_cli(self):
         mod = self._load_cli()
-        seen = {}
-
-        def fake_dispatch(args):
-            seen["argv"] = mod._forward_argv(args)
-            return 0
-
-        mod._akinator_dispatch = fake_dispatch
-        self.assertEqual(mod.main(["akinator", "--auto", "--purpose", "test"]), 0)
-        self.assertEqual(seen["argv"], ["--auto", "--purpose", "test"])
-
-    def test_akinator_wrapper_forwards_mixed_flag_arguments(self):
-        mod = self._load_cli()
-        seen = {}
-
-        def fake_dispatch(args):
-            seen["argv"] = mod._forward_argv(args)
-            return 0
-
-        mod._akinator_dispatch = fake_dispatch
-        self.assertEqual(mod.main(["akinator", "--demo", "--pick", "1"]), 0)
-        self.assertEqual(seen["argv"], ["--demo", "--pick", "1"])
+        parser = mod.build_parser()
+        args = parser.parse_args(["research", "map salesforce ai os", "--deep"])
+        self.assertEqual(args.command, "research")
+        self.assertTrue(args.deep)
+        self.assertEqual(args.prompt, "map salesforce ai os")
 
 
 class TestExpressionParser(unittest.TestCase):

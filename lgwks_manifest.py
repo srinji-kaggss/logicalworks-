@@ -919,9 +919,17 @@ _VERB_META: dict[str, dict] = {
         "tokens": "none",
     },
     "crawl": {
-        "intent": "frontier web crawl: fetch URL → classify → embed text/image/video → artifact tree",
-        "args": {"url": "target URL", "--no-media": "skip image/video embedding"},
-        "output": "manifest.json with artifact paths",
+        "intent": "unified URL/keyword crawl: substrate auth-aware bridge (default for URLs) or legacy jarvis engine → classify → embed → artifact tree",
+        "args": {
+            "target": "URL to crawl or keyword seed",
+            "--engine": "crawl engine: substrate (auth-aware) or jarvis/legacy (deterministic)",
+            "--login-url": "explicit login page URL (substrate)",
+            "--auth-selector": "CSS selector confirming successful login (substrate)",
+            "--embed-provider": "embedding provider (substrate)",
+            "--embed-model": "embedding model (substrate)",
+            "--estimate-only": "print a compute estimate and exit",
+        },
+        "output": "lgwks.jarvis.substrate_crawl.v0 JSON (substrate) or manifest.json with artifact paths",
         "tokens": "image/video embedding only",
     },
     "crdt info": {
