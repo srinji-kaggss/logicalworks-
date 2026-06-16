@@ -31,52 +31,12 @@ HISTORY_PATH.parent.mkdir(parents=True, exist_ok=True)
 # the parser; the REPL must use the same source of truth or commands disappear
 # from tab completion and the help text.
 
-_DOMAINS: dict[str, list[str]] = {
-    "Research":  ["jarvis", "fetch", "refine", "preview", "extract", "convert",
-                  "x", "manifest", "login", "cohere", "comprehend", "geo", "public",
-                  "akinator", "run", "context", "model-hub", "workflow"],
-    "GitHub":    ["gh"],
-    "DevOps":    ["repo", "review", "session", "project", "batch", "refactor", "hooks", "agent-os"],
-    "System":    ["solve", "debug", "doctor", "intent", "entity-graph", "graph",
-                  "substrate", "repl", "initialize", "auth", "keyvault", "foundation"],
-    "Data":      ["store", "memory", "embed"],
-}
-
-
-def _domain_for(verb: str) -> str:
-    for domain, verbs in _DOMAINS.items():
-        if verb in verbs:
-            return domain
-    return "Other"
-
-
-def _live_commands() -> list[str]:
-    """Introspect the live lgwks parser and return all registered subcommands.
-    Falls back to a static list if introspection fails (e.g. lgwks is broken)."""
-    try:
-        import importlib.util
-        from importlib.machinery import SourceFileLoader
-        loader = SourceFileLoader("lgwks_cli", str(ROOT / "lgwks"))
-        spec = importlib.util.spec_from_loader("lgwks_cli", loader)
-        mod = importlib.util.module_from_spec(spec)
-        sys.modules.setdefault("lgwks_cli", mod)
-        loader.exec_module(mod)
-        parser = mod.build_parser()
-    except Exception:
-        return []
-
-    sub_action = None
-    for action in parser._actions:
-        if action.dest == "command":
-            sub_action = action
-            break
-    if sub_action is None or not getattr(sub_action, "choices", None):
-        return []
-
-    help_by_name = {ca.dest: (ca.help or "").strip() for ca in sub_action._choices_actions}
-    # Filter out aliases (empty help text) but keep everything else
-    return sorted([name for name in sub_action.choices.keys() if help_by_name.get(name)])
-
+# Canonical CLI introspection + verb→domain taxonomy (shared with lgwks_home).
+from lgwks_cli_introspect import (  # noqa: E402
+    DOMAINS as _DOMAINS,
+    command_names as _live_commands,
+    domain_for as _domain_for,
+)
 
 _COMMANDS = _live_commands()
 # //why: if introspection fails, _COMMANDS is empty — the REPL still works for
