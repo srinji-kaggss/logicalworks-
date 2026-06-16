@@ -26,11 +26,20 @@ def gate_command(args: argparse.Namespace) -> int:
         
     if cmd == "admission":
         import lgwks_admission
-        # admission uses subcommands too, so we might need a more complex mapping
-        # but for now we'll just call the relevant function
         if getattr(args, "admission_cmd", "") == "info":
             return lgwks_admission._cmd_info(args)
         return lgwks_admission._cmd_check(args)
+
+    if cmd == "access":
+        import lgwks_access
+        acmd = getattr(args, "access_command", "")
+        if acmd == "resolve":
+            return lgwks_access._access_resolve_command(args)
+        if acmd == "promote":
+            return lgwks_access._access_promote_command(args)
+        if acmd == "verify":
+            return lgwks_access._access_verify_command(args)
+        return 1
 
     print(f"error: unknown gate command {cmd}", file=sys.stderr)
     return 1
@@ -65,3 +74,21 @@ def add_parser(sub) -> None:
     adm_chk = adm_sub.add_parser("check")
     adm_chk.add_argument("--tenant", default="guest")
     adm.set_defaults(func=gate_command)
+
+    # access
+    acc = gs.add_parser("access", help="capability-port access router")
+    acc_sub = acc.add_subparsers(dest="access_command", required=True)
+    
+    res = acc_sub.add_parser("resolve")
+    res.add_argument("--tenant", required=True)
+    res.add_argument("--promote", action="store_true")
+    
+    pro = acc_sub.add_parser("promote")
+    pro.add_argument("cid")
+    pro.add_argument("--tenant", required=True)
+    pro.add_argument("--store", required=True)
+    
+    ver = acc_sub.add_parser("verify")
+    ver.add_argument("--token", required=True)
+    
+    acc.set_defaults(func=gate_command)
