@@ -50,8 +50,8 @@ def _is_safe_path(target: str, repo_root: Path, allow_absolute: bool = False) ->
 
 def extract_command(args) -> int:
     repo_root = Path(__file__).resolve().parent
-    if not _is_safe_path(args.target, repo_root, getattr(args, "allow_absolute", False)):
-        print(f"error: blocked path (outside repo or absolute): {args.target}", file=sys.stderr)
+    if not _is_safe_path(args.target, repo_root, getattr(args, "allow_absolute", True)):
+        print(f"error: blocked path (outside repo): {args.target}", file=sys.stderr)
         return 1
 
     doc = _extract(args.target, getattr(args, "max_chars", 8000))
@@ -70,13 +70,13 @@ def convert_command(args) -> int:
     --to json wraps it with provenance, md/txt emit the body. Honest scope: this normalises TO text
     formats, it does not re-render INTO binary formats (no txt→docx) — that would be a different tool."""
     repo_root = Path(__file__).resolve().parent
-    if not _is_safe_path(args.source, repo_root, getattr(args, "allow_absolute", False)):
-        print(f"error: blocked path (outside repo or absolute): {args.source}", file=sys.stderr)
+    if not _is_safe_path(args.target, repo_root, getattr(args, "allow_absolute", True)):
+        print(f"error: blocked path (outside repo): {args.target}", file=sys.stderr)
         return 1
     
     if getattr(args, "out", None):
-        if not _is_safe_path(args.out, repo_root, getattr(args, "allow_absolute", False)):
-            print(f"error: blocked output path (outside repo or absolute): {args.out}", file=sys.stderr)
+        if not _is_safe_path(args.out, repo_root, getattr(args, "allow_absolute", True)):
+            print(f"error: blocked output path (outside repo): {args.out}", file=sys.stderr)
             return 1
 
     doc = _extract(args.source, getattr(args, "max_chars", 20000))

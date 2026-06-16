@@ -27,11 +27,28 @@ import urllib.request
 from pathlib import Path
 
 try:
+    from curl_cffi import requests as _curl
+except Exception:
+    _curl = None
+
+try:
     import lgwks_capabilities as _cap
 except Exception:
     _cap = None
 
 from lgwks_substrate_config import TAG_RE as _TAG, WS_COLLAPSE_RE as _WS  # one source of truth
+
+# ── bot-wall detection ────────────────────────────────────────────────────────
+
+_WALL_RE = re.compile(
+    r"unauthorized request|bot-traffic@|access denied|are you a (?:human|robot)|"
+    r"verify you are (?:a )?human|please enable cookies and|ddos protection|"
+    r"cf-browser-verification|cf-challenge|captcha|rate.?limit(?:ed)?|"
+    r"request blocked|temporarily blocked|too many requests|"
+    r"enable JavaScript|doesn't work properly without|requires JavaScript|"
+    r"Just a moment|Attention Required",
+    re.I,
+)
 _PDF_EXT = {".pdf"}
 _OFFICE_EXT = {".docx", ".xlsx", ".pptx", ".doc", ".xls", ".ppt"}
 _TEXT_EXT = {".txt", ".md", ".csv", ".json", ".yaml", ".yml", ".log", ".toml", ".ini", ".cfg", ".xml",
@@ -175,40 +192,50 @@ _JS_WALL = re.compile(r"enable JavaScript|doesn't work properly without|requires
 
 
 def _html(url: str, max_chars: int) -> str:
-    """crwl md-fit → curl floor → escalate to a real browser (playwright) on a JS/bot wall.
-    The escalation is the fix for SPAs like canadalife.com that return 'enable JavaScript'."""
+    """crwl md-fit → curl_cffi (impersonate chrome) → escalate to nodriver on a wall.
+    This is the world-class bypass ladder."""
     if not _remote_allowed(url):
         return ""
     best = ""
     exe = _bin("crwl")
     if exe:
         try:
+            # crwl is the fast floor; if it works, we're done.
             p = subprocess.run([exe, url, "-o", "md-fit"], capture_output=True, text=True, timeout=40)
             best = (p.stdout or "").strip()
         except Exception:
             pass
-    if not best:
-        try:
-            req = urllib.request.Request(url, headers=_headers(url))
-            with _opener().open(req, timeout=25) as resp:
-                best = _TAG.sub("", resp.read().decode("utf-8", "replace"))
-        except urllib.error.HTTPError as exc:
+
+    # If crwl failed or returned a wall, try curl_cffi with impersonation.
+    if not best or _WALL_RE.search(best[:1500]):
+        if _curl:
             try:
-                import lgwks_auth_runtime
-                lgwks_auth_runtime.note_auth_failure(url, exc.code)
+                # Tier 1: curl_cffi impersonates Chrome TLS/JA4 signatures.
+                r = _curl.get(url, impersonate="chrome124", timeout=25, headers=_headers(url))
+                if r.status_code == 200:
+                    import lgwks_html
+                    # Use real HTML->MD converter instead of destructive regex
+                    best = lgwks_html.html_to_markdown(r.text)
             except Exception:
                 pass
-        except Exception:
-            best = ""
-    # escalate to the real browser if we got nothing or hit a JS/bot wall.
-    if not best or _JS_WALL.search(best[:1500]):
+
+    # Escalation rung: if we still have a wall or no content, use nodriver (JS rendering).
+    if not best or _WALL_RE.search(best[:1500]) or len(best.strip()) < 200:
         try:
             import lgwks_browser
-            r = lgwks_browser.render(url, max_chars=max_chars)
+            # Tier 2: nodriver (native anti-detect browser)
+            r = lgwks_browser.render(url, max_chars=max_chars, browser_engine="nodriver")
             if r["ok"] and r["text"]:
-                return _trim(r["text"], max_chars)
+                best = r["text"]
         except Exception:
             pass
+
+    # Final validation: if it still looks like a wall, return empty to trigger 'ok: False'
+    if _WALL_RE.search(best[:1500]) or len(best.strip()) < 150:
+        import lgwks_auth_runtime
+        lgwks_auth_runtime.note_auth_failure(url, 403)  # Forbidden/Gate
+        return ""
+
     return _trim(best, max_chars)
 
 

@@ -48,7 +48,8 @@ CONFIG_EXTS = {".json", ".yaml", ".yml", ".toml", ".ini", ".cfg", ".xml", ".dock
 ALL_INDEX_EXTS = CODE_EXTS | DOC_EXTS | CONFIG_EXTS
 
 SKIP_DIRS = {".git", "node_modules", "__pycache__", ".venv", ".venv-models", "venv", "target",
-               ".next", "dist", "build", "store", "docs", ".claude", ".config"}
+               ".next", "dist", "build", "store", "docs", ".claude", ".config",
+               ".build/checkouts", ".build/artifacts"}
 SKIP_FILES = {"*.pyc", "*.so", "*.dylib", "*.egg-info", "*.bin", "*.lock"}
 
 # ---------------------------------------------------------------------------
@@ -449,7 +450,7 @@ def _parse_generic_code(file: Path, root: Path) -> list[CodeEntity]:
 
 
 def scan_codebase(root: Path | None = None) -> tuple[list[CodeEntity], list[Relation]]:
-    """Scan the codebase and return all entities + relations."""
+    """Scan the codebase using git-provenance to avoid indexing slop."""
     is_default_root = root is None
     root = root or ROOT
     all_entities: list[CodeEntity] = []
@@ -462,8 +463,17 @@ def scan_codebase(root: Path | None = None) -> tuple[list[CodeEntity], list[Rela
         roots.append(kernel_path)
 
     for r in roots:
-        for path in sorted(r.rglob("*")):
-            if not path.is_file() or not _should_index(path):
+        try:
+            # U1 provenance: only index what is tracked by git
+            cmd = ["git", "ls-files"]
+            files = subprocess.check_output(cmd, cwd=str(r), text=True).splitlines()
+        except Exception:
+            # Fallback to rglob if not a git repo, but still honor SKIP_DIRS
+            files = [str(p.relative_to(r)) for p in r.rglob("*") if p.is_file()]
+
+        for rel_path in files:
+            path = r / rel_path
+            if not _should_index(path):
                 continue
 
             if path.suffix == ".py":

@@ -126,11 +126,17 @@ def assemble(run_dir: Path) -> str:
 def write_pack(run_dir: Path) -> Path | None:
     """Write ./CONTEXT/{CONTEXT.md, raw/*.reason.json symlinks}. Returns the CONTEXT.md path."""
     rounds = _rounds(run_dir)
-    if not rounds:
-        return None
-    rounds.sort(key=lambda r: r["n"])
     cdir = run_dir / "CONTEXT"
     raw = cdir / "raw"
+    
+    if not rounds:
+        # Produce a baseline context pack even without rounds
+        cdir.mkdir(parents=True, exist_ok=True)
+        ctx_path = cdir / "CONTEXT.md"
+        ctx_path.write_text(f"# Context: {run_dir.name}\n(No rounds found)\n", encoding="utf-8")
+        return ctx_path
+
+    rounds.sort(key=lambda r: r["n"])
     raw.mkdir(parents=True, exist_ok=True)
     for r in list(reversed(rounds))[:TIER_RAW]:
         src = run_dir / f"round-{r['n']:03d}" / "reason.json"

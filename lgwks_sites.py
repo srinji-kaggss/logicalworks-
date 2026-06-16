@@ -82,7 +82,7 @@ _RE_TITLE = re.compile(r'<title>(.*?)</title>', re.I | re.S)
 _RE_POST = re.compile(r'<shreddit-post[^>]*title="([^"]*)"[^>]*>', re.I)
 _RE_SCORE = re.compile(r'<faceplate-number[^>]*number="([^"]*)"[^>]*>', re.I)
 _RE_COMMENT = re.compile(r'<shreddit-comment[^>]*>.*?<p[^>]*>(.*?)</p>', re.I | re.S)
-_RE_BODY = re.compile(r'<div[^>]*class="[^"]*text-neutral-content[^"]*"[^>]*>(.*?)</div>', re.I | re.S)
+_RE_BODY = re.compile(r'<div[^>]*class="[^"]*(?:text-neutral-content|md)[^"]*"[^>]*>(.*?)</div>', re.I | re.S)
 _RE_OLD_POST = re.compile(r'<a[^>]*class="title"[^>]*>(.*?)</a>', re.I)
 _RE_OLD_BODY = re.compile(r'<div[^>]*class="usertext-body"[^>]*>(.*?)</div>', re.I | re.S)
 

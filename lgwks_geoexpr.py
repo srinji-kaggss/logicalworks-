@@ -69,22 +69,31 @@ def validate_geoexpr(obj) -> dict:
         return _err("schema_not_object", "GeoExpr must be a JSON object")
     if obj.get("schema") != SCHEMA_GEOEXPR:
         return _err("schema_mismatch", f"expected schema {SCHEMA_GEOEXPR}, got {obj.get('schema')!r}")
-    if obj.get("op") != "product":
-        return _err("unsupported_op", f"only op='product' is supported, got {obj.get('op')!r}")
+    op = obj.get("op")
+    if op not in ("product", "union", "intersection", "difference"):
+        return _err("unsupported_op", f"op must be 'product', 'union', 'intersection' or 'difference', got {op!r}")
     axes = obj.get("axes")
-    if not isinstance(axes, list) or not axes:
-        return _err("axes_empty", "axes must be a non-empty list")
-    names = set()
-    for axis in axes:
-        if not isinstance(axis, dict) or "name" not in axis or "values" not in axis:
-            return _err("axis_malformed", "each axis needs 'name' and 'values'")
-        if not isinstance(axis["values"], list) or not axis["values"]:
-            return _err("axis_values_empty", f"axis {axis.get('name')!r} has no values")
-        if axis["name"] in names:
-            return _err("axis_duplicate", f"duplicate axis name {axis['name']!r}")
-        names.add(axis["name"])
-    if "verb" not in names:
-        return _err("axis_missing_verb", "a 'verb' axis is required as the command spine")
+    if op == "product" and (not isinstance(axes, list) or not axes):
+        return _err("axes_empty", "axes must be a non-empty list for product op")
+    
+    if op in ("union", "intersection", "difference"):
+        sets = obj.get("sets")
+        if not isinstance(sets, list) or not sets:
+            return _err("sets_empty", f"sets must be a non-empty list for {op} op")
+
+    if op == "product":
+        names = set()
+        for axis in axes:
+            if not isinstance(axis, dict) or "name" not in axis or "values" not in axis:
+                return _err("axis_malformed", "each axis needs 'name' and 'values'")
+            if not isinstance(axis["values"], list) or not axis["values"]:
+                return _err("axis_values_empty", f"axis {axis.get('name')!r} has no values")
+            if axis["name"] in names:
+                return _err("axis_duplicate", f"duplicate axis name {axis['name']!r}")
+            names.add(axis["name"])
+        if "verb" not in names:
+            return _err("axis_missing_verb", "a 'verb' axis is required as the command spine")
+
     constraints = obj.get("constraints", {})
     risk_max = constraints.get("risk_max", "read")
     if risk_max not in _RISK_ORDER:

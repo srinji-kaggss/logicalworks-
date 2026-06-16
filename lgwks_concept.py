@@ -95,8 +95,9 @@ def _slug(text: str) -> str:
 
 
 def _tokenize(text: str) -> list[str]:
-    """Deterministic word-level tokenization."""
-    return re.findall(r"[a-z0-9]+", text.lower())
+    """Deterministic word-level tokenization (canonical lgwks_lexicon)."""
+    import lgwks_lexicon as _lex
+    return _lex.tokens(text)
 
 
 @dataclass

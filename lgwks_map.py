@@ -24,14 +24,13 @@ from typing import Any
 _REPO = Path(__file__).resolve().parent   # so the hook can run from any cwd
 _LGWKS = _REPO / "lgwks"
 
-from lgwks_substrate_config import WORD_RE as _TOKEN  # one source of truth
-# Generic words that add no discriminative signal when matching an intent to a verb.
-_STOP = frozenset("the a an of to for and or with in on it this that is are be run get show "
-                  "lgwks create make build do use via from into your you my our".split())
+import lgwks_intent
+import lgwks_lexicon as _lex
 
 
 def _tokens(text: str) -> set[str]:
-    return {t for t in _TOKEN.findall((text or "").lower()) if t not in _STOP and len(t) > 1}
+    # Canonical lexical analyzer (was a private copy + a near-duplicate stopword list).
+    return _lex.tokens(text, min_len=2, stop=_lex.STOP_CLI, unique=True)
 
 
 def _load_verbs() -> list[dict[str, Any]]:
@@ -81,7 +80,11 @@ def map_intent(intent: str, *, top: int = 8) -> dict[str, Any]:
 
 
 def _cmd_map(args) -> int:
-    result = map_intent(args.intent, top=args.top)
+    # Fix #188: if intent looks like code-search, boost it
+    intent = args.intent
+    if "code" in intent.lower() or "find" in intent.lower():
+        intent += " search codebase"
+    result = map_intent(intent, top=args.top)
     print(json.dumps(result, indent=2))
     return 0
 

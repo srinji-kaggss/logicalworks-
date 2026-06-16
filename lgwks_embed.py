@@ -23,11 +23,7 @@ DIMS = 256
 CHUNK_WORDS = 420
 CHUNK_OVERLAP = 70
 from lgwks_substrate_config import TEXT_EXT, SKIP_DIRS  # one source of truth (were local copies)
-STOP = {
-    "a", "an", "and", "are", "as", "at", "be", "by", "for", "from", "has", "have", "if", "in",
-    "is", "it", "its", "not", "of", "on", "or", "that", "the", "this", "to", "was", "with",
-    "you", "your",
-}
+from lgwks_lexicon import STOP_EN as STOP  # canonical stopword set (was a local copy)
 from lgwks_substrate_config import SLUG_SCRUB_RE as SAFE  # one source of truth
 
 
@@ -43,7 +39,9 @@ def _folder_id(root: Path, folder: Path) -> str:
 
 
 def _tokens(text: str) -> list[str]:
-    return [t for t in re.findall(r"[a-zA-Z][a-zA-Z0-9_+\-.]{2,}", text.lower()) if t not in STOP]
+    # Canonical lexical analyzer (TERM profile keeps + - . ; one source of truth).
+    import lgwks_lexicon as _lex
+    return _lex.tokens(text, profile=_lex.TERM, min_len=3, stop=STOP)
 
 
 def _embedding(text: str, dims: int = DIMS) -> list[float]:

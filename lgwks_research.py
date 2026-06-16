@@ -743,14 +743,52 @@ def _save_round(out_dir: Path, n: int, frontier: str, compiled: dict, reason: di
     (rdir / "sources.json").write_text(_canon(sources or []), encoding="utf-8")
 
 
-def _verify_ledger(ledger: Path, key: bytes) -> bool:
-    if not ledger.exists():
-        return False
-    prev = "genesis"
-    for line in ledger.read_text().splitlines():
-        rec = json.loads(line)
-        claimed = rec.pop("hash")
-        if rec.get("prev") != prev or lgwks_sign.mac(prev + _canon(rec), key) != claimed:
-            return False
-        prev = claimed
-    return True
+def research_command(args: argparse.Namespace) -> int:
+    """Unified research command: merges begin, probe, and orchestrators."""
+    objective = args.prompt
+    purpose = getattr(args, "purpose", "general research")
+    
+    # If --deep is requested, run the autonomous loop
+    if getattr(args, "deep", False):
+        cfg = AutoConfig(
+            objective=objective,
+            purpose=purpose,
+            start=getattr(args, "start", objective),
+            max_rounds=getattr(args, "rounds", 6),
+            token_budget=getattr(args, "budget", 120_000),
+            crawl_mode="ground" if getattr(args, "live", False) else "estimate",
+            max_pages=getattr(args, "sources", 8),
+        )
+        res = run_auto(cfg)
+        return 0 if res.ledger_intact else 1
+    
+    # Otherwise, run the "begin" style engine probe
+    import lgwks_session
+    import lgwks_engine
+    import lgwks_ui as ui
+    repo = Path(getattr(args, "repo", ".")).resolve()
+    
+    session_summary = lgwks_session.session_begin(repo)
+    engine_result = lgwks_engine.run_engine(objective, repo=repo)
+    
+    if getattr(args, "json", False):
+        print(json.dumps({"session": session_summary, "subconscious": engine_result}, indent=2))
+        return 0
+        
+    on = ui.color_on()
+    print("\n".join(ui.band("lgwks · research", f"Starting: {objective}", on=on)))
+    return 0
+
+
+def add_parser(sub):
+    """Integrate unified research with a subparser."""
+    p = sub.add_parser("research", help="unified research orchestrator (begin, probe, auto)")
+    p.add_argument("prompt", help="research query or objective")
+    p.add_argument("--deep", action="store_true", help="run autonomous deep-research loop (akinator style)")
+    p.add_argument("--live", action="store_true", help="fetch real evidence from web (ground mode)")
+    p.add_argument("--sources", type=int, default=8, help="max sources to crawl")
+    p.add_argument("--rounds", type=int, default=6, help="max autonomous rounds")
+    p.add_argument("--budget", type=int, default=120_000, help="token budget")
+    p.add_argument("--repo", default=".", help="repo context")
+    p.add_argument("--json", action="store_true", help="machine output")
+    p.set_defaults(func=research_command)

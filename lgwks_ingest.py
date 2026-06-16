@@ -12,24 +12,27 @@ The whole pipeline, top to bottom, no hidden orchestration:
      └─ harvest  (wget-style: every <img>/<video>/<source>/file link on the page)
      └─ classify each resource by Content-Type  ->  text | image | video | other
      └─ embed
-     │     text   -> fact chunks -> det 256-d hash (always) + Qwen 4096 sliced to 3072 (local ollama, free)
-     │     image  -> Gemini media seam (3072) + perceptual fingerprint (always)
-     │     video  -> Gemini media seam (3072) + perceptual fingerprint (always)
+     │     text   -> fact chunks -> det 256-d hash (always) + Qwen3-VL Eye 4096 MRL-sliced to 3072 (local MLX)
+     │     image  -> Qwen3-VL Eye (4096 MRL-sliced to 3072) + perceptual fingerprint (always)
+     │     video  -> Qwen3-VL Eye (4096 MRL-sliced to 3072) + perceptual fingerprint (always)
      └─ artifact tree:  documents.jsonl · chunks.jsonl · facts.jsonl · vectors.jsonl ·
                         resources.jsonl · manifest.json
 
-//why the routing: text embeds free and local via Qwen (ollama); only image/video ever
-hit the paid Gemini media model. Qwen is sliced 4096->3072 so text and media share ONE
-dimension. (Same dim != same semantic space — different models; the future self-hosted
-Qwen3-VL swap, via lgwks_multimodal's LGWKS_EMBED_MEDIA_* env seam, unifies the space.)
-This module COMPOSES proven primitives (lgwks_browser, lgwks_run, lgwks_multimodal,
-lgwks_substrate_text) — it does not re-implement them.
+//why the routing: ONE Eye, ONE space. Text, image and video all embed through the
+same local Qwen3-VL embedding model (lgwks_run.embed_dual), so a paragraph, a
+screenshot and a clip are genuinely comparable — same model, same space, MRL-sliced
+to one width (3072). No paid cloud media model, no second vector space. The
+deterministic audit vector is a feature-hash for text and a perceptual fingerprint
+for media — always present, zero infra. This module COMPOSES proven primitives
+(lgwks_browser, lgwks_run, lgwks_multimodal, lgwks_substrate_text) — it does not
+re-implement them.
 """
 
 from __future__ import annotations
 
 import base64
 import json
+import math
 import re
 import time
 import urllib.parse
@@ -38,7 +41,6 @@ from pathlib import Path
 from typing import Any
 
 import lgwks_browser
-import lgwks_multimodal as mm
 import lgwks_run
 import lgwks_substrate_text as text
 from lgwks_substrate_io import _sha
@@ -173,14 +175,31 @@ def _is_wall(r: dict[str, Any]) -> bool:
     return _looks_like_login_gate(title, body, "")
 
 
+def _mrl_slice(vector: list[float], k: int) -> list[float]:
+    """Matryoshka slice to k dims + L2-renormalise — pure math, zero model/infra.
+
+    //why local + pure: this is the SAME MRL truncation lgwks_embed_port applies; it
+    is arithmetic on an already-computed vector, NOT a model call. (The prior code
+    imported a non-existent `lgwks_ollama.slice_mrl` — a latent ImportError that only
+    stayed hidden because the semantic branch never ran without a model present.)
+    """
+    sliced = vector[:k]
+    norm = math.sqrt(sum(x * x for x in sliced)) or 1.0
+    return [x / norm for x in sliced]
+
+
 def _embed_text(body: str) -> dict[str, Any]:
-    """det 256-d hash (always) + Qwen semantic sliced to TARGET_DIMS (None if ollama down)."""
+    """Deterministic 256-d audit hash (always) + semantic VL vector (the Eye, when present).
+
+    Text embeds through the one multimodal Eye (Qwen3-VL-Embedding-8B via
+    lgwks_run.embed_dual) — the same space images and video use — then MRL-sliced to
+    TARGET_DIMS so every vector in a run shares one width. Degrades to the
+    deterministic vector alone when no model is reachable (sem stays None).
+    """
     dual = lgwks_run.embed_dual(body, embed_on=True)
     sem = dual.get("sem")
-    if sem and sem.get("vector"):
-        import lgwks_ollama
-        sem = {**sem, "vector": lgwks_ollama.slice_mrl(sem["vector"], TARGET_DIMS),
-               "dims": min(TARGET_DIMS, sem["dims"])}
+    if sem and sem.get("vector") and sem.get("dims", 0) > TARGET_DIMS:
+        sem = {**sem, "vector": _mrl_slice(sem["vector"], TARGET_DIMS), "dims": TARGET_DIMS}
     return {"det": dual.get("det"), "sem": sem}
 
 
@@ -284,7 +303,8 @@ def ingest(url: str, *, project: str = "", run_root: str = "store/ingest",
     manifest = {
         "ok": True, "schema": "lgwks.ingest.v1", "url": url, "title": title or url,
         "bypass": page.get("bypass"), "run_dir": str(run_dir), "target_dims": TARGET_DIMS,
-        "providers": {"text": "ollama:qwen3-embedding:8b->3072 + det-256", "media": mm._MM_MODEL},
+        "providers": {"embedder": f"mlx:Qwen3-VL-Eye->{TARGET_DIMS} + det/perceptual-256",
+                      "space": "one multimodal VL space (text+image+video)"},
         "counts": counts, "resources_seen": len(harvester.urls),
         "duration_sec": round(time.time() - t0, 2),
     }
@@ -295,13 +315,19 @@ def ingest(url: str, *, project: str = "", run_root: str = "store/ingest",
 def _embed_media_resource(res_url: str, b64: str, mime: str, caption: str, doc_id: str,
                           vector_rows: list, fact_rows: list, counts: dict, *, video: bool = False) -> None:
     chunk_id = f"chunk-{_sha(doc_id + res_url)[:16]}"
-    if video:
-        res = mm.embed_media(video_b64=b64, video_mime=mime, caption=caption)
-        counts["videos"] += 1
-    else:
-        res = mm.embed_media(image_b64=b64, image_mime=mime, caption=caption)
-        counts["images"] += 1
-    
+    # ONE Eye for every modality: images and video embed through the SAME local
+    # Qwen3-VL space as text (lgwks_run.embed_dual), with the perceptual fingerprint
+    # as the deterministic audit vector. No separate paid media model, no second
+    # vector space. Degrades to the fingerprint alone when no model is reachable.
+    raw = base64.b64decode(b64)
+    res = lgwks_run.embed_dual("", embed_on=True,
+                               modality="video" if video else "image", media=raw)
+    sem = res.get("sem")
+    if sem and sem.get("vector") and sem.get("dims", 0) > TARGET_DIMS:
+        res = {**res, "sem": {**sem, "vector": _mrl_slice(sem["vector"], TARGET_DIMS),
+                              "dims": TARGET_DIMS}}
+    counts["videos" if video else "images"] += 1
+
     # Emit triples for media evidence
     rel = "video" if video else "image"
     fact_rows.append({

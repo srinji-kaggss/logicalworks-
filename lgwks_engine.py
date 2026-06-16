@@ -38,13 +38,7 @@ _MAX_PROMPT_CHARS = 16_000
 
 _SCHEMA = "lgwks.engine.schema.v1"
 
-# Tokens that carry no grounding signal
-_STOP = frozenset(
-    "the a an of to for and or with in on it this that is are be run get show "
-    "lgwks create make build do use via from into your you my our please can "
-    "how what when where why which will should would could".split()
-)
-from lgwks_substrate_config import WORD_RE as _TOKEN  # one source of truth
+import lgwks_lexicon as _lex
 
 # Prompt patterns that flag structural slop / intent drift
 _HEDGE_RE = re.compile(
@@ -55,8 +49,8 @@ _MULTI_INTENT_RE = re.compile(r"\b(and also|and then|but also|plus|additionally)
 
 
 def _tokens(text: object) -> list[str]:
-    s = text if isinstance(text, str) else ("" if text is None else str(text))
-    return [t for t in _TOKEN.findall(s.lower()) if t not in _STOP and len(t) > 1]
+    # Canonical lexical analyzer (one source of truth — was a private copy + stopword list).
+    return _lex.tokens(text, min_len=2, stop=_lex.STOP_CLI)
 
 
 def _compute_capability_idf(verbs: list[dict]) -> dict[str, float]:

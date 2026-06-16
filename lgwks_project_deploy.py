@@ -415,4 +415,18 @@ def deploy_command(args: argparse.Namespace) -> int:
     })
     jsonl(out_dir / "artifact-embeddings.jsonl", embeds)
     print(json.dumps({**dag, "path": str(out_dir)}, indent=2, sort_keys=True))
+
+    if not dry_run:
+        # Produce a runnable artifact: a script to re-verify or run the project's index
+        run_sh = out_dir / "run.sh"
+        run_sh.write_text(f"""#!/bin/bash
+# lgwks generated run script for project: {args.project}
+# run_id: {out_dir.name}
+
+echo "◆ Running project: {args.project}"
+{sys.executable} lgwks state run index {out_dir}
+""", encoding="utf-8")
+        run_sh.chmod(0o755)
+        print(f"  ✅ runnable artifact: {run_sh}")
+
     return 0

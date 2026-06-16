@@ -267,18 +267,20 @@ def refactor_file(path_or_at: str | Path, operations: list[dict], dry_run: bool 
 
     changes = engine.preview()
     if not changes:
-        return {"ok": True, "path": str(path), "changes_count": 0, "changes": []}
+        return {"ok": True, "path": str(path_or_at), "changes_count": 0, "changes": []}
 
     if not dry_run:
         try:
             new_source = engine.apply()
-            path.write_text(new_source, encoding="utf-8")
+            # If path_or_at is a Path object, use it; otherwise, wrap string as Path
+            file_path = path_or_at if isinstance(path_or_at, Path) else Path(path_or_at)
+            file_path.write_text(new_source, encoding="utf-8")
         except Exception as e:
             return {"ok": False, "error": f"Failed to write refactored file: {e}"}
 
     return {
         "ok": True,
-        "path": str(path),
+        "path": str(path_or_at),
         "changes_count": len(changes),
         "changes": changes
     }
@@ -313,7 +315,8 @@ def refactor_command(args: argparse.Namespace) -> int:
 
     on = ui.color_on()
     out = [""]
-    title = f"{path.name} — REFECTORED" if not args.preview else f"{path.name} — PREVIEW"
+    p_obj = Path(path_or_at)
+    title = f"{p_obj.name} — REFACTORED" if not args.preview else f"{p_obj.name} — PREVIEW"
     out += ui.band("lgwks · refactor", title, on=on)
     out.append(ui.spine(on=on))
     

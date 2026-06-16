@@ -26,7 +26,6 @@ import argparse
 import hashlib
 import ipaddress
 import json
-import math
 import re
 import socket
 import sys
@@ -162,13 +161,15 @@ def index_command(args: argparse.Namespace) -> int:
     path = Path(args.path)
     if path.is_dir():
         index_path = path / "index.json"
+        if not index_path.exists():
+            index_path = path / "manifest.json"
     else:
         index_path = path
-    
+
     if not index_path.exists():
-        print(json.dumps({"ok": False, "error": f"not found: {index_path}"}), file=sys.stderr)
+        print(json.dumps({"ok": False, "error": f"not found: {path} (checked index.json and manifest.json)"}), file=sys.stderr)
         return 1
-        
+
     try:
         index = json.loads(index_path.read_text(encoding="utf-8"))
         print(json.dumps(index, indent=2, sort_keys=True))
@@ -532,7 +533,8 @@ def _deterministic_embed(text: str, dims: int = DIMS) -> list[float]:
     for tok in toks:
         d = hashlib.blake2b(tok.encode(), digest_size=8).digest()
         vec[int.from_bytes(d[:4], "big") % dims] += 1.0 if d[4] % 2 == 0 else -1.0
-    norm = math.sqrt(sum(v * v for v in vec)) or 1.0
+    import lgwks_vecmath
+    norm = lgwks_vecmath.l2_norm(vec) or 1.0  # canonical L2 norm (one source of truth)
     return [round(v / norm, 6) for v in vec]
 
 
@@ -587,8 +589,38 @@ def embed(
     return _deterministic_embed(text), "deterministic-feature-hash", False
 
 
-class EmbeddingProviderUnavailable(RuntimeError):
-    """Raised when an embedding provider is explicitly requested but unavailable."""
+# Shared multimodal embedder. The Eye (Qwen3-VL-Embedding-8B) embeds text, images
+# AND video into ONE vector space — so there is exactly ONE semantic embedder, not
+# a separate text path and a separate media path. We open it once and reuse it
+# (each EmbedPort spawns a worker subprocess; per-call construction would be a
+# subprocess per chunk). A failed open is cached so we never re-probe a missing model.
+_SHARED_EMBED_PORT: Any | None = None
+_EMBED_PORT_UNAVAILABLE = False
+
+
+def _shared_embed_port() -> Any | None:
+    """The one reused multimodal EmbedPort, or None when no model is reachable.
+
+    Honors LGWKS_NO_MODELS (kill-switch → None → deterministic-only). Caches both
+    the live port and the unavailable verdict so callers pay the tier-probe once.
+    """
+    global _SHARED_EMBED_PORT, _EMBED_PORT_UNAVAILABLE
+    import os
+    if os.environ.get("LGWKS_NO_MODELS"):
+        return None
+    if _EMBED_PORT_UNAVAILABLE:
+        return None
+    if _SHARED_EMBED_PORT is not None:
+        return _SHARED_EMBED_PORT
+    try:
+        import atexit
+        import lgwks_embed_port as ep
+        _SHARED_EMBED_PORT = ep.EmbedPort()  # raises EmbedUnavailableError if no model
+        atexit.register(_SHARED_EMBED_PORT.close)
+        return _SHARED_EMBED_PORT
+    except Exception:
+        _EMBED_PORT_UNAVAILABLE = True  # no model / no venv — degrade, do not retry
+        return None
 
 
 def embed_dual(
@@ -597,48 +629,74 @@ def embed_dual(
     provider: str = "auto",
     *,
     model: str | None = None,
+    modality: str = "text",
+    media: bytes | str | Path | None = None,
 ) -> dict[str, Any]:
-    """ALWAYS compute BOTH deterministic (256-d) and semantic (4096-d) vectors.
+    """ALWAYS compute BOTH a deterministic (256-d) and a semantic vector — for ANY modality.
 
-    Returns a dict:
+    Truly multimodal: `modality` ∈ {"text","image","video"} selects the input.
+    Text comes from `text`; image/video bytes (or a path) come from `media`. All
+    three embed through the SAME Eye (Qwen3-VL-Embedding-8B via EmbedPort) into one
+    shared vector space — so a screenshot, a clip, and a paragraph are comparable.
+
+    Returns:
       { "det": { "vector": [...], "provider": "...", "dims": 256 },
-        "sem": { "vector": [...], "provider": "...", "dims": 4096 } }
+        "sem": { "vector": [...], "provider": "mlx:<space_id>", "dims": N, "is_semantic": True } }
 
-    The semantic vector is the PRIMARY vector for downstream ML (NeoBERT training).
-    The deterministic vector is the FALLBACK / AUDIT vector — always present,
-    always reproducible, zero infra dependency.
-
-    If the user requests 'deterministic' only, sem is still computed because
-    NeoBERT training requires it.  If the user requests semantic only, det is
-    still computed because auditability requires it.
+    The semantic vector is the PRIMARY vector for downstream ML. The deterministic
+    vector is the FALLBACK / AUDIT vector — always present, always reproducible,
+    zero infra dependency: a feature-hash for text, a perceptual fingerprint for
+    media. `sem` is None when no model is reachable (or LGWKS_NO_MODELS); every
+    caller already guards `if dual["sem"]` before writing semantic rows.
     """
     if not embed_on:
         return {"det": None, "sem": None}
+    if modality not in ("text", "image", "video"):
+        raise ValueError(f"embed_dual: unknown modality {modality!r}")
 
-    # ── deterministic (always present; zero-latency fallback) ──
-    det_vec = _deterministic_embed(text, dims=DIMS)
-    det = {"vector": det_vec, "provider": "deterministic-feature-hash", "dims": DIMS}
+    # ── deterministic / audit tier (always present; zero-latency, no model) ──
+    if modality == "text":
+        det_vec = _deterministic_embed(text, dims=DIMS)
+        det = {"vector": det_vec, "provider": "deterministic-feature-hash", "dims": DIMS}
+    else:
+        # Perceptual fingerprint is the media analogue of the feature hash: a stable,
+        # reproducible 256-d vector with zero model dependency (the audit fallback).
+        import lgwks_multimodal as mm
+        raw = media if isinstance(media, (bytes, bytearray)) else (
+            Path(media).read_bytes() if media is not None else b"")
+        det_vec = mm._perceptual_fingerprint(bytes(raw), dims=DIMS)
+        det = {"vector": det_vec, "provider": "perceptual-fingerprint", "dims": DIMS}
 
-    # ── semantic: TEXT embeds locally via MLX (Qwen3-VL-Embedding-8B) ──
+    # ── semantic tier: the ONE Eye (Qwen3-VL embedding space), all modalities ──
+    # Text rides the SAME canonical seam as lgwks_run.embed (model_hub.mlx_embed),
+    # so there is one text-embedding code path, not two. Image/video — which the
+    # text seam cannot handle — go through EmbedPort, the multimodal sibling of the
+    # same model family. Same Eye, different invocation only because text and pixels
+    # enter the model differently.
     sem = None
     try:
-        import lgwks_model_hub as hub
-        eye_model = "Qwen3-VL-Embedding-8B"
-        res = hub.mlx_embed(text, model_name=eye_model)
-        if res["ok"]:
-            vec = res["vector"]
-            sem = {"vector": vec, "provider": f"mlx:{eye_model}", "dims": len(vec)}
+        if modality == "text":
+            import lgwks_model_hub as hub
+            eye_model = "Qwen3-VL-Embedding-8B"
+            res = hub.mlx_embed(text, model_name=eye_model)
+            if res.get("ok"):
+                vec = res["vector"]
+                sem = {"vector": vec, "provider": f"mlx:{eye_model}",
+                       "dims": len(vec), "is_semantic": res.get("is_semantic", True)}
+        else:
+            port = _shared_embed_port()
+            if port is not None:
+                vec = port.embed_image(media) if modality == "image" else port.embed_video(media)
+                sem = {"vector": vec, "provider": f"mlx:{port.space_id()}",
+                       "dims": len(vec), "is_semantic": True}
     except Exception:
-        pass
+        sem = None  # never-block: degrade to the deterministic audit vector
 
-    # never-block: if MLX is down (or LGWKS_NO_MODELS in CI), sem stays None and
-    # the deterministic 256-d vector is the audit fallback — always present, zero
-    # infra dependency (see docstring). Every caller guards `if dual["sem"]` before
-    # writing semantic rows (lgwks_substrate_run.py:246,278). The prior code raised
-    # EmbeddingProviderUnavailable here — a crash bug two ways over: it fired
-    # unconditionally even when a provider had just set sem, and it raised
-    # lgwks_run's class, which lgwks_substrate_run does NOT catch (that one is
-    # lgwks_substrate_config's), so it propagated raw and killed build_run().
+    # never-block: if the Eye is down (or LGWKS_NO_MODELS in CI), sem stays None and
+    # the deterministic vector is the audit fallback — always present, zero infra
+    # dependency. The prior code raised EmbeddingProviderUnavailable here — a crash
+    # bug two ways over (fired even after a provider set sem; raised lgwks_run's
+    # class, which lgwks_substrate_run does NOT catch), so it killed build_run().
     return {"det": det, "sem": sem}
 
 

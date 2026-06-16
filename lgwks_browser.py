@@ -123,6 +123,13 @@ def _browser_path(engine: str) -> Path | None:
 def available(engine: str = "webkit") -> tuple[bool, str]:
     """Is a real browser usable? (pymod + installed browser binary).
     Returns (ok, reason-or-install-hint)."""
+    if engine == "nodriver":
+        try:
+            import nodriver  # noqa: F401
+            return True, "ok"
+        except Exception:
+            return False, "nodriver not installed — run: pip install nodriver"
+
     try:
         from playwright.sync_api import sync_playwright  # noqa: F401
     except Exception:
@@ -254,8 +261,24 @@ def render(url: str, max_chars: int = 8000, *, use_session: bool = False,
     ok, why = available(browser_engine)
     if not ok:
         return {"ok": False, "text": "", "reason": why}
-    if browser_engine not in ("chromium", "webkit"):
-        return {"ok": False, "text": "", "reason": f"unknown browser_engine: {browser_engine!r} — use 'chromium' or 'webkit'"}
+    if browser_engine not in ("chromium", "webkit", "nodriver"):
+        return {"ok": False, "text": "", "reason": f"unknown browser_engine: {browser_engine!r} — use 'chromium', 'webkit' or 'nodriver'"}
+
+    if browser_engine == "nodriver":
+        try:
+            import asyncio
+            import nodriver
+            async def _nodriver_render():
+                browser = await nodriver.start()
+                page = await browser.get(url)
+                await asyncio.sleep(wait_ms / 1000.0)
+                html = await page.get_content()
+                text = _text_from(html, max_chars)
+                await browser.stop()
+                return {"ok": True, "text": text, "html": html, "reason": "rendered:nodriver"}
+            return asyncio.run(_nodriver_render())
+        except Exception as e:
+            return {"ok": False, "text": "", "reason": f"nodriver failed: {type(e).__name__}"}
     from playwright.sync_api import sync_playwright
     session_path = _session_for_url(url)
     storage = str(session_path) if (use_session or session_path) and session_path else None

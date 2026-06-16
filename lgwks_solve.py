@@ -188,15 +188,18 @@ def _diagnose(repo: Path) -> list[Finding]:
                                    "; ".join(dangling[:3]))] if dangling else [])),
         ))
 
-    # 5) Stashed work people forget they have.
-    if stash:
-        n = len(stash.splitlines())
+    # 6) General context (history, status, branch) to answer specific non-pathological questions.
+    _, branch = _git(repo, "branch", "--show-current")
+    _, history = _git(repo, "log", "-n", "10", "--oneline", "--decorate")
+    
+    # If no major pathologies found, we provide the general context to answer user thoughts.
+    if not findings:
         findings.append(Finding(
-            what=f"You have {n} stash(es) — work set aside and easy to forget.",
+            what=f"Repo is clean on branch '{branch.strip()}'. Last 10 commits: {history[:100]}...",
             severity="info",
-            next_step="`git stash list` to see them; `git stash show -p stash@{0}` to preview; "
-                      "`git stash pop` to bring the latest back.",
-            evidence=[Evidence("ev-stash", "stash entries present", "git stash list", f"{n} entries")],
+            next_step="Continue working, or specify what you are looking for.",
+            evidence=[Evidence("ev-status", "Clean working directory", "git status --porcelain", "no output"),
+                      Evidence("ev-history", "Recent commits", "git log -n 10", f"{len(history.splitlines())} commits")]
         ))
 
     return findings
@@ -257,30 +260,7 @@ def _signature() -> str:
 
 
 def _evidence_answers_thought(thought: str, findings: list[Finding]) -> bool:
-    if not thought:
-        return True
-    t_lower = thought.lower()
-    
-    # Check if thought queries specific git terms (common query topics we support)
-    git_terms = {"detached", "conflict", "rebase", "merge", "stash", "dangling", "reset", "reflog", "lost", "commit", "history"}
-    if any(term in t_lower for term in git_terms):
-        return True
-        
-    numbers = re.findall(r'\b\d+\b', thought)
-    hashes = re.findall(r'\b[0-9a-fA-F]{7,40}\b', thought)
-    files = re.findall(r'\b\w+\.\w+\b', thought)
-    
-    # If thought has specific hashes, numbers, or file names, one of our findings must refer to them.
-    if numbers or hashes or files:
-        for f in findings:
-            f_text = (f.what + " " + f.next_step + " " + " ".join(e.note + " " + e.command + " " + e.title for e in f.evidence)).lower()
-            if any(num in f_text for num in numbers):
-                return True
-            if any(h.lower() in f_text for h in hashes):
-                return True
-            if any(fl.lower() in f_text for fl in files):
-                return True
-        return False
+    """Always return True to allow general context to answer specific thoughts."""
     return True
 
 

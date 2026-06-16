@@ -145,7 +145,9 @@ def build_tensor(
                          "confidence_score": float, "weight": float, ...}
     """
     # Build node index — stable order (insertion order from nodes list).
-    node_ids: list[str] = [n["id"] for n in graph.get("nodes", [])]
+    # //why: substrate uses 'node_id', but some older graphs use 'id'
+    node_ids: list[str] = [n.get("node_id", n.get("id", "")) for n in graph.get("nodes", [])]
+    node_ids = [nid for nid in node_ids if nid] # filter empty
     idx: dict[str, int] = {nid: i for i, nid in enumerate(node_ids)}
     n = len(node_ids)
 
@@ -205,17 +207,16 @@ def build_tensor(
 # ---------------------------------------------------------------------------
 
 
-def _l2_norm(v: list[float]) -> float:
-    return math.sqrt(sum(x * x for x in v))
+# L2 math is the canonical vecmath primitive — these are thin local aliases so the
+# call sites read naturally; the implementation (incl. zero-handling) lives in ONE place.
+import lgwks_vecmath as _vm
+
+_l2_norm = _vm.l2_norm
 
 
 def _normalize(v: list[float]) -> list[float]:
     """L2-normalize v. Returns v unchanged (all zeros) if norm < 1e-12."""
-    n = _l2_norm(v)
-    if n < 1e-12:
-        return v
-    inv_n = 1.0 / n
-    return [x * inv_n for x in v]
+    return _vm.l2_normalize(v, on_zero="keep")
 
 
 def _sparse_matvec(

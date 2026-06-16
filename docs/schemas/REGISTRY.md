@@ -288,6 +288,19 @@ trust_class, fallback, health{status,latency_ms_p50,last_checked}, eval_gate, st
 (`lgwks_model_hub._model_mesh_status`) reads the artifact, degrading to the in-code law when absent.
 **Repurpose when:** any deterministic scorer/detector → a CATALOG entry + these envelopes, not a new shape.
 
+**`lgwks.model.port.v1`** (**#220** — model law at *runtime*; `lgwks_model_port.py`): the one
+gateway every cognition request flows through. Where `lgwks.model.mesh.v1` records *which* model
+serves a role, this is *how* a role is run: an escalating harness over the trust tiers
+deterministic → sensor → generative (Math → Symbolic-ML → Model), preferring determinism — the
+probabilistic model is the last resort. Reads `MESH_LAW` for the pinned model id per role (law is
+truth; no hardcoded literals). One envelope: `{schema, role, ok, mode(deterministic|sensor|
+generative|degraded|deferred), tier, model|null, trust, value, confidence, escalation[], why}`.
+Honors `LGWKS_NO_MODELS`; fail-closed — when no tier answers, `mode="deferred"`, `value=null`,
+**never fabricates** (INV-3). Role helpers `extract_entities`/`classify`/`embed`/`reason` wrap the
+existing backends (the parallel of, and runtime counterpart to, `lgwks.reasoning.result.v0`).
+**Repurpose when:** any new role-dispatch / resolve-degrade need → an escalate() ladder + this
+envelope, never a fresh per-caller try/except.
+
 ### 12. JEPA manifest-level ids (live, supplement family 7)
 `lgwks.jepa.v1` (manifest verb envelope) · `lgwks.machine.packet.v1` · `lgwks.human.summary.v1` ·
 `lgwks.links.index.v1` (all `lgwks_project_artifacts.py`) · `lgwks.concept.graph.v0` (`lgwks_spawn.py`).

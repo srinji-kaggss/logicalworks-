@@ -19,7 +19,6 @@ import fcntl
 import hashlib
 import json
 import os
-import re
 import time
 import urllib.parse
 from collections import Counter
@@ -32,11 +31,7 @@ _DIR = ROOT / "store" / "projects"
 _GENESIS = "0" * 64
 from lgwks_substrate_config import SLUG_SCRUB_RE as _SAFE  # one source of truth
 _KINDS = {"project_scope", "conversation", "theme", "fetch_plan", "fetch_result", "note"}
-_STOP = {
-    "a", "an", "and", "are", "as", "at", "be", "by", "for", "from", "have", "i", "if", "in",
-    "is", "it", "its", "me", "my", "no", "not", "of", "on", "or", "our", "that", "the",
-    "this", "to", "we", "with", "you", "your",
-}
+from lgwks_lexicon import STOP_EN as _STOP  # canonical stopword set (was a local copy)
 
 
 def _project_id(project: str) -> str:
@@ -166,7 +161,8 @@ def append(project: str, kind: str, data: dict, key: bytes | None = None) -> dic
 
 
 def _tokens(text: str) -> list[str]:
-    return [t for t in re.findall(r"[a-zA-Z][a-zA-Z0-9_+\-.]{2,}", text.lower()) if t not in _STOP]
+    import lgwks_lexicon as _lex  # canonical lexical analyzer (one source of truth)
+    return _lex.tokens(text, profile=_lex.TERM, min_len=3, stop=_STOP)
 
 
 def themes(text: str, limit: int = 24) -> list[dict]:
