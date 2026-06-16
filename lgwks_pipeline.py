@@ -609,7 +609,7 @@ def _iter_dir_chunks(
         yield from _iter_substrate_dir(root, batch_size)
         return
 
-    import lgwks_embed
+    import lgwks_substrate_text as _st  # canonical chunking (one source of truth)
     batch: list[PipelineChunk] = []
     for path in sorted(root.rglob("*")):
         if any(part in _SKIP_DIRS for part in path.parts):
@@ -641,8 +641,8 @@ def _iter_dir_chunks(
                 text = path.read_text(encoding="utf-8", errors="replace")
             except OSError:
                 continue
-            # Reuse lgwks_embed._chunks() for consistent chunking
-            for idx, chunk_text in enumerate(lgwks_embed._chunks(text)):
+            # Canonical chunking (one source of truth)
+            for idx, chunk_text in enumerate(_st._chunk_text(text, size=420, overlap=70)):
                 batch.append(PipelineChunk(
                     chunk_id=_chunk_id(str(path), chunk_text, idx),
                     source_id=str(path), source_type="file",
@@ -670,14 +670,14 @@ def iter_dataset(
     elif p.suffix.lower() == ".csv":
         yield from _iter_csv_chunks(p, batch_size)
     elif p.exists():
-        import lgwks_embed
+        import lgwks_substrate_text as _st  # canonical chunking (one source of truth)
         text = p.read_text(encoding="utf-8", errors="replace")
         batch = [
             PipelineChunk(
                 chunk_id=_chunk_id(str(p), c, i),
                 source_id=str(p), source_type="file", text=c,
             )
-            for i, c in enumerate(lgwks_embed._chunks(text))
+            for i, c in enumerate(_st._chunk_text(text, size=420, overlap=70))
         ]
         yield batch, {}
 

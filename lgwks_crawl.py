@@ -6,16 +6,9 @@ from __future__ import annotations
 
 import argparse
 import json
-import re
 import sys
-from pathlib import Path
-from typing import Any
 
-import lgwks_ui as ui
-
-
-def _slug(text: str) -> str:
-    return re.sub(r"[^\w-]+", "-", text.lower()).strip("-").replace("--", "-")[:64]
+import lgwks_substrate_io as _io  # canonical filesystem slug (one source of truth)
 
 
 def crawl_command(args: argparse.Namespace) -> int:
@@ -33,7 +26,7 @@ def crawl_command(args: argparse.Namespace) -> int:
         # Map unified args to substrate args
         sub_args = argparse.Namespace(
             target=target,
-            project=getattr(args, "name", f"crawl-{_slug(target)[:32]}"),
+            project=getattr(args, "name", f"crawl-{_io._slug(target)[:32]}"),
             source_type="auto",
             max_pages=args.max_pages,
             max_depth=args.max_depth,

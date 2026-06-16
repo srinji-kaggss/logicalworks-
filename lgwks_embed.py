@@ -25,6 +25,9 @@ CHUNK_OVERLAP = 70
 from lgwks_substrate_config import TEXT_EXT, SKIP_DIRS  # one source of truth (were local copies)
 from lgwks_lexicon import STOP_EN as STOP  # canonical stopword set (was a local copy)
 from lgwks_substrate_config import SLUG_SCRUB_RE as SAFE  # one source of truth
+import lgwks_substrate_io as _io      # canonical file I/O (one source of truth)
+import lgwks_substrate_text as _st    # canonical text chunking/scoring (one source of truth)
+import lgwks_vecmath as _vm           # canonical vector math (one source of truth)
 
 
 def _project_id(project: str) -> str:
@@ -56,23 +59,6 @@ def _embedding(text: str, dims: int = DIMS) -> list[float]:
     return [round(v / norm, 6) for v in vec]
 
 
-def _cos(a: list[float], b: list[float]) -> float:
-    return sum(x * y for x, y in zip(a, b)) if a and b and len(a) == len(b) else 0.0
-
-
-def _chunks(text: str, size: int = CHUNK_WORDS, overlap: int = CHUNK_OVERLAP) -> list[str]:
-    words = re.findall(r"\S+", text)
-    if not words:
-        return []
-    step = max(1, size - overlap)
-    out = []
-    for start in range(0, len(words), step):
-        out.append(" ".join(words[start:start + size]))
-        if start + size >= len(words):
-            break
-    return out
-
-
 def _files(root: Path, max_files: int) -> list[Path]:
     out = []
     for p in root.rglob("*"):
@@ -83,13 +69,6 @@ def _files(root: Path, max_files: int) -> list[Path]:
         if p.is_file() and p.suffix.lower() in TEXT_EXT and p.stat().st_size <= 2_000_000:
             out.append(p)
     return sorted(out)
-
-
-def _read(path: Path, max_chars: int) -> str:
-    try:
-        return path.read_text(encoding="utf-8", errors="replace")[:max_chars]
-    except Exception:
-        return ""
 
 
 from lgwks_substrate_io import _emit_jsonl as _write_jsonl  # one source of truth for JSONL write
@@ -120,13 +99,13 @@ def build_vault(root_path: str, project: str, keywords: list[str], cycles: int =
         focus_vec = _embedding(" ".join(focus))
         cycle_terms: Counter[str] = Counter()
         for path in files:
-            text = _read(path, max_chars)
+            text = _io._read_text(path, max_chars)
             if not text:
                 continue
             raw_hash = hashlib.sha256(text.encode("utf-8", errors="ignore")).hexdigest()
-            for idx, chunk in enumerate(_chunks(text)):
+            for idx, chunk in enumerate(_st._chunk_text(text, size=CHUNK_WORDS, overlap=CHUNK_OVERLAP)):
                 vec = _embedding(chunk)
-                score = round(_cos(focus_vec, vec), 6)
+                score = round(_vm.dot(focus_vec, vec), 6)
                 toks = _tokens(chunk)
                 if score > 0:
                     cycle_terms.update(toks)

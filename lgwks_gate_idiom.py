@@ -111,7 +111,8 @@ class IdiomVerifier:
 
         paths, vecs, notes = corpus
         try:
-            sims = [(p, lgwks_embed._cos(candidate_vec, v)) for p, v in zip(paths, vecs)]
+            import lgwks_vecmath  # canonical vector math (one source of truth)
+            sims = [(p, lgwks_vecmath.dot(candidate_vec, v)) for p, v in zip(paths, vecs)]
         except Exception as exc:
             return Verdict(
                 gate_id=self.gate_id,

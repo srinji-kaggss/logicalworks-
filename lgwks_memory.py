@@ -25,6 +25,7 @@ from collections import Counter
 from pathlib import Path
 
 import lgwks_sign
+import lgwks_vecmath as _vm  # canonical vector math (one source of truth)
 
 ROOT = Path(__file__).resolve().parent
 _DIR = ROOT / "store" / "projects"
@@ -187,10 +188,6 @@ def embedding(text: str, dims: int = 128) -> list[float]:
     return [round(v / norm, 6) for v in vec]
 
 
-def _cos(a: list[float], b: list[float]) -> float:
-    return sum(x * y for x, y in zip(a, b)) if a and b and len(a) == len(b) else 0.0
-
-
 def remember(project: str, text: str, source: str = "conversation", verbose_embeddings: bool = False) -> dict:
     rec = append(project, "conversation", {"source": source, "text_sha256": hashlib.sha256(text.encode()).hexdigest()})
     th = themes(text)
@@ -221,7 +218,7 @@ def context(project: str, query: str = "", limit: int = 12) -> dict:
     for rec in rows:
         if rec.get("kind") == "theme":
             for t in rec["data"].get("themes", []):
-                theme_rows.append({**t, "seq": rec["seq"], "score": _cos(qv, t.get("embedding", [])) if qv else t["weight"]})
+                theme_rows.append({**t, "seq": rec["seq"], "score": _vm.dot(qv, t.get("embedding", [])) if qv else t["weight"]})
         elif rec.get("kind") == "project_scope":
             scopes.append(rec["data"])
     theme_rows.sort(key=lambda x: (x["score"], x["weight"]), reverse=True)

@@ -24,12 +24,9 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
+import lgwks_substrate_io as _io  # canonical filesystem slug (one source of truth)
 import lgwks_ui as ui
 from lgwks_repo import _is_repo
-
-
-def _slugify(text: str) -> str:
-    return re.sub(r"[^\w-]+", "-", text.lower()).strip("-").replace("--", "-")[:64]
 
 
 # ---------------------------------------------------------------------------
@@ -236,7 +233,7 @@ def _do_research(args: argparse.Namespace) -> int:
         import lgwks_substrate
         sub_args = argparse.Namespace(
             target=query,
-            project=_slugify(query),
+            project=_io._slug(query),
             source_type="auto",
             max_pages=12,
             max_depth=getattr(args, "depth", 1),
@@ -289,7 +286,7 @@ def _do_research(args: argparse.Namespace) -> int:
             import lgwks_substrate
             sub_args = argparse.Namespace(
                 target=resolved_url,
-                project=_slugify(query),
+                project=_io._slug(query),
                 source_type="auto",
                 max_pages=12,
                 max_depth=getattr(args, "depth", 1),

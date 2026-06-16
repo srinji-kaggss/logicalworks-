@@ -30,6 +30,7 @@ from pathlib import Path
 from typing import Any
 
 import lgwks_embed
+import lgwks_vecmath  # canonical vector math (one source of truth)
 
 ROOT = Path(__file__).resolve().parent
 DB_DIR = ROOT / "store" / "codebase"
@@ -617,7 +618,7 @@ def search(query: str, top_k: int = 5, kind_filter: str | None = None) -> list[d
             continue
         if not e.embedding:
             continue
-        score = lgwks_embed._cos(query_vec, e.embedding)
+        score = lgwks_vecmath.dot(query_vec, e.embedding)
         results.append((score, e))
 
     results.sort(key=lambda x: -x[0])

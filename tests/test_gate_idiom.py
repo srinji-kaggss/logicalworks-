@@ -83,15 +83,15 @@ class TestIdiomGate(unittest.TestCase):
             corpus.mkdir()
             (corpus / "a.py").write_text("def hello(): pass\n")
             v = IdiomVerifier(corpus_dir=corpus, max_files=10)
-            import lgwks_embed
-            orig_cos = lgwks_embed._cos
-            lgwks_embed._cos = lambda _a, _b: (_ for _ in ()).throw(RuntimeError("math domain error"))
+            import lgwks_vecmath
+            orig_dot = lgwks_vecmath.dot
+            lgwks_vecmath.dot = lambda _a, _b: (_ for _ in ()).throw(RuntimeError("math domain error"))
             try:
                 verdict = v.check("def foo(): pass\n", {})
                 self.assertEqual(verdict.outcome, Outcome.CANNOT_DECIDE)
                 self.assertIn("similarity computation failed", verdict.diagnosis or "")
             finally:
-                lgwks_embed._cos = orig_cos
+                lgwks_vecmath.dot = orig_dot
 
     def test_score_bounds_enforced(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -99,14 +99,14 @@ class TestIdiomGate(unittest.TestCase):
             corpus.mkdir()
             (corpus / "a.py").write_text("def hello(): pass\n")
             v = IdiomVerifier(corpus_dir=corpus, max_files=10)
-            import lgwks_embed
-            orig_cos = lgwks_embed._cos
-            lgwks_embed._cos = lambda _a, _b: 2.5
+            import lgwks_vecmath
+            orig_dot = lgwks_vecmath.dot
+            lgwks_vecmath.dot = lambda _a, _b: 2.5
             try:
                 with self.assertRaises(ValueError):
                     v.check("def foo(): pass\n", {})
             finally:
-                lgwks_embed._cos = orig_cos
+                lgwks_vecmath.dot = orig_dot
 
 
 if __name__ == "__main__":

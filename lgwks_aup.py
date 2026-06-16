@@ -34,7 +34,8 @@ from typing import Any
 # ---------------------------------------------------------------------------
 # Re-use local embedding engine (non-LLM, deterministic blake2b feature-hash)
 # ---------------------------------------------------------------------------
-import lgwks_memory  # type: ignore[unused-import]  # provides embedding(), _cos
+import lgwks_memory  # provides embedding()
+import lgwks_vecmath  # canonical vector math (one source of truth)
 
 
 # //why: customer_id is a PII surface; we anonymise by SHA-256 before logging.
@@ -436,7 +437,7 @@ class AUPGate:
             # Embed the rule description + keywords concatenated as signal
             signal = f"{rule.category} {rule.description} {' '.join(rule.keywords)}"
             r_emb = lgwks_memory.embedding(signal)
-            score = lgwks_memory._cos(q_emb, r_emb)
+            score = lgwks_vecmath.dot(q_emb, r_emb)
             if score > best_score:
                 best_score = score
                 best_rule = rule
