@@ -16,7 +16,6 @@ import os
 import sys
 import time
 import shutil
-import hashlib
 import subprocess
 import tempfile
 from pathlib import Path
@@ -27,11 +26,8 @@ import lgwks_project_artifacts as artifacts
 _BOT = "stress"
 
 
-from lgwks_clock import now_iso as _ts  # one source of truth for timestamps
-
-
 def _run_seed(repo: str) -> str:
-    return hashlib.sha256(f"stress:{repo}".encode()).hexdigest()[:12]
+    return artifacts.run_seed(_BOT, repo)
 
 
 def _make(
@@ -47,28 +43,12 @@ def _make(
     tags: list[str],
     symbol: Optional[str] = None,
 ) -> dict:
-    return {
-        "schema": artifacts.BOT_RECORD_SCHEMA,
-        "run_id": run_id,
-        "bot": _BOT,
-        "target": {"kind": "file", "id": file},
-        "kind": kind,
-        "summary": summary,
-        "severity": severity,
-        "confidence": confidence,
-        "status": "open",
-        "evidence": evidence,
-        "links": {
-            "repo": repo,
-            "file": file,
-            "symbol": symbol,
-            "tests": [],
-            "artifacts": [],
-        },
-        "world_refs": [{"kind": "concept", "id": kind}],
-        "tags": tags,
-        "created_at": _ts(),
-    }
+    return artifacts.make_record(
+        bot=_BOT, run_id=run_id, kind=kind, summary=summary, severity=severity,
+        confidence=confidence, evidence=evidence, tags=tags, target_id=file,
+        links={"repo": repo, "file": file, "symbol": symbol, "tests": [], "artifacts": []},
+        world_refs=[{"kind": "concept", "id": kind}],
+    )
 
 
 def run(

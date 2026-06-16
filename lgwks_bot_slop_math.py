@@ -18,7 +18,6 @@ import ast
 import hashlib
 import re
 from collections import defaultdict
-from datetime import datetime, timezone
 from pathlib import Path
 from typing import Optional, Any
 
@@ -34,10 +33,6 @@ _GENERIC_NAMES = frozenset({
 
 # Planned/unresolved claim markers
 _TODO_RE = re.compile(r"#\s*(TODO|FIXME|PLANNED|XXX|HACK)(?:\(([^)]+)\))?:?\s*(.+)", re.I)
-
-
-def _ts() -> str:
-    return datetime.now(timezone.utc).isoformat(timespec="seconds")
 
 
 def _run_id(bot: str, repo: str) -> str:
@@ -69,21 +64,11 @@ def _make(
     # ensure at least one anchor
     if not file and not symbol:
         links["artifacts"] = [repo]
-    return {
-        "schema": artifacts.BOT_RECORD_SCHEMA,
-        "run_id": run_id,
-        "bot": bot,
-        "target": {"kind": target_kind, "id": tid},
-        "kind": kind,
-        "summary": summary,
-        "severity": severity,
-        "confidence": confidence,
-        "status": "open",
-        "evidence": evidence,
-        "links": links,
-        "tags": tags,
-        "created_at": _ts(),
-    }
+    return artifacts.make_record(
+        bot=bot, run_id=run_id, kind=kind, summary=summary, severity=severity,
+        confidence=confidence, evidence=evidence, tags=tags,
+        target_kind=target_kind, target_id=tid, links=links,
+    )
 
 
 def _py_files(repo: Path) -> list[Path]:

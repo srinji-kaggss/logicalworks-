@@ -37,6 +37,7 @@ from collections import Counter
 from pathlib import Path
 from typing import Any, Optional
 
+import lgwks_clock
 import lgwks_cycle
 
 ROOT = Path(__file__).resolve().parent
@@ -311,6 +312,58 @@ BOT_REGISTRY_DEFAULT = {
     "slop_math",
     "stress",
 }
+
+
+def run_seed(bot: str, repo: str) -> str:
+    """Deterministic 12-char run id for a bot scanning a repo (replay-stable).
+
+    One source of truth — every bot lane derives its run id this way; do not
+    re-spell ``sha256(f"{bot}:{repo}")[:12]`` per module.
+    """
+    return hashlib.sha256(f"{bot}:{repo}".encode()).hexdigest()[:12]
+
+
+def make_record(
+    *,
+    bot: str,
+    run_id: str,
+    kind: str,
+    summary: str,
+    severity: str,
+    confidence: float,
+    evidence: list[dict],
+    tags: list[str],
+    links: dict,
+    target_id: str,
+    target_kind: str = "file",
+    world_refs: Optional[list[dict]] = None,
+    created_at: Optional[str] = None,
+) -> dict:
+    """Canonical ``lgwks.bot.record.v1`` builder — one source of truth for every bot lane.
+
+    Each bot supplies its own ``links`` / ``world_refs`` / ``target``; the shared
+    skeleton (schema id, ``status="open"``, timestamp default) is built here. ``created_at``
+    is injectable so a run over unchanged code is byte-reproducible — stamp it once per
+    run() and thread it down rather than calling the clock per finding (doctrine T4).
+    """
+    rec = {
+        "schema": BOT_RECORD_SCHEMA,
+        "run_id": run_id,
+        "bot": bot,
+        "target": {"kind": target_kind, "id": target_id},
+        "kind": kind,
+        "summary": summary,
+        "severity": severity,
+        "confidence": confidence,
+        "status": "open",
+        "evidence": evidence,
+        "links": links,
+        "tags": tags,
+        "created_at": created_at or lgwks_clock.now_iso(),
+    }
+    if world_refs is not None:
+        rec["world_refs"] = world_refs
+    return rec
 
 
 def _is_str(v) -> bool:

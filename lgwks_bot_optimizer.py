@@ -14,7 +14,6 @@ Every finding is a valid lgwks.bot.record.v1 record linking to a repo-local path
 from __future__ import annotations
 
 import ast
-import hashlib
 import re
 from pathlib import Path
 from typing import Optional, Any
@@ -35,11 +34,8 @@ _RE_EXPORTS = {
 }
 
 
-from lgwks_clock import now_iso as _ts  # one source of truth for timestamps
-
-
 def _run_seed(repo: str) -> str:
-    return hashlib.sha256(f"optimizer:{repo}".encode()).hexdigest()[:12]
+    return artifacts.run_seed(_BOT, repo)
 
 
 def _make(
@@ -55,28 +51,12 @@ def _make(
     tags: list[str],
     symbol: Optional[str] = None,
 ) -> dict:
-    return {
-        "schema": artifacts.BOT_RECORD_SCHEMA,
-        "run_id": run_id,
-        "bot": _BOT,
-        "target": {"kind": "file", "id": file},
-        "kind": kind,
-        "summary": summary,
-        "severity": severity,
-        "confidence": confidence,
-        "status": "open",
-        "evidence": evidence,
-        "links": {
-            "repo": repo,
-            "file": file,
-            "symbol": symbol,
-            "tests": [],
-            "artifacts": [],
-        },
-        "world_refs": [{"kind": "concept", "id": kind}],
-        "tags": tags,
-        "created_at": _ts(),
-    }
+    return artifacts.make_record(
+        bot=_BOT, run_id=run_id, kind=kind, summary=summary, severity=severity,
+        confidence=confidence, evidence=evidence, tags=tags, target_id=file,
+        links={"repo": repo, "file": file, "symbol": symbol, "tests": [], "artifacts": []},
+        world_refs=[{"kind": "concept", "id": kind}],
+    )
 
 
 def _failure_record(run_id: str, repo: str, file: str, reason: str) -> dict:
