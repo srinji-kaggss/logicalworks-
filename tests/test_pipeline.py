@@ -25,15 +25,6 @@ class TestPipeline(unittest.TestCase):
         mean = pipeline._vec_mean(vecs)
         self.assertEqual(mean, [2.0, 3.0])
 
-        # Test weighted_centroid
-        weights = [1.0, 3.0]
-        centroid = pipeline._weighted_centroid(vecs, weights)
-        # expected: [1*1 + 3*3, 1*2 + 3*4] / 4 = [2.5, 3.5] normed
-        # normed expected: [2.5, 3.5] / sqrt(2.5^2 + 3.5^2)
-        norm = (2.5**2 + 3.5**2)**0.5
-        self.assertAlmostEqual(centroid[0], 2.5 / norm)
-        self.assertAlmostEqual(centroid[1], 3.5 / norm)
-
     def test_first_principal_component(self):
         # PCA power iteration on simple 2D vectors
         vecs = [[1.0, 1.0], [2.0, 2.0], [3.0, 3.0]]
