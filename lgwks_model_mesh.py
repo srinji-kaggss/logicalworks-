@@ -207,3 +207,84 @@ def load_mesh(path) -> dict[str, Any]:
     """Read + validate a mesh artifact from disk. Imports no model package."""
     with open(path, "r", encoding="utf-8") as fh:
         return validate_mesh(json.load(fh))
+
+
+# ── Trust-tier escalation order (the harness ladder) ──────────────────────────
+# The runtime gateway (lgwks_model_port) escalates through tiers in THIS order,
+# preferring determinism: math first, narrow/symbolic ML next, the probabilistic
+# model only as a last resort. The names are the mesh's own locked `trust_class`
+# vocabulary — deterministic → sensor → generative IS Math → Symbolic-ML → Model.
+# Lower rank = tried first = more trustworthy/cheaper.
+TIER_ORDER: tuple[str, ...] = ("deterministic", "sensor", "generative")
+
+
+def tier_rank(trust_class: str | None) -> int:
+    """Escalation rank for a trust_class (lower = preferred / tried first).
+
+    Unknown or null trust_class sorts last (most-probabilistic assumption), so a
+    miscatalogued entry never silently jumps ahead of a deterministic one.
+    """
+    try:
+        return TIER_ORDER.index(trust_class)  # type: ignore[arg-type]
+    except ValueError:
+        return len(TIER_ORDER)
+
+
+def models_for_role(
+    role: str,
+    *,
+    status: str = "current_law",
+    law: list[dict[str, Any]] | None = None,
+) -> list[dict[str, Any]]:
+    """Canonical model-law entries serving `role`, ordered by escalation tier.
+
+    Pure data read over MESH_LAW — loads NO model, imports no model package
+    (same constraint as build_mesh). This is the single place runtime ports look
+    up *which* model serves a role: the law is the source of truth, so ports pin
+    their model id FROM here instead of hardcoding a literal that can drift.
+
+    Returns entries sorted deterministic → sensor → generative (then by name for
+    a stable order among peers). `status` filters by lifecycle (default the
+    in-force law); pass status=None to include open slots / candidate references.
+    """
+    entries = law if law is not None else MESH_LAW
+    out = [e for e in entries if e.get("role") == role
+           and (status is None or e.get("status") == status)]
+    out.sort(key=lambda e: (tier_rank(e.get("trust_class")), e.get("name") or ""))
+    return out
+
+
+def model_for_role(
+    role: str,
+    *,
+    trust_class: str | None = None,
+    status: str = "current_law",
+    law: list[dict[str, Any]] | None = None,
+) -> dict[str, Any] | None:
+    """The single preferred model-law entry for `role`, or None if the law has none.
+
+    With `trust_class`, returns the preferred entry in that tier only (e.g. the
+    `generative` model for role=proposal). Without it, returns the lowest-tier
+    (most deterministic) entry — but callers wanting the *model* tier should pass
+    the tier explicitly. Loads no model.
+    """
+    candidates = models_for_role(role, status=status, law=law)
+    if trust_class is not None:
+        candidates = [e for e in candidates if e.get("trust_class") == trust_class]
+    return candidates[0] if candidates else None
+
+
+def model_name_for_role(
+    role: str,
+    *,
+    trust_class: str | None = None,
+    default: str | None = None,
+    status: str = "current_law",
+) -> str | None:
+    """Convenience: the pinned model *id* for a role/tier, or `default` if the law
+    has no entry. Lets a runtime port write
+    `model_name_for_role("proposal", trust_class="generative", default=...)`
+    so the literal lives in the law, not the port."""
+    entry = model_for_role(role, trust_class=trust_class, status=status)
+    name = entry.get("name") if entry else None
+    return name if name else default

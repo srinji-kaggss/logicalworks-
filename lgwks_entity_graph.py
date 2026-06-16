@@ -1,17 +1,19 @@
 """lgwks_entity_graph — offline document entity graph builder.
 
-Three extraction tiers (always graceful-degrade):
-  T1: regex enumeration lookup (always runs, zero deps)
-  T2: CoreML text classifier (DEFERRED: ignore model feedback for now)
-  T3: Foundation Models structured extraction (DEFERRED: ignore model feedback for now)
+Extraction and schema classification both route through the unified model port
+(`lgwks_model_port`), which owns the escalation ladder — this module no longer
+re-implements its own resolve-degrade logic:
+  • entity mentions  → port.extract_entities  (deterministic regex → Foundation)
+  • chunk schema      → port.classify          (sensor CoreML → defer)
 
 Output: SQLite DB (nodes + edges + chunks) + JSON export for git sync.
 No cloud, no remote inference, no HuggingFace, no Ollama. All local.
 
-//why: Fundserv research lives on a managed laptop (EPM, no elevation).
-A three-tier local stack gives extraction even without a trained model (T1),
-gets better classification when one is available (T2), and can interpret
-genuinely ambiguous structure locally once Foundation Models ships (T3).
+//why: research runs on a managed laptop (EPM, no elevation). The port's ladder
+gives extraction even without a trained model (regex always runs), gets a semantic
+schema label when a local classifier is present, and interprets the genuinely
+ambiguous long tail via on-device Foundation Models — degrading silently, never
+fabricating, exactly once, in one place.
 """
 
 from __future__ import annotations
@@ -453,42 +455,50 @@ def ingest_chunk(
     db: GraphDB,
     chunk: dict[str, Any],
     classifier_fn: Any | None = None,
-) -> None:
-    """Ingest one parsed chunk into the graph.
+) -> int:
+    """Ingest one parsed chunk into the graph. Returns the number of mentions found.
 
-    chunk keys expected: chunk_id, document_id, url, text, hash, [schema]
-    classifier_fn: callable(text: str) -> {"schema": str, "confidence": float} or None
-    //why: schema from parser is structural (DOM fingerprint); classifier gives semantic label
+    chunk keys expected: chunk_id, document_id, url, text, hash, [schema|chunk_kind]
+    classifier_fn: legacy callable(text) -> {"schema","confidence"}; when None the
+        unified model port supplies schema classification (the canonical path).
+
+    Extraction escalates through the model port's ladder (regex → Foundation), so
+    the engine, not this caller, owns the resolve-degrade policy. //why: schema from
+    a parser is structural (DOM fingerprint); the classifier gives a semantic label.
     """
+    import lgwks_model_port as port
+
     text = chunk.get("text", "")
     chunk_id = chunk["chunk_id"]
     doc_id = chunk.get("document_id", "")
     url = chunk.get("url", "")
 
-    # T2: run classifier if available
-    schema = chunk.get("schema", "UNKNOWN")
-    if classifier_fn and schema == "UNKNOWN":
-        try:
-            result = classifier_fn(text)
-            if result.get("confidence", 0.0) >= 0.60:
-                schema = result["schema"]
-        except Exception:
-            pass  # T2 failure is silent; T1 still runs
+    # #196: substrate chunks carry `chunk_kind`, not `schema`. Accept either so the
+    # graph builds from ordinary substrate output, not just FundServ-shaped input.
+    schema = chunk.get("schema") or chunk.get("chunk_kind") or "UNKNOWN"
+    if schema == "UNKNOWN":
+        if classifier_fn is not None:  # legacy injected classifier
+            try:
+                result = classifier_fn(text)
+                if result.get("confidence", 0.0) >= 0.60:
+                    schema = result["schema"]
+            except Exception:
+                pass  # classification failure is non-fatal; extraction still runs
+        else:  # canonical path: schema classification through the unified port
+            verdict = port.classify(text)
+            if verdict["ok"] and verdict["value"]:
+                schema = verdict["value"]["schema"]
 
-    mentions = extract_mentions(text)
+    # Entity extraction via the port ladder: T1 regex → T3 Foundation (fix for the
+    # prior `ExtractedMention` crash — the port returns typed {type,text,start,end}
+    # dicts, never an undefined symbol). T2 page-schema classification is a separate
+    # role (handled above), not an entity-extraction tier.
+    extraction = port.extract_entities(text, entity_types=list(ENTITY_TYPES))
+    mentions = [
+        EntityMention(m["type"], m["text"], m["start"], m["end"])
+        for m in (extraction["value"] or [])
+    ]
     labels = list({m.entity_type for m in mentions})
-
-    # T3: Foundation Models fallback for genuinely ambiguous mentions
-    if not mentions or all(m.entity_type == "UNKNOWN" for m in mentions):
-        try:
-            import lgwks_foundation
-            fm_result = lgwks_foundation.extract_entities(text, entity_types=list(ENTITY_TYPES))
-            if fm_result.status == "ok" and fm_result.entities:
-                for e in fm_result.entities:
-                    mentions.append(ExtractedMention(e.text, e.type, e.start, e.end))
-                labels = list({m.entity_type for m in mentions})
-        except Exception:
-            pass  # T3 unavailable is silent
 
     db.upsert_chunk(chunk_id, doc_id, text, url=url, schema=schema, labels=labels)
 
@@ -508,16 +518,38 @@ def ingest_chunk(
             dst = f"{b.entity_type}:{b.text.lower()}"
             db.upsert_edge(src, dst, "co-occurs")
 
+    return len(mentions)
+
 
 def ingest_chunks(
     db: GraphDB,
     chunks: list[dict[str, Any]],
     classifier_fn: Any | None = None,
-) -> None:
-    """Ingest a batch of chunks. Commits after all inserts."""
+) -> dict[str, int]:
+    """Ingest a batch of chunks. Commits after all inserts.
+
+    Returns {"chunks","mentions","empty_chunks"}. #196: when chunks yield zero
+    mentions we surface a loud warning with a hint instead of silently building an
+    empty graph — the failure mode that made `entity-graph` look broken on
+    ordinary (non-FundServ) substrate output.
+    """
+    total_mentions = 0
+    empty = 0
     for chunk in chunks:
-        ingest_chunk(db, chunk, classifier_fn=classifier_fn)
+        found = ingest_chunk(db, chunk, classifier_fn=classifier_fn)
+        total_mentions += found
+        empty += 1 if found == 0 else 0
     db.commit()
+
+    if chunks and total_mentions == 0:
+        print(
+            f"[entity-graph] WARNING: ingested {len(chunks)} chunk(s) but extracted "
+            f"0 entities. Recognised types: {', '.join(ENTITY_TYPES)}. If your text "
+            f"has none of these, no nodes are expected; otherwise verify the chunk "
+            f"`text` field is populated (substrate chunks use `chunk_kind`, accepted).",
+            file=sys.stderr,
+        )
+    return {"chunks": len(chunks), "mentions": total_mentions, "empty_chunks": empty}
 
 
 # ── git sync ──────────────────────────────────────────────────────────────────
@@ -618,13 +650,10 @@ def _entity_graph_command(args: Any) -> None:
             print(f"[entity-graph] chunks file not found: {chunks_file}", file=sys.stderr)
             sys.exit(1)
 
-        # Optional T2 classifier
+        # Schema classification flows through the unified model port (classifier_fn
+        # left None → ingest_chunk calls port.classify). The port owns CoreML
+        # availability + the confidence gate, so this command no longer probes it.
         classifier_fn = None
-        try:
-            from lgwks_coreml import classify_page  # type: ignore[import]
-            classifier_fn = classify_page
-        except ImportError:
-            pass
 
         chunks: list[dict] = []
         for line in chunks_file.read_text(encoding="utf-8").splitlines():
