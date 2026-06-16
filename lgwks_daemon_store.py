@@ -38,6 +38,11 @@ WORK_KINDS = frozenset({
     "worktree_open", "worktree_close",
 })
 ITEM_STATUSES = frozenset({"queued", "running", "done", "failed"})
+STATS_SCHEMA = "lgwks.daemon.stats.v0"
+
+
+class QueueFullError(RuntimeError):
+    """Raised when an enqueue is rejected by per-tenant admission control (backpressure)."""
 
 
 from lgwks_clock import now_iso as _now  # one source of truth for timestamps
@@ -235,6 +240,11 @@ def validate_context_packet(packet: dict[str, Any]) -> dict[str, Any]:
 class DaemonEventStore:
     """WAL-backed daemon event store with idempotent append semantics."""
 
+    # Per-tenant admission cap on ACTIVE work (queued + running). An unbounded
+    # queue is a memory-exhaustion / DoS vector; world-class daemons apply
+    # backpressure. Override per-instance for tests. (#227 world-class E1)
+    MAX_QUEUE_DEPTH: int = 10_000
+
     def __init__(self, path: str | Path):
         self.path = Path(path)
         self.path.parent.mkdir(parents=True, exist_ok=True)
@@ -423,6 +433,20 @@ class DaemonEventStore:
         conn = self._conn
         conn.execute("BEGIN IMMEDIATE")
         try:
+            # Admission control: reject once active (queued+running) depth hits the
+            # cap, so the queue can never grow without bound. Counted inside the
+            # transaction to avoid a TOCTOU race with concurrent enqueuers.
+            active = conn.execute(
+                "SELECT COUNT(*) FROM daemon_work_queue "
+                "WHERE tenant_id=? AND status IN ('queued','running')",
+                (tenant_id,),
+            ).fetchone()[0]
+            if active >= self.MAX_QUEUE_DEPTH:
+                conn.execute("ROLLBACK")
+                raise QueueFullError(
+                    f"queue full for tenant {tenant_id}: "
+                    f"{active} active >= cap {self.MAX_QUEUE_DEPTH}"
+                )
             cur = conn.execute(
                 """
                 INSERT OR IGNORE INTO daemon_work_queue
@@ -436,6 +460,8 @@ class DaemonEventStore:
             inserted = cur.rowcount == 1
             conn.execute("COMMIT")
             return inserted
+        except QueueFullError:
+            raise
         except Exception:
             conn.execute("ROLLBACK")
             raise
@@ -524,6 +550,76 @@ class DaemonEventStore:
             "failed": counts["failed"],
             "total": sum(counts.values()),
         }
+
+    def stats(self, tenant_id: str) -> dict[str, Any]:
+        """Unified per-tenant counters snapshot (`lgwks.daemon.stats.v0`).
+
+        One structured view across events + work queue (+ runs when present),
+        for observability — the metrics surface a world-class daemon exposes
+        rather than forcing N separate calls. (#227 world-class D3)
+        """
+        conn = self._conn
+        qd = self.queue_depth(tenant_id, conn)
+        events = conn.execute(
+            "SELECT COUNT(*) FROM daemon_events WHERE tenant_id=?", (tenant_id,)
+        ).fetchone()[0]
+        try:
+            runs = conn.execute(
+                "SELECT COUNT(*) FROM daemon_runs WHERE tenant_id=?", (tenant_id,)
+            ).fetchone()[0]
+        except sqlite3.OperationalError:
+            runs = 0
+        return {
+            "schema": STATS_SCHEMA,
+            "tenant_id": tenant_id,
+            "events": events,
+            "queued": qd["queued"],
+            "running": qd["running"],
+            "done": qd["done"],
+            "failed": qd["failed"],
+            "queue_total": qd["total"],
+            "runs": runs,
+        }
+
+    def recover_orphaned(self, tenant_id: str, *, older_than_s: float = 300.0) -> int:
+        """Requeue work items stuck in 'running' past a lease window.
+
+        If a daemon dies mid-job, its claimed items would otherwise sit in
+        'running' forever (silently orphaned). This reclaims any whose
+        ``started_at`` is older than ``older_than_s`` back to 'queued' so a
+        live daemon picks them up. Returns the count recovered.
+        Called on startup and periodically. (#227 world-class F1)
+        """
+        import datetime as _dt
+
+        now_dt = _dt.datetime.fromisoformat(_now())
+        conn = self._conn
+        conn.execute("BEGIN IMMEDIATE")
+        try:
+            rows = conn.execute(
+                "SELECT item_id, started_at FROM daemon_work_queue "
+                "WHERE tenant_id=? AND status='running'",
+                (tenant_id,),
+            ).fetchall()
+            recovered = 0
+            for item_id, started_at in rows:
+                try:
+                    started_dt = _dt.datetime.fromisoformat(started_at) if started_at else now_dt
+                except (ValueError, TypeError):
+                    started_dt = now_dt
+                age = (now_dt - started_dt).total_seconds()
+                if age >= older_than_s:
+                    conn.execute(
+                        "UPDATE daemon_work_queue SET status='queued', started_at=NULL "
+                        "WHERE item_id=?",
+                        (item_id,),
+                    )
+                    recovered += 1
+            conn.execute("COMMIT")
+            return recovered
+        except Exception:
+            conn.execute("ROLLBACK")
+            raise
 
     def get_packet(
         self,
