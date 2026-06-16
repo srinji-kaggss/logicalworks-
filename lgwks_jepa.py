@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import argparse
 import json
-import re
 import sys
 import time
 from pathlib import Path
@@ -32,7 +31,9 @@ from lgwks_hashing import content_id as _sha  # canonical content-id (one source
 
 
 def _tokenize(text: str) -> list[str]:
-    return [t.lower() for t in re.findall(r"[A-Za-z][A-Za-z0-9_./-]{2,}", text)]
+    # Canonical lexical analyzer (CODE profile keeps _ . / - ; one source of truth).
+    import lgwks_lexicon as _lex
+    return _lex.tokens(text, profile=_lex.CODE, min_len=3)
 
 
 def _read_views(args: argparse.Namespace) -> list[dict[str, Any]]:

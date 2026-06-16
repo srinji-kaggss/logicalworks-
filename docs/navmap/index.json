@@ -140,6 +140,7 @@
         "lgwks_jarvis",
         "lgwks_jepa",
         "lgwks_keyvault",
+        "lgwks_lexicon",
         "lgwks_machine",
         "lgwks_manifest",
         "lgwks_map",
@@ -418,6 +419,7 @@
         "lgwks_hashing",
         "lgwks_inline",
         "lgwks_jailbreak",
+        "lgwks_lexicon",
         "lgwks_oriented",
         "lgwks_proc",
         "lgwks_reasoning_port",
@@ -1428,13 +1430,14 @@
     },
     "lgwks_concept": {
       "deps": [
-        "lgwks_hashing"
+        "lgwks_hashing",
+        "lgwks_lexicon"
       ],
       "has_cli": false,
       "has_tests": true,
       "integration": "integrated",
       "last_commit_days": 1,
-      "loc": 623,
+      "loc": 624,
       "owning_issue": null,
       "packet": null,
       "purpose": "deterministic concept extraction and activation steering.",
@@ -1744,6 +1747,7 @@
     },
     "lgwks_embed": {
       "deps": [
+        "lgwks_lexicon",
         "lgwks_memory",
         "lgwks_substrate_config",
         "lgwks_substrate_io"
@@ -1752,7 +1756,7 @@
       "has_tests": false,
       "integration": "integrated",
       "last_commit_days": 1,
-      "loc": 229,
+      "loc": 227,
       "owning_issue": null,
       "packet": null,
       "purpose": "deterministic local folder embedding vault.",
@@ -1798,15 +1802,15 @@
         "lgwks_entity_graph",
         "lgwks_had",
         "lgwks_jailbreak",
+        "lgwks_lexicon",
         "lgwks_map",
-        "lgwks_substrate_config",
         "lgwks_vecmath"
       ],
       "has_cli": true,
       "has_tests": true,
       "integration": "integrated",
       "last_commit_days": 0,
-      "loc": 515,
+      "loc": 509,
       "owning_issue": null,
       "packet": null,
       "purpose": "U6: Subconscious Engine (deterministic first slice).",
@@ -2471,6 +2475,7 @@
       "deps": [
         "lgwks_capture",
         "lgwks_hashing",
+        "lgwks_lexicon",
         "lgwks_model_hub",
         "lgwks_portal",
         "lgwks_project_artifacts"
@@ -2479,7 +2484,7 @@
       "has_tests": true,
       "integration": "integrated",
       "last_commit_days": 0,
-      "loc": 306,
+      "loc": 307,
       "owning_issue": null,
       "packet": null,
       "purpose": "first executable multi-view JEPA package surface.",
@@ -2508,6 +2513,31 @@
         "lgwks_openrouter_embed",
         "lgwks_pipeline",
         "lgwks_workflows"
+      ]
+    },
+    "lgwks_lexicon": {
+      "deps": [
+        "lgwks_substrate_config"
+      ],
+      "has_cli": false,
+      "has_tests": false,
+      "integration": "integrated",
+      "last_commit_days": null,
+      "loc": 66,
+      "owning_issue": null,
+      "packet": null,
+      "purpose": "the one canonical LEXICAL analyzer (word / identifier tokenisation).",
+      "staleness": "active",
+      "subsystem": "Unclassified (triage)",
+      "used_by": [
+        "lgwks_concept",
+        "lgwks_embed",
+        "lgwks_engine",
+        "lgwks_jepa",
+        "lgwks_map",
+        "lgwks_memory",
+        "lgwks_portal",
+        "lgwks_query"
       ]
     },
     "lgwks_machine": {
@@ -2559,13 +2589,13 @@
     "lgwks_map": {
       "deps": [
         "lgwks_intent",
-        "lgwks_substrate_config"
+        "lgwks_lexicon"
       ],
       "has_cli": true,
       "has_tests": false,
       "integration": "integrated",
       "last_commit_days": 0,
-      "loc": 108,
+      "loc": 106,
       "owning_issue": null,
       "packet": null,
       "purpose": "U1 Capability Map (second-harness PRD \u00a712).",
@@ -2581,6 +2611,7 @@
     "lgwks_memory": {
       "deps": [
         "lgwks_inline",
+        "lgwks_lexicon",
         "lgwks_sign",
         "lgwks_substrate_config"
       ],
@@ -2588,7 +2619,7 @@
       "has_tests": true,
       "integration": "integrated",
       "last_commit_days": 0,
-      "loc": 278,
+      "loc": 274,
       "owning_issue": null,
       "packet": null,
       "purpose": "deterministic project memory chain (hardened, build #3).",
@@ -2797,13 +2828,14 @@
     "lgwks_portal": {
       "deps": [
         "lgwks_graph",
-        "lgwks_hashing"
+        "lgwks_hashing",
+        "lgwks_lexicon"
       ],
       "has_cli": true,
       "has_tests": true,
       "integration": "integrated",
       "last_commit_days": 0,
-      "loc": 278,
+      "loc": 279,
       "owning_issue": null,
       "packet": null,
       "purpose": "deterministic portal packets for coding-agent re-entry.",
@@ -3017,13 +3049,13 @@
         "lgwks_daemon_event",
         "lgwks_daemon_store",
         "lgwks_entity_graph",
-        "lgwks_substrate_config"
+        "lgwks_lexicon"
       ],
       "has_cli": false,
       "has_tests": false,
       "integration": "unreferenced",
       "last_commit_days": 1,
-      "loc": 270,
+      "loc": 271,
       "owning_issue": null,
       "packet": null,
       "purpose": "the unified daemon query surface (#124).",
@@ -3575,14 +3607,12 @@
         "lgwks_cognition",
         "lgwks_cycle",
         "lgwks_embed",
-        "lgwks_engine",
         "lgwks_extract",
         "lgwks_gh",
         "lgwks_input",
-        "lgwks_map",
+        "lgwks_lexicon",
         "lgwks_memory",
         "lgwks_pipeline",
-        "lgwks_query",
         "lgwks_redact",
         "lgwks_search",
         "lgwks_storage",
@@ -3767,7 +3797,8 @@
       "staleness": "active",
       "subsystem": "Unclassified (triage)",
       "used_by": [
-        "lgwks_cortex"
+        "lgwks_cortex",
+        "lgwks_lexicon"
       ]
     },
     "lgwks_tokenizer_registry": {
@@ -3785,6 +3816,7 @@
       "staleness": "active",
       "subsystem": "Substrate / storage / schema",
       "used_by": [
+        "lgwks_lexicon",
         "lgwks_storage"
       ]
     },
@@ -3918,7 +3950,7 @@
       "has_cli": false,
       "has_tests": false,
       "integration": "integrated",
-      "last_commit_days": 1,
+      "last_commit_days": 0,
       "loc": 82,
       "owning_issue": null,
       "packet": null,
@@ -4297,15 +4329,15 @@
   "totals": {
     "by_integration": {
       "cli_only": 4,
-      "integrated": 162,
+      "integrated": 163,
       "unreferenced": 6
     },
     "by_staleness": {
-      "active": 162,
+      "active": 163,
       "orphan": 4,
       "staling": 6
     },
-    "loc": 58215,
-    "modules": 172
+    "loc": 58271,
+    "modules": 173
   }
 }

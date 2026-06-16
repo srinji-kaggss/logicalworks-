@@ -37,14 +37,15 @@ RESULT_SCHEMA = "lgwks.daemon.query.result.v1"
 
 PROJECTIONS = frozenset({"graph", "vector", "transcript", "artifact", "fact", "symbol"})
 
-from lgwks_substrate_config import WORD_RE as _TOKEN_RE  # one source of truth
+import lgwks_lexicon as _lex
 
 # An adapter maps a validated request → a list of raw hit dicts for ONE projection.
 Adapter = Callable[[dict[str, Any]], list[dict[str, Any]]]
 
 
 def _tokens(text: str) -> set[str]:
-    return set(_TOKEN_RE.findall((text or "").lower()))
+    # Canonical lexical analyzer (one source of truth) — plain words, no stopwords.
+    return _lex.tokens(text, unique=True)
 
 
 def score_text(q: str | None, matched_text: str) -> float:
