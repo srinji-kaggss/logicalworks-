@@ -482,10 +482,8 @@ def build_narration_artifact(
         },
     }
     (root / "narration.json").write_text(json.dumps(artifact, indent=2, sort_keys=True), encoding="utf-8")
-    (root / "narration-emissions.jsonl").write_text(
-        "\n".join(json.dumps(e, sort_keys=True) for e in emissions) + "\n",
-        encoding="utf-8",
-    )
+    from lgwks_substrate_io import _emit_jsonl
+    _emit_jsonl(root / "narration-emissions.jsonl", emissions)
     (root / "narration-fabric-log.json").write_text(
         json.dumps(artifact["fabric"], indent=2, sort_keys=True),
         encoding="utf-8",
@@ -638,7 +636,8 @@ def build_capture(
         },
         "emissions": emissions,
     }
-    (root / "emissions.jsonl").write_text("\n".join(json.dumps(e, sort_keys=True) for e in emissions) + "\n", encoding="utf-8")
+    from lgwks_substrate_io import _emit_jsonl
+    _emit_jsonl(root / "emissions.jsonl", emissions)
     (root / "fabric-log.json").write_text(json.dumps(packet["fabric"], indent=2, sort_keys=True), encoding="utf-8")
     (root / "packet.json").write_text(json.dumps(packet, indent=2, sort_keys=True), encoding="utf-8")
     

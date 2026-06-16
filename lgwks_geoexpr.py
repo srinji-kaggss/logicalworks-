@@ -255,9 +255,8 @@ def _persist_run(geoexpr: dict, plan: dict, preview: dict, transcript: dict) -> 
     ]
     for i, r in enumerate(transcript["results"]):
         embeddings.append(_embed_record("result", f"{plan['plan_id']}:{i}", r.get("out", "") or r["verb"]))
-    with (run_dir / "artifact-embeddings.jsonl").open("w", encoding="utf-8") as fh:
-        for row in embeddings:
-            fh.write(json.dumps(row, sort_keys=True) + "\n")
+    from lgwks_substrate_io import _emit_jsonl
+    _emit_jsonl(run_dir / "artifact-embeddings.jsonl", embeddings)
     return run_dir
 
 

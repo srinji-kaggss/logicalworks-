@@ -803,10 +803,10 @@ def execute_plan(plan: RunPlan, dry: bool = False, synthetic: dict[str, str] | N
     uncertainty = round(1.0 - 0.5 * coverage - 0.5 * info, 4)
     log.append("L3_uncertainty", {"coverage": coverage, "information": round(info, 4), "uncertainty": uncertainty})
     # L4: a node with no falsifier and only the floor tier is not promotable -> quarantine.
+    from lgwks_substrate_io import _emit_jsonl
     quarantine = [n for n in nodes.values() if n["falsifier"] is None]
     if quarantine:
-        (out_dir / "quarantine.jsonl").write_text(
-            "\n".join(json.dumps(n, sort_keys=True) for n in quarantine) + "\n", encoding="utf-8")
+        _emit_jsonl(out_dir / "quarantine.jsonl", quarantine)
         log.append("L4_quarantine", {"count": len(quarantine), "reason": "no falsifier/tier — human review"})
 
     # 6 — pre-vector export (graph-schema/2-shaped; splice-and-dice / canvas viz).
@@ -817,8 +817,7 @@ def execute_plan(plan: RunPlan, dry: bool = False, synthetic: dict[str, str] | N
         "math": {"coverage": coverage, "uncertainty": uncertainty},
     }, indent=2, sort_keys=True), encoding="utf-8")
     if embeddings:                          # the objective vector cache (default-on; empty if --no-embed)
-        (out_dir / "embeddings.jsonl").write_text(
-            "\n".join(json.dumps(e, sort_keys=True) for e in embeddings) + "\n", encoding="utf-8")
+        _emit_jsonl(out_dir / "embeddings.jsonl", embeddings)
         log.append("vector_cache", {"count": len(embeddings), "provider": embed_provider})
     log.append("run_end", {"documents": len(docs), "nodes": len(nodes), "edges": len(edges)})
 
