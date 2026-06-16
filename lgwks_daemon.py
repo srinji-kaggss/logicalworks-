@@ -31,6 +31,8 @@ from lgwks_daemon_store import DaemonEventStore
 STATUS_SCHEMA = "lgwks.daemon.status.v0"
 DOCTOR_SCHEMA = "lgwks.daemon.doctor.v0"
 HEARTBEAT_INTERVAL_S = 1.0
+# A live pid with no heartbeat for this long is a hung daemon, not a healthy one.
+HEARTBEAT_STALE_S = 10.0
 POLL_INTERVAL_S = 0.5
 START_TIMEOUT_S = 5.0
 STOP_TIMEOUT_S = 5.0
@@ -80,6 +82,23 @@ def _tenant_for(paths: DaemonPaths, override: str | None = None) -> str:
     can never read" silent-loss gap (#227 F1).
     """
     return (override or "").strip() or f"repo:{paths.repo_root.name}"
+
+
+def _heartbeat_age_s(heartbeat_at: str) -> float | None:
+    """Seconds since an ISO heartbeat, via the canonical clock. None if unparseable."""
+    if not heartbeat_at:
+        return None
+    import datetime as _dt
+
+    from lgwks_clock import now_iso
+    try:
+        hb = _dt.datetime.fromisoformat(heartbeat_at)
+        now = _dt.datetime.fromisoformat(now_iso())
+    except (ValueError, TypeError):
+        return None
+    if hb.tzinfo is None:
+        hb = hb.replace(tzinfo=now.tzinfo)
+    return (now - hb).total_seconds()
 
 
 def _read_json(path: Path) -> dict[str, Any] | None:
@@ -387,6 +406,8 @@ class SessionDaemon:
         state = _read_json(self.paths.state)
         pid = int((lock or {}).get("pid", 0) or 0)
         alive = _pid_alive(pid)
+        heartbeat_at = (state or {}).get("heartbeat_at", "")
+        age = _heartbeat_age_s(heartbeat_at)
         return {
             "schema": STATUS_SCHEMA,
             "repo_root": str(self.paths.repo_root),
@@ -397,9 +418,37 @@ class SessionDaemon:
             "pid": pid or None,
             "alive": alive,
             "transcript_path": (state or lock or {}).get("transcript_path", ""),
-            "heartbeat_at": (state or {}).get("heartbeat_at", ""),
+            "heartbeat_at": heartbeat_at,
+            "heartbeat_age_s": age,
+            # A hung daemon keeps its pid (alive) but stops writing heartbeats.
+            # Flag that distinct failure mode rather than reporting healthy.
+            "heartbeat_stale": (age is not None and age > HEARTBEAT_STALE_S),
             "status": "running" if alive else "stopped",
             "stale_lock_reaped": False,
+        }
+
+    def readiness(self) -> dict[str, Any]:
+        """Readiness (can the daemon serve?) — distinct from liveness (process alive).
+
+        A world-class daemon separates "the process exists" from "it can do its
+        job". Readiness here = the event store is reachable and its migrations
+        are applied, so packets/queue ops will succeed. (#227 world-class G3)
+        """
+        store_ok = False
+        detail = ""
+        try:
+            store = DaemonEventStore(self.paths.db)
+            try:
+                store.queue_depth(_tenant_for(self.paths))  # touches the migrated schema
+                store_ok = True
+            finally:
+                store.close()
+        except Exception as exc:  # noqa: BLE001
+            detail = str(exc)
+        return {
+            "schema": "lgwks.daemon.readiness.v0",
+            "ready": store_ok,
+            "checks": [{"name": "event_store", "ok": store_ok, "detail": detail}],
         }
 
     def doctor(self) -> dict[str, Any]:
@@ -795,6 +844,13 @@ def _emit_command(args: argparse.Namespace) -> int:
     return 0
 
 
+def _ready_command(args: argparse.Namespace) -> int:
+    daemon = SessionDaemon(Path(args.repo))
+    res = daemon.readiness()
+    print(json.dumps(res, indent=2))
+    return 0 if res.get("ready") else 1
+
+
 def _stats_command(args: argparse.Namespace) -> int:
     from lgwks_daemon_store import DaemonEventStore
     paths = _paths(Path(args.repo).resolve())
@@ -982,6 +1038,10 @@ def add_parser(sub) -> None:
     doctor.add_argument("--repo", default=".", help="repo root")
     doctor.set_defaults(func=_doctor_command)
 
+    ready = ps.add_parser("ready", help="readiness probe — can the daemon serve? (exit 0/1)")
+    ready.add_argument("--repo", default=".", help="repo root")
+    ready.set_defaults(func=_ready_command)
+
     enqueue = ps.add_parser("enqueue", help="enqueue a work item from stdin JSON")
     enqueue.set_defaults(func=_enqueue_command)
 
@@ -1088,6 +1148,9 @@ def main(argv: list[str] | None = None) -> int:
 
     doctor = sub.add_parser("doctor", help="verify daemon runtime prerequisites")
     doctor.set_defaults(func=_doctor_command)
+
+    ready = sub.add_parser("ready", help="readiness probe — can the daemon serve? (exit 0/1)")
+    ready.set_defaults(func=_ready_command)
 
     serve = sub.add_parser("_serve", help=argparse.SUPPRESS)
     serve.add_argument("--transcript-path", default="")

@@ -284,5 +284,88 @@ class TestFaultRecovery(_StoreCase):
         self.assertEqual(again[0]["item_id"], "orphan-1")
 
 
+# ── Category G — Advanced resilience & operability (iteration-2 bar-raise) ──
+class TestAdvancedResilience(_StoreCase):
+    def test_G1_poison_pill_dead_lettered(self):
+        """A repeatedly-crashing item must dead-letter, not requeue forever.
+
+        Recovery without an attempt cap is an infinite-retry vulnerability:
+        a poison pill that crashes the worker every time would be reclaimed
+        and re-dispatched endlessly. World-class queues cap attempts and move
+        the item to a dead-letter (failed) state.
+        """
+        self.assertTrue(
+            hasattr(DaemonEventStore, "MAX_ATTEMPTS"),
+            "store must cap work-item attempts (dead-letter on poison pill)",
+        )
+        self.store.MAX_ATTEMPTS = 3  # type: ignore[attr-defined]
+        self.store.enqueue(_work_item("poison", self.tenant))
+        # simulate crash-recover cycles: each dequeue is one attempt, each
+        # recover reclaims the orphaned 'running' item.
+        for _ in range(int(self.store.MAX_ATTEMPTS) + 2):  # type: ignore[attr-defined]
+            self.store.dequeue(self.tenant, limit=1)
+            self.store.recover_orphaned(self.tenant, older_than_s=0)
+        depth = self.store.queue_depth(self.tenant)
+        self.assertEqual(depth["queued"], 0, "poison pill must not stay requeueable")
+        self.assertEqual(depth["failed"], 1, "poison pill must be dead-lettered")
+
+
+class TestOperability(unittest.TestCase):
+    def setUp(self):
+        self.tmp = Path(tempfile.mkdtemp())
+        (self.tmp / "store").mkdir(exist_ok=True)
+        self.daemon = daemon_mod.SessionDaemon(self.tmp)
+
+    def tearDown(self):
+        try:
+            self.daemon.stop()
+        except Exception:
+            pass
+
+    def test_G3_readiness_distinct_from_liveness(self):
+        """Readiness (can serve) must be reported separately from liveness (alive)."""
+        self.assertTrue(hasattr(self.daemon, "readiness"), "daemon must expose readiness()")
+        r = self.daemon.readiness()
+        self.assertIn("ready", r)
+        self.assertTrue(r["ready"], "store reachable + migrations applied => ready")
+        # liveness is orthogonal: a not-yet-started daemon is ready but not alive
+        self.assertFalse(self.daemon.status()["alive"])
+
+    def test_G4_stale_heartbeat_detected(self):
+        """A hung daemon (live pid, frozen heartbeat) must be flagged stale."""
+        self.daemon.paths.root.mkdir(parents=True, exist_ok=True)
+        daemon_mod._write_json(self.daemon.paths.state, {
+            "pid": 999999, "heartbeat_at": "2000-01-01T00:00:00+00:00",
+            "transcript_path": "", "status": "running",
+        })
+        daemon_mod._write_json(self.daemon.paths.lock, {"pid": 999999})
+        status = self.daemon.status()
+        self.assertIn("heartbeat_stale", status)
+        self.assertTrue(status["heartbeat_stale"])
+
+
+# ── Category H — Saturation probes (iteration-3 bar-raise) ─────────────────
+# These raise the bar into areas often missing in homegrown daemons. If they
+# pass WITHOUT new code, the daemon already clears the bar there — the loop's
+# convergence signal (no remaining gap to close).
+class TestSaturation(_StoreCase):
+    def test_H1_busy_timeout_set(self):
+        """Under write-lock contention the store must wait, not error immediately."""
+        bt = self.store._conn.execute("PRAGMA busy_timeout").fetchone()[0]
+        self.assertGreaterEqual(bt, 1000, "store connection needs a busy_timeout >= 1s")
+
+    def test_H2_synchronous_durability(self):
+        """synchronous must be NORMAL(1) or FULL(2) — never OFF(0) (data-loss risk)."""
+        sync = self.store._conn.execute("PRAGMA synchronous").fetchone()[0]
+        self.assertGreaterEqual(int(sync), 1)
+
+    def test_H3_unknown_event_kind_rejected(self):
+        """Schema integrity: an event with an unknown kind must be rejected at append."""
+        bad = _event(self.tenant, "s1", "a1")
+        bad["kind"] = "not_a_real_kind"
+        with self.assertRaises(Exception):
+            self.store.append(bad)
+
+
 if __name__ == "__main__":
     unittest.main()

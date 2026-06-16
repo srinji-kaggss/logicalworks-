@@ -163,6 +163,14 @@ _MIGRATIONS = [
         ALTER TABLE daemon_runs ADD COLUMN export_hash TEXT;
         """,
     ),
+    (
+        6,
+        "daemon_work_queue_attempts_v1",
+        # dequeue-count for dead-letter / poison-pill protection (#227 world-class G1)
+        """
+        ALTER TABLE daemon_work_queue ADD COLUMN attempts INTEGER NOT NULL DEFAULT 0;
+        """,
+    ),
 ]
 
 
@@ -244,6 +252,11 @@ class DaemonEventStore:
     # queue is a memory-exhaustion / DoS vector; world-class daemons apply
     # backpressure. Override per-instance for tests. (#227 world-class E1)
     MAX_QUEUE_DEPTH: int = 10_000
+
+    # Max dequeue attempts before a work item is dead-lettered (status='failed').
+    # Bounds the infinite-retry risk that recover_orphaned() otherwise creates
+    # for a poison pill. Override per-instance for tests. (#227 world-class G1)
+    MAX_ATTEMPTS: int = 5
 
     def __init__(self, path: str | Path):
         self.path = Path(path)
@@ -485,7 +498,9 @@ class DaemonEventStore:
             items: list[dict[str, Any]] = []
             for row in rows:
                 conn.execute(
-                    "UPDATE daemon_work_queue SET status='running', started_at=? WHERE item_id=?",
+                    "UPDATE daemon_work_queue "
+                    "SET status='running', started_at=?, attempts=attempts+1 "
+                    "WHERE item_id=?",
                     (now, row[0]),
                 )
                 items.append({
@@ -597,18 +612,28 @@ class DaemonEventStore:
         conn.execute("BEGIN IMMEDIATE")
         try:
             rows = conn.execute(
-                "SELECT item_id, started_at FROM daemon_work_queue "
+                "SELECT item_id, started_at, attempts FROM daemon_work_queue "
                 "WHERE tenant_id=? AND status='running'",
                 (tenant_id,),
             ).fetchall()
             recovered = 0
-            for item_id, started_at in rows:
+            for item_id, started_at, attempts in rows:
                 try:
                     started_dt = _dt.datetime.fromisoformat(started_at) if started_at else now_dt
                 except (ValueError, TypeError):
                     started_dt = now_dt
                 age = (now_dt - started_dt).total_seconds()
-                if age >= older_than_s:
+                if age < older_than_s:
+                    continue
+                if (attempts or 0) >= self.MAX_ATTEMPTS:
+                    # Poison pill: dead-letter instead of requeueing forever.
+                    conn.execute(
+                        "UPDATE daemon_work_queue "
+                        "SET status='failed', done_at=?, error='max_attempts_exceeded' "
+                        "WHERE item_id=?",
+                        (_now(), item_id),
+                    )
+                else:
                     conn.execute(
                         "UPDATE daemon_work_queue SET status='queued', started_at=NULL "
                         "WHERE item_id=?",
