@@ -1,0 +1,114 @@
+schema_version: "v1.0"
+repository: "logicalworks-"
+description: "Absolute, non-negotiable source of truth for context streaming. Built from absolute first principles."
+modules:
+  storage_and_state:
+    lgwks_sqlite.py:
+      description: "Connection pool and migration manager for SQLite databases."
+      classes:
+        - ConnectionPool
+        - MigrationManager
+      methods:
+        - get_db(path: str | Path, **kwargs) -> sqlite3.Connection
+        - connect(path: str | Path, **kwargs) -> sqlite3.Connection
+    lgwks_daemon_store.py:
+      description: "Manages daemon-owned SQLite database."
+      db_schema:
+        tables:
+          - name: daemon_events
+            columns: [event_id, tenant_id, agent_id, session_id, actor, client, lane, kind, scope, ts]
+          - name: daemon_session_heads
+            columns: [tenant_id, agent_id, session_id, first_event_id, last_event_id, event_count, last_ts, last_lane, last_kind, last_scope]
+          - name: daemon_work_queue
+            columns: [item_id, tenant_id, session_id, agent_id, kind, priority, status, payload_json, enqueued_at, started_at]
+          - name: daemon_runs
+            columns: [run_id, tenant_id, target, run_dir, manifest_json, indexed_at]
+          - name: daemon_worktrees
+            columns: [worktree_id, tenant_id, session_id, agent_id, repo_path, worktree_path, branch, base_sha, status, created_at]
+      classes:
+        - DaemonEventStore(path: str | Path)
+      methods:
+        - append(record: dict)
+        - enqueue(item: dict)
+        - dequeue(tenant_id: str, limit: int)
+        - open_worktree(...)
+    lgwks_cognition.py:
+      description: "Append-only, HMAC hash-chained record of AI thinking + intent-commits. Stored as JSONL."
+      db_path: "store/cognition/{safe_stream_name}-{hash}.cognition.jsonl"
+      classes:
+        - CognitionLog(stream: str, key: bytes)
+      methods:
+        - append(kind: str, data: dict)
+        - verify() -> bool
+        - corpus() -> list[dict]
+    lgwks_crdt.py:
+      description: "Conflict-free Replicated Data Types for state merging."
+      classes:
+        - GSet
+        - ORSet
+        - LWWRegister
+        - JsonFileSink(path: str | Path)
+      methods:
+        - merge_state(a, b)
+        - serialise(state)
+        - reconverge(...)
+  model_routing:
+    lgwks_model_mesh.py:
+      description: "Validates and loads the mesh artifact."
+      methods:
+        - load_mesh(path)
+        - validate_mesh(mesh)
+        - models_for_role(mesh, role)
+        - tier_rank(trust_class)
+      invariants: "Escalation order: deterministic -> sensor -> generative."
+    lgwks_model_port.py:
+      description: "Gateway for escalating prompts through the model trust ladder."
+      methods:
+        - escalate(role, attempts, threshold, defer_why)
+        - extract_entities(text, entity_types)
+        - classify(text, threshold)
+        - embed(text, modality)
+        - reason(prompt, **kw)
+  verification_gates:
+    lgwks_cohere.py:
+      description: "Verification framework for G0."
+      classes:
+        - G0Verifier(crate_dir)
+      methods:
+        - cohere(subject, crate_dir, rules_path)
+    lgwks_verify.py:
+      description: "Types and calculators for evidence-based verification."
+      classes:
+        - Evidence
+        - Verdict
+        - GateRegistry
+        - LScore
+        - LCalculator
+      methods:
+        - run_pipeline(subject, context, reg)
+    lgwks_gate_arch.py:
+      description: "AST-based architectural rule verifiers."
+      classes:
+        - RuleVerifier
+      methods:
+        - make_arch_verifiers(rules_path)
+  ingestion_and_extraction:
+    lgwks_extract.py:
+      description: "Downloads and extracts text from URLs/Paths."
+      methods:
+        - extract(target: str, max_chars: int) -> dict
+    lgwks_search.py:
+      description: "Multi-provider web search module."
+      methods:
+        - search(query, k) -> list[dict]
+        - sweep(query, k_per_arm) -> dict
+        - scholar(query, k) -> list[dict]
+    crawler:
+      description: "Rust-based non-LLM web crawler (frontier crawler)."
+      components:
+        - crawler/src/main.rs: "CLI interface. Outputs JSON."
+        - crawler/src/api.rs: "HTTP API. POST /crawl {CrawlRequest} -> CrawlResult"
+        - crawler/src/engine.rs: "Core crawler execution."
+      schemas:
+        - CrawlRequest (url, max_pages, max_depth, stealth, allow_offsite)
+        - CrawlResult (lgwks.crawl.v1)
