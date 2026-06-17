@@ -38,8 +38,9 @@ Build-state truth lives in `spec/second-harness/BUILDLOG*.md`, not in spec prose
 4. `docs/DAEMON-CORE-PLAN.md` — the current cohesive plan to finish the daemon core and the first website-research experience.
 5. `governance/README.md` — governance map.
 6. `spec/second-harness/HANDOFF.md` + `INGESTION-PLAN.md` — current work packets.
-7. `docs/ARCHITECTURE.md` — older system-shape doctrine; useful, but not the best entrypoint for the current whole.
-8. Assigned issue(s) — GitHub Issues are the work tracker.
+7. `docs/AUTHORITY.md` — **NEW: The single, unified architectural rulebook and context stream.** Read this for the 15-layer model mesh, 3-tier escalation ladder, and ingestion details.
+8. `docs/ARCHITECTURE.md` — older system-shape doctrine; useful, but not the best entrypoint for the current whole.
+9. Assigned issue(s) — GitHub Issues are the work tracker.
 
 ## Reserved load-bearing doc nouns
 - `navmap` = the repo-wide module atlas only. It lives under `docs/navmap/`.
@@ -80,3 +81,6 @@ Entry doc in each repo is `CLAUDE.md` (`AGENTS.md` symlinks to it).
 - **Mandatory Pre-flight**: Run `lgwks doctor` before ANY research, code analysis, or daemon task.
 - **Absolute Paths**: All command executions must use absolute paths to the `lgwks` script.
 - **No Hallucination**: Refer ONLY to `lgwks_model_mesh.py` for model law.
+
+## CONTEXT STREAMING MANDATE
+**If a user asks you to "review the codebase", "stream context", or "what are the rules", you MUST read the `docs/AUTHORITY.md` file and base your entire architectural understanding upon it.**
