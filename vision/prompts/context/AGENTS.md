@@ -1,0 +1,1 @@
+/Users/srinji/logic-os-kernel/CLAUDE.md

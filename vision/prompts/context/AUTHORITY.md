@@ -1,0 +1,1 @@
+../../../docs/AUTHORITY.md
