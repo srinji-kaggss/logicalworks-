@@ -62,7 +62,9 @@ def build_parser() -> argparse.ArgumentParser:
     import lgwks_batch; lgwks_batch.add_parser(ops_sub)
     import lgwks_agent_os; lgwks_agent_os.add_parser(ops_sub)
     import lgwks_workflows; lgwks_workflows.add_parser(ops_sub)
-    import lgwks_ops; lgwks_ops.add_parser(ops_sub)
+    import lgwks_ops; lgwks_ops.add_parser(sub)
+    import lgwks_hooks; lgwks_hooks.add_parser(sub)
+
     
     # 10. human — interactive/setup verbs (login, tui, repl, init)
     hum = sub.add_parser("human", help="interactive and human-only verbs")
