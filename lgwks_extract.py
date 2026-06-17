@@ -192,51 +192,57 @@ _JS_WALL = re.compile(r"enable JavaScript|doesn't work properly without|requires
 
 
 def _html(url: str, max_chars: int) -> str:
-    """crwl md-fit → curl_cffi (impersonate chrome) → escalate to nodriver on a wall.
-    This is the world-class bypass ladder."""
+    """The strict escalation ladder: Deterministic -> Sensor -> Generative.
+    
+    //why: Handoffs to a higher tier are ONLY used when the limit of the 
+    previous gate is hit, and never before. (Performance & Determinism mandate).
+    """
     if not _remote_allowed(url):
         return ""
+
     best = ""
+
+    # GATE 1: Deterministic (crwl / Rust-based DOM-to-MD)
     exe = _bin("crwl")
     if exe:
         try:
-            # crwl is the fast floor; if it works, we're done.
             p = subprocess.run([exe, url, "-o", "md-fit"], capture_output=True, text=True, timeout=40)
             best = (p.stdout or "").strip()
         except Exception:
             pass
 
-    # If crwl failed or returned a wall, try curl_cffi with impersonation.
-    if not best or _WALL_RE.search(best[:1500]):
-        if _curl:
-            try:
-                # Tier 1: curl_cffi impersonates Chrome TLS/JA4 signatures.
-                r = _curl.get(url, impersonate="chrome124", timeout=25, headers=_headers(url))
-                if r.status_code == 200:
-                    import lgwks_html
-                    # Use real HTML->MD converter instead of destructive regex
-                    best = lgwks_html.html_to_markdown(r.text)
-            except Exception:
-                pass
+    # Check Gate 1 Success
+    if best and not _WALL_RE.search(best[:1500]) and len(best) > 200:
+        return _trim(best, max_chars)
 
-    # Escalation rung: if we still have a wall or no content, use nodriver (JS rendering).
-    if not best or _WALL_RE.search(best[:1500]) or len(best.strip()) < 200:
+    # GATE 2: Sensor / ML (Lightweight Extraction / Impersonation)
+    if _curl:
         try:
-            import lgwks_browser
-            # Tier 2: nodriver (native anti-detect browser)
-            r = lgwks_browser.render(url, max_chars=max_chars, browser_engine="nodriver")
-            if r["ok"] and r["text"]:
-                best = r["text"]
+            r = _curl.get(url, impersonate="chrome124", timeout=25, headers=_headers(url))
+            if r.status_code == 200:
+                import lgwks_html
+                best = lgwks_html.html_to_markdown(r.text)
         except Exception:
             pass
 
-    # Final validation: if it still looks like a wall, return empty to trigger 'ok: False'
-    if _WALL_RE.search(best[:1500]) or len(best.strip()) < 150:
-        import lgwks_auth_runtime
-        lgwks_auth_runtime.note_auth_failure(url, 403)  # Forbidden/Gate
-        return ""
+    # Check Gate 2 Success
+    if best and not _WALL_RE.search(best[:1500]) and len(best) > 200:
+        return _trim(best, max_chars)
 
-    return _trim(best, max_chars)
+    # GATE 3: Generative (Vision / Qwen3-VL)
+    # ONLY escalate to heavy LLM visual grounding if the page is completely locked
+    try:
+        import lgwks_search_engine
+        res = lgwks_search_engine._ground_visually(url, "Extract core text and facts")
+        if res.get("ok") and "fact" in res:
+            return _trim(res["fact"]["content"], max_chars)
+    except Exception:
+        pass
+
+    # Final validation failure
+    import lgwks_auth_runtime
+    lgwks_auth_runtime.note_auth_failure(url, 403)
+    return ""
 
 
 def _download(url: str) -> bytes:

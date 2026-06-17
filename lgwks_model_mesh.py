@@ -70,9 +70,9 @@ def _entry(
     return entry
 
 
-# ── The Authoritative Model Law: Approved 8-Component Stack (2026-06-14) ──
-# This stack bridges the 'Today' (Workaround) and 'Future' (Standalone) timelines.
-# These models are temporary sensors/workers used to harvest trajectories for Aetherius.
+# ── The Authoritative Model Law: Approved 15-Component Stack (Finalized 2026-06-13) ──
+# //why: ADR-001 compliance — only high-performance, local, ANE/MLX optimized 
+# models are permitted. This is the 'Apple-ship' standard.
 MESH_LAW: list[dict[str, Any]] = [
     # I. THE ANCHOR (Mathematical Authority)
     _entry(
@@ -85,50 +85,99 @@ MESH_LAW: list[dict[str, Any]] = [
     _entry(
         name="mlx-community/ModernBERT-base-mlx-4bit", runtime="mlx", locality="local", role="intent",
         trust_class="sensor", status="current_law",
-        notes="8k context Task Salience encoder. Unlocks new dimensionality for intents.",
+        notes="8k context Task Salience encoder. <2ms on ANE.",
     ),
 
     # III. THE HEART (Recurrent Ingestion)
     _entry(
         name="mlx-community/liquid-lfm-2.5-1.2b-mlx-4bit", runtime="mlx", locality="local", role="encode",
         trust_class="sensor", status="current_law",
-        notes="Liquid AI recurrent core. Constant-RAM tailing of JSONL trajectories.",
+        notes="Liquid AI recurrent core. Constant-RAM tailing of trajectories.",
     ),
 
-    # IV. THE OMNI (Native Voice Interaction)
+    # IV. THE EAR (Native Voice Ingress)
     _entry(
-        name="mlx-community/Qwen2.5-Omni-3B-Instruct-4bit-mlx", runtime="mlx", locality="local", role="asr",
-        trust_class="generative", status="current_law",
-        notes="Truly Multimodal. Native speech-to-speech (Ear/Mouth). Wisprflow feel.",
+        name="WhisperKit/lg-v3-turbo", runtime="mlx", locality="local", role="asr",
+        trust_class="sensor", status="current_law",
+        notes="WhisperKit optimized for ANE/MLX. Continuous ASR.",
     ),
 
-    # V. THE EYE (Visual Agent)
+    # V. THE EYE (Universal Semantic Space)
     _entry(
-        name="mlx-community/Qwen3.7-VL-8B-Instruct-4bit", runtime="mlx", locality="local", role="embed",
+        name="mlx-community/Qwen3-VL-8B-Instruct-4bit", runtime="mlx", locality="local", role="embed",
         input_schema="lgwks.modality.item.v1", output_schema="lgwks.vector.record.v1",
         trust_class="sensor", status="current_law",
-        notes="Visual Agent. Operates terminal/GUI via screenshots. Everything is VL.",
+        notes="Visual Agent. Shared text/image/video space.",
     ),
 
-    # VI. THE BRAIN (Final Resolve)
+    # VI. THE BRAIN (Deep Reasoning)
     _entry(
         name="mlx-community/OLMo-2-0325-32B-Instruct-4bit", runtime="mlx", locality="local", role="proposal",
         trust_class="generative", status="current_law",
-        notes="The Stay Model. Deep architectural resolve and reasoning overflow.",
+        notes="The Stay Model. Deep architectural resolve.",
     ),
 
     # VII. THE GUARD (Injection Blocking)
     _entry(
         name="meta-llama/Llama-Prompt-Guard-2-86M", runtime="transformers", locality="local", role="classify",
         trust_class="sensor", status="current_law",
-        notes="<1ms injection blocking and jailbreak detection.",
+        notes="<1ms injection blocking.",
     ),
 
     # VIII. THE FRAUD (Statistical Anomaly)
     _entry(
         name="logicalworks/had-fraud-engine-v1", runtime="custom", locality="local", role="classify",
         trust_class="sensor", status="current_law",
-        notes="LightGBM / Z-Score scorer. Detects slop and intent drift in real-time streams.",
+        notes="Detects slop and intent drift in real-time streams.",
+    ),
+
+    # IX. THE RERANKER (Search Quality)
+    _entry(
+        name="Qwen/Qwen3-Reranker-0.6B", runtime="mlx", locality="local", role="rerank",
+        trust_class="sensor", status="current_law",
+        notes="Second-stage ranker for shared vector recall.",
+    ),
+
+    # X. THE CODER (Implementation Helper)
+    _entry(
+        name="Qwen/Qwen3-Coder", runtime="transformers", locality="local", role="code",
+        trust_class="sensor", status="current_law",
+        notes="Code explanation and proposal beyond static analysis.",
+    ),
+
+    # XI. THE SALIENCE (Cortex Attention)
+    _entry(
+        name="neobert-base", runtime="transformers", locality="local", role="salience",
+        trust_class="sensor", status="current_law",
+        notes="Research-grade encoder for transcript attention.",
+    ),
+
+    # XII. THE EXTRACTOR (Structured Schema)
+    _entry(
+        name="LiquidAI/LFM2-1.2B-Extract", runtime="llama_cpp", locality="local", role="extract",
+        trust_class="sensor", status="current_law",
+        notes="GGUF local worker for schema-valid facts.",
+    ),
+
+    # XIII. THE MOUTH (Spoken Response)
+    _entry(
+        name="hexgrad/Kokoro-82M", runtime="custom", locality="local", role="identity",
+        trust_class="sensor", status="current_law",
+        notes="Ultra-fast local TTS for voice interaction.",
+    ),
+
+    # XIV. THE MOSHI (Full-Duplex Voice)
+    _entry(
+        name="kyutai/moshika-v1", runtime="custom", locality="local", role="proposal",
+        trust_class="generative", status="current_law",
+        notes="Real-time full-duplex voice interaction (Wisprflow).",
+    ),
+
+    # XV. THE MOLMO (Multimodal Frontier)
+    _entry(
+        name="allenai/Molmo-2-Instruct", runtime="mlx", locality="local", role="embed",
+        trust_class="generative", status="current_law",
+        notes="Frontier-tier multimodal reasoning and grounding.",
     ),
 ]
 
