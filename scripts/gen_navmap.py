@@ -42,7 +42,7 @@ SKIP = {"tests", "models", "store", ".venv", "node_modules", "__pycache__"}
 # OPEN issues drive the `scaffolding` state; closed/landed packets are recorded for rollup.
 PACKET_MAP = {
     "lgwks_vector": ("I1", None), "lgwks_input": ("I2", None),
-    "lgwks_lfm2_extract": ("I3", None), "lgwks_embed_port": ("I4", None),
+    "lgwks_extract": ("I3", None), "lgwks_embed_port": ("I4", None),
     "lgwks_score": ("I5", None), "lgwks_rank": ("I6", None),
     "lgwks_inbound": ("I7", None),
     "lgwks_admission": ("I8", "#72"), "lgwks_capability": ("I8", "#72"),
@@ -145,6 +145,18 @@ def main() -> int:
             tree = ast.parse(src)
         except SyntaxError:
             continue
+
+        # Detect observability signals
+        has_cognition = "CognitionLog" in src or "lgwks_cognition" in src
+        has_events = "DaemonEventStore" in src or "lgwks_daemon_event" in src
+        has_ui = "lgwks_ui" in src or "ui.band" in src or "ui.spine" in src
+
+        signals = []
+        if has_cognition: signals.append("🧠")
+        if has_events: signals.append("📡")
+        if has_ui: signals.append("👁️")
+        obs_signal = "".join(signals)
+
         deps: set[str] = set()
         for node in ast.walk(tree):
             if isinstance(node, ast.Import):
@@ -169,6 +181,7 @@ def main() -> int:
             "packet": packet,
             "owning_issue": issue,
             "last_commit_days": ages.get(rel),
+            "obs": obs_signal,
         }
 
     # reverse deps (static imports)
@@ -294,7 +307,7 @@ def main() -> int:
              "`staling`: no caller anywhere, but built/tested or has a CLI verb, no issue (wire or retire) · "
              "`orphan`: no caller, no tests, no CLI, no issue (deletion candidate).")
     L.append("")
-    L.append("Row legend: `cli` `test` · `←N` imported by N · `→N` imports N · `Nd` days since last commit.")
+    L.append("Row legend: `cli` `test` · `←N` imported by N · `→N` imports N · `Nd` days since last commit · `🧠` Cognition · `📡` Events · `👁️` UI.")
     L.append("")
 
     # per-issue rollup first (the holistic "exploring an issue" view)
@@ -317,8 +330,8 @@ def main() -> int:
         sub_loc = sum(data[m]["loc"] for m in mods)
         L.append(f"## {label}  ·  {len(mods)} mod · {sub_loc:,} LOC")
         L.append("")
-        L.append("| module | purpose | loc | stale | rel |")
-        L.append("|---|---|---|---|---|")
+        L.append("| module | purpose | loc | stale | obs | rel |")
+        L.append("|---|---|---|---|---|---|")
         for m in mods:
             d = data[m]
             rel = []
@@ -333,7 +346,7 @@ def main() -> int:
             if d["last_commit_days"] is not None:
                 rel.append(f"{d['last_commit_days']}d")
             purpose = (d["purpose"] or "—").replace("|", "\\|")
-            L.append(f"| `{m}` | {purpose} | {d['loc']} | {d['staleness']} | {' '.join(rel)} |")
+            L.append(f"| `{m}` | {purpose} | {d['loc']} | {d['staleness']} | {d['obs']} | {' '.join(rel)} |")
         L.append("")
 
     (out_dir / "README.md").write_text("\n".join(L), encoding="utf-8")

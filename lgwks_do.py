@@ -202,127 +202,14 @@ def _do_code(args: argparse.Namespace) -> int:
 
 
 def _do_research(args: argparse.Namespace) -> int:
-    # Phase 1: AUP check on the query text itself
-    query = getattr(args, "query", "")
-    json_out = getattr(args, "json", False)
-    run = DoRun(command="research", repo=".", started_at=_now())
-    t0 = time.time()
-
-    if query:
-        p1 = _run_aup_check(text=query, json_out=json_out)
-        run.phases.append(p1)
-        if not p1.ok:
-            run.exit_code = 3
-            run.verdict = "deny"
-            run.duration_sec = time.time() - t0
-            run.finished_at = _now()
-            return _emit(run, json_out)
-
-    # Phase 2: research execution via substrate if URL, else akinator stub
-    is_url = bool(re.search(r"^https?://", query.strip()))
-    if is_url:
-        import lgwks_substrate
-        sub_args = argparse.Namespace(
-            target=query,
-            project=_io._slug(query),
-            source_type="auto",
-            max_pages=12,
-            max_depth=getattr(args, "depth", 1),
-            max_files=250,
-            max_chars=120_000,
-            chunk_words=450,
-            chunk_overlap=70,
-            fact_threshold=0.6,
-            embed_provider="dual",
-            embed_model="",
-            login_if_needed=True,
-            login_url="",
-            success_selector=None,
-            max_auto_bypass_attempts=3,
-            max_auth_handoffs=3,
-            browser_engine="chromium",
-            click_discovery=False,
-            max_clicks_per_page=20,
-            crawl_mode="link-then-click",
-        )
-        try:
-            manifest = lgwks_substrate.build_run(sub_args)
-            root = manifest.get("artifacts", {}).get("root", "")
-            p2 = PhaseResult(
-                name="substrate:research",
-                ok=manifest.get("counts", {}).get("documents", 0) > 0,
-                exit_code=0,
-                message=f"{manifest.get('counts',{}).get('documents',0)} docs, {manifest.get('counts',{}).get('chunks',0)} chunks",
-                artifact={
-                    "run_id": manifest.get("run_id", ""),
-                    "run_dir": root,
-                    "manifest": str(Path(root) / "manifest.json") if root else "",
-                    "counts": manifest.get("counts", {}),
-                },
-            )
-        except Exception as exc:
-            p2 = PhaseResult(name="substrate:research", ok=False, exit_code=2, message=str(exc))
-    else:
-        # keyword/prompt → resolve top URL via web search, then crawl
-        resolved_url = ""
-        p2 = PhaseResult(name="search:resolve", ok=False, exit_code=2,
-                         message=f"web search for {query!r} returned no results")
-        try:
-            import lgwks_search as _ls
-            hits = _ls.search(query, k=5)
-            resolved_url = hits[0]["url"] if hits else ""
-        except Exception as exc:
-            p2 = PhaseResult(name="search:resolve", ok=False, exit_code=2, message=str(exc))
-        if resolved_url:
-            import lgwks_substrate
-            sub_args = argparse.Namespace(
-                target=resolved_url,
-                project=_io._slug(query),
-                source_type="auto",
-                max_pages=12,
-                max_depth=getattr(args, "depth", 1),
-                max_files=250,
-                max_chars=120_000,
-                chunk_words=450,
-                chunk_overlap=70,
-                fact_threshold=0.6,
-                embed_provider="dual",
-                embed_model="",
-                login_if_needed=True,
-                login_url="",
-                success_selector=None,
-                max_auto_bypass_attempts=3,
-                max_auth_handoffs=3,
-                browser_engine="chromium",
-                click_discovery=False,
-                max_clicks_per_page=20,
-                crawl_mode="link-then-click",
-            )
-            try:
-                manifest = lgwks_substrate.build_run(sub_args)
-                root = manifest.get("artifacts", {}).get("root", "")
-                p2 = PhaseResult(
-                    name="substrate:research",
-                    ok=manifest.get("counts", {}).get("documents", 0) > 0,
-                    exit_code=0,
-                    message=f"{manifest.get('counts',{}).get('documents',0)} docs, {manifest.get('counts',{}).get('chunks',0)} chunks",
-                    artifact={
-                        "run_id": manifest.get("run_id", ""),
-                        "run_dir": root,
-                        "resolved_from": query,
-                        "resolved_url": resolved_url,
-                        "counts": manifest.get("counts", {}),
-                    },
-                )
-            except Exception as exc:
-                p2 = PhaseResult(name="substrate:research", ok=False, exit_code=2, message=str(exc))
-    run.phases.append(p2)
-
-    run.exit_code = max(p.exit_code for p in run.phases)
-    run.verdict = verdict_from_phases(run.phases)
-    run.duration_sec = time.time() - t0
-    run.finished_at = _now()
-    return _emit(run, json_out)
+    import lgwks_research
+    repo = Path(getattr(args, "repo", ".")).resolve()
+    return lgwks_research.run_shallow(
+        objective=getattr(args, "query", ""),
+        repo=repo,
+        depth=getattr(args, "depth", 1),
+        json_out=getattr(args, "json", False)
+    )
 
 
 def _do_govern(args: argparse.Namespace) -> int:

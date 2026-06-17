@@ -779,16 +779,120 @@ def _save_round(out_dir: Path, n: int, frontier: str, compiled: dict, reason: di
     (rdir / "sources.json").write_text(_canon(sources or []), encoding="utf-8")
 
 
+def run_shallow(objective: str, repo: Path = Path("."), depth: int = 1, json_out: bool = False) -> int:
+    """Run a shallow research query: AUP check + substrate crawl."""
+    import lgwks_aup
+    import lgwks_substrate
+    import lgwks_search as _ls
+    import lgwks_phase as phase
+    import lgwks_ui as ui
+    
+    t0 = time.time()
+    phases = []
+    
+    # Phase 1: AUP Gate
+    check = lgwks_aup.AUPGate.load().check({
+        "customer_id": "lgwks-research",
+        "request_type": "intent",
+        "content_preview": objective[:32000],
+    })
+    ok = check.verdict in (lgwks_aup.Verdict.ALLOW, lgwks_aup.Verdict.REVIEW)
+    p1 = phase.PhaseResult(name="aup:check", ok=ok, exit_code=0 if ok else 3, 
+                           message=check.verdict.value, artifact={"diagnosis": check.diagnosis})
+    phases.append(p1)
+    
+    if not ok:
+        return _emit_legacy(objective, phases, t0, json_out)
+
+    # Phase 2: Resolve URL or search
+    source = objective
+    is_url = bool(re.search(r"^https?://", str(source).strip()))
+    if not is_url and source:
+        hits = _ls.search(source, k=5)
+        if hits:
+            source = hits[0]["url"]
+            is_url = True
+        else:
+            phases.append(phase.PhaseResult(name="search:resolve", ok=False, exit_code=2,
+                                           message=f"web search for {objective!r} returned no results"))
+            return _emit_legacy(objective, phases, t0, json_out)
+
+    # Phase 3: Substrate Crawl
+    sub_args = argparse.Namespace(
+        target=source,
+        project=slugify(objective),
+        source_type="auto",
+        max_pages=12,
+        max_depth=depth,
+        max_files=250,
+        max_chars=120_000,
+        chunk_words=450,
+        chunk_overlap=70,
+        fact_threshold=0.6,
+        embed_provider="dual",
+        embed_model="",
+        login_if_needed=True,
+        login_url="",
+        success_selector=None,
+        max_auto_bypass_attempts=3,
+        max_auth_handoffs=3,
+        browser_engine="chromium",
+        click_discovery=False,
+        max_clicks_per_page=20,
+        crawl_mode="link-then-click",
+    )
+    try:
+        manifest = lgwks_substrate.build_run(sub_args)
+        docs = manifest.get("counts", {}).get("documents", 0)
+        p2 = phase.PhaseResult(
+            name="substrate:research",
+            ok=docs > 0,
+            exit_code=0,
+            message=f"{docs} docs, {manifest.get('counts',{}).get('chunks',0)} chunks",
+            artifact={"run_id": manifest.get("run_id", ""), "run_dir": manifest.get("artifacts", {}).get("root", "")},
+        )
+        phases.append(p2)
+    except Exception as exc:
+        phases.append(phase.PhaseResult(name="substrate:research", ok=False, exit_code=2, message=str(exc)))
+
+    return _emit_legacy(objective, phases, t0, json_out)
+
+
+def _emit_legacy(objective: str, phases: list, t0: float, json_out: bool) -> int:
+    import lgwks_phase as phase
+    import lgwks_ui as ui
+    verdict = phase.verdict_from_phases(phases)
+    dur = time.time() - t0
+    
+    if json_out:
+        print(json.dumps({
+            "objective": objective,
+            "phases": [p.__dict__ for p in phases],
+            "verdict": verdict,
+            "duration_sec": round(dur, 3),
+        }, indent=2))
+    else:
+        on = ui.color_on()
+        print("\n".join(ui.band("lgwks · research", objective, on=on)))
+        for p in phases:
+            color = ui.EMERALD if p.ok else (ui.RUST if p.exit_code == 3 else ui.AMBER)
+            print(f"  [{'PASS' if p.ok else 'FAIL'}] {p.name}: {p.message}")
+        print(f"Verdict: {verdict.upper()} ({dur:.2f}s)")
+    
+    return max(p.exit_code for p in phases) if phases else 0
+
+
 def research_command(args: argparse.Namespace) -> int:
     """Unified research command: merges begin, probe, and orchestrators."""
     objective = args.prompt
-    purpose = getattr(args, "purpose", "general research")
-    
+    repo = Path(getattr(args, "repo", ".")).resolve()
+    json_out = getattr(args, "json", False)
+
     # If --deep is requested, run the autonomous loop
     if getattr(args, "deep", False):
         cfg = AutoConfig(
             objective=objective,
-            purpose=purpose,
+            purpose=getattr(args, "purpose", "general research"),
             start=getattr(args, "start", objective),
             max_rounds=getattr(args, "rounds", 6),
             token_budget=getattr(args, "budget", 120_000),
@@ -798,16 +902,19 @@ def research_command(args: argparse.Namespace) -> int:
         res = run_auto(cfg)
         return 0 if res.ledger_intact else 1
     
+    # If objective is a URL or we are in a non-interactive shell, run shallow research
+    is_url = bool(re.search(r"^https?://", objective.strip()))
+    if is_url or not sys.stdin.isatty():
+        return run_shallow(objective, repo=repo, depth=getattr(args, "depth", 1), json_out=json_out)
+
     # Otherwise, run the "begin" style engine probe
     import lgwks_session
     import lgwks_engine
-    import lgwks_ui as ui
-    repo = Path(getattr(args, "repo", ".")).resolve()
     
     session_summary = lgwks_session.session_begin(repo)
     engine_result = lgwks_engine.run_engine(objective, repo=repo)
     
-    if getattr(args, "json", False):
+    if json_out:
         print(json.dumps({"session": session_summary, "subconscious": engine_result}, indent=2))
         return 0
         

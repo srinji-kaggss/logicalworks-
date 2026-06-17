@@ -338,157 +338,10 @@ def _browser_engine_from_args(args: argparse.Namespace) -> str:
 
 
 def _do_research_inline(args: argparse.Namespace) -> int:
-    import lgwks_aup
-    import lgwks_substrate
-    import lgwks_spawn
-
-    query = getattr(args, "query", "")
-    json_out = getattr(args, "json", False)
-    depth = getattr(args, "depth", 1)
-    plan_file = getattr(args, "plan", "")
-    engine = _browser_engine_from_args(args)
-    use_session = getattr(args, "no_session", False) is not True
-
-    run = WorkflowRun(workflow="research", args={"query": query, "depth": depth, "engine": engine}, started_at=_now())
-    t0 = time.time()
-
-    # Phase 1: AUP gate — call directly; _run_phase expects int exit codes
-    if query:
-        try:
-            check = lgwks_aup.AUPGate.load().check({
-                "customer_id": "lgwks-workflow",
-                "request_type": "intent",
-                "content_preview": query[:32000],
-            })
-            verdict_ok = check.verdict in (lgwks_aup.Verdict.ALLOW, lgwks_aup.Verdict.REVIEW)
-            p1 = PhaseResult(
-                name="aup:check",
-                ok=verdict_ok,
-                exit_code=0 if verdict_ok else 3,
-                message="pass" if verdict_ok else "deny",
-                artifact={"duration_sec": round(time.time() - t0, 3), "diagnosis": check.diagnosis},
-            )
-            run.phases.append(p1)
-        except Exception as exc:
-            run.phases.append(PhaseResult(name="aup:check", ok=False, exit_code=3, message=f"AUP gate error: {exc}"))
-        if not run.phases[-1].ok:
-            run.exit_code = 3
-            run.verdict = "deny"
-            run.duration_sec = time.time() - t0
-            run.finished_at = _now()
-            return _emit(run, json_out)
-
-    # Phase 2: substrate crawl (maps URL or file → full artifact tree)
-    source = query
-    if plan_file and Path(plan_file).exists():
-        try:
-            plan_data = json.loads(Path(plan_file).read_text(encoding="utf-8"))
-            source = plan_data.get("source", query)
-        except Exception as exc:
-            run.phases.append(PhaseResult(name="plan:load", ok=False, exit_code=2, message=str(exc)))
-            run.exit_code = 2
-            run.verdict = "degraded"
-            run.duration_sec = time.time() - t0
-            run.finished_at = _now()
-            return _emit(run, json_out)
-
-    is_url = bool(re.search(r"^https?://", str(source).strip()))
-    is_path = bool(source) and Path(source).exists()
-    if not is_url and not is_path and source:
-        try:
-            import lgwks_search as _ls
-            hits = _ls.search(source, k=5)
-            if hits:
-                source = hits[0]["url"]
-                is_url = True
-            else:
-                run.phases.append(PhaseResult(
-                    name="search:resolve", ok=False, exit_code=2,
-                    message=f"web search for {source!r} returned no results",
-                ))
-                run.exit_code = 2
-                run.verdict = "degraded"
-                run.duration_sec = time.time() - t0
-                run.finished_at = _now()
-                return _emit(run, json_out)
-        except Exception as exc:
-            run.phases.append(PhaseResult(name="search:resolve", ok=False, exit_code=2, message=str(exc)))
-            run.exit_code = 2
-            run.verdict = "degraded"
-            run.duration_sec = time.time() - t0
-            run.finished_at = _now()
-            return _emit(run, json_out)
-
-    sub_args = argparse.Namespace(
-        target=source or ".",
-        project=slugify(str(source or "research")),
-        source_type="auto",
-        max_pages=12,
-        max_depth=depth,
-        max_files=250,
-        max_chars=120_000,
-        chunk_words=450,
-        chunk_overlap=70,
-        fact_threshold=0.6,
-        embed_provider="dual",
-        embed_model="",
-        login_if_needed=True,
-        login_url="",
-        success_selector=None,
-        max_auto_bypass_attempts=3,
-        max_auth_handoffs=3,
-        browser_engine=engine,
-        click_discovery=False,
-        max_clicks_per_page=20,
-        crawl_mode="link-then-click",
-        research=True,                  # ── Trigger co-scientist harness ──
-        research_rounds=6,
-    )
-    try:
-        manifest = lgwks_substrate.build_run(sub_args)
-        root = manifest.get("artifacts", {}).get("root", "")
-        p2 = PhaseResult(
-            name="substrate:crawl",
-            ok=manifest.get("counts", {}).get("documents", 0) > 0,
-            exit_code=0,
-            message=f"{manifest.get('counts', {}).get('documents', 0)} docs, {manifest.get('counts', {}).get('chunks', 0)} chunks",
-            artifact={
-                "run_id": manifest.get("run_id", ""),
-                "run_dir": root,
-                "manifest": str(Path(root) / "manifest.json") if root else "",
-                "counts": manifest.get("counts", {}),
-            },
-        )
-        run.phases.append(p2)
-        run_dir = Path(root) if root else Path(".")
-    except Exception as exc:
-        run.phases.append(PhaseResult(name="substrate:crawl", ok=False, exit_code=2, message=str(exc)))
-        run.exit_code = 2
-        run.verdict = "degraded"
-        run.duration_sec = time.time() - t0
-        run.finished_at = _now()
-        return _emit(run, json_out)
-
-    # Phase 3: synthesize
-    if run.phases[-1].ok:
-        try:
-            packet = lgwks_spawn.assemble_packet(run_dir=run_dir)
-            p3 = PhaseResult(
-                name="synthesize:spawn",
-                ok=True,
-                exit_code=0,
-                message=f"{packet.get('schema', 'spawn')} packet assembled",
-                artifact={"spawn_path": str(run_dir / "spawn.json")},
-            )
-            run.phases.append(p3)
-        except Exception as exc:
-            run.phases.append(PhaseResult(name="synthesize:spawn", ok=False, exit_code=2, message=str(exc)))
-
-    run.exit_code = max(p.exit_code for p in run.phases)
-    run.verdict = verdict_from_phases(run.phases)
-    run.duration_sec = time.time() - t0
-    run.finished_at = _now()
-    return _emit(run, json_out)
+    import lgwks_research
+    # Map 'query' from the workflow namespace to 'prompt' for the research command
+    args.prompt = getattr(args, "query", "")
+    return lgwks_research.research_command(args)
 
 
 def slugify(text: str) -> str:
@@ -701,119 +554,35 @@ def _do_quick_scan(args: argparse.Namespace) -> int:
 
 
 def _do_audit_trail(args: argparse.Namespace) -> int:
-    """Pull git history ±N commits and generate audit report."""
-    import lgwks_solve
-    repo = Path(getattr(args, "repo", ".")).resolve()
-    commits = getattr(args, "commits", 10)
-    json_out = getattr(args, "json", False)
-
-    run = WorkflowRun(workflow="audit-trail", args={"repo": str(repo), "commits": commits}, started_at=_now())
-    t0 = time.time()
-
-    if not _is_repo(repo):
-        run.phases.append(PhaseResult(name="repo:check", ok=False, exit_code=4, message=f"{repo} is not a git repo"))
-        run.exit_code = 4; run.verdict = "error"
-        run.duration_sec = time.time() - t0; run.finished_at = _now()
-        return _emit(run, json_out)
-
-    # Solve for provenance
-    p1 = _run_phase("solve:provenance", lambda: lgwks_solve.solve_command(
-        argparse.Namespace(target="git", repo=str(repo), thought=f"audit last {commits} commits", json=json_out)))
-    run.phases.append(p1)
-
-    run.exit_code = max(p.exit_code for p in run.phases)
-    run.verdict = verdict_from_phases(run.phases)
-    run.duration_sec = time.time() - t0; run.finished_at = _now()
-    return _emit(run, json_out)
+    import lgwks_ops
+    return lgwks_ops.audit_trail(
+        repo=Path(getattr(args, "repo", ".")).resolve(),
+        commits=getattr(args, "commits", 10),
+        json_out=getattr(args, "json", False)
+    )
 
 
 def _do_health_check(args: argparse.Namespace) -> int:
-    """Doctor + store + env integrity + manifest sanity."""
-    import lgwks_manifest
-    json_out = getattr(args, "json", False)
-
-    run = WorkflowRun(workflow="health-check", args={}, started_at=_now())
-    t0 = time.time()
-
-    # Doctor
-    import lgwks_ui as _ui
-    p1 = _run_phase("doctor:env", lambda: _doctor_env())
-    run.phases.append(p1)
-
-    # Manifest sanity
-    p2 = _run_phase("manifest:sanity", lambda: lgwks_manifest.manifest_command(
-        argparse.Namespace(json=True, render=False, for_agent=False)))
-    run.phases.append(p2)
-
-    run.exit_code = max(p.exit_code for p in run.phases)
-    run.verdict = verdict_from_phases(run.phases)
-    run.duration_sec = time.time() - t0; run.finished_at = _now()
-    return _emit(run, json_out)
-
-
-def _doctor_env() -> int:
-    """Lightweight env check — returns 0 if OK."""
-    try:
-        import lgwks_browser
-        ok, _ = lgwks_browser.available()
-        if not ok:
-            return 2
-    except Exception:
-        return 2
-    return 0
+    import lgwks_ops
+    return lgwks_ops.health_check(json_out=getattr(args, "json", False))
 
 
 def _do_onboard(args: argparse.Namespace) -> int:
-    """First-time machine setup."""
-    import lgwks_keyvault
-    json_out = getattr(args, "json", False)
-    skip_browser = getattr(args, "skip_browser", False)
-
-    run = WorkflowRun(workflow="onboard", args={}, started_at=_now())
-    t0 = time.time()
-
-    if not skip_browser:
-        import subprocess as sp
-        p1 = _run_phase("onboard:browser", lambda: sp.run(["playwright", "install", "chromium"], capture_output=True).returncode)
-        run.phases.append(p1)
-    else:
-        run.phases.append(PhaseResult(name="onboard:browser", ok=True, exit_code=0, message="skipped"))
-
-    p2 = _run_phase("onboard:keyvault", lambda: lgwks_keyvault.keyvault_command(
-        argparse.Namespace(subcommand="check", name="openrouter", json=json_out)))
-    run.phases.append(p2)
-
-    run.exit_code = max(p.exit_code for p in run.phases)
-    run.verdict = verdict_from_phases(run.phases)
-    run.duration_sec = time.time() - t0; run.finished_at = _now()
-    return _emit(run, json_out)
+    import lgwks_ops
+    return lgwks_ops.onboard(
+        skip_browser=getattr(args, "skip_browser", False),
+        json_out=getattr(args, "json", False)
+    )
 
 
 def _do_migration_check(args: argparse.Namespace) -> int:
-    """Compare two codebase versions for breaking changes."""
-    import lgwks_solve
-    repo = Path(getattr(args, "repo", ".")).resolve()
-    from_ref = getattr(args, "from_ref", "HEAD~1")
-    to_ref = getattr(args, "to_ref", "HEAD")
-    json_out = getattr(args, "json", False)
-
-    run = WorkflowRun(workflow="migration-check", args={"repo": str(repo), "from": from_ref, "to": to_ref}, started_at=_now())
-    t0 = time.time()
-
-    if not _is_repo(repo):
-        run.phases.append(PhaseResult(name="repo:check", ok=False, exit_code=4, message=f"{repo} is not a git repo"))
-        run.exit_code = 4; run.verdict = "error"
-        return _emit(run, json_out)
-
-    p1 = _run_phase("solve:migration", lambda: lgwks_solve.solve_command(
-        argparse.Namespace(target="git", repo=str(repo),
-                         thought=f"breaking changes between {from_ref} and {to_ref}", json=json_out)))
-    run.phases.append(p1)
-
-    run.exit_code = max(p.exit_code for p in run.phases)
-    run.verdict = verdict_from_phases(run.phases)
-    run.duration_sec = time.time() - t0; run.finished_at = _now()
-    return _emit(run, json_out)
+    import lgwks_ops
+    return lgwks_ops.migration_check(
+        repo=Path(getattr(args, "repo", ".")).resolve(),
+        from_ref=getattr(args, "from_ref", "HEAD~1"),
+        to_ref=getattr(args, "to_ref", "HEAD"),
+        json_out=getattr(args, "json", False)
+    )
 
 
 def _do_code_wrapper(args: argparse.Namespace) -> int:
