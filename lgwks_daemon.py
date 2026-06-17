@@ -31,6 +31,8 @@ from lgwks_daemon_store import DaemonEventStore
 STATUS_SCHEMA = "lgwks.daemon.status.v0"
 DOCTOR_SCHEMA = "lgwks.daemon.doctor.v0"
 HEARTBEAT_INTERVAL_S = 1.0
+# A live pid with no heartbeat for this long is a hung daemon, not a healthy one.
+HEARTBEAT_STALE_S = 10.0
 POLL_INTERVAL_S = 0.5
 START_TIMEOUT_S = 5.0
 STOP_TIMEOUT_S = 5.0
@@ -69,6 +71,34 @@ def _paths(repo_root: Path) -> DaemonPaths:
         db=root / "daemon-events.db",
         bus=root / "daemon-bus.jsonl",
     )
+
+
+def _tenant_for(paths: DaemonPaths, override: str | None = None) -> str:
+    """Canonical tenant resolution. One source of truth for every command.
+
+    Default is the repo-derived tenant `repo:<name>`. An explicit override
+    (e.g. ``emit --tenant``) is honored so emit/packet stay symmetric — both
+    route through this helper, which closes the "emit writes a tenant packet
+    can never read" silent-loss gap (#227 F1).
+    """
+    return (override or "").strip() or f"repo:{paths.repo_root.name}"
+
+
+def _heartbeat_age_s(heartbeat_at: str) -> float | None:
+    """Seconds since an ISO heartbeat, via the canonical clock. None if unparseable."""
+    if not heartbeat_at:
+        return None
+    import datetime as _dt
+
+    from lgwks_clock import now_iso
+    try:
+        hb = _dt.datetime.fromisoformat(heartbeat_at)
+        now = _dt.datetime.fromisoformat(now_iso())
+    except (ValueError, TypeError):
+        return None
+    if hb.tzinfo is None:
+        hb = hb.replace(tzinfo=now.tzinfo)
+    return (now - hb).total_seconds()
 
 
 def _read_json(path: Path) -> dict[str, Any] | None:
@@ -376,6 +406,8 @@ class SessionDaemon:
         state = _read_json(self.paths.state)
         pid = int((lock or {}).get("pid", 0) or 0)
         alive = _pid_alive(pid)
+        heartbeat_at = (state or {}).get("heartbeat_at", "")
+        age = _heartbeat_age_s(heartbeat_at)
         return {
             "schema": STATUS_SCHEMA,
             "repo_root": str(self.paths.repo_root),
@@ -386,9 +418,37 @@ class SessionDaemon:
             "pid": pid or None,
             "alive": alive,
             "transcript_path": (state or lock or {}).get("transcript_path", ""),
-            "heartbeat_at": (state or {}).get("heartbeat_at", ""),
+            "heartbeat_at": heartbeat_at,
+            "heartbeat_age_s": age,
+            # A hung daemon keeps its pid (alive) but stops writing heartbeats.
+            # Flag that distinct failure mode rather than reporting healthy.
+            "heartbeat_stale": (age is not None and age > HEARTBEAT_STALE_S),
             "status": "running" if alive else "stopped",
             "stale_lock_reaped": False,
+        }
+
+    def readiness(self) -> dict[str, Any]:
+        """Readiness (can the daemon serve?) — distinct from liveness (process alive).
+
+        A world-class daemon separates "the process exists" from "it can do its
+        job". Readiness here = the event store is reachable and its migrations
+        are applied, so packets/queue ops will succeed. (#227 world-class G3)
+        """
+        store_ok = False
+        detail = ""
+        try:
+            store = DaemonEventStore(self.paths.db)
+            try:
+                store.queue_depth(_tenant_for(self.paths))  # touches the migrated schema
+                store_ok = True
+            finally:
+                store.close()
+        except Exception as exc:  # noqa: BLE001
+            detail = str(exc)
+        return {
+            "schema": "lgwks.daemon.readiness.v0",
+            "ready": store_ok,
+            "checks": [{"name": "event_store", "ok": store_ok, "detail": detail}],
         }
 
     def doctor(self) -> dict[str, Any]:
@@ -402,14 +462,38 @@ class SessionDaemon:
                 "ok": bool(os.environ.get("LGWKS_TRANSCRIPT_PATH", "").strip()),
                 "detail": os.environ.get("LGWKS_TRANSCRIPT_PATH", ""),
             },
+            # The transcript the *running* daemon is actually tailing — distinct from
+            # the env var above. A daemon pinned to a non-existent or subagent
+            # transcript silently tails a dead session (#227 F3): surface it as
+            # degraded instead of letting it look healthy.
+            self._transcript_binding_check(),
         ]
+        # transcript_* checks are degraded-but-non-fatal (the daemon still serves
+        # the emit/packet contract without a live transcript tail).
+        soft = {"transcript_env", "transcript_binding"}
         return {
             "schema": DOCTOR_SCHEMA,
             "repo_root": str(self.paths.repo_root),
             "checks": checks,
             "stale_lock_reaped": stale_reaped,
-            "ok": all(check["ok"] or check["name"] == "transcript_env" for check in checks),
+            "ok": all(check["ok"] or check["name"] in soft for check in checks),
         }
+
+    def _transcript_binding_check(self) -> dict[str, Any]:
+        """Inspect the transcript the running daemon is actually bound to (#227 F3)."""
+        state = _read_json(self.paths.state) or {}
+        lock = _read_json(self.paths.lock) or {}
+        bound = (state.get("transcript_path") or lock.get("transcript_path") or "").strip()
+        if not bound:
+            return {"name": "transcript_binding", "ok": False, "detail": "no transcript bound"}
+        path = Path(bound)
+        if not path.exists():
+            return {"name": "transcript_binding", "ok": False,
+                    "detail": f"bound transcript missing: {bound}"}
+        if "/subagents/" in bound:
+            return {"name": "transcript_binding", "ok": False,
+                    "detail": f"bound to subagent transcript (stale session likely): {bound}"}
+        return {"name": "transcript_binding", "ok": True, "detail": bound}
 
     def start(self, *, transcript_path: str | None = None) -> dict[str, Any]:
         stale_reaped = _cleanup_stale_lock(self.paths)
@@ -492,7 +576,7 @@ class SessionDaemon:
             raise RuntimeError("daemon lock exists but process is dead; try again (stale lock cleared)")
 
         running = True
-        tenant_id = f"repo:{self.paths.repo_root.name}"
+        tenant_id = _tenant_for(self.paths)
 
         def _stop(_signum, _frame) -> None:
             nonlocal running
@@ -511,6 +595,19 @@ class SessionDaemon:
                     payload={"event": "daemon_started", "pid": pid},
                 )
             )
+            # Startup fault recovery: we hold the exclusive lock, so any item
+            # left in 'running' was orphaned by a dead predecessor — reclaim it
+            # so work is never silently lost across a crash. (#227 world-class F1)
+            recovered = store.recover_orphaned(tenant_id, older_than_s=0)
+            if recovered:
+                store.append(
+                    _build_event(
+                        repo_root=self.paths.repo_root,
+                        transcript_path=transcript,
+                        kind="workflow_event",
+                        payload={"event": "orphaned_work_recovered", "count": recovered},
+                    )
+                )
             heartbeat_due = time.time()
             while running:
                 now = time.time()
@@ -571,8 +668,25 @@ def _doctor_command(args: argparse.Namespace) -> int:
 
 def _start_command(args: argparse.Namespace) -> int:
     daemon = SessionDaemon(Path(args.repo))
-    print(json.dumps(daemon.start(transcript_path=args.transcript_path), indent=2))
-    return 0
+    try:
+        print(json.dumps(daemon.start(transcript_path=args.transcript_path), indent=2))
+        return 0
+    except RuntimeError as exc:
+        # Machine-first contract: never leak a Python traceback to a parsing
+        # agent. An already-running daemon is a benign, structured outcome.
+        current = daemon.status()
+        print(json.dumps(
+            {
+                "schema": "lgwks.daemon.start.v0",
+                "ok": True,  # post-condition (daemon running) is satisfied
+                "status": "already_running",
+                "started": False,
+                "pid": current.get("pid"),
+                "detail": str(exc),
+            },
+            indent=2,
+        ))
+        return 0
 
 
 def _stop_command(args: argparse.Namespace) -> int:
@@ -661,12 +775,19 @@ def _runs_get_command(args: argparse.Namespace) -> int:
 
 def _enqueue_command(args: argparse.Namespace) -> int:
     import sys as _sys
-    from lgwks_daemon_store import DaemonEventStore
+    from lgwks_daemon_store import DaemonEventStore, QueueFullError
     paths = _paths(Path(args.repo).resolve())
     store = DaemonEventStore(paths.db)
     try:
         item = json.load(_sys.stdin)
         inserted = store.enqueue(item)
+    except QueueFullError as exc:
+        # Backpressure is a normal, structured outcome — never a traceback.
+        print(json.dumps({"ok": False, "status": "queue_full", "detail": str(exc)}, indent=2))
+        return 0
+    except (ValueError, json.JSONDecodeError) as exc:
+        print(json.dumps({"ok": False, "status": "invalid_item", "detail": str(exc)}, indent=2))
+        return 1
     finally:
         store.close()
     print(json.dumps({"ok": True, "inserted": inserted}, indent=2))
@@ -676,7 +797,7 @@ def _enqueue_command(args: argparse.Namespace) -> int:
 def _queue_command(args: argparse.Namespace) -> int:
     from lgwks_daemon_store import DaemonEventStore
     paths = _paths(Path(args.repo).resolve())
-    tenant_id = f"repo:{paths.repo_root.name}"
+    tenant_id = _tenant_for(paths, getattr(args, "tenant", None))
     store = DaemonEventStore(paths.db)
     try:
         depth = store.queue_depth(tenant_id)
@@ -692,7 +813,7 @@ def _emit_command(args: argparse.Namespace) -> int:
     from lgwks_daemon_store import DaemonEventStore
 
     paths = _paths(Path(args.repo).resolve())
-    tenant_id = getattr(args, "tenant", None) or f"repo:{paths.repo_root.name}"
+    tenant_id = _tenant_for(paths, getattr(args, "tenant", None))
 
     payload: dict[str, Any] = {}
     if not _sys.stdin.isatty():
@@ -723,10 +844,30 @@ def _emit_command(args: argparse.Namespace) -> int:
     return 0
 
 
+def _ready_command(args: argparse.Namespace) -> int:
+    daemon = SessionDaemon(Path(args.repo))
+    res = daemon.readiness()
+    print(json.dumps(res, indent=2))
+    return 0 if res.get("ready") else 1
+
+
+def _stats_command(args: argparse.Namespace) -> int:
+    from lgwks_daemon_store import DaemonEventStore
+    paths = _paths(Path(args.repo).resolve())
+    tenant_id = _tenant_for(paths, getattr(args, "tenant", None))
+    store = DaemonEventStore(paths.db)
+    try:
+        snapshot = store.stats(tenant_id)
+    finally:
+        store.close()
+    print(json.dumps(snapshot, indent=2))
+    return 0
+
+
 def _packet_command(args: argparse.Namespace) -> int:
     from lgwks_daemon_store import DaemonEventStore
     paths = _paths(Path(args.repo).resolve())
-    tenant_id = f"repo:{paths.repo_root.name}"
+    tenant_id = _tenant_for(paths, getattr(args, "tenant", None))
     store = DaemonEventStore(paths.db)
     try:
         packet = store.get_packet(
@@ -897,6 +1038,10 @@ def add_parser(sub) -> None:
     doctor.add_argument("--repo", default=".", help="repo root")
     doctor.set_defaults(func=_doctor_command)
 
+    ready = ps.add_parser("ready", help="readiness probe — can the daemon serve? (exit 0/1)")
+    ready.add_argument("--repo", default=".", help="repo root")
+    ready.set_defaults(func=_ready_command)
+
     enqueue = ps.add_parser("enqueue", help="enqueue a work item from stdin JSON")
     enqueue.set_defaults(func=_enqueue_command)
 
@@ -915,11 +1060,17 @@ def add_parser(sub) -> None:
     emit.set_defaults(func=_emit_command)
 
     queue = ps.add_parser("queue", help="show queue depth for this repo")
+    queue.add_argument("--tenant", help="tenant id (default: repo:<name>); must match emit")
     queue.set_defaults(func=_queue_command)
+
+    stats = ps.add_parser("stats", help="unified per-tenant counters (events + queue + runs)")
+    stats.add_argument("--tenant", help="tenant id (default: repo:<name>)")
+    stats.set_defaults(func=_stats_command)
 
     packet = ps.add_parser("packet", help="fetch deterministic session packet")
     packet.add_argument("--session-id", required=True)
     packet.add_argument("--agent-id", required=True)
+    packet.add_argument("--tenant", help="tenant id (default: repo:<name>); must match emit")
     packet.set_defaults(func=_packet_command)
 
     research = ps.add_parser("research", help="run substrate crawl and index into daemon store")
@@ -998,6 +1149,9 @@ def main(argv: list[str] | None = None) -> int:
     doctor = sub.add_parser("doctor", help="verify daemon runtime prerequisites")
     doctor.set_defaults(func=_doctor_command)
 
+    ready = sub.add_parser("ready", help="readiness probe — can the daemon serve? (exit 0/1)")
+    ready.set_defaults(func=_ready_command)
+
     serve = sub.add_parser("_serve", help=argparse.SUPPRESS)
     serve.add_argument("--transcript-path", default="")
     serve.set_defaults(func=_serve_command)
@@ -1006,11 +1160,17 @@ def main(argv: list[str] | None = None) -> int:
     enqueue.set_defaults(func=_enqueue_command)
 
     queue = sub.add_parser("queue", help="show queue depth for this repo")
+    queue.add_argument("--tenant", help="tenant id (default: repo:<name>); must match emit")
     queue.set_defaults(func=_queue_command)
+
+    stats = sub.add_parser("stats", help="unified per-tenant counters (events + queue + runs)")
+    stats.add_argument("--tenant", help="tenant id (default: repo:<name>)")
+    stats.set_defaults(func=_stats_command)
 
     packet = sub.add_parser("packet", help="fetch deterministic session packet")
     packet.add_argument("--session-id", required=True)
     packet.add_argument("--agent-id", required=True)
+    packet.add_argument("--tenant", help="tenant id (default: repo:<name>); must match emit")
     packet.set_defaults(func=_packet_command)
 
     research = sub.add_parser("research", help="run substrate crawl and index into daemon store")

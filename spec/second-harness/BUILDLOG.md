@@ -1105,3 +1105,43 @@ Verification:
 - `pytest` over the 7 new suites + touched existing (daemon_store/e2e/p1/hooks/model_hub) → **221 passed**
 - `python3 scripts/check_schema_registry.py` → **conformant (129 rows)**
 - Contracts + JSON-Schemas registered in `docs/schemas/REGISTRY.md` (each in its landing commit).
+
+---
+
+## 2026-06-16 · Daemon world-class hardening — falsification harness (#227 + iter 2-3)
+
+First live dogfood of the daemon (`ops daemon` emit→packet) confirmed the core loop works
+end-to-end, and surfaced 3 contract gaps (filed **#227**), all fixed:
+- **F1** canonical `_tenant_for()`; `emit`/`packet`/`queue` tenant-symmetric (+ `--tenant` on
+  packet/queue) — closes silent cross-tenant invisibility.
+- **F2** `_start_command`/`_enqueue_command` emit structured JSON (`already_running`/`queue_full`/
+  `invalid_item`), never a traceback.
+- **F3** `doctor` gains `transcript_binding` check (flags missing/subagent-pin).
+
+Then built a **world-class-daemon falsification harness** (`tests/test_daemon_world_class.py`):
+H0 = "the daemon lacks world-class daemon properties"; the bar is the test, not prose.
+Drove it to convergence — **23/23 invariants** across 8 categories (lifecycle, WAL durability,
+concurrency/no-lost-updates/no-double-claim/isolation, observability, backpressure,
+fault-recovery, resilience/ops, saturation). New capabilities landed to clear it:
+- `DaemonEventStore.stats()` + `daemon stats` CLI — unified per-tenant counters.
+- `MAX_QUEUE_DEPTH` admission cap in `enqueue` (txn-safe, no TOCTOU) — bounded queue.
+- `recover_orphaned()` + startup auto-reclaim — no work silently orphaned across a crash.
+- `MAX_ATTEMPTS` dead-letter + `attempts` col (migration **v6**); `dequeue` increments;
+  recovery dead-letters a poison pill to `failed` past the cap (closes infinite-retry risk).
+- `SessionDaemon.readiness()` + `daemon ready` probe — readiness distinct from liveness.
+- `status()` gains `heartbeat_age_s` + `heartbeat_stale` — a hung daemon is detectable.
+
+Convergence signal: the final tranche (Category H — `busy_timeout` contention, `synchronous`
+durability, unknown-kind rejection) passed with **zero code changes** (already satisfied by the
+hardened `lgwks_sqlite` layer). Raising the bar stopped finding gaps → H0 strongly rejected.
+
+Deferred (explicit seams):
+- **Live hook-wiring** (Stop/PostToolUse in `.claude/settings.local.json`) — Director-gated;
+  held until the standalone daemon is certified world-class, to avoid disrupting a live session.
+- **Periodic orphan-recovery** — needs a per-item lease before dispatch goes concurrent
+  (today the synchronous loop would risk double-dispatching a long-running job).
+
+Verification:
+- `tests/test_daemon_world_class.py` → **23 passed**; daemon suite (`-k daemon`) → **130 passed**
+- full repo suite (`tests/ axiom/tests/`) → **2020 passed / 3 skipped / 0 failed**
+- Commits `d4e36e1` (#227 + harness) + `61d25d2` (iter 2-3) on `harden/daemon-world-class`.

@@ -20,6 +20,18 @@
       "required": false
     },
     {
+      "name": "AUTHORITY.md",
+      "kind": "relative",
+      "path": "../../../docs/AUTHORITY.md",
+      "required": true
+    },
+    {
+      "name": "CODEBASE_SCHEMA.yaml",
+      "kind": "relative",
+      "path": "../../../docs/CODEBASE_SCHEMA.yaml",
+      "required": true
+    },
+    {
       "name": "governance",
       "kind": "fleet-home",
       "path": "governance",

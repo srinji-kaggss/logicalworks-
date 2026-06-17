@@ -87,6 +87,18 @@ Built enough to rely on:
 
 ## 3. What is left
 
+> **Status update (2026-06-16): P0 met + hardened to world-class.** The lifecycle/packet
+> contract below is now backed by an executable falsification harness,
+> `tests/test_daemon_world_class.py` (H0 = "the daemon lacks world-class daemon properties"),
+> green at **23/23** invariants across 8 categories. Every P0 acceptance line maps to a test:
+> "restart loses no committed state" → B1; "concurrent sessions don't corrupt/lose" → C1/C2;
+> "packet fetched deterministically by session" → C3; tenant isolation → C4. Added beyond P0:
+> bounded-queue backpressure (`MAX_QUEUE_DEPTH`), orphaned-work recovery + startup reclaim,
+> dead-letter (`MAX_ATTEMPTS`), readiness probe (`daemon ready`), heartbeat-staleness, unified
+> `daemon stats`. See BUILDLOG 2026-06-16. **Deferred:** live hook-wiring (Director-gated until
+> the standalone daemon is certified) and periodic orphan-recovery (needs a per-item lease
+> before dispatch goes concurrent). The Rust single-writer port remains the post-freeze seam.
+
 ### P0. Daemon lifecycle and packet API
 
 Need one owned daemon process with:
