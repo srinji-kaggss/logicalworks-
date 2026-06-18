@@ -135,6 +135,7 @@ class ClassifyResult:
     inference_ms: float = 0.0
     method: str = "cosine"  # "eye" | "coreml" | "cosine" | "keyword" | "empty" | "error"
     margin: float = 0.0     # top1 − top2 separation; the ambiguity signal
+    metadata: dict[str, Any] = field(default_factory=dict)
 
     @property
     def plan_only(self) -> bool:
@@ -153,10 +154,13 @@ class ClassifyResult:
         # //why the method guard is load-bearing, not redundant with the score:
         # it is the structural half of the #29 fix. Even if a lexical score were
         # somehow >= the bar, a non-semantic method can never grant execution.
+        # //why margin check: a near-tie (low margin) is the gibberish signature.
+        # Execution requires BOTH a high absolute score AND a clear lead.
         return (
             bool(self.label)
             and self.method in SEMANTIC_METHODS
             and self.confidence >= FULL_AUTHORITY_THRESHOLD
+            and self.margin >= MARGIN_MIN
         )
 
 
@@ -189,17 +193,16 @@ class IntentClassifier:
     """
 
     def __init__(self, classes: list[str], centroids: Optional[Any] = None,
-                 coreml_model: Optional[Any] = None, semantic: bool = False):
+                 coreml_model: Optional[Any] = None, space_id: str = "unknown"):
         self._classes = classes
         self._centroids = centroids      # list[list[float]] shape (N_classes, embed_dim) when built
         self._coreml = coreml_model      # coremltools model handle when loaded
-        # //why pin the centroid space at construction: the cosine path may grant
-        # full authority ONLY if BOTH the centroids and the live query were embedded
-        # by the real Eye. self._semantic records whether the centroids are Eye
-        # vectors; classify() ANDs it with the query's own is_semantic. If the Eye
-        # was up at load but down at query (or vice-versa) the spaces differ and the
-        # method degrades to "cosine" (capped) — see _classify_cosine.
-        self._semantic = semantic
+        self._space_id = space_id        # //why explicit space_id (H2): ensures mathematical parity
+
+        # //why record semantic: semantic spaces may cross the full-authority bar.
+        # "eye" provider (mlx:) and CoreML are semantic; feature-hash is not.
+        self._semantic = space_id.startswith("mlx:") or space_id == "coreml" or space_id.startswith("openrouter:")
+        
         self._ready = False
 
     # -- factory ------------------------------------------------------------
@@ -227,7 +230,8 @@ class IntentClassifier:
         # left centroids=None, so every call fell through to _classify_keyword).
         # Cache-first: a 201s rebuild only happens on a verb-set or embedder-space
         # change; otherwise centroids load from disk in milliseconds.
-        centroids, semantic = _load_or_build_centroids(verbs)
+        # //why space_id instead of semantic flag (H2): ensures parity (ADR-003).
+        centroids, space_id = _load_or_build_centroids(verbs)
 
         coreml_model = None
         if model_path is None:
@@ -238,11 +242,12 @@ class IntentClassifier:
             try:
                 import coremltools as ct  # type: ignore
                 coreml_model = ct.models.MLModel(str(model_path))
+                space_id = "coreml"
             except Exception:
                 coreml_model = None  # //why: CoreML optional; cosine path still works
 
         inst = cls(classes=classes, centroids=centroids, coreml_model=coreml_model,
-                   semantic=semantic)
+                   space_id=space_id)
         inst._ready = True
         return inst
 
@@ -299,17 +304,18 @@ class IntentClassifier:
         # match when both came from the feature-hash fallback. The vector is the
         # signal; the method label records which space we were in, and the method
         # gates authority via _clamp_for_method + grants_full_authority.
-        emb, q_semantic = _embed(text)
+        emb, q_space_id, q_semantic = _embed(text)
         centroids = self._centroids or []
 
         # //why the space-mismatch guard is load-bearing (H2): centroids and
         # queries must live in the same mathematical space (e.g. both Eye-MRL or
         # both blake2b hash). A length check is NOT enough if dimensions coincide.
-        # We enforce parity here.
-        if self._semantic != q_semantic:
+        # We enforce parity here via explicit space_id.
+        if self._space_id != q_space_id:
             # Spaces are incomparable (e.g. Eye centroids vs Hash query).
             # Force zero-confidence to trigger PLAN_ONLY or pass-through.
-            return ClassifyResult(label="", confidence=0.0, top_k=[], method="mismatch")
+            return ClassifyResult(label="", confidence=0.0, top_k=[], method="mismatch",
+                                 metadata={"expected_space": self._space_id, "actual_space": q_space_id})
 
         if centroids and len(emb) != len(centroids[0]):
             return ClassifyResult(label="", confidence=0.0, top_k=[], method="error")
@@ -362,7 +368,7 @@ def _load_manifest(path: Optional[Path]) -> dict:
         return {"verbs": []}
 
 
-def _embed(text: str) -> tuple[list[float], bool]:
+def _embed(text: str) -> tuple[list[float], str, bool]:
     # //why route through lgwks_run.embed, the ONE canonical embedding seam: it
     # tries the real Qwen Eye (qwen3-embedding via Ollama, MRL-sliced to DIMS) and
     # returns is_semantic=True; only if the Eye is down/absent does it fall back to
@@ -372,10 +378,10 @@ def _embed(text: str) -> tuple[list[float], bool]:
     # the rest of lgwks. The bool flows into the authority law: semantic → method
     # "eye" (may grant authority), non-semantic → "cosine" (capped).
     import lgwks_run
-    vec, _provider, is_semantic = lgwks_run.embed(text, embed_on=True, provider="auto")
+    vec, provider, is_semantic = lgwks_run.embed(text, embed_on=True, provider="auto")
     if vec is None:  # //why guard: embed_on=True always yields a vector, but never trust a None into cosine
-        return [], False
-    return vec, bool(is_semantic)
+        return [], "error", False
+    return vec, provider, bool(is_semantic)
 
 
 # //why a true normalized cosine, not a bare dot: feature-hash vectors are
@@ -402,24 +408,26 @@ def _probe_embedder_tag() -> str:
     # centroids live in (Eye vs deterministic hash) so the two never get mixed.
     # One probe embed reveals is_semantic without paying the full build cost.
     try:
-        _vec, semantic = _embed("manifest")
-        return "eye" if semantic else "hash"
+        _vec, provider, semantic = _embed("manifest")
+        return provider
     except Exception:
         return "hash"
 
 
-def _centroid_cache_path(verbs: list[dict], embedder_tag: str) -> Path:
-    return _CENTROID_CACHE_DIR / f"centroids-{embedder_tag}-{_verb_signature(verbs)}.json"
+def _centroid_cache_path(verbs: list[dict], space_id: str) -> Path:
+    # sanitize space_id for filename
+    safe_id = "".join(c if c.isalnum() else "_" for c in space_id)
+    return _CENTROID_CACHE_DIR / f"centroids-{safe_id}-{_verb_signature(verbs)}.json"
 
 
-def _load_or_build_centroids(verbs: list[dict]) -> tuple[list[list[float]], bool]:
+def _load_or_build_centroids(verbs: list[dict]) -> tuple[list[list[float]], str]:
     """Load cached centroids when the verb set + embedder space match; else build
     (the slow 175-embed path) and persist. The cache is the difference between a
     201s load and a millisecond load."""
     if not verbs:
-        return [], False
-    embedder_tag = _probe_embedder_tag()
-    cache_path = _centroid_cache_path(verbs, embedder_tag)
+        return [], "empty"
+    space_id = _probe_embedder_tag()
+    cache_path = _centroid_cache_path(verbs, space_id)
     if cache_path.exists():
         try:
             data = json.loads(cache_path.read_text(encoding="utf-8"))
@@ -427,10 +435,10 @@ def _load_or_build_centroids(verbs: list[dict]) -> tuple[list[list[float]], bool
                     and len(data.get("centroids", [])) == len(verbs)):
                 # //why trust the cache: the filename hash already pins it to this
                 # exact verb set + embedder space; a length match is the final guard.
-                return data["centroids"], bool(data.get("semantic", False))
+                return data["centroids"], data.get("space_id", space_id)
         except Exception:
             pass  # //why swallow: a corrupt cache must never block; rebuild instead.
-    centroids, semantic = _build_centroids(verbs)
+    centroids, actual_space_id = _build_centroids(verbs)
     # //why only cache the Eye space: a hash-built centroid set is cheap to rebuild
     # and we never want a degraded (Eye-was-down) build to masquerade as semantic on
     # a later run. Persist either way, keyed by tag, so both spaces stay separated.
@@ -438,16 +446,15 @@ def _load_or_build_centroids(verbs: list[dict]) -> tuple[list[list[float]], bool
         _CENTROID_CACHE_DIR.mkdir(parents=True, exist_ok=True)
         cache_path.write_text(json.dumps({
             "schema": _CENTROID_CACHE_SCHEMA,
-            "embedder_tag": embedder_tag,
-            "semantic": semantic,
+            "space_id": actual_space_id,
             "centroids": centroids,
         }, separators=(",", ":")), encoding="utf-8")
     except Exception:
         pass  # //why swallow: failure to cache must not fail the load.
-    return centroids, semantic
+    return centroids, actual_space_id
 
 
-def _build_centroids(verbs: list[dict]) -> tuple[list[list[float]], bool]:
+def _build_centroids(verbs: list[dict]) -> tuple[list[list[float]], str]:
     # //why verb id + intent as the class signal: the manifest IS the class
     # schema. A new verb adds a class automatically on the next load. Aligned
     # 1:1 with the classes list so argmax maps straight back to a verb id.
@@ -455,17 +462,18 @@ def _build_centroids(verbs: list[dict]) -> tuple[list[list[float]], bool]:
     # they were built by the Eye (not the fallback). One non-semantic centroid
     # taints the set — we report semantic ONLY if every centroid is semantic.
     centroids: list[list[float]] = []
-    all_semantic = bool(verbs)
+    first_space_id = None
     for v in verbs:
         verb_id = v.get("verb", "")
         intent = v.get("intent", "")
         if intent == "(no metadata)":
             intent = ""
         signal = f"{verb_id.replace('.', ' ')} {intent}".strip()
-        vec, is_semantic = _embed(signal)
+        vec, space_id, _is_semantic = _embed(signal)
         centroids.append(vec)
-        all_semantic = all_semantic and is_semantic
-    return centroids, all_semantic
+        if first_space_id is None:
+            first_space_id = space_id
+    return centroids, first_space_id or "unknown"
 
 
 # ---------------------------------------------------------------------------

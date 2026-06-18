@@ -29,9 +29,9 @@ VERBS = [
 
 
 def _classifier() -> ic.IntentClassifier:
-    centroids, semantic = ic._build_centroids(VERBS)
+    centroids, space_id = ic._build_centroids(VERBS)
     return ic.IntentClassifier(
-        classes=[v["verb"] for v in VERBS], centroids=centroids, semantic=semantic)
+        classes=[v["verb"] for v in VERBS], centroids=centroids, space_id=space_id)
 
 
 class _Hermetic(unittest.TestCase):
@@ -63,22 +63,22 @@ class TestEmbeddingDeterminism(_Hermetic):
     def test_embed_returns_vector_and_semantic_flag(self):
         # //why: the embed seam now carries is_semantic — the bool that gates the
         # authority law. Under LGWKS_NO_MODELS it must be False (no real Eye).
-        vec, is_semantic = ic._embed("compile a geo expression")
+        vec, provider, is_semantic = ic._embed("compile a geo expression")
         self.assertIsInstance(vec, list)
         self.assertFalse(is_semantic, "no Eye in test env → non-semantic")
 
     def test_embed_is_unit_normalized(self):
-        v, _ = ic._embed("compile a geo expression")
+        v, _, _ = ic._embed("compile a geo expression")
         self.assertAlmostEqual(math.sqrt(sum(x * x for x in v)), 1.0, places=4)
 
     def test_distinct_text_distinct_vector(self):
         self.assertNotEqual(ic._embed("fetch this website")[0], ic._embed("compile geography")[0])
 
     def test_centroids_align_with_classes(self):
-        c, semantic = ic._build_centroids(VERBS)
+        c, space_id = ic._build_centroids(VERBS)
         self.assertEqual(len(c), len(VERBS))
         self.assertTrue(all(len(vec) == 256 for vec in c))
-        self.assertFalse(semantic, "feature-hash centroids are not semantic")
+        self.assertEqual(space_id, "deterministic-feature-hash")
 
 
 class TestAuthorityLaw(_Hermetic):
@@ -115,17 +115,20 @@ class TestAuthorityLaw(_Hermetic):
 
     def test_property_guard_is_method_gated_not_just_score(self):
         # A hand-forged high score on a non-semantic method must still be denied.
-        forged = ic.ClassifyResult(label="manifest", confidence=0.99, method="cosine")
+        forged = ic.ClassifyResult(label="manifest", confidence=0.99, method="cosine", margin=0.1)
         self.assertFalse(forged.grants_full_authority)
         # The same score on the semantic method is allowed.
-        semantic = ic.ClassifyResult(label="manifest", confidence=0.99, method="coreml")
+        semantic = ic.ClassifyResult(label="manifest", confidence=0.99, method="coreml", margin=0.1)
         self.assertTrue(semantic.grants_full_authority)
         # Semantic but below the bar → denied.
-        weak = ic.ClassifyResult(label="manifest", confidence=0.80, method="coreml")
+        weak = ic.ClassifyResult(label="manifest", confidence=0.80, method="coreml", margin=0.1)
         self.assertFalse(weak.grants_full_authority)
         # Semantic, high score, but no label → denied.
-        blank = ic.ClassifyResult(label="", confidence=0.99, method="coreml")
+        blank = ic.ClassifyResult(label="", confidence=0.99, method="coreml", margin=0.1)
         self.assertFalse(blank.grants_full_authority)
+        # Semantic, high score, but low margin → denied.
+        tight = ic.ClassifyResult(label="manifest", confidence=0.99, method="coreml", margin=0.001)
+        self.assertFalse(tight.grants_full_authority)
 
 
 class TestGateBehavior(_Hermetic):

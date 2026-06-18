@@ -2,6 +2,9 @@
 
 test: check-registry test-python test-rust
 
+verify:
+	@node /Users/srinji/keel/src/run.mjs --profile keel.profile.json
+
 check-registry:
 	python3 scripts/check_schema_registry.py
 

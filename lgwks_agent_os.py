@@ -178,6 +178,12 @@ class FleetOrchestrator:
         branch_prefix: str = "fleet",
     ) -> SpawnRecord:
         """Create a unique git worktree for *agent_id*, stage inputs, and audit."""
+        # HARDEN: Validate inputs to prevent path traversal/storage risk (H8)
+        if not re.fullmatch(r"[a-z0-9\-]+", agent_id):
+            raise ValueError(f"malicious agent_id: {agent_id!r}")
+        if not re.fullmatch(r"[a-z0-9\-]+", branch_prefix):
+            raise ValueError(f"malicious branch_prefix: {branch_prefix!r}")
+
         agents = self.scan_agents()
         if agent_id not in agents:
             raise ValueError(f"unknown agent_id: {agent_id!r}")

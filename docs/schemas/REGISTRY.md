@@ -179,6 +179,9 @@ side-database (the external `~/ingestion_results/*.db` stores are exactly the lo
 | `lgwks.daemon.status.v0` | 0 | **live, research-grade** — daemon lifecycle status envelope: `repo_root`, `daemon_root`, `db_path`, `lock_present`, `state_present`, `pid`, `alive`, `transcript_path`, `heartbeat_at`, `status`, `stale_lock_reaped` | `lgwks_daemon.py` |
 | `lgwks.daemon.doctor.v0` | 0 | **live, research-grade** — daemon doctor report: `checks[]` for daemon root, event-store parent, transcript env; includes `stale_lock_reaped` and aggregate `ok` | `lgwks_daemon.py` |
 | `lgwks.daemon.bus.event.v1` | 1 | **live** (Issue 160) — single typed event bus emitted by daemon for TUI/CLI tailing: `id`, `kind`, `state` (`queued`/`processed`), `processed_at`, `payload` | `lgwks_daemon.py` | jsonschema |
+| `lgwks.daemon.readiness.v0` | 0 | **live** — daemon readiness check | `lgwks_daemon.py` | dict |
+| `lgwks.daemon.start.v0` | 0 | **live** — daemon start event | `lgwks_daemon.py` | dict |
+| `lgwks.daemon.stats.v0` | 0 | **live** — daemon runtime stats | `lgwks_daemon_store.py` | dict |
 | `lgwks.daemon.work_item.v0` | 0 | **live (2026-06-12), research-grade** — dequeued work-queue item: `schema`, `item_id`, `tenant_id`, `session_id`, `agent_id`, `kind` (`research_run`/`ingest_file`/`workflow`/`index_run`/`custom`/`worktree_open`/`worktree_close`), `priority` (int, higher = sooner), `payload{}`, `enqueued_at`, `started_at`, `status` (`running`). Dequeue is atomic via `BEGIN IMMEDIATE`; idempotent by `item_id` on enqueue | `lgwks_daemon_store.py` (`WORK_ITEM_SCHEMA`) |
 | `lgwks.daemon.queue.v0` | 0 | **live (2026-06-12), research-grade** — per-tenant queue depth snapshot: `schema`, `tenant_id`, `queued`, `running`, `done`, `failed`, `total` | `lgwks_daemon_store.py` (`QUEUE_SCHEMA`) |
 | `lgwks.daemon.packet.v0` | 0 | **superseded-by: lgwks.context.packet.v1** (on #122 landing) — original deterministic session context packet: `schema`, `tenant_id`, `session_id`, `agent_id`, `session_head`, `queue`, `recent_events[]`, `event_count`. Promoted (not a peer mint) to the context packet below | `lgwks_daemon_store.py` (`PACKET_SCHEMA`) |
@@ -302,8 +305,16 @@ existing backends (the parallel of, and runtime counterpart to, `lgwks.reasoning
 envelope, never a fresh per-caller try/except.
 
 ### 12. JEPA manifest-level ids (live, supplement family 7)
-`lgwks.jepa.v1` (manifest verb envelope) · `lgwks.machine.packet.v1` · `lgwks.human.summary.v1` ·
-`lgwks.links.index.v1` (all `lgwks_project_artifacts.py`) · `lgwks.concept.graph.v0` (`lgwks_spawn.py`).
+| id | ver | status | defined in | validation |
+|----|-----|--------|-----------|------------|
+| `lgwks.jepa.v1` | 1 | **live** | `lgwks_project_artifacts.py` | dict |
+| `lgwks.project.deploy.v1` | 1 | **live** | `lgwks_project_artifacts.py` | dict |
+| `lgwks.project.plan.v1` | 1 | **live** | `lgwks_project_artifacts.py` | dict |
+| `lgwks.project.review.v1` | 1 | **live** | `lgwks_project_artifacts.py` | dict |
+| `lgwks.machine.packet.v1` | 1 | **live** | `lgwks_project_artifacts.py` | dict |
+| `lgwks.human.summary.v1` | 1 | **live** | `lgwks_project_artifacts.py` | dict |
+| `lgwks.links.index.v1` | 1 | **live** | `lgwks_project_artifacts.py` | dict |
+| `lgwks.concept.graph.v0` | 0 | **live** | `lgwks_spawn.py` | dict |
 
 ### 13. Documentation fixtures (NOT contracts — listed so the gate distinguishes them)
 `lgwks.foo.v0`, `lgwks.foo.v1` — example ids inside `lgwks_schema.py` docs/scanner strings only.

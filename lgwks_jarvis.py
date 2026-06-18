@@ -432,7 +432,15 @@ class JarvisDB:
         cur.execute("insert or replace into meta(key,value) values('schema_version', ?)", (SCHEMA_VERSION,))
         self.conn.commit()
 
+    def _safe_ident(self, name: str) -> str:
+        """Validate SQL identifier to prevent injection (H7)."""
+        import re
+        if not re.fullmatch(r"[a-zA-Z0-9_]+", name):
+            raise ValueError(f"malicious SQL identifier: {name!r}")
+        return name
+
     def columns(self, table: str) -> set[str]:
+        self._safe_ident(table)
         try:
             rows = self.conn.execute(f"pragma table_info({table})").fetchall()
         except sqlite3.OperationalError:
@@ -440,6 +448,8 @@ class JarvisDB:
         return {row[1] for row in rows}
 
     def add_column_if_missing(self, table: str, column: str, definition: str):
+        self._safe_ident(table)
+        self._safe_ident(column)
         if column not in self.columns(table):
             self.conn.execute(f"alter table {table} add column {column} {definition}")
 
@@ -483,7 +493,10 @@ class JarvisDB:
             self.add_column_if_missing("chunks", "semantic_type_json", "text not null default '{}'")
 
     def insert(self, table: str, row: dict):
+        self._safe_ident(table)
         keys = list(row)
+        for k in keys:
+            self._safe_ident(k)
         placeholders = ",".join("?" for _ in keys)
         cols = ",".join(keys)
         updates = ",".join(f"{k}=excluded.{k}" for k in keys if k != "id")
@@ -493,6 +506,7 @@ class JarvisDB:
         self.conn.execute(sql, [row[k] for k in keys])
 
     def count(self, table: str, run_id: str) -> int:
+        self._safe_ident(table)
         return int(self.conn.execute(f"select count(*) from {table} where run_id=?", (run_id,)).fetchone()[0])
 
 

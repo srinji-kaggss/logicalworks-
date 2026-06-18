@@ -529,11 +529,36 @@ def fetch(url: str, dry: bool, synthetic: dict[str, str] | None, frozen: tuple[s
 
 
 def _deterministic_embed(text: str, dims: int = DIMS) -> list[float]:
+    """Deterministic feature-hash embedding (lexical fallback).
+    
+    //why N-grams (H4): single words lose local context (e.g. 'not good' vs 'good').
+    // Bigrams and trigrams capture simple composition without a model.
+    """
     vec = [0.0] * dims
-    toks = re.findall(r"[a-z0-9]+", text.lower())
-    for tok in toks:
-        d = hashlib.blake2b(tok.encode(), digest_size=8).digest()
-        vec[int.from_bytes(d[:4], "big") % dims] += 1.0 if d[4] % 2 == 0 else -1.0
+    lowered = text.lower()
+    toks = re.findall(r"[a-z0-9]+", lowered)
+    
+    # 1-grams, 2-grams, 3-grams
+    features = []
+    features.extend(toks)
+    if len(toks) >= 2:
+        features.extend([" ".join(toks[i:i+2]) for i in range(len(toks)-1)])
+    if len(toks) >= 3:
+        features.extend([" ".join(toks[i:i+3]) for i in range(len(toks)-2)])
+
+    for feat in features:
+        # //why blake2b: fast, cryptographic-grade distribution.
+        d = hashlib.blake2b(feat.encode(), digest_size=8).digest()
+        # use first 4 bytes for bucket, next 1 for sign
+        bucket = int.from_bytes(d[:4], "big") % dims
+        sign = 1.0 if d[4] % 2 == 0 else -1.0
+        # //why weighting: longer features (N-grams) carry more specific signal
+        weight = 1.0
+        if " " in feat:
+            weight = 1.5 if feat.count(" ") == 1 else 2.0
+            
+        vec[bucket] += sign * weight
+
     import lgwks_vecmath
     norm = lgwks_vecmath.l2_norm(vec) or 1.0  # canonical L2 norm (one source of truth)
     return [round(v / norm, 6) for v in vec]

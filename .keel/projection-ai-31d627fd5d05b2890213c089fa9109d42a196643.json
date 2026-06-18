@@ -1,0 +1,7 @@
+{
+  "schema": "keel.projection.ai/v0",
+  "run": "31d627fd5d05b2890213c089fa9109d42a196643",
+  "verdict": "true",
+  "gate": "do_178b_baseline",
+  "offenders": []
+}

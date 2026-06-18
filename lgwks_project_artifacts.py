@@ -291,6 +291,11 @@ def graph_edges(cycles: list[dict]) -> list[dict]:
 BOT_RECORD_SCHEMA = "lgwks.bot.record.v1"
 BOT_PLAN_SCHEMA = "lgwks.bot.plan.v1"
 
+# Project-specific schemas (H6)
+PROJECT_PLAN_SCHEMA = "lgwks.project.plan.v1"
+PROJECT_DEPLOY_SCHEMA = "lgwks.project.deploy.v1"
+PROJECT_REVIEW_SCHEMA = "lgwks.project.review.v1"
+
 BOT_SEVERITY_LEVELS = {"info", "low", "medium", "high", "critical"}
 BOT_STATUS_VALUES = {"open", "confirmed", "suppressed", "duplicate", "resolved"}
 BOT_EVIDENCE_TYPES = {
@@ -553,6 +558,40 @@ def validate_bot_record(record: dict) -> tuple[bool, list[str]]:
     if not _is_datetime_str(record["created_at"]):
         errs.append("created_at must be a valid ISO 8601 date-time string")
 
+    return len(errs) == 0, errs
+
+
+def validate_project_plan(plan: dict) -> tuple[bool, list[str]]:
+    """Validate a project plan against PROJECT_PLAN_SCHEMA (H6)."""
+    errs = []
+    if not isinstance(plan, dict):
+        return False, ["plan must be a dictionary"]
+    
+    if plan.get("schema") != PROJECT_PLAN_SCHEMA:
+        errs.append(f"unsupported plan version: expected '{PROJECT_PLAN_SCHEMA}', got {plan.get('schema')!r}")
+    
+    required = ["plan_id", "project", "prompt", "budgets"]
+    for field in required:
+        if field not in plan:
+            errs.append(f"missing required field: {field}")
+            
+    return len(errs) == 0, errs
+
+
+def validate_project_deploy(dag: dict) -> tuple[bool, list[str]]:
+    """Validate a project deploy DAG against PROJECT_DEPLOY_SCHEMA (H6)."""
+    errs = []
+    if not isinstance(dag, dict):
+        return False, ["deploy DAG must be a dictionary"]
+        
+    if dag.get("schema") != PROJECT_DEPLOY_SCHEMA:
+        errs.append(f"unsupported deploy version: expected '{PROJECT_DEPLOY_SCHEMA}', got {dag.get('schema')!r}")
+        
+    required = ["project", "mode", "artifacts"]
+    for field in required:
+        if field not in dag:
+            errs.append(f"missing required field: {field}")
+            
     return len(errs) == 0, errs
 
 

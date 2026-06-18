@@ -29,18 +29,40 @@ import lgwks_intent
 import lgwks_model_hub
 
 
-# Known verb categories for classification
+# Known verb categories for classification (fallback)
 _VERB_CATEGORIES: list[str] = [
-    "research",      # jarvis, crawl, fetch, public, refine, extract
-    "code",          # repo, review, debug, refactor, graph
-    "system",        # solve, doctor, intent, keyvault, foundation, auth
-    "data",          # store, memory, embed, axiom, pipeline
-    "github",        # gh
-    "devops",        # project, batch, session, hooks, agent-os, portal, do
-    "multiply",      # x
-    "meta",          # manifest, preview, preview, login
-    "unknown",       # catch-all
+    "research", "code", "system", "data", "github", "devops", "multiply", "meta", "unknown"
 ]
+
+
+def _derive_taxonomy() -> list[str]:
+    """Derives categories from the live manifest subsystems."""
+    try:
+        # Avoid circular import if called during module load
+        from lgwks_manifest import build_manifest
+        manifest = build_manifest()
+        
+        # Primary segments of verbs define the initial subsystem taxonomy
+        subsystems = sorted({v["verb"].split()[0] for v in manifest.get("verbs", [])})
+        
+        # Ensure canonical categories are present (merged or mapped)
+        canonical = ["research", "code", "system", "data", "github", "devops", "multiply", "meta"]
+        
+        # For now, return a union to ensure backward compatibility with hardcoded lists
+        # but prioritized by manifest truth.
+        return sorted(list(set(subsystems) | set(canonical))) + ["unknown"]
+    except Exception:
+        return _VERB_CATEGORIES
+
+
+# ── Lazy-loaded categories ───────────────────────────────────────────────
+_DERIVED_CATEGORIES: list[str] | None = None
+
+def get_categories() -> list[str]:
+    global _DERIVED_CATEGORIES
+    if _DERIVED_CATEGORIES is None:
+        _DERIVED_CATEGORIES = _derive_taxonomy()
+    return _DERIVED_CATEGORIES
 
 # Mapping from heuristic intent types to verb categories
 _HEURISTIC_MAP: dict[str, str] = {
@@ -68,7 +90,7 @@ def _load_tinybert() -> Any | None:
         tokenizer = AutoTokenizer.from_pretrained(model_dir)
         model = AutoModelForSequenceClassification.from_pretrained(model_dir)
         # Validate model has the right number of output classes
-        if model.config.num_labels != len(_VERB_CATEGORIES):
+        if model.config.num_labels != len(get_categories()):
             # Not fine-tuned for our task — needs training
             return None
         return {"model": model, "tokenizer": tokenizer, "name": "tiny-bert"}
@@ -86,29 +108,55 @@ def _get_router() -> Any | None:
     return _TINYBERT
 
 
-def _heuristic_classify(text: str) -> tuple[str, float]:
-    """Fast heuristic fallback classifier. Returns (category, confidence)."""
+# Mapping categories to keywords for heuristic fallback
+_CATEGORY_KEYWORDS: dict[str, set[str]] = {
+    "research": {"crawl", "search", "research", "find", "lookup", "wiki", "arxiv", "paper", "fetch", "grab", "extract"},
+    "code": {"code", "review", "debug", "refactor", "test", "bug", "fix", "ast", "graph", "ship", "merge", "rebase"},
+    "system": {"solve", "config", "setup", "doctor", "health", "check", "intent", "auth", "keyvault", "vault", "foundation", "identity"},
+    "data": {"store", "memory", "embed", "data", "cache", "axiom", "pipeline", "fabric", "crdt", "state"},
+    "github": {"github", "gh", "pr", "pull", "issue", "request", "repository"},
+    "devops": {"project", "deploy", "batch", "session", "fleet", "agent", "spawn", "ops", "workflow", "portal", "do"},
+    "multiply": {"multiply", "x", "brace", "product", "chain"},
+    "meta": {"manifest", "preview", "login", "help", "what can", "initialize", "setup"},
+}
+
+
+def _heuristic_classify(text: str) -> dict[str, Any]:
+    """Fast heuristic fallback classifier with density-based scoring and explanation."""
     text_lower = text.lower()
+    # Simple regex tokenizer if lgwks_hashing.tokenize is not available
+    import re
+    words = set(re.findall(r"[a-z0-9]+", text_lower))
+    
+    if not words:
+        return {"category": "unknown", "confidence": 0.0, "reason": "empty input"}
 
-    # Simple keyword-based classification
-    if any(w in text_lower for w in {"crawl", "search", "research", "find", "lookup", "wiki", "arxiv", "paper"}):
-        return "research", 0.7
-    if any(w in text_lower for w in {"code", "review", "debug", "refactor", "test", "bug", "fix", "ast", "graph"}):
-        return "code", 0.75
-    if any(w in text_lower for w in {"system", "solve", "config", "setup", "doctor", "health", "check"}):
-        return "system", 0.65
-    if any(w in text_lower for w in {"store", "memory", "embed", "data", "cache", "vault"}):
-        return "data", 0.6
-    if any(w in text_lower for w in {"github", "gh", "pr", "pull", "issue", "merge", "repo", "request"}):
-        return "github", 0.8
-    if any(w in text_lower for w in {"project", "deploy", "batch", "session", "fleet", "agent", "spawn"}):
-        return "devops", 0.65
-    if any(w in text_lower for w in {"multiply", "x", "brace", "product", "chain"}) or "{" in text and "}" in text:
-        return "multiply", 0.9
-    if any(w in text_lower for w in {"manifest", "preview", "login", "help", "what can"}):
-        return "meta", 0.6
+    best_cat = "unknown"
+    best_conf = 0.3
+    best_matches = []
 
-    return "unknown", 0.3
+    for cat, keywords in _CATEGORY_KEYWORDS.items():
+        matches = [w for w in words if w in keywords]
+        if not matches:
+            continue
+        
+        # //why density-based: matching 1/2 words is stronger than 1/100 words.
+        # Matches are capped at 0.9 to leave room for the model path.
+        density = len(matches) / len(words)
+        conf = min(0.4 + (density * 0.5), 0.9)
+        
+        if conf > best_conf:
+            best_cat = cat
+            best_conf = conf
+            best_matches = matches
+
+    reason = f"matched keywords: {', '.join(best_matches)}" if best_matches else "no keywords matched"
+    return {
+        "category": best_cat,
+        "confidence": round(best_conf, 3),
+        "reason": reason,
+        "matches": best_matches
+    }
 
 
 def classify(text: str) -> dict[str, Any]:
@@ -121,6 +169,7 @@ def classify(text: str) -> dict[str, Any]:
             "method": str,        # "tiny-bert" | "heuristic"
             "latency_ms": float,
             "input_hash": str,    # SHA-256 of input for audit
+            "reason": str,        # explanation for the decision
         }
     """
     t0 = time.time()
@@ -140,8 +189,8 @@ def classify(text: str) -> dict[str, Any]:
                 confidence = probs[0][pred].item()
 
             # Map prediction index to category
-            # tiny-bert has 9 output classes matching _VERB_CATEGORIES
-            category = _VERB_CATEGORIES[pred] if pred < len(_VERB_CATEGORIES) else "unknown"
+            categories = get_categories()
+            category = categories[pred] if pred < len(categories) else "unknown"
             latency_ms = (time.time() - t0) * 1000
 
             return {
@@ -150,21 +199,23 @@ def classify(text: str) -> dict[str, Any]:
                 "method": "tiny-bert",
                 "latency_ms": round(latency_ms, 2),
                 "input_hash": input_hash,
+                "reason": f"model predicted {category} with {confidence:.1%} confidence"
             }
         except Exception:
-            # Fall back to heuristic on model error
+            # Fall through to heuristic if model inference fails
             pass
 
     # Heuristic fallback
-    category, confidence = _heuristic_classify(text)
+    res = _heuristic_classify(text)
     latency_ms = (time.time() - t0) * 1000
-
+    
     return {
-        "category": category,
-        "confidence": round(confidence, 3),
+        "category": res["category"],
+        "confidence": res["confidence"],
         "method": "heuristic",
         "latency_ms": round(latency_ms, 2),
         "input_hash": input_hash,
+        "reason": res["reason"]
     }
 
 

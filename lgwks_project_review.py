@@ -26,7 +26,7 @@ from pathlib import Path
 
 import lgwks_cycle
 
-from lgwks_project_artifacts import MAPPER_ROLE_COUNT
+from lgwks_project_artifacts import MAPPER_ROLE_COUNT, PROJECT_REVIEW_SCHEMA
 from lgwks_project_deploy import _deploy_path
 
 
@@ -62,7 +62,7 @@ def review_project(project: str) -> dict:
     export_policies = sorted({r.get("export_policy", r.get("consent", "")) for r in learning if r})
     event_counts = dict(sorted(Counter(e.get("status", "unknown") for e in events).items()))
     return {
-        "schema": "lgwks-project-review/1",
+        "schema": PROJECT_REVIEW_SCHEMA,
         "project": project,
         "path": str(out_dir),
         "chain_ok": chain["chain_ok"],

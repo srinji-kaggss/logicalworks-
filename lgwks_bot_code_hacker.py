@@ -235,15 +235,34 @@ class TaintTracker:
 
 @dataclass
 class RiskScore:
-    """Composite risk: combines signal strength, blast radius, and history."""
+    """Composite risk: combines signal strength, blast radius, and history.
+    
+    //why explicit signals (H5): removes inert 0.1 placeholders. 
+    Predictive signals (reachability, privilege_delta) replace the 'vibe' sum.
+    """
     base: float           # 0..1 from the detector
-    context_boost: float  # +0..0.3 from taint flow / cross-file reach
-    history_penalty: float  # -0..0.2 if previously dismissed
+    reachability: float = 0.0    # 0..1 normalized (O(n) predecessors)
+    privilege_delta: float = 0.0 # 0..0.3 (delta if touches high-priv sink)
+    history_penalty: float = 0.0 # -0..0.2 if previously dismissed
     final: float = field(init=False)
+    explanation: str = field(init=False)
 
     def __post_init__(self) -> None:
-        raw = self.base + self.context_boost - self.history_penalty
+        # Context boost: high reachability increases blast radius; 
+        # privilege delta adds a step-function jump for sensitive sinks.
+        context_boost = (self.reachability * 0.2) + self.privilege_delta
+        raw = self.base + context_boost - self.history_penalty
         self.final = max(0.0, min(1.0, raw))
+        
+        reasons = []
+        if self.reachability > 0.5:
+            reasons.append(f"high reachability ({self.reachability:.2f})")
+        if self.privilege_delta > 0:
+            reasons.append(f"privilege delta (+{self.privilege_delta:.2f})")
+        if self.history_penalty > 0:
+            reasons.append(f"history penalty (-{self.history_penalty:.2f})")
+        
+        self.explanation = " | ".join(reasons) if reasons else "base detector confidence"
 
     def severity(self) -> str:
         if self.final >= 0.9:
@@ -383,16 +402,28 @@ class _Visitor(ast.NodeVisitor):
     reporting, which gives fraud-engine-quality explainability."""
 
     def __init__(self, rel: str, run_id: str, repo: str, baseline: Baseline | None = None,
-                 created_at: Optional[str] = None) -> None:
+                 created_at: Optional[str] = None, graph: Any = None) -> None:
         self.rel = rel
         self.run_id = run_id
         self.repo = repo
         self.baseline = baseline
         self.created_at = created_at  # //why: one run timestamp, threaded for replay determinism
+        self.graph = graph            # //why: for blast-radius / reachability scoring (H5)
         self.findings: list[dict] = []
         self.taint = TaintTracker()
         self._net_safe = _is_net_safe(rel)
         
+        # Cache reachability for this file once
+        self._file_reachability = 0.0
+        if graph and hasattr(graph, "predecessors"):
+            try:
+                preds = list(graph.predecessors(rel))
+                # Normalize by total node count (max 1.0)
+                n = len(graph.nodes)
+                self._file_reachability = len(preds) / n if n > 0 else 0.0
+            except Exception:
+                pass
+
         # Guard tracking
         self.guards_found: set[str] = set()
 
@@ -415,7 +446,18 @@ class _Visitor(ast.NodeVisitor):
                 return  # skip suppressed finding
             history_penalty = self.baseline.get_history_penalty(fp)
 
-        risk = RiskScore(base=confidence, context_boost=0.0, history_penalty=history_penalty)
+        # Calculate privilege delta (H5)
+        priv_delta = 0.0
+        if kind in ("dangerous_shell_exec", "ssrf_risk", "sql_injection_risk"):
+            priv_delta = 0.15
+        if tags and "critical" in tags:
+            priv_delta = 0.3
+
+        risk = RiskScore(base=confidence, reachability=self._file_reachability, 
+                         privilege_delta=priv_delta, history_penalty=history_penalty)
+
+        # Include risk explanation in evidence for transparency (H5)
+        evidence.append({"type": "metric", "name": "risk_explanation", "value": risk.explanation})
 
         self.findings.append(_make(
             run_id=self.run_id, repo=self.repo, file=self.rel,
@@ -708,7 +750,7 @@ class _Visitor(ast.NodeVisitor):
 # ── File scanner ────────────────────────────────────────────────────────────
 
 def _scan_file(path: Path, rel: str, run_id: str, repo: str, baseline: Baseline | None,
-               created_at: Optional[str] = None) -> list[dict]:
+               created_at: Optional[str] = None, graph: Any = None) -> list[dict]:
     try:
         source = path.read_text(encoding="utf-8", errors="replace")
         tree = ast.parse(source, filename=str(path))
@@ -716,7 +758,7 @@ def _scan_file(path: Path, rel: str, run_id: str, repo: str, baseline: Baseline 
         return [_failure_record(run_id, repo, rel, str(exc), created_at=created_at)]
     except Exception as exc:
         return [_failure_record(run_id, repo, rel, str(exc), created_at=created_at)]
-    v = _Visitor(rel, run_id, repo, baseline=baseline, created_at=created_at)
+    v = _Visitor(rel, run_id, repo, baseline=baseline, created_at=created_at, graph=graph)
     v.visit(tree)
     return v.findings
 
@@ -726,9 +768,10 @@ def _scan_file(path: Path, rel: str, run_id: str, repo: str, baseline: Baseline 
 def run(
     repo: Path | str,
     changed_files: Optional[list[str]] = None,
-    _graph=None,
+    graph: Any = None,
     run_id: Optional[str] = None,
     baseline_path: Optional[Path] = None,
+    update_baseline: bool = False,
     emit_sarif: bool = False,
     created_at: Optional[str] = None,
 ) -> list[dict]:
@@ -738,14 +781,13 @@ def run(
     Args:
         repo: path to the repo root.
         changed_files: if given, scan only these relative paths.
-        graph: reserved for future blast-radius scoring.
+        graph: CodeGraph object for blast-radius / reachability scoring (H5).
         run_id: stable run identifier; generated from repo path when omitted.
         baseline_path: path to JSON baseline for false-positive suppression.
         emit_sarif: if True, also write SARIF to repo/.lgwks/code-hacker.sarif.
 
     Returns list of lgwks.bot.record.v1 records.
     """
-    _ = _graph
     repo = Path(repo).resolve()
     repo_str = str(repo)
     if run_id is None:
@@ -780,10 +822,11 @@ def run(
         p = Path(path)
         if not p.is_file():
             continue
-        findings.extend(_scan_file(p, rel, run_id, repo_str, baseline, created_at=created_at))
+        findings.extend(_scan_file(p, rel, run_id, repo_str, baseline, 
+                                   created_at=created_at, graph=graph))
 
     # Persist new baseline
-    if baseline_path:
+    if baseline_path and update_baseline:
         baseline.record(findings)
 
     # Optional SARIF export
@@ -797,3 +840,35 @@ def run(
         )
 
     return findings
+
+
+if __name__ == "__main__":
+    import sys
+    import argparse
+    
+    parser = argparse.ArgumentParser(description="Logical Works Code Hacker — AST-based security scanner (H5–H8)")
+    parser.add_argument("--scan", default=".", help="Directory to scan")
+    parser.add_argument("--baseline", type=Path, help="Path to JSON baseline for FP suppression")
+    parser.add_argument("--update-baseline", action="store_true", help="Overwrite the baseline with new findings")
+    parser.add_argument("--sarif", action="store_true", help="Emit SARIF output")
+    args = parser.parse_args()
+    
+    # repo root is parent of this script's directory if run from within
+    repo_path = Path(args.scan).resolve()
+    
+    try:
+        findings = run(repo_path, baseline_path=args.baseline, emit_sarif=args.sarif, update_baseline=args.update_baseline)
+        print(f"Scan complete: {len(findings)} findings.")
+        
+        # Exit 1 if any open high-severity findings
+        high_risk = [f for f in findings if f.get("status") == "open" and f.get("severity") == "high"]
+        if high_risk:
+            print(f"FAILED: {len(high_risk)} high-severity findings remain open.")
+            for f in high_risk[:5]:
+                 print(f"  - {f['summary']} in {f['links']['file']}")
+            sys.exit(1)
+            
+        sys.exit(0)
+    except Exception as exc:
+        print(f"ERROR: {exc}", file=sys.stderr)
+        sys.exit(2)

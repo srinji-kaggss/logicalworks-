@@ -36,6 +36,7 @@ from lgwks_project_artifacts import (
     DEFAULT_WEIGHT,
     MAPPER_ROLE_COUNT,
     PROJECT_ROOT,
+    PROJECT_PLAN_SCHEMA,
     _clamp,
     _slug,
     _terms,
@@ -67,7 +68,7 @@ def build_plan(args: argparse.Namespace) -> dict:
         {"id": "critic-packet", "role": "score evidence gaps and emit AI-to-AI packets"},
     ]
     return {
-        "schema": "lgwks-project-plan/1",
+        "schema": PROJECT_PLAN_SCHEMA,
         "plan_id": plan_id,
         "project": project,
         "prompt": prompt,

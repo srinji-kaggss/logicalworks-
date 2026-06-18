@@ -1,0 +1,7 @@
+{
+  "schema": "keel.projection.ai/v0",
+  "run": "b5e0237e05ac36b9bac7a803f113dbf43762c3f3",
+  "verdict": "true",
+  "gate": "lgwks_floor",
+  "offenders": []
+}

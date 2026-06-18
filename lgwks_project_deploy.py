@@ -38,6 +38,9 @@ from lgwks_project_artifacts import (
     DEFAULT_TOKENS,
     EMBED_DIMS,
     MAPPER_ROLES,
+    PROJECT_DEPLOY_SCHEMA,
+    PROJECT_PLAN_SCHEMA,
+    PROJECT_ROOT,
     _clamp,
     _embedding,
     _sha,
@@ -312,16 +315,49 @@ def _run_non_ml_execution(args: argparse.Namespace, prompt: str, keywords: list[
     }
 
 
+def _load_plan(project: str) -> Optional[dict]:
+    """Load and validate the project plan if it exists (H6)."""
+    import lgwks_project_plan as plan_mod
+    plan_path = PROJECT_ROOT / plan_mod._slug(project) / "plan.json"
+    if not plan_path.exists():
+        return None
+    
+    try:
+        plan = json.loads(plan_path.read_text(encoding="utf-8"))
+        from lgwks_project_artifacts import validate_project_plan
+        ok, errs = validate_project_plan(plan)
+        if not ok:
+            print(f"warning: plan schema invalid: {', '.join(errs)}", file=sys.stderr)
+            return None
+        return plan
+    except Exception as exc:
+        print(f"warning: failed to load plan: {exc}", file=sys.stderr)
+        return None
+
+
 def deploy_command(args: argparse.Namespace) -> int:
-    prompt = args.prompt or args.project
+    plan = _load_plan(args.project)
+    
+    # Use plan fields if available, otherwise fallback to args/defaults (H6 consistency)
+    prompt = args.prompt or (plan["prompt"] if plan else args.project)
     cap = worker_cap()
-    reasoning_cycles = _clamp(args.reasoning_cycles, DEFAULT_REASONING_CYCLES, 1, 50)
-    embedding_rounds = _clamp(args.embedding_rounds, DEFAULT_EMBEDDING_ROUNDS, 1, 10_000)
-    max_workers = _clamp(args.max_workers, cap["computed_cap"], 1, cap["computed_cap"])
-    tokens_per_cycle = _clamp(args.tokens_per_cycle, DEFAULT_TOKENS, 1000, 200_000)
+    
+    budgets = plan.get("budgets", {}) if plan else {}
+    reasoning_cycles = _clamp(args.reasoning_cycles or budgets.get("reasoning_cycles"), 
+                              DEFAULT_REASONING_CYCLES, 1, 50)
+    embedding_rounds = _clamp(args.embedding_rounds or budgets.get("embedding_rounds"), 
+                              DEFAULT_EMBEDDING_ROUNDS, 1, 10_000)
+    max_workers = _clamp(args.max_workers or budgets.get("max_workers"), 
+                         cap["computed_cap"], 1, cap["computed_cap"])
+    tokens_per_cycle = _clamp(args.tokens_per_cycle or budgets.get("tokens_per_cycle"), 
+                              DEFAULT_TOKENS, 1000, 200_000)
+    
     learning_mode = args.learning_mode
     dry_run = args.dry_run or not args.execute
-    keywords = _terms(prompt)
+    keywords = plan.get("keywords") if plan else _terms(prompt)
+    if keywords is None:
+        keywords = _terms(prompt)
+
     m_state = _model_state(args.project, prompt)
     rollback_ref = m_state["champion"]["id"]
     cycles = lgwks_cycle.make_cycles(args.project, prompt, cycles=reasoning_cycles,
@@ -363,7 +399,7 @@ def deploy_command(args: argparse.Namespace) -> int:
     execution_events = lgwks_cycle.read_jsonl(out_dir / "execution-events.jsonl")
     vector_summary = json.loads((out_dir / "vector-vault.json").read_text(encoding="utf-8"))
     dag = {
-        "schema": "lgwks-project-deploy/1",
+        "schema": PROJECT_DEPLOY_SCHEMA,
         "project": args.project,
         "prompt_ref": lgwks_cycle.prompt_ref(prompt),
         "mode": "dry-run" if dry_run else "execute-planned",

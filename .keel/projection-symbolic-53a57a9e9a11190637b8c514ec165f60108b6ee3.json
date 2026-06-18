@@ -1,0 +1,37 @@
+{
+  "schema": "keel.projection.symbolic/v0",
+  "run": "53a57a9e9a11190637b8c514ec165f60108b6ee3",
+  "gate_concept": "lgwks_floor",
+  "verdict": "true",
+  "atoms": [
+    {
+      "atom": "referential_truth",
+      "unit": ".",
+      "value": "true",
+      "cached": false
+    },
+    {
+      "atom": "testability_falsifiability",
+      "unit": ".",
+      "value": "true",
+      "cached": false
+    },
+    {
+      "atom": "security_by_construction",
+      "unit": ".",
+      "value": "true",
+      "cached": false
+    }
+  ],
+  "concepts": [
+    {
+      "concept": "lgwks_floor",
+      "verdict": "true",
+      "offenders": []
+    }
+  ],
+  "cache": {
+    "recomputed": 3,
+    "reused": 0
+  }
+}

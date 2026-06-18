@@ -244,6 +244,10 @@ def _ensure_v2_columns(conn: sqlite3.Connection) -> None:
     existing = {row[1] for row in conn.execute("PRAGMA table_info(vector_records)").fetchall()}
     for col in ("tokenization_id", "artifact_cid"):
         if col not in existing:
+            # Validate identifier to prevent injection (H7)
+            import re
+            if not re.fullmatch(r"[a-zA-Z0-9_]+", col):
+                raise ValueError(f"malicious SQL identifier: {col!r}")
             conn.execute(f"ALTER TABLE vector_records ADD COLUMN {col} TEXT")
 
 

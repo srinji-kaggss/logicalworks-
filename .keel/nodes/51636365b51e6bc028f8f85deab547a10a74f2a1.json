@@ -1,0 +1,1 @@
+{"inputs":["ee2e85c65e4711e333e4dfb89ade0beb576f767d","ad2c895319a075111a3958db8aabbbb2517361e7","gated"],"kind":"atom:referential_truth","params":{"atom":"referential_truth","channel":"gated","unit":"."},"verdict":{"points":[{"exit":0,"label":"base","value":"true"}],"value":"true"}}
