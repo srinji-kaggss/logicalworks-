@@ -1,0 +1,9 @@
+{
+  "target": { "name": "unbound-gate-blocks", "root": ".", "ecosystem": "shell" },
+  "units": [ { "unit": "crate", "discover": { "type": "literal", "values": ["."] } } ],
+  "bindings": [
+    { "atom": "referential_truth", "unit": "crate",
+      "evidence": { "tool": "bash", "argv": ["-c", "true"], "needs": ["bash"], "ok_when": "exit==0" } }
+  ],
+  "gate_concept": "sound"
+}

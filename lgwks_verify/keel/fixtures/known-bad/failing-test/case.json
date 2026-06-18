@@ -1,0 +1,8 @@
+{
+  "schema": "keel.known-bad-case/v0",
+  "front_end": "profile",
+  "entry": "profile.json",
+  "expect_verdict": "NO-GO",
+  "expect_exit": 1,
+  "description": "Python failing test blocks buildable"
+}

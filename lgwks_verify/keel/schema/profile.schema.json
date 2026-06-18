@@ -1,0 +1,87 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "keel.profile/v0",
+  "title": "Keel tailoring profile",
+  "description": "The per-codebase document an AI fills to point Keel at a target. RESTRICTIVE by design: a fill is mechanically validated before any verification runs. Atom IDENTITY is fixed by schema/atoms.json; a profile may only choose units, bind atoms to concrete tools for this toolchain, pick the gate concept, declare an envelope, and set thresholds. It may NOT redefine an atom or a framework concept.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["target", "units", "bindings", "gate_concept"],
+  "properties": {
+    "target": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["name"],
+      "properties": {
+        "name": { "type": "string" },
+        "root": { "type": "string", "description": "filesystem root of the target codebase" },
+        "ecosystem": { "type": "string", "enum": ["rust", "typescript", "python", "go", "mixed"] }
+      }
+    },
+    "units": {
+      "type": "array",
+      "description": "How to enumerate code units. Each rule yields units of one type.",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["unit", "discover"],
+        "properties": {
+          "unit": { "type": "string", "enum": ["crate", "module", "package", "service"] },
+          "discover": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["type"],
+            "properties": {
+              "type": { "type": "string", "enum": ["glob", "manifest", "literal"] },
+              "pattern": { "type": "string" },
+              "values": { "type": "array", "items": { "type": "string" } }
+            }
+          }
+        }
+      }
+    },
+    "bindings": {
+      "type": "array",
+      "description": "Bind an atom to the concrete Tier-1 tool that instantiates it for THIS toolchain. Atom id must exist in schema/atoms.json.",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["atom", "evidence"],
+        "properties": {
+          "atom": { "type": "string" },
+          "unit": { "type": "string", "enum": ["crate", "module", "package", "service"] },
+          "evidence": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["tool", "argv", "ok_when"],
+            "properties": {
+              "tool": { "type": "string" },
+              "argv": { "type": "array", "items": { "type": "string" } },
+              "cwd": { "type": "string" },
+              "needs": { "type": "array", "items": { "type": "string" }, "description": "binaries that must be present, else atom is 'unknown' (skip), never 'false'" },
+              "ok_when": { "type": "string", "enum": ["exit==0"] }
+            }
+          }
+        }
+      }
+    },
+    "gate_concept": {
+      "type": "string",
+      "description": "Concept id (from schema/concepts.json) the always-on gate enforces. Default 'sound'."
+    },
+    "envelope": {
+      "type": "object",
+      "additionalProperties": false,
+      "description": "Declared operating target for quantitative atoms / soak tier (docs/04).",
+      "properties": {
+        "target": { "type": "object", "additionalProperties": { "type": "number" } },
+        "slo": { "type": "object", "additionalProperties": { "type": "number" } },
+        "margin": { "type": "number", "minimum": 1.0 }
+      }
+    },
+    "thresholds": {
+      "type": "object",
+      "description": "Where graded atoms cross to boolean. atom id -> minimum score [0,1].",
+      "additionalProperties": { "type": "number", "minimum": 0, "maximum": 1 }
+    }
+  }
+}

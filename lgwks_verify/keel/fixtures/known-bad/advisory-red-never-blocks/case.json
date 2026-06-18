@@ -1,0 +1,9 @@
+{
+  "schema": "keel.known-bad-case/v0",
+  "front_end": "registry",
+  "entry": "registry.json",
+  "args": ["--concept", "buildable", "--tier", "commit"],
+  "expect_verdict": "GO",
+  "expect_exit": 0,
+  "description": "A registry with two satisfied blocking verifiers AND one advisory/proposer verifier that goes RED. Keel MUST return GO (exit 0) and surface the advisory separately. Proves the Phase-2 seam (docs/05 §5.5): a non-deterministic/proposer signal shares the ontology but NEVER flips the verdict."
+}

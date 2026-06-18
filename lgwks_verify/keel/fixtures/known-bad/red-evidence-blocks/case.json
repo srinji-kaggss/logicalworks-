@@ -1,0 +1,8 @@
+{
+  "schema": "keel.known-bad-case/v0",
+  "front_end": "profile",
+  "entry": "profile.json",
+  "expect_verdict": "NO-GO",
+  "expect_exit": 1,
+  "description": "referential_truth is bound to a tool that exits 1 (planted red evidence). Keel MUST return NO-GO. Proves a false atom flips the gate (∧ short-circuits to false; docs/02 §2.6)."
+}

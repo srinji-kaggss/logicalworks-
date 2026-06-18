@@ -1,0 +1,157 @@
+{
+  "schema": "keel.concepts/v0",
+  "note": "A concept is a named formula over atom ids. Closed grammar: a formula is an atom id (string), or {all:[...]}, {any:[...]}, {not: formula}. No free text, no code. The three 'framework' concepts MUST match lean/ExcellentCode/Framework.lean exactly and are checked by ORG.selftest. All others are user space \u2014 the Director may add one in a single entry, any day, with no engine change.",
+  "grammar": {
+    "formula": "atomId | {all: formula[]} | {any: formula[]} | {not: formula}",
+    "value": "true | false | unknown (three-valued; unknown over a gated atom => block)"
+  },
+  "concepts": [
+    {
+      "id": "CoreGroundedCorrect",
+      "origin": "framework",
+      "formal": "referential_truth \u2227 type_soundness \u2227 totality_or_controlled_partiality \u2227 specification_fidelity",
+      "formula": {
+        "all": [
+          "referential_truth",
+          "type_soundness",
+          "totality_or_controlled_partiality",
+          "specification_fidelity"
+        ]
+      }
+    },
+    {
+      "id": "Hallucinated",
+      "origin": "framework",
+      "formal": "\u00ac CoreGroundedCorrect",
+      "formula": {
+        "not": {
+          "all": [
+            "referential_truth",
+            "type_soundness",
+            "totality_or_controlled_partiality",
+            "specification_fidelity"
+          ]
+        }
+      }
+    },
+    {
+      "id": "Excellent",
+      "origin": "framework",
+      "formal": "\u22c0 all twenty atoms",
+      "formula": {
+        "all": [
+          "referential_truth",
+          "specification_fidelity",
+          "type_soundness",
+          "precondition_correctness",
+          "postcondition_correctness",
+          "invariant_preservation",
+          "totality_or_controlled_partiality",
+          "boundary_completeness",
+          "compositionality",
+          "minimal_sufficient_complexity",
+          "algorithmic_efficiency",
+          "state_minimization",
+          "data_model_truth",
+          "error_semantics",
+          "security_by_construction",
+          "idempotence",
+          "concurrency_correctness",
+          "observability",
+          "testability_falsifiability",
+          "change_locality"
+        ]
+      }
+    },
+    {
+      "id": "sound",
+      "origin": "user",
+      "formal": "conservative always-on floor",
+      "formula": {
+        "all": [
+          "referential_truth",
+          "type_soundness",
+          "totality_or_controlled_partiality",
+          "testability_falsifiability"
+        ]
+      }
+    },
+    {
+      "id": "did",
+      "origin": "user",
+      "formal": "defence-in-depth surface",
+      "formula": {
+        "all": [
+          "security_by_construction",
+          "error_semantics",
+          "observability",
+          "concurrency_correctness"
+        ]
+      }
+    },
+    {
+      "id": "stat_sound",
+      "origin": "user",
+      "formal": "statistically/quantitatively grounded",
+      "formula": {
+        "all": [
+          "boundary_completeness",
+          "algorithmic_efficiency",
+          "testability_falsifiability",
+          "specification_fidelity"
+        ]
+      }
+    },
+    {
+      "id": "buildable",
+      "origin": "user",
+      "formal": "symbols resolve AND claims are tested \u2014 the minimal demonstrable floor",
+      "formula": {
+        "all": [
+          "referential_truth",
+          "testability_falsifiability"
+        ]
+      }
+    },
+    {
+      "id": "resilient",
+      "origin": "user",
+      "formal": "holds under fault \u2014 the RESILIENCE crossing (docs/07 \u00a77.3): what fault-injection crosses",
+      "note": "Instantiated by crossing the failure space (OOM/IO-fail-at-N, partial writes, concurrent contention) and asserting the invariants still hold. 'Where the bridge fails' \u2014 find the load at which it does, prove it is past the envelope.",
+      "formula": {
+        "all": [
+          "error_semantics",
+          "totality_or_controlled_partiality",
+          "invariant_preservation",
+          "concurrency_correctness"
+        ]
+      }
+    },
+    {
+      "id": "well_crossed",
+      "origin": "user",
+      "formal": "the finite decision/boundary outcome space is crossed to completion (docs/07 \u00a77.1)",
+      "note": "Instantiated by MC/DC (every decision's conditions crossed), mutation (every structural perturbation killed), and fuzz (the input space crossed). The codebase's outcomes are finite given its structure; this concept asks whether the verifier crossed them.",
+      "formula": {
+        "all": [
+          "boundary_completeness",
+          "precondition_correctness",
+          "postcondition_correctness",
+          "testability_falsifiability"
+        ]
+      }
+    },
+    {
+      "id": "lgwks_floor",
+      "origin": "user",
+      "formal": "DO-178B compliant CI baseline + Keel semantic security",
+      "formula": {
+        "all": [
+          "referential_truth",
+          "testability_falsifiability",
+          "security_by_construction"
+        ]
+      }
+    }
+  ]
+}

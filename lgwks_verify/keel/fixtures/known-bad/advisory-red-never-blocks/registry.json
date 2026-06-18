@@ -1,0 +1,12 @@
+{
+  "schema": "lwks.verify.registry/v0",
+  "gate_concept": "buildable",
+  "verifiers": [
+    { "id": "OK.ref", "atom": "referential_truth", "division": "COH", "tier": "commit",
+      "needs": ["bash"], "run": { "type": "shell", "cmd": "true" } },
+    { "id": "OK.test", "atom": "testability_falsifiability", "division": "COV", "tier": "commit",
+      "needs": ["bash"], "run": { "type": "shell", "cmd": "true" } },
+    { "id": "ADV.dup.struct", "division": "COH", "tier": "commit", "severity": "advisory", "role": "proposer",
+      "needs": ["bash"], "run": { "type": "shell", "cmd": "echo advisory-went-red; exit 1" } }
+  ]
+}

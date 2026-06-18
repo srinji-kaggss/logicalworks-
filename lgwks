@@ -66,6 +66,9 @@ def build_parser() -> argparse.ArgumentParser:
     import lgwks_agent_os; lgwks_agent_os.add_parser(ops_sub)
     import lgwks_workflows; lgwks_workflows.add_parser(ops_sub)
     
+    # 11. verify — deterministic CI / Keel integration
+    import lgwks_verify; lgwks_verify.add_parser(sub)
+
     # 10. human — interactive/setup verbs (login, tui, repl, init)
     hum = sub.add_parser("human", help="interactive and human-only verbs")
     hum_sub = hum.add_subparsers(dest="human_command", required=True)

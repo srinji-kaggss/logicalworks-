@@ -1,0 +1,13 @@
+{
+  "target": { "name": "advisory-red-dup", "root": ".", "ecosystem": "python" },
+  "units": [ { "unit": "core", "discover": { "type": "literal", "values": ["."] } } ],
+  "bindings": [
+    { "atom": "referential_truth", "unit": "core",
+      "evidence": { "tool": "python3", "argv": ["-c", "pass"], "ok_when": "exit==0" } },
+    { "atom": "testability_falsifiability", "unit": "core",
+      "evidence": { "tool": "python3", "argv": ["-c", "pass"], "ok_when": "exit==0" } },
+    { "atom": "security_by_construction", "unit": "core",
+      "evidence": { "tool": "python3", "argv": ["advisory.py"], "ok_when": "exit==0" } }
+  ],
+  "gate_concept": "buildable"
+}

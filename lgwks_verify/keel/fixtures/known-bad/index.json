@@ -1,0 +1,19 @@
+{
+  "schema": "keel.known-bad-corpus/v0",
+  "purpose": "DO-330 TQL-4 tool-qualification corpus for KEEL ITSELF. Each case plants a condition and declares the verdict Keel MUST return; src/qualify.mjs runs Keel against each in a hermetic temp dir and asserts. A core guarantee with no fixture is an unproven claim.",
+  "case_contract": {
+    "front_end": "profile | registry — which Keel runner ingests the entry",
+    "entry": "the profile.json / registry.json filename inside this fixture dir",
+    "args": "optional extra argv (e.g. --concept, --concurrency)",
+    "expect_verdict": "GO | NO-GO | BLOCKED — the mark Keel must print",
+    "expect_exit": "0 (GO) | 1 (NO-GO/BLOCKED) | 2 (fault, never expected)",
+    "description": "the planted condition and the guarantee it proves"
+  },
+  "cases": [
+    "clean-control",
+    "unbound-gate-blocks",
+    "red-evidence-blocks",
+    "crossing-one-point-fails",
+    "advisory-red-never-blocks"
+  ]
+}

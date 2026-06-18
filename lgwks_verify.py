@@ -250,3 +250,77 @@ def check_gate_evidence_completeness(verdicts: list[Verdict]) -> tuple[bool, lis
         if v.outcome in (Outcome.FAIL, Outcome.CANNOT_DECIDE) and not v.provenance:
             reasons.append(f"{v.gate_id}: {v.outcome.value} with no evidence/provenance")
     return (len(reasons) == 0, reasons)
+
+import argparse
+import subprocess
+import os
+import re
+from pathlib import Path
+
+def add_parser(subparsers: argparse._SubParsersAction) -> None:
+    parser = subparsers.add_parser("verify", help="deterministic CI / Keel integration")
+    parser.add_argument("--profile", required=True, help="Profile JSON to use")
+    parser.add_argument("--tier", choices=["commit", "nightly", "release"], default="commit")
+    parser.add_argument("--concurrency", type=int, default=0)
+    parser.add_argument("--self-test", action="store_true", help="Run the known-bad corpus self-qualification")
+    parser.set_defaults(func=verify_command)
+
+def verify_command(args: argparse.Namespace) -> int:
+    root = Path(__file__).resolve().parent
+    keel_run = root / "lgwks_verify" / "keel" / "src" / "run.mjs"
+    
+    if getattr(args, "self_test", False):
+        qualify_run = root / "lgwks_verify" / "keel" / "src" / "qualify.mjs"
+        return subprocess.run(["node", str(qualify_run)]).returncode
+    cmd = ["node", str(keel_run), "--profile", args.profile]
+    if getattr(args, "concurrency", 0) > 0:
+        cmd.extend(["--concurrency", str(args.concurrency)])
+    
+    is_machine = os.environ.get("LGWRS_MACHINE") == "1"
+    
+    res = subprocess.run(cmd, capture_output=is_machine, text=True)
+
+    if not is_machine:
+        return res.returncode
+
+    # If --machine, parse output and construct JSON
+    chain_file = root / ".keel" / "_chain.jsonl"
+    run_id = None
+    if chain_file.exists():
+        with open(chain_file, "r") as f:
+            lines = f.read().splitlines()
+            if lines:
+                try:
+                    last_entry = json.loads(lines[-1])
+                    run_id = last_entry.get("run")
+                except json.JSONDecodeError:
+                    pass
+
+    if run_id:
+        proj_ai_file = root / ".keel" / f"projection-ai-{run_id}.json"
+        if proj_ai_file.exists():
+            with open(proj_ai_file, "r") as f:
+                data = json.load(f)
+            
+            # Extract crossing from stdout
+            crossing = {"points": 0, "failed": 0, "unknown": 0}
+            crossing_match = re.search(r"crossing: (\d+) structural point.*?\((\d+) failed, (\d+) unknown\)", res.stdout)
+            if crossing_match:
+                crossing["points"] = int(crossing_match.group(1))
+                crossing["failed"] = int(crossing_match.group(2))
+                crossing["unknown"] = int(crossing_match.group(3))
+            
+            advisories = []
+            if "⚠ ADVISORY" in res.stdout:
+                adv_lines = [line.strip() for line in res.stdout.splitlines() if line.strip().startswith("·")]
+                advisories = adv_lines
+
+            data["coverage"] = "unknown"
+            data["crossing"] = crossing
+            data["advisories"] = advisories
+            
+            print(json.dumps(data, indent=2))
+        else:
+            print(json.dumps({"error": f"No projection found for run {run_id}"}))
+            
+    return res.returncode

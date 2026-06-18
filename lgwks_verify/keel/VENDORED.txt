@@ -1,0 +1,2 @@
+Source SHA: 181707a
+Re-sync command: cp -r /Users/srinji/keel/src/* lgwks_verify/keel/src/ && cp -r /Users/srinji/keel/schema/* lgwks_verify/keel/schema/

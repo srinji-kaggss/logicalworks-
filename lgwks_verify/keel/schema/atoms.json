@@ -1,0 +1,26 @@
+{
+  "schema": "keel.atoms/v0",
+  "note": "The twenty evidence atoms of the Excellent Code Framework, intent-stripped. Each atom is INSTANTIATED by a real Tier-1 tool; Keel never asserts an atom true without evidence. kind: boolean|graded. tier: commit|soak|sim. unit: the code-unit type the atom binds to (auto-activation). An atom with no bound evidence source evaluates to 'unknown', never 'true'.",
+  "atoms": [
+    { "id": "referential_truth", "n": 1, "formal": "∀s∈Symbols(P), Resolve_E(s)≠∅", "evidence": "compiler/import/API/schema resolution", "kind": "boolean", "tier": "commit", "unit": "crate", "core": true },
+    { "id": "specification_fidelity", "n": 2, "formal": "∀x∈D, ⟦P⟧_E(x)=S(x)", "evidence": "spec tests/proofs/review", "kind": "boolean", "tier": "commit", "unit": "crate", "core": true },
+    { "id": "type_soundness", "n": 3, "formal": "e:T ⇒ eval(e)∈T or defined error", "evidence": "type checker/static analysis", "kind": "boolean", "tier": "commit", "unit": "crate", "core": true },
+    { "id": "precondition_correctness", "n": 4, "formal": "Pre(x) ⇒ P valid on x", "evidence": "contracts/input validation", "kind": "boolean", "tier": "commit", "unit": "module" },
+    { "id": "postcondition_correctness", "n": 5, "formal": "Pre(x)∧P(x)=y ⇒ Post(x,y)", "evidence": "contracts/assertions/tests", "kind": "boolean", "tier": "commit", "unit": "module" },
+    { "id": "invariant_preservation", "n": 6, "formal": "I(s)∧step(s,a)=s′ ⇒ I(s′)", "evidence": "state-machine proof/property tests", "kind": "boolean", "tier": "commit", "unit": "module" },
+    { "id": "totality_or_controlled_partiality", "n": 7, "formal": "∀x∈D, P(x)∈Out∪defined-error", "evidence": "exhaustive error handling", "kind": "boolean", "tier": "commit", "unit": "crate", "core": true },
+    { "id": "boundary_completeness", "n": 8, "formal": "domain partitioned; boundaries tested", "evidence": "boundary tests/domain partition", "kind": "graded", "tier": "commit", "unit": "module" },
+    { "id": "compositionality", "n": 9, "formal": "module contracts hold; no hidden effects", "evidence": "module contracts/effect analysis", "kind": "boolean", "tier": "commit", "unit": "module" },
+    { "id": "minimal_sufficient_complexity", "n": 10, "formal": "complexity/coupling ≤ bound", "evidence": "complexity/coupling review", "kind": "graded", "tier": "commit", "unit": "module" },
+    { "id": "algorithmic_efficiency", "n": 11, "formal": "cost ≤ declared bound", "evidence": "complexity analysis/benchmarks", "kind": "graded", "tier": "soak", "unit": "crate" },
+    { "id": "state_minimization", "n": 12, "formal": "reachable state count controlled", "evidence": "state count/control", "kind": "graded", "tier": "commit", "unit": "module" },
+    { "id": "data_model_truth", "n": 13, "formal": "schema constraints model the domain", "evidence": "domain model review/schema constraints", "kind": "boolean", "tier": "commit", "unit": "crate" },
+    { "id": "error_semantics", "n": 14, "formal": "errors typed; recovery defined", "evidence": "typed errors/recovery plan", "kind": "boolean", "tier": "commit", "unit": "module" },
+    { "id": "security_by_construction", "n": 15, "formal": "authz + invariants hold by structure", "evidence": "authorization/invariant checks", "kind": "boolean", "tier": "commit", "unit": "crate" },
+    { "id": "idempotence", "n": 16, "formal": "retried effects safe where declared", "evidence": "idempotency keys/transaction tests", "kind": "boolean", "tier": "sim", "unit": "service" },
+    { "id": "concurrency_correctness", "n": 17, "formal": "chosen consistency condition preserved", "evidence": "locks/transactions/linearizability tests", "kind": "boolean", "tier": "sim", "unit": "service" },
+    { "id": "observability", "n": 18, "formal": "runtime diagnosable", "evidence": "diagnostic coverage", "kind": "graded", "tier": "commit", "unit": "service" },
+    { "id": "testability_falsifiability", "n": 19, "formal": "claims refutable by tests/proofs", "evidence": "unit/property/integration tests", "kind": "boolean", "tier": "commit", "unit": "crate" },
+    { "id": "change_locality", "n": 20, "formal": "local requirement change ⇒ local code change", "evidence": "coupling/modularity analysis", "kind": "graded", "tier": "commit", "unit": "crate" }
+  ]
+}

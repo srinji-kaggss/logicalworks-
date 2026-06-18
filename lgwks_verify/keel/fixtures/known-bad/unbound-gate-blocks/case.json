@@ -1,0 +1,8 @@
+{
+  "schema": "keel.known-bad-case/v0",
+  "front_end": "profile",
+  "entry": "profile.json",
+  "expect_verdict": "BLOCKED",
+  "expect_exit": 1,
+  "description": "The gate concept 'sound' references type_soundness / totality_or_controlled_partiality, which have NO binding. Keel MUST return BLOCKED (verdict unknown), never GO. Proves the cardinal rule: unknown ≠ pass (docs/02 §2.6)."
+}

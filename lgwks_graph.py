@@ -613,6 +613,32 @@ def _parse_rust_file(source: str, rel_path: str) -> tuple[list[str], list[str], 
     return imports, defines, variables, calls
 
 
+
+_CPP_INCLUDE_RE = _re.compile(r'#include\s*(["<])(.*?)([">])')
+_CPP_CLASS_RE = _re.compile(r'\b(class|struct)\s+([A-Za-z0-9_]+)\s*[{:]')
+_CPP_FUNC_RE = _re.compile(r'^[ \t]*([A-Za-z0-9_:]+[ \t]+[*&]*[ \t]*)([A-Za-z0-9_]+)\s*\([^)]*\)\s*\{', _re.MULTILINE)
+_CPP_CALL_RE = _re.compile(r'\b([A-Za-z0-9_]+)\s*\(')
+
+def _parse_cpp_file(source: str, rel_path: str) -> tuple[list[str], list[str], set[str], set[str]]:
+    imports: list[str] = []
+    defines: list[str] = []
+    variables: set[str] = set()
+    calls: set[str] = set()
+
+    for m in _CPP_INCLUDE_RE.finditer(source):
+        imports.append(m.group(2))
+
+    for m in _CPP_CLASS_RE.finditer(source):
+        defines.append(f"{m.group(1)}:{m.group(2)}")
+
+    for m in _CPP_FUNC_RE.finditer(source):
+        defines.append(f"def:{m.group(2)}")
+
+    for m in _CPP_CALL_RE.finditer(source):
+        calls.add(m.group(1))
+
+    return imports, defines, variables, calls
+
 def _rust_import_to_path(imp: str, repo: Path, rel_path: str) -> str | None:
     """Map a Rust use statement to a likely file path in the repo.
     Handles: crate::foo::bar, super::baz, self::qux, std::... (external)."""
@@ -859,7 +885,8 @@ def extract_from_repo(repo: Path, previous: Graph | None = None) -> Graph:
 
         is_py = rel_path.endswith(".py")
         is_rs = rel_path.endswith(".rs")
-        if not (is_py or is_rs):
+        is_cpp = rel_path.endswith((".cc", ".cpp", ".c", ".cxx", ".h", ".hpp", ".mm"))
+        if not (is_py or is_rs or is_cpp):
             continue
 
         try:
@@ -911,16 +938,38 @@ def extract_from_repo(repo: Path, previous: Graph | None = None) -> Graph:
                     all_defs[d[4:]] = rel_path
             file_data.append((rel_path, fpath, source, None, imports, defines, variables, calls, []))
 
+        elif is_cpp:
+            imports, defines, variables, calls = _parse_cpp_file(source, rel_path)
+            for d in defines:
+                if d.startswith("def:"):
+                    all_defs[d[4:]] = rel_path
+            file_data.append((rel_path, fpath, source, None, imports, defines, variables, calls, []))
+
     # Second pass: build nodes + import edges
     for rel_path, fpath, source, tree, imports, defines, variables, calls, _ in file_data:
         # map imports to likely internal modules
         internal_imports: list[str] = []
         is_rs = rel_path.endswith(".rs")
+        is_cpp = rel_path.endswith((".cc", ".cpp", ".c", ".cxx", ".h", ".hpp", ".mm"))
         for imp in imports:
             if is_rs:
                 mapped = _rust_import_to_path(imp, repo, rel_path)
                 if mapped:
                     internal_imports.append(mapped)
+            elif is_cpp:
+                # Basic matching for C++ relative paths.
+                # imp is already the path string from #include "path" or <path>
+                if (repo / imp).exists():
+                    internal_imports.append(imp)
+                else:
+                    # also try relative to the current file
+                    rel_to_curr = (fpath.parent / imp).resolve()
+                    try:
+                        rel_mapped = rel_to_curr.relative_to(repo)
+                        if (repo / rel_mapped).exists():
+                            internal_imports.append(str(rel_mapped))
+                    except ValueError:
+                        pass
             else:
                 parts = imp.split(".")
                 candidate = "/".join(parts) + ".py"

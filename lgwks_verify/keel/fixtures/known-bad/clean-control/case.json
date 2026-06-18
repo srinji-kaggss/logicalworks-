@@ -1,0 +1,8 @@
+{
+  "schema": "keel.known-bad-case/v0",
+  "front_end": "profile",
+  "entry": "profile.json",
+  "expect_verdict": "GO",
+  "expect_exit": 0,
+  "description": "Control: both gated atoms have a satisfied binding (tool exits 0). Keel MUST return GO. Proves no false positive — a clean target is not gated."
+}

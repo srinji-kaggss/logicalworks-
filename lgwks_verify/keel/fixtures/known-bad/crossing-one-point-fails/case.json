@@ -1,0 +1,8 @@
+{
+  "schema": "keel.known-bad-case/v0",
+  "front_end": "profile",
+  "entry": "profile.json",
+  "expect_verdict": "NO-GO",
+  "expect_exit": 1,
+  "description": "referential_truth is crossed over a 3-point matrix (docs/07 §7.2): two points pass, one (label 'edge') exits 1. The atom holds only if EVERY crossed point holds (Kleene ∧), so Keel MUST return NO-GO. Proves the finite-outcome crossing model — 'cross 100%, the bridge fails at the edge point.'"
+}

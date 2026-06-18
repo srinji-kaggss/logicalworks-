@@ -1,0 +1,18 @@
+{
+  "target": { "name": "crossing-one-point-fails", "root": ".", "ecosystem": "shell" },
+  "units": [ { "unit": "crate", "discover": { "type": "literal", "values": ["."] } } ],
+  "bindings": [
+    { "atom": "referential_truth", "unit": "crate",
+      "evidence": {
+        "tool": "bash", "argv": ["-c", "true"], "needs": ["bash"], "ok_when": "exit==0",
+        "cross": [
+          { "label": "linux",  "argv": ["-c", "true"] },
+          { "label": "darwin", "argv": ["-c", "true"] },
+          { "label": "edge",   "argv": ["-c", "echo crossing-point-failed; exit 1"] }
+        ]
+      } },
+    { "atom": "testability_falsifiability", "unit": "crate",
+      "evidence": { "tool": "bash", "argv": ["-c", "true"], "needs": ["bash"], "ok_when": "exit==0" } }
+  ],
+  "gate_concept": "buildable"
+}

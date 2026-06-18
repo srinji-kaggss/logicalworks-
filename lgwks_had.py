@@ -337,6 +337,13 @@ def _assumption_signal(prompt: str, *, classify_fn=None) -> Optional[RiskSignal]
                       {"posterior": ir.audit.get("posterior"), "risk_if_wrong": ir.risk})
 
 
+def _keel_signal(advisories: Optional[list]) -> RiskSignal:
+    """Keel verification advisories integration (#235). Maps to abstain (confirm)."""
+    if not advisories:
+        return RiskSignal("keel_advisories", 0.0, 1.0, [], {"fed": False})
+    _t_block, t_confirm, _t_attenuate = _ladder()
+    return RiskSignal("keel_advisories", t_confirm, 1.0, advisories, {"fed": True})
+
 def _anomaly_signal(series: Optional[list]) -> RiskSignal:
     """Fraud/anomaly/drift defense (z-score). SEAM: needs a per-request history series,
     which has no live source yet — so this contributes 0.0 (available-but-unfed) until the
@@ -379,7 +386,7 @@ def _unified_receipt(verdict: str, components: list) -> str:
 
 
 def assess(prompt: str, *, classify_fn=None, assume: bool = False,
-           series: Optional[list] = None) -> dict:
+           series: Optional[list] = None, keel_advisories: Optional[list] = None) -> dict:
     """The unified abstention decision over ALL risk signals (#143).
 
     Supersedes the injection-only lgwks_jailbreak.assess as the gate the U6 engine calls.
@@ -409,6 +416,7 @@ def assess(prompt: str, *, classify_fn=None, assume: bool = False,
         if asm is not None:
             components.append(asm)
     components.append(_anomaly_signal(series))
+    components.append(_keel_signal(keel_advisories))
 
     verdict, composed = compose_verdict(components)
     flat_signals = [s for c in components for s in c.signals]
