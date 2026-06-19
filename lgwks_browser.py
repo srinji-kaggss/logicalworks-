@@ -23,6 +23,8 @@ import select
 import socket
 import sys
 import urllib.parse
+import urllib.error
+import urllib.request
 from pathlib import Path
 
 logger = logging.getLogger(__name__)
@@ -202,6 +204,32 @@ def _headers(url: str) -> dict[str, str]:
         return {}
 
 
+class _SafeRedirectHandler(urllib.request.HTTPRedirectHandler):
+    def redirect_request(self, req, fp, code, msg, headers, newurl):
+        if not _remote_allowed(newurl):
+            raise urllib.error.HTTPError(req.full_url, code, "blocked redirect target", headers, fp)
+        return super().redirect_request(req, fp, code, msg, headers, newurl)
+
+
+def _raw_render_fallback(url: str, max_chars: int, *, with_html: bool, user_agent: str | None,
+                         extra_headers: dict | None, reason: str) -> dict:
+    """Guarded zero-JS fallback for public pages when Playwright navigation fails."""
+    headers = {"User-Agent": user_agent or _UA}
+    if extra_headers:
+        headers.update(extra_headers)
+    try:
+        req = urllib.request.Request(url, headers=headers)
+        with urllib.request.build_opener(_SafeRedirectHandler()).open(req, timeout=20) as resp:
+            raw = resp.read(2_000_000)
+        html = raw.decode("utf-8", "replace")
+        out = {"ok": True, "text": _text_from(html, max_chars), "reason": f"raw-fallback after {reason}"}
+        if with_html:
+            out["html"] = html
+        return out
+    except Exception as exc:
+        return {"ok": False, "text": "", "reason": f"{reason}; raw fallback failed: {type(exc).__name__}: {exc}"}
+
+
 def _route_handler(lock_host: str, auth_headers: dict[str, str]):
     """Return a Playwright route handler that:
     1. Blocks SSRF targets on EVERY request (including redirects/subresources).
@@ -335,7 +363,17 @@ def render(url: str, max_chars: int = 8000, *, use_session: bool = False,
             finally:
                 browser.close()
     except Exception as e:
-        return {"ok": False, "text": "", "reason": f"render failed: {type(e).__name__}"}
+        reason = f"render failed: {type(e).__name__}: {e}"
+        if not use_session and not auth_headers:
+            return _raw_render_fallback(
+                url,
+                max_chars,
+                with_html=with_html,
+                user_agent=user_agent,
+                extra_headers=extra_headers,
+                reason=reason,
+            )
+        return {"ok": False, "text": "", "reason": reason}
 
 
 def _click_candidates_js() -> str:

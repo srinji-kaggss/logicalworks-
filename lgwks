@@ -77,6 +77,7 @@ def build_parser() -> argparse.ArgumentParser:
     import lgwks_context; lgwks_context.add_parser(sub)
     import lgwks_model_hub; lgwks_model_hub.add_parser(sub)
     import lgwks_jarvis; lgwks_jarvis.add_parser(sub)
+    import lgwks_manifest; lgwks_manifest.add_parser(sub)
     auth = sub.add_parser("auth", add_help=False, help="compat: capability auth vault")
     auth.add_argument("-h", "--help", dest="auth_help", action="store_true")
     auth.add_argument("auth_args", nargs=argparse.REMAINDER)

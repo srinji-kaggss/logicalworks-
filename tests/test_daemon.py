@@ -3,10 +3,14 @@
 from __future__ import annotations
 
 import json
+import argparse
+import contextlib
+import io
 import tempfile
 import time
 import unittest
 from pathlib import Path
+from unittest import mock
 
 import lgwks_daemon as daemon_mod
 
@@ -124,3 +128,79 @@ class TestSessionDaemon(unittest.TestCase):
         self.assertTrue(check["ok"])
         # transcript binding is degraded-but-non-fatal: overall doctor stays ok
         self.assertTrue(report["ok"])
+
+    def _research_args(self) -> argparse.Namespace:
+        return argparse.Namespace(
+            repo=str(self.tmp),
+            target="https://example.invalid/",
+            project="daemon-test",
+            max_pages=1,
+            max_depth=0,
+            embed_provider="deterministic",
+            login_if_needed=False,
+        )
+
+    def _research_manifest(self, *, docs: int, chunks: int) -> dict:
+        run_dir = self.tmp / "research-runs" / f"docs-{docs}-chunks-{chunks}"
+        run_dir.mkdir(parents=True, exist_ok=True)
+        (run_dir / "frontier.jsonl").write_text(
+            json.dumps({
+                "url": "https://example.invalid/",
+                "status": "error",
+                "reason": "render failed: Error: dns unavailable",
+            }) + "\n",
+            encoding="utf-8",
+        )
+        return {
+            "run_id": f"run-docs-{docs}-chunks-{chunks}",
+            "target": "https://example.invalid/",
+            "artifacts": {"root": str(run_dir)},
+            "counts": {
+                "documents": docs,
+                "chunks": chunks,
+                "facts": 0,
+                "vectors": 0,
+                "graph_nodes": 0,
+            },
+        }
+
+    def test_research_command_fails_closed_on_empty_crawl(self):
+        args = self._research_args()
+        manifest = self._research_manifest(docs=0, chunks=0)
+
+        buf = io.StringIO()
+        with mock.patch("lgwks_substrate_run.build_run", return_value=manifest):
+            with contextlib.redirect_stdout(buf):
+                rc = daemon_mod._research_command(args)
+
+        self.assertEqual(rc, 2)
+        payload = json.loads(buf.getvalue())
+        self.assertFalse(payload["ok"])
+        self.assertEqual(payload["error"], "research run produced no documents/chunks")
+        self.assertEqual(payload["frontier_status_counts"], {"error": 1})
+        self.assertEqual(payload["frontier_tail"][0]["reason"], "render failed: Error: dns unavailable")
+
+        from lgwks_daemon_store import DaemonEventStore
+
+        store = DaemonEventStore(self.daemon.paths.db)
+        try:
+            runs = store.list_runs(f"repo:{self.tmp.name}")
+        finally:
+            store.close()
+        self.assertTrue(any(run["run_id"] == manifest["run_id"] for run in runs))
+
+    def test_research_command_reports_success_only_for_materialized_content(self):
+        args = self._research_args()
+        manifest = self._research_manifest(docs=1, chunks=2)
+
+        buf = io.StringIO()
+        with mock.patch("lgwks_substrate_run.build_run", return_value=manifest):
+            with contextlib.redirect_stdout(buf):
+                rc = daemon_mod._research_command(args)
+
+        self.assertEqual(rc, 0)
+        payload = json.loads(buf.getvalue())
+        self.assertTrue(payload["ok"])
+        self.assertEqual(payload["counts"]["documents"], 1)
+        self.assertEqual(payload["counts"]["chunks"], 2)
+        self.assertNotIn("frontier_tail", payload)

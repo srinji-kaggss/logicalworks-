@@ -14,11 +14,11 @@ def route_command(args: argparse.Namespace) -> int:
     
     if cmd == "map":
         import lgwks_map
-        return lgwks_map.map_command(args)
+        return lgwks_map._cmd_map(args)
     
     if cmd == "engine":
         import lgwks_engine
-        return lgwks_engine.engine_command(args)
+        return lgwks_engine._cmd_engine(args)
         
     if cmd == "refine":
         import lgwks_machine
@@ -35,11 +35,15 @@ def add_parser(sub) -> None:
     # map
     m = rs.add_parser("map", help="rank verbs by relevance")
     m.add_argument("intent")
+    m.add_argument("--top", type=int, default=8, help="number of results (default 8)")
+    m.add_argument("--json", action="store_true", help="structured output (default; always JSON)")
     m.set_defaults(func=route_command)
     
     # engine
     e = rs.add_parser("engine", help="subconscious engine: produce schema")
     e.add_argument("prompt")
+    e.add_argument("--top", type=int, default=5, help="max capability selections (default 5)")
+    e.add_argument("--repo", metavar="PATH", help="repo path for last_state lookup")
     e.set_defaults(func=route_command)
     
     # refine

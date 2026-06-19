@@ -733,14 +733,35 @@ def _research_command(args: argparse.Namespace) -> int:
         store.register_run(tenant_id, manifest)
     finally:
         store.close()
-    print(json.dumps({
-        "ok": True,
+    counts = manifest.get("counts", {})
+    ok = bool(counts.get("documents")) and bool(counts.get("chunks"))
+    response = {
+        "ok": ok,
         "run_id": manifest.get("run_id"),
         "run_dir": manifest["artifacts"]["root"],
         "tenant_id": tenant_id,
         "resolved_target": target,
+        "counts": counts,
+    }
+    if not ok:
+        response["error"] = "research run produced no documents/chunks"
+        frontier_path = Path(manifest["artifacts"]["root"]) / "frontier.jsonl"
+        if frontier_path.exists():
+            frontier_rows = [
+                json.loads(line)
+                for line in frontier_path.read_text(encoding="utf-8").splitlines()
+                if line.strip()
+            ]
+            status_counts: dict[str, int] = {}
+            for row in frontier_rows:
+                status = str(row.get("status", "unknown"))
+                status_counts[status] = status_counts.get(status, 0) + 1
+            response["frontier_status_counts"] = status_counts
+            response["frontier_tail"] = frontier_rows[-5:]
+    print(json.dumps({
+        **response,
     }, indent=2))
-    return 0
+    return 0 if ok else 2
 
 
 def _runs_command(args: argparse.Namespace) -> int:

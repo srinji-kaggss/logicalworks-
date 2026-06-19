@@ -330,15 +330,17 @@ def _claude_agents_dir() -> Path:
     return base / ".claude" / "agents"
 
 
-def load_manifest(path: Path = MANIFEST_PATH) -> dict:
+def load_manifest(path: Path | None = None) -> dict:
+    path = path or MANIFEST_PATH
     data = json.loads(path.read_text(encoding="utf-8"))
     if not isinstance(data.get("entries"), list):
         raise ValueError("manifest entries must be a list")
     return data
 
 
-def resolve_manifest_entries(manifest: dict | None = None) -> list[ContextTarget]:
+def resolve_manifest_entries(manifest: dict | None = None, *, base_dir: Path | None = None) -> list[ContextTarget]:
     manifest = manifest or load_manifest()
+    base_dir = (base_dir or MANIFEST_PATH.parent).resolve()
     out: list[ContextTarget] = []
     for entry in manifest["entries"]:
         if not isinstance(entry, dict):
@@ -348,7 +350,7 @@ def resolve_manifest_entries(manifest: dict | None = None) -> list[ContextTarget
         required = bool(entry.get("required", True))
         resolved: Path | None
         if kind == "relative":
-            resolved = (CONTEXT_DIR / str(entry["path"])).resolve()
+            resolved = (base_dir / str(entry["path"])).resolve()
         elif kind == "fleet-home":
             resolved = (_fleet_home() / str(entry["path"])).resolve()
         else:
@@ -361,7 +363,8 @@ def bootstrap_context() -> list[dict]:
     """Create/refresh prompts/context symlinks from the manifest."""
     CONTEXT_DIR.mkdir(parents=True, exist_ok=True)
     results: list[dict] = []
-    for target in resolve_manifest_entries():
+    manifest = load_manifest()
+    for target in resolve_manifest_entries(manifest, base_dir=MANIFEST_PATH.parent):
         link = CONTEXT_DIR / target.name
         if link.is_symlink() or link.exists():
             link.unlink()
@@ -424,7 +427,7 @@ def write_agent_cards(path: Path = AGENT_CARD_PATH) -> Path:
 
 def doctor() -> dict:
     manifest = load_manifest()
-    entries = resolve_manifest_entries(manifest)
+    entries = resolve_manifest_entries(manifest, base_dir=MANIFEST_PATH.parent)
     startup_files = {name: (PROMPTS_ROOT / name).exists() for name in PROMPT_FILES}
     context = []
     for entry in entries:

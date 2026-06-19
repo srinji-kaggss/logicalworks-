@@ -669,6 +669,8 @@ class GraphRenderer:
                 color = ui.CREAM
             
             node_label = node_id.split("/")[-1] if "/" in node_id else node_id
+            if current_depth == 0:
+                node_label = f"lgwks/{node_label}"
             if node_indices is not None and node_id in node_indices:
                 idx = node_indices[node_id]
                 node_label = f"[{idx}] {node_label}"

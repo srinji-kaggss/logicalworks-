@@ -825,8 +825,10 @@ def run(
         findings.extend(_scan_file(p, rel, run_id, repo_str, baseline, 
                                    created_at=created_at, graph=graph))
 
-    # Persist new baseline
-    if baseline_path and update_baseline:
+    # Persist the baseline whenever a baseline path is supplied. Suppression reads
+    # this file on the next run; callers use update_baseline for explicit CLI
+    # intent, but the library API must not leave a requested baseline path empty.
+    if baseline_path:
         baseline.record(findings)
 
     # Optional SARIF export

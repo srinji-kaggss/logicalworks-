@@ -226,6 +226,13 @@ _VERB_META: dict[str, dict] = {
         "output": "WorkflowRun JSON or human band/spine UI",
         "tokens": "none (deterministic)",
     },
+    "research": {
+        "intent": "autonomous deep-research loop over a scoped objective; estimate by default, live crawl only through the signed run spine",
+        "args": {"objective": "research ask", "--auto": "self-drive rounds", "--guide": "implementation guide path",
+                 "--crawl-mode": "estimate|ground|live", "--budget": "hard token ceiling"},
+        "output": "research map, round ledger, frontier, and report artifacts",
+        "tokens": "bounded by --budget in auto mode",
+    },
     "auth": {
         "intent": "manage auth locks and Keychain-backed capability refs for crawler access",
         "args": {"add|stale|check|ls": "subcommand forwarded to the auth-vault tool"},
@@ -333,6 +340,45 @@ _VERB_META: dict[str, dict] = {
         "args": {"text": "intent text to classify", "--json": "structured output", "--model": "auto | heuristic | tiny-bert"},
         "output": "routing JSON with category, confidence, method, latency_ms, verb, args, note",
         "tokens": "none (heuristic) / tiny-bert local inference",
+    },
+    "route map": {
+        "intent": "rank live lgwks verbs for a natural-language intent using the manifest capability contract",
+        "args": {"intent": "natural-language intent", "--top": "number of results", "--json": "structured output"},
+        "output": "lgwks.map.v1 with ranked verb matches and scores",
+        "tokens": "none",
+    },
+    "route engine": {
+        "intent": "produce the subconscious routing schema for an intent: capability selections, confidence, risk, and pathways",
+        "args": {"prompt": "natural-language intent", "--top": "max selections", "--repo": "repo for last-state lookup"},
+        "output": "lgwks.engine.schema.v1 with selections, flags, retrieval, scores, and pathways",
+        "tokens": "none",
+    },
+    "route refine": {
+        "intent": "refine machine intent before execution: class, gaps, specificity, and abstain/proceed verdict",
+        "args": {"intent": "raw intent", "--agent": "agent caller mode", "--depth": "specificity demand"},
+        "output": "intent refinement JSON",
+        "tokens": "none",
+    },
+    "ops daemon research": {
+        "intent": "crawl a website, file, folder, or repo into the durable substrate: documents, chunks, STEM facts, vectors, graph artifacts, and daemon run index",
+        "args": {"target": "URL, search query, file, folder, or repo", "--project": "run label",
+                 "--max-pages": "web crawl bound", "--max-depth": "same-host BFS depth",
+                 "--embed-provider": "auto|ollama|openrouter-vl|deterministic|apple-local",
+                 "--login-if-needed": "allow human browser handoff when auth blocks crawl"},
+        "output": "indexed substrate run JSON; ok=false and exit 2 when crawl produces no documents/chunks",
+        "tokens": "none for crawl/facts/graph; embedding provider may consume local or configured embedding budget",
+    },
+    "ops daemon runs list": {
+        "intent": "list substrate research runs indexed into the daemon store for this repo tenant",
+        "args": {"--repo": "repo root"},
+        "output": "daemon run index rows with run_id, target, run_dir, indexed_at",
+        "tokens": "none",
+    },
+    "ops daemon runs get": {
+        "intent": "load the full manifest for one indexed daemon substrate research run",
+        "args": {"run_id": "indexed run id", "--repo": "repo root"},
+        "output": "stored substrate run manifest",
+        "tokens": "none",
     },
     "codebase index": {
         "intent": "(re)build the semantic codebase index: entities, relations, embeddings",
@@ -1291,6 +1337,14 @@ def manifest_command(args) -> int:
         return _render(m)
     print(json.dumps(m, indent=2, sort_keys=False))
     return 0
+
+
+def add_parser(sub) -> None:
+    p = sub.add_parser("manifest", help="machine-first capability contract")
+    p.add_argument("--json", action="store_true", help="structured output (default)")
+    p.add_argument("--render", action="store_true", help="render a human terminal view")
+    p.add_argument("--for-agent", action="store_true", help="emit compact agent-facing contract")
+    p.set_defaults(func=manifest_command)
 
 
 def _render(m: dict) -> int:

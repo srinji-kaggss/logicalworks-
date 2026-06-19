@@ -25,7 +25,7 @@ def _run(*args: str, timeout: int = 30) -> subprocess.CompletedProcess:
 def test_documented_shortcuts_are_registered():
     proc = _run("--help")
     assert proc.returncode == 0
-    for command in ("agent-os", "run", "context", "model-hub", "jarvis", "auth", "fetch"):
+    for command in ("agent-os", "run", "context", "model-hub", "jarvis", "auth", "fetch", "manifest"):
         assert command in proc.stdout
 
 
@@ -71,3 +71,29 @@ def test_context_accepts_documented_positional_run_dir(tmp_path: Path):
     payload = json.loads(proc.stdout)
     assert payload["ok"] is True
     assert Path(payload["path"]).exists()
+
+
+def test_manifest_shortcut_is_parseable_json():
+    proc = _run("manifest")
+    assert proc.returncode == 0, proc.stderr
+    payload = json.loads(proc.stdout)
+    assert payload["manifest"] == "lgwks.manifest.v0"
+    assert payload["verbs"]
+
+
+def test_route_map_uses_live_manifest_contract():
+    proc = _run("route", "map", "research a website and build graph", "--top", "3")
+    assert proc.returncode == 0, proc.stderr
+    payload = json.loads(proc.stdout)
+    assert payload["schema"] == "lgwks.map.v1"
+    assert payload["verb_count"] > 0
+    assert payload["matches"][0]["verb"] == "ops daemon research"
+    assert payload["matches"][0]["intent"] != "(no metadata)"
+
+
+def test_route_engine_dispatches_to_subconscious_engine():
+    proc = _run("route", "engine", "research a website and build graph", "--top", "3")
+    assert proc.returncode == 0, proc.stderr
+    payload = json.loads(proc.stdout)
+    assert payload["schema"] == "lgwks.engine.schema.v1"
+    assert payload["pathways"][0] == "ops daemon research"
