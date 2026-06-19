@@ -182,6 +182,7 @@
         "lgwks_schema",
         "lgwks_score",
         "lgwks_search",
+        "lgwks_search_engine",
         "lgwks_session",
         "lgwks_sign",
         "lgwks_site_profile",
@@ -399,6 +400,7 @@
         "lgwks_preview",
         "lgwks_public",
         "lgwks_search",
+        "lgwks_search_engine",
         "lgwks_site_profile",
         "lgwks_sites",
         "lgwks_substrate_crawl"
@@ -1274,9 +1276,9 @@
       "used_by": [
         "lgwks(dispatcher)",
         "lgwks_crawl",
-        "lgwks_extract",
         "lgwks_ingest",
         "lgwks_search",
+        "lgwks_search_engine",
         "lgwks_substrate",
         "lgwks_substrate_crawl",
         "lgwks_workflows"
@@ -1407,7 +1409,7 @@
       "has_cli": false,
       "has_tests": false,
       "integration": "integrated",
-      "last_commit_days": 2,
+      "last_commit_days": 0,
       "loc": 144,
       "owning_issue": null,
       "packet": null,
@@ -1711,7 +1713,7 @@
       "has_cli": true,
       "has_tests": true,
       "integration": "integrated",
-      "last_commit_days": 1,
+      "last_commit_days": 0,
       "loc": 1223,
       "owning_issue": null,
       "packet": null,
@@ -1989,17 +1991,17 @@
     "lgwks_extract": {
       "deps": [
         "lgwks_auth_runtime",
-        "lgwks_browser",
         "lgwks_capabilities",
         "lgwks_html",
+        "lgwks_search_engine",
         "lgwks_sites",
         "lgwks_substrate_config"
       ],
       "has_cli": false,
       "has_tests": true,
       "integration": "integrated",
-      "last_commit_days": 3,
-      "loc": 318,
+      "last_commit_days": 1,
+      "loc": 324,
       "owning_issue": null,
       "packet": null,
       "purpose": "ingest every file format \u2192 text. The \"read anything\" port.",
@@ -2008,9 +2010,9 @@
       "used_by": [
         "lgwks_dsl",
         "lgwks_files",
-        "lgwks_ground",
         "lgwks_input",
-        "lgwks_search"
+        "lgwks_search",
+        "lgwks_search_engine"
       ]
     },
     "lgwks_fabric_projection": {
@@ -2247,7 +2249,7 @@
       "has_cli": false,
       "has_tests": true,
       "integration": "integrated",
-      "last_commit_days": 7,
+      "last_commit_days": 0,
       "loc": 1207,
       "owning_issue": null,
       "packet": null,
@@ -2264,15 +2266,14 @@
     "lgwks_ground": {
       "deps": [
         "lgwks_cache",
-        "lgwks_extract",
-        "lgwks_search",
+        "lgwks_search_engine",
         "lgwks_urlrisk"
       ],
       "has_cli": false,
       "has_tests": false,
       "integration": "integrated",
-      "last_commit_days": 15,
-      "loc": 165,
+      "last_commit_days": 1,
+      "loc": 144,
       "owning_issue": null,
       "packet": null,
       "purpose": "fused live grounding for the research loop (#9 / harness layer).",
@@ -2724,7 +2725,7 @@
       "has_cli": true,
       "has_tests": false,
       "integration": "integrated",
-      "last_commit_days": 2,
+      "last_commit_days": 0,
       "loc": 1370,
       "owning_issue": null,
       "packet": null,
@@ -2817,8 +2818,8 @@
       "has_cli": false,
       "has_tests": true,
       "integration": "integrated",
-      "last_commit_days": 3,
-      "loc": 291,
+      "last_commit_days": 1,
+      "loc": 339,
       "owning_issue": null,
       "packet": null,
       "purpose": "model law rendered as a single queryable manifest (#119).",
@@ -2827,6 +2828,7 @@
       "used_by": [
         "lgwks_model_hub",
         "lgwks_model_port",
+        "lgwks_search_engine",
         "scripts"
       ]
     },
@@ -3448,7 +3450,7 @@
       "has_cli": true,
       "has_tests": false,
       "integration": "integrated",
-      "last_commit_days": 3,
+      "last_commit_days": 0,
       "loc": 53,
       "owning_issue": null,
       "packet": null,
@@ -3495,6 +3497,7 @@
         "lgwks_pipeline",
         "lgwks_redact",
         "lgwks_research",
+        "lgwks_search_engine",
         "lgwks_substrate",
         "lgwks_substrate_run",
         "lgwks_substrate_vector"
@@ -3559,10 +3562,34 @@
       "used_by": [
         "lgwks_daemon",
         "lgwks_do",
-        "lgwks_ground",
         "lgwks_home",
         "lgwks_run",
+        "lgwks_search_engine",
         "lgwks_workflows"
+      ]
+    },
+    "lgwks_search_engine": {
+      "deps": [
+        "lgwks_browser",
+        "lgwks_extract",
+        "lgwks_model_mesh",
+        "lgwks_run",
+        "lgwks_search",
+        "lgwks_substrate_io"
+      ],
+      "has_cli": false,
+      "has_tests": false,
+      "integration": "integrated",
+      "last_commit_days": 1,
+      "loc": 126,
+      "owning_issue": null,
+      "packet": null,
+      "purpose": "the 'Web Browser for AIs'.",
+      "staleness": "active",
+      "subsystem": "Research / web acquisition / extract",
+      "used_by": [
+        "lgwks_extract",
+        "lgwks_ground"
       ]
     },
     "lgwks_session": {
@@ -3903,6 +3930,7 @@
         "lgwks_geoexpr",
         "lgwks_ingest",
         "lgwks_run",
+        "lgwks_search_engine",
         "lgwks_storage",
         "lgwks_substrate",
         "lgwks_substrate_run",
@@ -4601,15 +4629,15 @@
   "totals": {
     "by_integration": {
       "cli_only": 4,
-      "integrated": 171,
+      "integrated": 172,
       "unreferenced": 5
     },
     "by_staleness": {
-      "active": 172,
+      "active": 173,
       "orphan": 3,
       "staling": 5
     },
-    "loc": 60462,
-    "modules": 180
+    "loc": 60621,
+    "modules": 181
   }
 }
