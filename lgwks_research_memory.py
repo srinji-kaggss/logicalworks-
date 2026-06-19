@@ -1,9 +1,8 @@
-"""Read-only recall adapter for the unified cross-repo agent brain.
+"""Read-only recall adapter for the unified cross-repo codebase brain.
 
 The project memory chain in ``lgwks_memory`` is append-only per project. This
-module is different: it treats the operator's multimodal ingestion database as
-prior context for research orchestration. Reads are best-effort and never mutate
-the source database.
+module is different: it treats the operator's multimodal ingestion database as a
+compressed codebase map. Reads are best-effort and never mutate the source DB.
 """
 
 from __future__ import annotations
@@ -125,7 +124,7 @@ def recall(
     per_table_limit: int = 300,
     snippet_chars: int = 420,
 ) -> dict[str, Any]:
-    """Return deterministic lexical recall from the unified brain DB.
+    """Return deterministic lexical recall from the unified codebase brain DB.
 
     This intentionally starts with transparent lexical scoring instead of opaque
     embedding assumptions because the DB may contain heterogeneous embedding
@@ -236,17 +235,17 @@ def brain_command(args: argparse.Namespace) -> int:
 
 
 def add_parser(sub) -> None:
-    p = sub.add_parser("brain", help="cross-repo unified agent brain recall")
+    p = sub.add_parser("brain", help="read-only compressed codebase brain recall")
     brain = p.add_subparsers(dest="brain_command", required=True)
 
     recall_p = brain.add_parser("recall", help="recall prior context for a query")
     recall_p.add_argument("query", nargs="+")
-    recall_p.add_argument("--db", default="", help="override unified brain SQLite path")
+    recall_p.add_argument("--db", default="", help="override unified codebase brain SQLite path")
     recall_p.add_argument("--limit", type=int, default=8)
     recall_p.add_argument("--json", action="store_true")
     recall_p.set_defaults(func=brain_command)
 
-    stats_p = brain.add_parser("stats", help="show unified brain table counts")
-    stats_p.add_argument("--db", default="", help="override unified brain SQLite path")
+    stats_p = brain.add_parser("stats", help="show unified codebase brain table counts")
+    stats_p.add_argument("--db", default="", help="override unified codebase brain SQLite path")
     stats_p.add_argument("--json", action="store_true")
     stats_p.set_defaults(func=brain_command)

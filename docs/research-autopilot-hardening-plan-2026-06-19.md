@@ -12,19 +12,19 @@ Use the airplane analogy as the architecture boundary:
 
 The immediate failure was concrete: `do research` could return a successful process
 exit even when substrate produced zero documents/chunks, and research did not route
-the unified cross-repo brain before searching.
+the compressed cross-repo codebase map before searching.
 
 ## Fix Landed In This Pass
 
-- Added `lgwks_research_memory.py`, a read-only adapter over
+- Added `lgwks_research_memory.py`, a read-only adapter over the compressed codebase map at
   `/Users/srinji/ingestion_results/unified_agent_brain_multimodal.db`.
-- Added `lgwks state brain stats|recall` so prior context can be inspected directly.
+- Added `lgwks state brain stats|recall` so codebase prior context can be inspected directly.
 - Added a `brain:recall` phase to `lgwks do research`, enabled by default.
 - Added `--brain-db`, `--recall-limit`, and `--no-brain-recall` controls.
 - Made `do research` fail closed when substrate returns no materialized documents or chunks.
-- Added tests for unified-brain recall, integrated research recall, and empty-crawl fail-closed behavior.
+- Added tests for read-only codebase-brain recall, integrated research recall, and empty-crawl fail-closed behavior.
 
-Observed local brain state on 2026-06-19:
+Observed local compressed-codebase DB state on 2026-06-19:
 
 - `research`: 0 rows
 - `chronicle`: 262 rows
@@ -32,8 +32,10 @@ Observed local brain state on 2026-06-19:
 - `intelligence`: 102 rows
 - `perception`: 1234 rows
 
-That means recall must currently query non-research tables. A future writeback path
-must populate `research` after each run.
+Invariant: `/Users/srinji/ingestion_results/unified_agent_brain_multimodal.db`
+is a read-only compressed codebase map for LGWKS runtime purposes. Do not use it as
+the operational research memory store, and do not write fresh research runs into it.
+Research writeback needs a separate LGWKS-owned research ledger/index.
 
 ## Firecrawl Hardening Notes To Preserve
 
@@ -55,21 +57,24 @@ Important design signals from that export:
 For any serious `research` command, LGWKS must emit:
 
 - Intent: original prompt, refined objective, assumptions, and unresolved questions.
-- Prior context: unified brain hits, matched terms, missing terms, and provenance.
+- Prior context: read-only codebase-brain hits, matched terms, missing terms, and provenance.
 - Search plan: provider list, query DAG, source budget, diversity policy, and stop rule.
 - Evidence ledger: every source considered, every source accepted, every source rejected, and why.
 - Synthesis: claims tied to evidence ids, with abstentions where coverage is weak.
 - Writeback: durable embeddings/summaries for future recall.
 - Mayday alarms: explicit degraded verdicts for empty crawls, low source count, missing
-  prior-context routing, no writeback, citation gaps, or provider collapse.
+  prior-context routing, no research-ledger writeback, citation gaps, or provider collapse.
 
 ## Next Fix Sequence
 
 1. Research writeback
-   - After every substrate/research run, insert summaries into the `research` table with
-     `filepath`, `type`, `dense_summary`, `content_hash`, `metadata`, and `timestamp`.
+   - After every substrate/research run, write summaries into a separate LGWKS-owned
+     research ledger/index, not the unified compressed-codebase DB.
+   - Required fields: source ids, dense summaries, content hashes, provider metadata,
+     query DAG node id, timestamps, and embedding/vector metadata.
    - Acceptance: repeat the same metacognition prompt and verify the second run recalls
-     prior research rows, not only generic `intelligence` rows.
+     prior research-run rows from the LGWKS research ledger while the unified DB remains
+     unchanged.
 
 2. Daemon routing
    - Ensure `lgwks do research` and `lgwks research --deep` emit daemon events and index
@@ -125,5 +130,7 @@ Then inspect these files in order:
 - `lgwks_search.py`
 - `docs/research-autopilot-hardening-plan-2026-06-19.md`
 
-Do not start by refactoring. First preserve the fail-closed contract and the
-prior-context routing. The next smallest high-leverage patch is research writeback.
+Do not start by refactoring. First preserve the fail-closed contract, keep the
+unified compressed-codebase DB read-only, and preserve prior-context routing. The
+next smallest high-leverage patch is research writeback into a separate LGWKS
+research ledger/index.

@@ -1,6 +1,6 @@
 # NAVMAP — lgwks module atlas (generated; do not hand-edit)
 
-> `scripts/gen_navmap.py` from source — re-run to refresh. **182 modules · 61,028 LOC.** This is the canonical repo map: if someone says "review the map" or "check the navmap", they mean this file unless another map is explicitly named. Read/query this FIRST. Strict machine-readable contract: `docs/navmap/index.json` (`lgwks.navmap.v1`).
+> `scripts/gen_navmap.py` from source — re-run to refresh. **182 modules · 61,027 LOC.** This is the canonical repo map: if someone says "review the map" or "check the navmap", they mean this file unless another map is explicitly named. Read/query this FIRST. Strict machine-readable contract: `docs/navmap/index.json` (`lgwks.navmap.v1`).
 
 **Staleness:** `active` 174 · `orphan` 3 · `staling` 5
 
@@ -107,12 +107,12 @@ Row legend: `cli` `test` · `←N` imported by N · `→N` imports N · `Nd` day
 |---|---|---|---|---|
 | `hooks.claude_scope_guard_hook` | Claude PreToolUse hook — blocks scope creep. | 126 | active | test ←8 →2 1d |
 | `hooks.claude_stop_hook` | Claude Stop hook — reads JSONL transcript tail and emits transcript_turn events. | 88 | active | test ←8 →3 6d |
-| `hooks.claude_tool_hook` | Claude PostToolUse hook — emits tool_call events to the daemon store. | 77 | active | test ←8 →2 5d |
+| `hooks.claude_tool_hook` | Claude PostToolUse hook — emits tool_call events to the daemon store. | 77 | active | test ←8 →2 6d |
 | `hooks.claude_why_hook` | Claude PostToolUse hook — nudges for //why annotations. | 85 | active | test ←8 →2 1d |
-| `hooks.codex_inbound` | Codex ingress adapter — thin daemon event emitter for OpenAI Codex CLI hooks. | 70 | active | test ←8 →2 5d |
+| `hooks.codex_inbound` | Codex ingress adapter — thin daemon event emitter for OpenAI Codex CLI hooks. | 70 | active | test ←8 →2 6d |
 | `hooks.gemini_inbound` | Gemini ingress adapter — thin daemon event emitter for Google Gemini CLI hooks. | 77 | active | test ←8 →2 6d |
 | `hooks.lgwks_subconscious_hook` | vendor-agnostic agent observer. | 146 | active | test ←8 →2 1d |
-| `hooks.subconscious_inbound` | Second-harness U7 — subconscious inbound tap (UserPromptSubmit hook). | 115 | active | test ←8 →3 5d |
+| `hooks.subconscious_inbound` | Second-harness U7 — subconscious inbound tap (UserPromptSubmit hook). | 115 | active | test ←8 →3 6d |
 | `lgwks_agent_os` | fleet startup/bootstrap helpers for the Logical Works prompt layer (#1). | 553 | active | cli test ←2 →2 0d |
 | `lgwks_algorithms` | L4 narrow-ML catalog (semantic-escalation-harness stage L4). | 190 | active | test ←1 4d |
 | `lgwks_capabilities` | the resolver that fixes "the tool isn't where it should be." | 268 | active | ←6 13d |
@@ -122,7 +122,7 @@ Row legend: `cli` `test` · `←N` imported by N · `→N` imports N · `Nd` day
 | `lgwks_daemon_event` | normalized daemon event envelope for shared referee runtime. | 373 | active | cli test ←6 →3 3d |
 | `lgwks_daemon_export` | content-addressed archive/export tier for daemon runs. | 158 | active | test ←1 →1 4d |
 | `lgwks_daemon_store` | durable event log + work queue for the daemon referee runtime. | 1039 | active | test ←4 →3 2d |
-| `lgwks_do` | unified orchestrator: code, research, govern, cleanup, ship. | 588 | active | cli ←4 →12 3d |
+| `lgwks_do` | unified orchestrator: code, research, govern, cleanup, ship. | 588 | active | cli ←4 →12 0d |
 | `lgwks_dsl` | lightweight Ruby-like DSL for workflow orchestration. | 141 | active | cli ←1 →1 0d |
 | `lgwks_engine` | U6: Subconscious Engine (deterministic first slice). | 509 | active | cli test ←4 →7 3d |
 | `lgwks_ground` | fused live grounding for the research loop (#9 / harness layer). | 144 | active | ←2 →3 2d |
@@ -179,7 +179,7 @@ Row legend: `cli` `test` · `←N` imported by N · `→N` imports N · `Nd` day
 | `lgwks_model_port` | the one runtime gateway every cognition request flows through. | 300 | active | test ←10 →6 3d |
 | `lgwks_run` | the post-gate execution spine (Issue #7, ADR-001). | 897 | active | cli ←13 →13 0d |
 | `lgwks_sign` | keyed integrity for the run log, the vault chain, and gate verdicts (Issue #7). | 53 | active | ←9 18d |
-| `lgwks_storage` | D4 Three-Syscall Storage Gate (ADR-068). | 837 | active | test ←6 →8 3d |
+| `lgwks_storage` | D4 Three-Syscall Storage Gate (ADR-068). | 837 | active | test ←6 →8 4d |
 | `lgwks_urlrisk` | G3 scope curator (Issue #7, ADR-001 §5, constitution L9). | 244 | active | ←1 →1 4d |
 | `lgwks_verify` | the Verifier oracle (spec-01), hardened with provenance tracking. | 327 | active | cli test ←6 1d |
 | `lgwks_voice_event` | speech ingress, never a gate bypass (#123). | 151 | staling | test →2 5d |
@@ -208,7 +208,7 @@ Row legend: `cli` `test` · `←N` imported by N · `→N` imports N · `Nd` day
 | `lgwks_schema` | schema registry for next-agent discovery. | 283 | active | cli test ←7 6d |
 | `lgwks_sqlite` | Shared SQLite connection hardening for lgwks durable stores. | 299 | active | ←12 3d |
 | `lgwks_substrate` | thin facade re-exporting all substrate sub-modules. | 223 | active | test ←7 →11 0d |
-| `lgwks_substrate_config` | constants, paths, regexes, and shared types for substrate runs. | 109 | active | ←22 3d |
+| `lgwks_substrate_config` | constants, paths, regexes, and shared types for substrate runs. | 109 | active | ←22 4d |
 | `lgwks_substrate_io` | file system I/O, JSONL/JSON emission, and manifest loading. | 145 | active | ←13 →2 3d |
 | `lgwks_substrate_text` | text processing: chunking, scoring, stemming, fact extraction. | 137 | active | ←5 →1 10d |
 | `lgwks_substrate_vector` | vector search, vector space identity, and cross-space guards. | 253 | active | ←2 →3 10d |
@@ -235,7 +235,7 @@ Row legend: `cli` `test` · `←N` imported by N · `→N` imports N · `Nd` day
 | `scripts.gen_navmap` | relational + staleness module atlas for AI navigation (stdlib only). | 354 | active | cli ←5 6d |
 | `scripts.setup_models` | setup_models.py — one-time developer script to download and convert models. | 248 | active | ←5 →1 3d |
 
-## Unclassified (triage)  ·  24 mod · 3,942 LOC
+## Unclassified (triage)  ·  24 mod · 3,941 LOC
 
 | module | purpose | loc | stale | rel |
 |---|---|---|---|---|
@@ -246,7 +246,7 @@ Row legend: `cli` `test` · `←N` imported by N · `→N` imports N · `Nd` day
 | `lgwks_config` | validated YAML config surface (lgwks.config.v1). | 133 | active | test ←3 4d |
 | `lgwks_cortex` | the Transcript Cortex (PRD-06 U5). | 195 | active | ←2 →7 4d |
 | `lgwks_fabric_projection` | the universal projection seam for the State Fabric. | 122 | active | ←1 →2 4d |
-| `lgwks_fabric_reader` | the unified read surface over the State Fabric. | 88 | active | test ←1 →2 3d |
+| `lgwks_fabric_reader` | the unified read surface over the State Fabric. | 88 | active | test ←1 →2 4d |
 | `lgwks_hashing` | the single source of truth for content hashing. | 88 | active | test ←41 4d |
 | `lgwks_inline` | unified payload-inlining resolver. | 136 | active | test ←8 4d |
 | `lgwks_jailbreak` | entrypoint injection-risk sensor + abstention verdict. | 174 | active | ←2 →1 3d |
@@ -257,7 +257,7 @@ Row legend: `cli` `test` · `←N` imported by N · `→N` imports N · `Nd` day
 | `lgwks_reasoning_port` | runtime-neutral DEEP-REASONING seam. | 150 | active | test ←2 →1 3d |
 | `lgwks_redact` | the single source of truth for credential redaction. | 33 | active | ←3 4d |
 | `lgwks_research` | autonomous deep-research loop (Issue #9, parent #7). | 831 | active | cli ←3 →9 3d |
-| `lgwks_research_memory` | Read-only recall adapter for the unified cross-repo agent brain. | 253 | active | cli test ←2 →1 |
+| `lgwks_research_memory` | Read-only recall adapter for the unified cross-repo codebase brain. | 252 | active | cli test ←2 →1 0d |
 | `lgwks_tokenizer` | the Aetherius Neural Tokenizer (ANT). | 217 | active | ←2 →1 3d |
 | `lgwks_transcript` | tail-reader utility for Claude Code JSONL transcript files. | 144 | active | ←2 4d |
 | `lgwks_transform` | minimal JSONPath/GJSON-like extractor (Issue 159). | 39 | active | ←1 4d |

@@ -550,9 +550,9 @@ def add_parser(sub) -> None:
     research.add_argument("query", nargs="?", default="", help="research query string")
     research.add_argument("--depth", type=int, default=1, help="research depth")
     research.add_argument("--model", default="", help="model override")
-    research.add_argument("--brain-db", default="", help="override unified brain SQLite path")
+    research.add_argument("--brain-db", default="", help="override unified codebase brain SQLite path")
     research.add_argument("--recall-limit", type=int, default=8, help="prior-context hits to attach")
-    research.add_argument("--no-brain-recall", action="store_true", help="skip unified brain prior-context recall")
+    research.add_argument("--no-brain-recall", action="store_true", help="skip unified codebase brain prior-context recall")
     research.add_argument("--json", action="store_true", help="structured DoRun JSON output")
     research.set_defaults(func=do_command)
 
