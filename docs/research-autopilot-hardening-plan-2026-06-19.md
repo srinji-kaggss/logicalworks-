@@ -11,35 +11,19 @@ Use the airplane analogy as the architecture boundary:
 - Keel: assurance discipline. Requirements, design, code, tests, traceability, and regression evidence.
 
 The immediate failure was concrete: `do research` could return a successful process
-exit even when substrate produced zero documents/chunks, and research did not route
-the compressed cross-repo codebase map before searching.
+exit even when substrate produced zero documents/chunks.
 
 ## Fix Landed In This Pass
 
-- Added `lgwks_research_memory.py`, a read-only adapter over the compressed codebase map at
-  `/Users/srinji/ingestion_results/unified_agent_brain_multimodal.db`.
-- Added `lgwks state brain stats|recall` so codebase prior context can be inspected directly
-  when a DB path is explicitly supplied.
-- Added a `brain:recall` phase to `lgwks do research`; it skips unless `--brain-db`
-  or `LGWKS_AGENT_BRAIN_DB` is configured.
-- Added `--brain-db`, `--recall-limit`, and `--no-brain-recall` controls.
 - Made `do research` fail closed when substrate returns no materialized documents or chunks.
-- Added tests for read-only codebase-brain recall, integrated research recall, and empty-crawl fail-closed behavior.
+- Added tests for empty-crawl fail-closed behavior.
 
-Observed local compressed-codebase DB state on 2026-06-19:
+Related system boundary observed on 2026-06-19:
 
-- `research`: 0 rows
-- `chronicle`: 262 rows
-- `timeline`: 365 rows
-- `intelligence`: 102 rows
-- `perception`: 1234 rows
-
-Invariant: `/Users/srinji/ingestion_results/unified_agent_brain_multimodal.db`
-is a live, cron-owned, read-only compressed codebase map for LGWKS runtime purposes.
-LGWKS must not assume it owns that DB, must not write fresh research runs into it,
-and must not touch it by default. Use it only when the operator explicitly passes
-`--db`, `--brain-db`, or `LGWKS_AGENT_BRAIN_DB`. Research writeback needs a separate
-LGWKS-owned research ledger/index.
+`/Users/srinji/ingestion_results/unified_agent_brain_multimodal.db` is owned by
+the independent unified-brain ingestion cron job. LGWKS must not depend on it,
+configure it, or write into it. Research writeback needs a separate LGWKS-owned
+research ledger/index.
 
 ## Firecrawl Hardening Notes To Preserve
 
@@ -61,7 +45,7 @@ Important design signals from that export:
 For any serious `research` command, LGWKS must emit:
 
 - Intent: original prompt, refined objective, assumptions, and unresolved questions.
-- Prior context: read-only codebase-brain hits, matched terms, missing terms, and provenance.
+- Prior context: LGWKS-owned research ledger hits, matched terms, missing terms, and provenance.
 - Search plan: provider list, query DAG, source budget, diversity policy, and stop rule.
 - Evidence ledger: every source considered, every source accepted, every source rejected, and why.
 - Synthesis: claims tied to evidence ids, with abstentions where coverage is weak.
@@ -73,12 +57,11 @@ For any serious `research` command, LGWKS must emit:
 
 1. Research writeback
    - After every substrate/research run, write summaries into a separate LGWKS-owned
-     research ledger/index, not the unified compressed-codebase DB.
+     research ledger/index.
    - Required fields: source ids, dense summaries, content hashes, provider metadata,
      query DAG node id, timestamps, and embedding/vector metadata.
    - Acceptance: repeat the same metacognition prompt and verify the second run recalls
-     prior research-run rows from the LGWKS research ledger while the unified DB remains
-     unchanged.
+     prior research-run rows from the LGWKS research ledger.
 
 2. Daemon routing
    - Ensure `lgwks do research` and `lgwks research --deep` emit daemon events and index
@@ -121,20 +104,17 @@ Start with these commands:
 cd /Users/srinji/logicalworks-
 git status --short --branch
 sed -n '1,220p' docs/navmap/README.md
-./lgwks state brain stats --json --db /path/to/explicit/codebase-map.db
-pytest -q tests/test_research_memory.py tests/test_daemon.py
+pytest -q tests/test_daemon.py
 ```
 
 Then inspect these files in order:
 
-- `lgwks_research_memory.py`
 - `lgwks_do.py`
 - `lgwks_research.py`
 - `lgwks_daemon.py`
 - `lgwks_search.py`
 - `docs/research-autopilot-hardening-plan-2026-06-19.md`
 
-Do not start by refactoring. First preserve the fail-closed contract, keep the
-unified compressed-codebase DB read-only, and preserve prior-context routing. The
-next smallest high-leverage patch is research writeback into a separate LGWKS
-research ledger/index.
+Do not start by refactoring. First preserve the fail-closed contract. The next
+smallest high-leverage patch is research writeback into a separate LGWKS research
+ledger/index. The unified-brain ingestion DB remains out of scope for LGWKS.

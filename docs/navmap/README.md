@@ -1,8 +1,8 @@
 # NAVMAP — lgwks module atlas (generated; do not hand-edit)
 
-> `scripts/gen_navmap.py` from source — re-run to refresh. **182 modules · 61,051 LOC.** This is the canonical repo map: if someone says "review the map" or "check the navmap", they mean this file unless another map is explicitly named. Read/query this FIRST. Strict machine-readable contract: `docs/navmap/index.json` (`lgwks.navmap.v1`).
+> `scripts/gen_navmap.py` from source — re-run to refresh. **181 modules · 60,733 LOC.** This is the canonical repo map: if someone says "review the map" or "check the navmap", they mean this file unless another map is explicitly named. Read/query this FIRST. Strict machine-readable contract: `docs/navmap/index.json` (`lgwks.navmap.v1`).
 
-**Staleness:** `active` 174 · `orphan` 3 · `staling` 5
+**Staleness:** `active` 173 · `orphan` 3 · `staling` 5
 
 Rules — `active`: referenced by another module/dispatcher (static or dynamic), or a tested CLI verb <180d · `scaffolding`: no caller, owned by an open issue · `staling`: no caller anywhere, but built/tested or has a CLI verb, no issue (wire or retire) · `orphan`: no caller, no tests, no CLI, no issue (deletion candidate).
 
@@ -32,7 +32,7 @@ Row legend: `cli` `test` · `←N` imported by N · `→N` imports N · `Nd` day
 | `lgwks_inbound` | L5 consumer pack: RRF fusion + token-budgeted reflex envelope (I7). | 371 | active | cli test ←3 →4 6d |
 | `lgwks_input` | universal input handler (lgwks.modality.item.v1). | 530 | active | ←1 →2 4d |
 | `lgwks_pipeline` | unified ingestion and ranking spine. | 1328 | active | cli test ←1 →17 3d |
-| `lgwks_promote` | audited tenant→world promotion (ARCH L5, I8-hardening #89). | 146 | active | ←3 →3 6d |
+| `lgwks_promote` | audited tenant→world promotion (ARCH L5, I8-hardening #89). | 146 | active | ←3 →3 7d |
 | `lgwks_rank` | cubic node centrality (Z-eigenpair) + AI-discrepancy δ (I6). | 541 | active | cli test ←3 →1 3d |
 | `lgwks_score` | deterministic schema scoring: RESCAL order-3 · R_k · MDL (I5). | 382 | active | cli test ←2 3d |
 | `lgwks_vector` | vector-space + cid contract (lgwks.vector.record.v1). | 550 | active | ←11 →3 1d |
@@ -71,7 +71,7 @@ Row legend: `cli` `test` · `←N` imported by N · `→N` imports N · `Nd` day
 | `lgwks_bot_slop_math` | U6: deterministic structural slop-detection bots (S1–S6). | 586 | active | test ←1 →2 3d |
 | `lgwks_bot_stress` | U8: Concurrent Stress Bot. | 307 | active | test ←1 →1 3d |
 | `lgwks_cohere` | Coherence Engine pipeline (spec-00). | 170 | active | cli test ←1 →5 3d |
-| `lgwks_debug` | automated debugging: turn "it's broken" into "here's why + next step." | 510 | active | cli test ←1 →2 3d |
+| `lgwks_debug` | automated debugging: turn "it's broken" into "here's why + next step." | 510 | active | cli test ←1 →2 4d |
 | `lgwks_surprise` | the Surprise Detection Loop (Phase 1 Hardening). | 81 | staling | cli →1 4d |
 
 ## Axiom byte framework  ·  8 mod · 1,757 LOC
@@ -101,7 +101,7 @@ Row legend: `cli` `test` · `←N` imported by N · `→N` imports N · `Nd` day
 | `lgwks_repo` | repo lifecycle commands: audit, recover, cleanup, merge, handoff, graph. | 756 | active | cli test ←6 →7 3d |
 | `lgwks_review` | graph-aware, spec-bound code review. | 665 | active | cli test ←3 →10 3d |
 
-## Harness / daemon / orchestration  ·  42 mod · 13,831 LOC
+## Harness / daemon / orchestration  ·  42 mod · 13,789 LOC
 
 | module | purpose | loc | stale | rel |
 |---|---|---|---|---|
@@ -122,7 +122,7 @@ Row legend: `cli` `test` · `←N` imported by N · `→N` imports N · `Nd` day
 | `lgwks_daemon_event` | normalized daemon event envelope for shared referee runtime. | 373 | active | cli test ←6 →3 3d |
 | `lgwks_daemon_export` | content-addressed archive/export tier for daemon runs. | 158 | active | test ←1 →1 4d |
 | `lgwks_daemon_store` | durable event log + work queue for the daemon referee runtime. | 1039 | active | test ←4 →3 2d |
-| `lgwks_do` | unified orchestrator: code, research, govern, cleanup, ship. | 588 | active | cli ←4 →12 0d |
+| `lgwks_do` | unified orchestrator: code, research, govern, cleanup, ship. | 546 | active | cli ←4 →11 0d |
 | `lgwks_dsl` | lightweight Ruby-like DSL for workflow orchestration. | 141 | active | cli ←1 →1 0d |
 | `lgwks_engine` | U6: Subconscious Engine (deterministic first slice). | 509 | active | cli test ←4 →7 3d |
 | `lgwks_ground` | fused live grounding for the research loop (#9 / harness layer). | 144 | active | ←2 →3 2d |
@@ -145,7 +145,7 @@ Row legend: `cli` `test` · `←N` imported by N · `→N` imports N · `Nd` day
 | `lgwks_tongue` | the Tongue: an optional OpenRouter LLM compiles hypotheses + the elimination | 236 | active | ←3 →1 3d |
 | `lgwks_workercap` | computed worker-slot ceiling from a probed host profile. | 99 | active | ←4 17d |
 | `lgwks_workflow_aetherius` | the autonomous intelligence kernel. | 156 | active | cli ←1 →5 4d |
-| `lgwks_workflow_trigger` | event-chain grammar for latent workflows (#121). | 194 | staling | test →1 5d |
+| `lgwks_workflow_trigger` | event-chain grammar for latent workflows (#121). | 194 | staling | test →1 6d |
 | `lgwks_workflows` | unified AI workflow harness. | 1210 | active | cli ←3 →18 0d |
 
 ## Membrane / intent / steering  ·  11 mod · 3,328 LOC
@@ -190,7 +190,7 @@ Row legend: `cli` `test` · `←N` imported by N · `→N` imports N · `Nd` day
 | module | purpose | loc | stale | rel |
 |---|---|---|---|---|
 | `lgwks_foundation` | T3 structured extraction via Apple Foundation Models (macOS 26+, on-device). | 200 | active | cli ←2 10d |
-| `lgwks_gh` | GitHub surface: issues, PRs, state maps, hardening, deterministic "what's next". | 899 | active | cli test ←2 →3 3d |
+| `lgwks_gh` | GitHub surface: issues, PRs, state maps, hardening, deterministic "what's next". | 899 | active | cli test ←2 →3 4d |
 | `lgwks_home` | the launcher. Type `lgwks` (bare) and the whole thing pops up. | 964 | active | test ←4 →9 3d |
 | `lgwks_manifest` | the machine-first contract. `lgwks manifest` → one JSON blob an AGENT reads instead | 1370 | active | cli ←7 →5 0d |
 | `lgwks_ui` | our own terminal visual language. Deliberately NOT Claude Code. | 117 | active | ←20 13d |
@@ -203,13 +203,13 @@ Row legend: `cli` `test` · `←N` imported by N · `→N` imports N · `Nd` day
 | `lgwks_cache` | the UNTRUSTED-CACHE store (build #2, z2 evidence / z4 quarantine). | 114 | active | ←2 →1 4d |
 | `lgwks_capture` | unified operator-facing capture compiler over substrate + portal. | 183 | active | cli test ←1 →3 4d |
 | `lgwks_cognition` | the COGNITION-LOG store (build #2, z4 core). | 190 | active | ←7 →3 2d |
-| `lgwks_memory` | deterministic project memory chain (hardened, build #3). | 272 | active | cli test ←4 →6 3d |
+| `lgwks_memory` | deterministic project memory chain (hardened, build #3). | 272 | active | cli test ←3 →6 3d |
 | `lgwks_project_artifacts` | shared schemas, JSONL writers, record builders, | 1159 | active | ←11 →3 1d |
 | `lgwks_schema` | schema registry for next-agent discovery. | 283 | active | cli test ←7 6d |
 | `lgwks_sqlite` | Shared SQLite connection hardening for lgwks durable stores. | 299 | active | ←12 3d |
 | `lgwks_substrate` | thin facade re-exporting all substrate sub-modules. | 223 | active | test ←7 →11 0d |
 | `lgwks_substrate_config` | constants, paths, regexes, and shared types for substrate runs. | 109 | active | ←22 4d |
-| `lgwks_substrate_io` | file system I/O, JSONL/JSON emission, and manifest loading. | 145 | active | ←13 →2 3d |
+| `lgwks_substrate_io` | file system I/O, JSONL/JSON emission, and manifest loading. | 145 | active | ←13 →2 4d |
 | `lgwks_substrate_text` | text processing: chunking, scoring, stemming, fact extraction. | 137 | active | ←5 →1 10d |
 | `lgwks_substrate_vector` | vector search, vector space identity, and cross-space guards. | 253 | active | ←2 →3 10d |
 | `lgwks_tokenizer_registry` | tokenizer/analyzer identity registry. | 190 | active | test ←2 →1 4d |
@@ -235,7 +235,7 @@ Row legend: `cli` `test` · `←N` imported by N · `→N` imports N · `Nd` day
 | `scripts.gen_navmap` | relational + staleness module atlas for AI navigation (stdlib only). | 354 | active | cli ←5 6d |
 | `scripts.setup_models` | setup_models.py — one-time developer script to download and convert models. | 248 | active | ←5 →1 3d |
 
-## Unclassified (triage)  ·  24 mod · 3,965 LOC
+## Unclassified (triage)  ·  23 mod · 3,689 LOC
 
 | module | purpose | loc | stale | rel |
 |---|---|---|---|---|
@@ -250,16 +250,15 @@ Row legend: `cli` `test` · `←N` imported by N · `→N` imports N · `Nd` day
 | `lgwks_hashing` | the single source of truth for content hashing. | 88 | active | test ←41 4d |
 | `lgwks_inline` | unified payload-inlining resolver. | 136 | active | test ←8 4d |
 | `lgwks_jailbreak` | entrypoint injection-risk sensor + abstention verdict. | 174 | active | ←2 →1 3d |
-| `lgwks_lexicon` | the one canonical LEXICAL analyzer (word / identifier tokenisation). | 66 | active | ←9 →1 3d |
+| `lgwks_lexicon` | the one canonical LEXICAL analyzer (word / identifier tokenisation). | 66 | active | ←8 →1 3d |
 | `lgwks_oriented` | the basement seam for the Structural Inference Framework (#172). | 186 | active | test ←1 3d |
 | `lgwks_phase` | canonical phase-result type and exit-code→verdict policy. | 43 | active | ←2 3d |
 | `lgwks_proc` | the single source of truth for safe subprocess invocation. | 41 | active | ←3 4d |
 | `lgwks_reasoning_port` | runtime-neutral DEEP-REASONING seam. | 150 | active | test ←2 →1 3d |
 | `lgwks_redact` | the single source of truth for credential redaction. | 33 | active | ←3 4d |
 | `lgwks_research` | autonomous deep-research loop (Issue #9, parent #7). | 831 | active | cli ←3 →9 3d |
-| `lgwks_research_memory` | Read-only recall adapter for the unified cross-repo codebase brain. | 276 | active | cli test ←2 →1 0d |
 | `lgwks_tokenizer` | the Aetherius Neural Tokenizer (ANT). | 217 | active | ←2 →1 3d |
 | `lgwks_transcript` | tail-reader utility for Claude Code JSONL transcript files. | 144 | active | ←2 4d |
 | `lgwks_transform` | minimal JSONPath/GJSON-like extractor (Issue 159). | 39 | active | ←1 4d |
 | `lgwks_vecmath` | the single source of truth for vector similarity math. | 82 | active | ←14 3d |
-| `scripts.build_model_mesh` | freeze the model law as a queryable manifest (#119). | 45 | active | ←5 →1 5d |
+| `scripts.build_model_mesh` | freeze the model law as a queryable manifest (#119). | 45 | active | ←5 →1 6d |

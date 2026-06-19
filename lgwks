@@ -55,7 +55,6 @@ def build_parser() -> argparse.ArgumentParser:
     t6_sub = t6.add_subparsers(dest="state_cmd", required=True)
     import lgwks_run; lgwks_run.add_parser(t6_sub)
     import lgwks_context; lgwks_context.add_parser(t6_sub)
-    import lgwks_research_memory; lgwks_research_memory.add_parser(t6_sub)
     import lgwks_spawn; lgwks_spawn.add_parser(t6_sub)
     import lgwks_crdt; lgwks_crdt.add_parser(t6_sub)
 

@@ -35,7 +35,7 @@ Used *only* for proposing solutions or final reasoning overflows.
 ## 3. The Ingestion Spine (Issues #228 - #231)
 The ingestion layer is undergoing a massive upgrade to unify world-knowledge and tenant-knowledge.
 *   **The Multi-Level Embedding (Issue #231)**: Ingestion is not just text. It requires L1 (Source), L2 (Logic), and L3 (Disassembly/Binary). This is why `Qwen3-VL` is excellent for text, but raw binary may require a specialized binary-foundation model in the future.
-*   **The Brain DB (Issue #230)**: `unified_agent_brain_multimodal.db` is the centralized, append-only world model. `lgwks_vector.py` and `EmbedPort` must route here, replacing isolated project-scoped stores.
+*   **Independent Unified Brain Index (Issue #230)**: `unified_agent_brain_multimodal.db` is owned by the ingestion pipeline in `/Users/srinji/ingestion_results`, not by LGWKS runtime code. `lgwks_vector.py` and `EmbedPort` must keep their own project/local store contracts; they must not route to the cron-owned unified index implicitly.
 *   **Canonical Primitives**: Operations like hashing, clock time, JSONL emission, and vector math have been centralized into `lgwks_hashing.py`, `lgwks_clock.py`, `lgwks_substrate_io.py`, and `lgwks_vecmath.py`. (Completed in PR #225).
 
 ## 4. The Harness & Daemon Orchestration
@@ -51,4 +51,4 @@ In my previous PR, I completely misunderstood the "Gate 1" concept and the "No E
 3.  **I bypassed the true architecture**: By jumping straight to Vision/Generative AI for tasks that the Symbolic/Deterministic layer (Rust crawler, ASTs, Axiom bytes) is perfectly capable of handling, I violated the fundamental law of the codebase.
 
 ## 6. Next Steps (Building, Not Refactoring)
-Now that I understand the true shape of the repo—the reliance on the Rust `crwl`, the Axiom byte framework, the 15-model mesh running locally via MLX, and the centralized `unified_agent_brain_multimodal.db`—I will focus on **wiring the existing components together** to close the ingestion gaps (Issues #228, #229, #230, #231) rather than refactoring working code with unauthorized external dependencies.
+Now that I understand the true shape of the repo—the reliance on the Rust `crwl`, the Axiom byte framework, the 15-model mesh running locally via MLX, and the independent unified-brain ingestion index—I will focus on **wiring LGWKS-owned components together** to close ingestion gaps without coupling LGWKS runtime storage to the cron-owned index.

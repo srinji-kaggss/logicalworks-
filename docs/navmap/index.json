@@ -176,7 +176,6 @@
         "lgwks_repl",
         "lgwks_repo",
         "lgwks_research",
-        "lgwks_research_memory",
         "lgwks_review",
         "lgwks_route",
         "lgwks_run",
@@ -441,7 +440,6 @@
         "lgwks_reasoning_port",
         "lgwks_redact",
         "lgwks_research",
-        "lgwks_research_memory",
         "lgwks_tokenizer",
         "lgwks_transcript",
         "lgwks_transform",
@@ -1802,7 +1800,7 @@
       "has_cli": true,
       "has_tests": true,
       "integration": "integrated",
-      "last_commit_days": 3,
+      "last_commit_days": 4,
       "loc": 510,
       "owning_issue": null,
       "packet": null,
@@ -1821,7 +1819,6 @@
         "lgwks_phase",
         "lgwks_refactor",
         "lgwks_repo",
-        "lgwks_research_memory",
         "lgwks_review",
         "lgwks_search",
         "lgwks_substrate",
@@ -1832,7 +1829,7 @@
       "has_tests": false,
       "integration": "integrated",
       "last_commit_days": 0,
-      "loc": 588,
+      "loc": 546,
       "owning_issue": null,
       "packet": null,
       "purpose": "unified orchestrator: code, research, govern, cleanup, ship.",
@@ -2205,7 +2202,7 @@
       "has_cli": true,
       "has_tests": true,
       "integration": "integrated",
-      "last_commit_days": 3,
+      "last_commit_days": 4,
       "loc": 899,
       "owning_issue": null,
       "packet": null,
@@ -2695,8 +2692,7 @@
         "lgwks_map",
         "lgwks_memory",
         "lgwks_portal",
-        "lgwks_query",
-        "lgwks_research_memory"
+        "lgwks_query"
       ]
     },
     "lgwks_machine": {
@@ -2791,8 +2787,7 @@
       "used_by": [
         "lgwks_aup",
         "lgwks_embed",
-        "lgwks_project_deploy",
-        "lgwks_research_memory"
+        "lgwks_project_deploy"
       ]
     },
     "lgwks_model_hub": {
@@ -3213,7 +3208,7 @@
       "has_cli": false,
       "has_tests": false,
       "integration": "integrated",
-      "last_commit_days": 6,
+      "last_commit_days": 7,
       "loc": 146,
       "owning_issue": null,
       "packet": null,
@@ -3416,25 +3411,6 @@
         "lgwks(dispatcher)",
         "lgwks_pipeline",
         "lgwks_tongue"
-      ]
-    },
-    "lgwks_research_memory": {
-      "deps": [
-        "lgwks_lexicon"
-      ],
-      "has_cli": true,
-      "has_tests": true,
-      "integration": "integrated",
-      "last_commit_days": 0,
-      "loc": 276,
-      "owning_issue": null,
-      "packet": null,
-      "purpose": "Read-only recall adapter for the unified cross-repo codebase brain.",
-      "staleness": "active",
-      "subsystem": "Unclassified (triage)",
-      "used_by": [
-        "lgwks(dispatcher)",
-        "lgwks_do"
       ]
     },
     "lgwks_review": {
@@ -3939,7 +3915,7 @@
       "has_cli": false,
       "has_tests": false,
       "integration": "integrated",
-      "last_commit_days": 3,
+      "last_commit_days": 4,
       "loc": 145,
       "owning_issue": null,
       "packet": null,
@@ -4418,7 +4394,7 @@
       "has_cli": false,
       "has_tests": true,
       "integration": "unreferenced",
-      "last_commit_days": 5,
+      "last_commit_days": 6,
       "loc": 194,
       "owning_issue": null,
       "packet": null,
@@ -4517,7 +4493,7 @@
       "has_cli": false,
       "has_tests": false,
       "integration": "integrated",
-      "last_commit_days": 5,
+      "last_commit_days": 6,
       "loc": 45,
       "owning_issue": null,
       "packet": null,
@@ -4654,15 +4630,15 @@
   "totals": {
     "by_integration": {
       "cli_only": 4,
-      "integrated": 173,
+      "integrated": 172,
       "unreferenced": 5
     },
     "by_staleness": {
-      "active": 174,
+      "active": 173,
       "orphan": 3,
       "staling": 5
     },
-    "loc": 61051,
-    "modules": 182
+    "loc": 60733,
+    "modules": 181
   }
 }
