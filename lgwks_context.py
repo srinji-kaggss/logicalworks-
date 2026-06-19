@@ -149,14 +149,23 @@ def write_pack(run_dir: Path) -> Path | None:
 
 def add_parser(sub) -> None:
     p = sub.add_parser("context", help="build a graduated-resolution spawn context pack")
-    p.add_argument("--run-dir", required=True, help="path to a run directory with rounds.ledger.jsonl")
+    p.add_argument("run_dir_pos", nargs="?", help="path to a run directory with rounds.ledger.jsonl")
+    p.add_argument("--run-dir", help="path to a run directory with rounds.ledger.jsonl")
     p.add_argument("--json", action="store_true", help="structured output")
     p.set_defaults(func=_context_command)
 
 
 def _context_command(args: argparse.Namespace) -> int:
     import json as _json
-    run_dir = Path(args.run_dir)
+    run_arg = getattr(args, "run_dir", None) or getattr(args, "run_dir_pos", None)
+    if not run_arg:
+        msg = "run directory required"
+        if getattr(args, "json", False):
+            print(_json.dumps({"ok": False, "error": msg}, indent=2))
+        else:
+            print(f"error: {msg}", file=sys.stderr)
+        return 2
+    run_dir = Path(run_arg)
     out = write_pack(run_dir)
     if not out:
         msg = "no rounds found (no rounds.ledger.jsonl)"

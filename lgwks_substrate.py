@@ -24,6 +24,8 @@ import lgwks_browser
 import lgwks_entity_graph as entity_graph
 import lgwks_run
 import lgwks_sqlite
+import lgwks_substrate_crawl as crawl
+import lgwks_substrate_run as _run_mod
 from lgwks_html import html_to_markdown
 
 # Config layer
@@ -101,8 +103,8 @@ from lgwks_substrate_run import (
     add_parser,
     baseline_command,
     baseline_run,
-    build_command,
-    build_run,
+    build_command as _build_command,
+    build_run as _build_run,
     map_command,
     query_command,
     query_run,
@@ -112,6 +114,36 @@ from lgwks_substrate_run import (
     _provider_unavailable_payload,
     _source_type,
 )
+
+
+def build_run(args):
+    """Backward-compatible facade wrapper for consumers patching lgwks_substrate.
+
+    The implementation lives in lgwks_substrate_run, but existing tests and
+    callers patch facade attributes such as RUN_ROOT and _crawl_site. Mirror those
+    values into the implementation for the duration of the call.
+    """
+    old_run_root = _run_mod.RUN_ROOT
+    old_crawl_site = crawl._crawl_site
+    _run_mod.RUN_ROOT = globals().get("RUN_ROOT", old_run_root)
+    crawl._crawl_site = globals().get("_crawl_site", old_crawl_site)
+    try:
+        return _run_mod.build_run(args)
+    finally:
+        _run_mod.RUN_ROOT = old_run_root
+        crawl._crawl_site = old_crawl_site
+
+
+def build_command(args):
+    try:
+        payload = build_run(args)
+    except EmbeddingProviderUnavailable as exc:
+        import json
+        print(json.dumps(_provider_unavailable_payload(args, exc), indent=2))
+        return 1
+    import json
+    print(json.dumps(payload, indent=2))
+    return 0
 
 __all__ = [
     # Exceptions / types

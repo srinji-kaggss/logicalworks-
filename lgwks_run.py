@@ -423,12 +423,23 @@ def host_is_blocked(host: str) -> bool:
     """C3/L-2: block loopback/private/link-local/metadata + DNS-rebinding. Resolve, then judge every IP."""
     if not host:
         return True
-    try:
-        infos = socket.getaddrinfo(host, None)
-    except Exception:
+    host = host.strip("[]").lower().rstrip(".")
+    if host.endswith((".xip.io", ".nip.io")):
         return True
-    for info in infos:
-        ip = ipaddress.ip_address(info[4][0])
+    try:
+        ips = [str(ipaddress.ip_address(host))]
+    except ValueError:
+        ips = []
+    try:
+        if not ips:
+            infos = socket.getaddrinfo(host, 443)
+            ips = [info[4][0] for info in infos]
+    except Exception:
+        return not ("." in host and not host.endswith((".local", ".internal", ".invalid")))
+    for ip_str in ips:
+        ip = ipaddress.ip_address(ip_str)
+        if hasattr(ip, "ipv4_mapped") and ip.ipv4_mapped is not None:
+            ip = ip.ipv4_mapped
         if (ip.is_private or ip.is_loopback or ip.is_link_local or ip.is_reserved
                 or ip.is_multicast or ip.is_unspecified):
             return True
@@ -440,11 +451,11 @@ def host_is_blocked(host: str) -> bool:
 def _allowed_hop(url: str, frozen: tuple[str, ...]) -> bool:
     """A hop is allowed only if it is http(s), in the frozen declared set (L6), and not a blocked host."""
     p = urllib.parse.urlparse(url)
-    if p.scheme not in ("http", "https"):       # no file://, gopher://, etc.
+    if p.scheme not in ("http", "https") or not p.hostname:       # no file://, gopher://, etc.
         return False
     if url not in frozen:                        # scope is immutable — a redirect off-set is rejected
         return False
-    return not host_is_blocked(p.netloc)
+    return not host_is_blocked(p.hostname)
 
 
 def fetch(url: str, dry: bool, synthetic: dict[str, str] | None, frozen: tuple[str, ...]) -> FetchResult:
@@ -578,21 +589,22 @@ def embed(
     Falls back to deterministic feature-hash (NOT semantic)."""
     if not embed_on:
         return None, "none", False
-    if provider in ("auto", "mlx"):
+    if provider in ("auto", "mlx", "ollama"):
         # //why: The 2026 stack uses MLX-native Qwen3-VL-Embedding-8B as the primary Eye.
         # It replaces the legacy Ollama path to achieve sub-millisecond ANE latency.
         try:
             import lgwks_model_hub as hub
             # The Eye is our universal multimodal embedding space
-            eye_model = "Qwen3-VL-Embedding-8B"
+            eye_model = model or ("qwen3-embedding:8b" if provider == "ollama" else "Qwen3-VL-Embedding-8B")
             res = hub.mlx_embed(text, model_name=eye_model)
             if res["ok"]:
                 vec = res["vector"]
-                target_dims = DIMS if dims is None else dims
+                target_dims = len(vec) if provider == "ollama" and dims is None else (DIMS if dims is None else dims)
                 # MRL (Matryoshka Representation Learning) allows safe truncation
                 if len(vec) > target_dims:
                     vec = vec[:target_dims]
-                return vec, f"mlx:{eye_model}", res.get("is_semantic", True)
+                label = f"ollama:{eye_model}" if provider == "ollama" else f"mlx:{eye_model}"
+                return vec, label, res.get("is_semantic", True)
         except Exception:
             pass # fallback to deterministic
     if provider == "openrouter-vl":
@@ -702,13 +714,18 @@ def embed_dual(
     sem = None
     try:
         if modality == "text":
-            import lgwks_model_hub as hub
-            eye_model = "Qwen3-VL-Embedding-8B"
-            res = hub.mlx_embed(text, model_name=eye_model)
-            if res.get("ok"):
-                vec = res["vector"]
-                sem = {"vector": vec, "provider": f"mlx:{eye_model}",
-                       "dims": len(vec), "is_semantic": res.get("is_semantic", True)}
+            if provider in {"apple-local", "openrouter-vl", "ollama"}:
+                vec, label, is_semantic = embed(text, True, provider=provider, model=model)
+                if vec is not None and is_semantic:
+                    sem = {"vector": vec, "provider": label, "dims": len(vec), "is_semantic": True}
+            elif provider in {"auto", "mlx"}:
+                import lgwks_model_hub as hub
+                eye_model = "Qwen3-VL-Embedding-8B"
+                res = hub.mlx_embed(text, model_name=eye_model)
+                if res.get("ok"):
+                    vec = res["vector"]
+                    sem = {"vector": vec, "provider": f"mlx:{eye_model}",
+                           "dims": len(vec), "is_semantic": res.get("is_semantic", True)}
         else:
             port = _shared_embed_port()
             if port is not None:

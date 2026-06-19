@@ -65,6 +65,29 @@ def build_parser() -> argparse.ArgumentParser:
     import lgwks_batch; lgwks_batch.add_parser(ops_sub)
     import lgwks_agent_os; lgwks_agent_os.add_parser(ops_sub)
     import lgwks_workflows; lgwks_workflows.add_parser(ops_sub)
+
+    # doctor — top-level pre-flight shortcut required by the repo contract
+    doctor = sub.add_parser("doctor", help="shortcut: report local capability and daemon health")
+    doctor.set_defaults(func=_doctor_dispatch)
+
+    # Backward-compatible public commands documented in README.md. Keep these
+    # thin aliases while the grouped 10-verb surface remains canonical.
+    import lgwks_agent_os; lgwks_agent_os.add_parser(sub)
+    import lgwks_run; lgwks_run.add_parser(sub)
+    import lgwks_context; lgwks_context.add_parser(sub)
+    import lgwks_model_hub; lgwks_model_hub.add_parser(sub)
+    import lgwks_jarvis; lgwks_jarvis.add_parser(sub)
+    auth = sub.add_parser("auth", add_help=False, help="compat: capability auth vault")
+    auth.add_argument("-h", "--help", dest="auth_help", action="store_true")
+    auth.add_argument("auth_args", nargs=argparse.REMAINDER)
+    auth.set_defaults(func=_auth_dispatch)
+    fetch = sub.add_parser("fetch", help="compat: render and extract one page in a browser")
+    fetch.add_argument("url")
+    fetch.add_argument("--max-chars", type=int, default=8000)
+    fetch.add_argument("--json", action="store_true")
+    fetch.add_argument("--chromium", action="store_true", help="use chromium instead of webkit")
+    fetch.add_argument("--no-session", action="store_true", help="do not use saved browser session")
+    fetch.set_defaults(func=_fetch_dispatch)
     
     # 11. verify — deterministic CI / Keel integration
     import lgwks_verify; lgwks_verify.add_parser(sub)
@@ -143,6 +166,44 @@ def _repl_dispatch(args) -> int:
 def _initialize_dispatch(args) -> int:
     import lgwks_agent_os
     return lgwks_agent_os.initialize_command(args)
+
+def _doctor_dispatch(args) -> int:
+    import lgwks_capabilities
+    import lgwks_daemon
+
+    capability_checks = lgwks_capabilities.doctor()
+    daemon_report = lgwks_daemon.SessionDaemon(ROOT).doctor()
+    report = {
+        "schema": "lgwks.doctor.v1",
+        "ok": bool(daemon_report.get("ok")),
+        "capabilities": capability_checks,
+        "daemon": daemon_report,
+    }
+    print(json.dumps(report, indent=2, sort_keys=True))
+    return 0 if report["ok"] else 1
+
+def _auth_dispatch(args) -> int:
+    import subprocess
+    argv = list(getattr(args, "auth_args", []) or ["--help"])
+    if getattr(args, "auth_help", False):
+        argv = ["--help"]
+    return subprocess.call([sys.executable, str(ROOT / "tools" / "lgwks-auth"), *argv])
+
+def _fetch_dispatch(args) -> int:
+    import lgwks_browser
+    result = lgwks_browser.render(
+        args.url,
+        max_chars=args.max_chars,
+        use_session=not getattr(args, "no_session", False),
+        browser_engine="chromium" if getattr(args, "chromium", False) else "webkit",
+    )
+    if getattr(args, "json", False) or os.environ.get("LGWRS_MACHINE") == "1":
+        print(json.dumps(result, indent=2, sort_keys=True))
+    elif result.get("ok"):
+        print(result.get("text", ""))
+    else:
+        print(result.get("reason", "fetch failed"), file=sys.stderr)
+    return 0 if result.get("ok") else 1
 
 class TransformStdout:
     """Buffer stdout and apply a path expression (Issue 159) on close."""

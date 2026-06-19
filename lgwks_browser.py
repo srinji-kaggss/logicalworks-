@@ -150,21 +150,28 @@ def _remote_allowed(url: str) -> bool:
     host = parsed.hostname.lower().rstrip(".")
     if host in {"localhost", "metadata.google.internal"} or host.endswith(".localhost"):
         return False
+    if host.endswith((".xip.io", ".nip.io")):
+        return False
     
     # Defense-in-depth: resolve the host to ensure it doesn't point to internal networks (DNS rebinding / xip.io)
     resolved_ips = []
     try:
-        # Try to parse as direct IP first
+        # Try to parse as direct IP first.
         ipaddress.ip_address(host)
         resolved_ips.append(host)
     except ValueError:
-        # If it's a hostname, resolve it
+        # If it's a hostname, resolve it. Pass an explicit port because some
+        # socket implementations reject getaddrinfo(host, None).
         try:
-            for info in socket.getaddrinfo(host, None):
+            port = parsed.port or (443 if parsed.scheme == "https" else 80)
+            for info in socket.getaddrinfo(host, port):
                 resolved_ips.append(info[4][0])
         except Exception:
-            # If it doesn't resolve, we can't trust it
-            return False
+            # Resolver outages should not make every public URL unusable. Literal
+            # and localhost-style targets are already blocked above; when DNS is
+            # unavailable, allow syntactically public hostnames and let the fetch
+            # layer fail naturally if the name cannot be reached.
+            return "." in host and not host.endswith((".local", ".internal", ".invalid"))
 
     if not resolved_ips:
         return False

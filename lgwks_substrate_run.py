@@ -240,7 +240,12 @@ def build_run(args: argparse.Namespace) -> dict[str, Any]:
                     "chunk_kind": chunk_kind,
                 })
                 for sentence in text._fact_sentences(stem, args.fact_threshold):
-                    dual = lgwks_run.embed_dual(sentence, embed_on=True)
+                    dual = lgwks_run.embed_dual(
+                        sentence,
+                        embed_on=True,
+                        provider=args.embed_provider,
+                        model=args.embed_model,
+                    )
                     # deterministic fact vector (always present; audit trail)
                     fdet = dual["det"]
                     provider_counts[fdet["provider"]] += 1
@@ -271,7 +276,12 @@ def build_run(args: argparse.Namespace) -> dict[str, Any]:
                         })
 
             vector_text = stem or piece
-            dual = lgwks_run.embed_dual(vector_text, embed_on=True)
+            dual = lgwks_run.embed_dual(
+                vector_text,
+                embed_on=True,
+                provider=args.embed_provider,
+                model=args.embed_model,
+            )
             # deterministic chunk vector (always present)
             cdet = dual["det"]
             provider_counts[cdet["provider"]] += 1
