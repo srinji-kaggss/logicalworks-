@@ -153,6 +153,7 @@ side-database (the external `~/ingestion_results/*.db` stores are exactly the lo
 |----|-----|--------|-----------|
 | `lgwks.actor.v1` | 1 | **live** — THE composition envelope | `lgwks_actor.py:79` |
 | `lgwks.do.run.v1` | 1 | live | `lgwks_do.py:51` |
+| `lgwks.workflow_dsl.run.v1` | 1 | live — structured `wf-run --json` result: `{schema, ok, background, message}` | `lgwks_dsl.py` |
 | `lgwks.spawn.v1` | 1 | live | `lgwks_spawn.py:~70` |
 | `lgwks.pipeline.manifest.v1` | 1 | live | `lgwks_pipeline.py:52` |
 | `lgwks.manifest.v0` / `lgwks.intent.v0` / `lgwks.hooks.v0` / `lgwks.audit.v0` / `lgwks.gh.v0` / `lgwks.session.summary.v0` | 0 | live, research-grade | `lgwks_schema.py:66-133`, `lgwks_gh.py:82` |

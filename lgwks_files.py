@@ -70,18 +70,19 @@ def convert_command(args) -> int:
     --to json wraps it with provenance, md/txt emit the body. Honest scope: this normalises TO text
     formats, it does not re-render INTO binary formats (no txt→docx) — that would be a different tool."""
     repo_root = Path(__file__).resolve().parent
-    if not _is_safe_path(args.target, repo_root, getattr(args, "allow_absolute", True)):
-        print(f"error: blocked path (outside repo): {args.target}", file=sys.stderr)
+    source = getattr(args, "source", "")
+    if not _is_safe_path(source, repo_root, getattr(args, "allow_absolute", True)):
+        print(f"error: blocked path (outside repo): {source}", file=sys.stderr)
         return 1
     
-    if getattr(args, "out", None):
+    if getattr(args, "out", None) and args.out != "-":
         if not _is_safe_path(args.out, repo_root, getattr(args, "allow_absolute", True)):
             print(f"error: blocked output path (outside repo): {args.out}", file=sys.stderr)
             return 1
 
-    doc = _extract(args.source, getattr(args, "max_chars", 20000))
+    doc = _extract(source, getattr(args, "max_chars", 20000))
     if not doc["ok"]:
-        print(f"convert: could not read {args.source!r} (kind={doc['kind']})", file=sys.stderr)
+        print(f"convert: could not read {source!r} (kind={doc['kind']})", file=sys.stderr)
         return 1
     to = getattr(args, "to", "txt")
     if to == "json":
@@ -92,9 +93,28 @@ def convert_command(args) -> int:
     else:  # txt
         payload = doc["text"]
     out = getattr(args, "out", None)
-    if out:
+    if out and out != "-":
         Path(out).write_text(payload, encoding="utf-8")
         print(f"convert: wrote {out} ({len(payload)} chars, from {doc['kind']})", file=sys.stderr)
     else:
         print(payload)
     return 0
+
+
+def add_parser(sub) -> None:
+    extract = sub.add_parser("extract", help="read any supported file or URL into text")
+    extract.add_argument("target", help="file path or URL")
+    extract.add_argument("--json", action="store_true", help="structured extraction envelope")
+    extract.add_argument("--max-chars", type=int, default=8000, help="maximum extracted characters")
+    extract.add_argument("--allow-absolute", action="store_true", default=True,
+                         help="allow absolute local paths")
+    extract.set_defaults(func=extract_command)
+
+    convert = sub.add_parser("convert", help="convert any supported source to txt, md, or json")
+    convert.add_argument("source", help="file path or URL")
+    convert.add_argument("--to", choices=["txt", "md", "json"], default="txt")
+    convert.add_argument("--out", default="-", help="output file, or - for stdout")
+    convert.add_argument("--max-chars", type=int, default=20000, help="maximum extracted characters")
+    convert.add_argument("--allow-absolute", action="store_true", default=True,
+                         help="allow absolute local paths")
+    convert.set_defaults(func=convert_command)

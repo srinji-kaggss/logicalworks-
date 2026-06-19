@@ -12,6 +12,7 @@ Example:
 import re
 import json
 import subprocess
+import sys
 from typing import Any, List, Dict
 
 class WorkflowDSL:
@@ -46,7 +47,7 @@ class WorkflowDSL:
             workflows.append({"name": name, "steps": steps})
         return workflows
 
-def execute_dsl(dsl_string: str, background: bool = True) -> str:
+def execute_dsl(dsl_string: str, background: bool = True, verbose: bool = True) -> str:
     """Parse and execute the DSL via the daemon queue."""
     parser = WorkflowDSL()
     try:
@@ -75,11 +76,13 @@ def execute_dsl(dsl_string: str, background: bool = True) -> str:
             if not background:
                 import subprocess
                 import sys
-                print(f"Executing workflow '{wf['name']}' synchronously ({len(wf['steps'])} steps)...")
+                if verbose:
+                    print(f"Executing workflow '{wf['name']}' synchronously ({len(wf['steps'])} steps)...")
                 for i, step in enumerate(wf['steps']):
                     verb = step["verb"]
                     args = step.get("args", [])
-                    print(f"  Step {i+1}: {verb} {' '.join(args)}")
+                    if verbose:
+                        print(f"  Step {i+1}: {verb} {' '.join(args)}")
                     cmd = [sys.executable, "lgwks", verb] + args
                     try:
                         res = subprocess.run(cmd, check=True)
@@ -97,7 +100,8 @@ def execute_dsl(dsl_string: str, background: bool = True) -> str:
             # For each step, ensure it maps to a non-heavy node
             # e.g. 'extract' -> lgwks_extract
             # 'research' -> lgwks_pipeline(research=True)
-            print(f"Enqueued workflow '{wf['name']}' with {len(wf['steps'])} steps (Orchestration: Deterministic).")
+            if verbose:
+                print(f"Enqueued workflow '{wf['name']}' with {len(wf['steps'])} steps (Orchestration: Deterministic).")
             
         if not background:
             return f"Successfully executed {len(wfs)} workflows."
@@ -110,11 +114,21 @@ def add_parser(sub):
     p = sub.add_parser("wf-run", help="run a complex workflow via the Ruby-like DSL")
     p.add_argument("dsl", help="the DSL string to execute (e.g. 'workflow \"task\" { ... }')")
     p.add_argument("--sync", action="store_true", help="run synchronously (blocking)")
+    p.add_argument("--json", action="store_true", help="structured workflow DSL result")
     p.set_defaults(func=run)
 
 def run(args):
     """CLI entrypoint for wf-run."""
-    res = execute_dsl(args.dsl, background=not args.sync)
+    res = execute_dsl(args.dsl, background=not args.sync, verbose=not getattr(args, "json", False))
+    ok = "Error" not in res and "failed" not in res
+    if getattr(args, "json", False):
+        print(json.dumps({
+            "schema": "lgwks.workflow_dsl.run.v1",
+            "ok": ok,
+            "background": not args.sync,
+            "message": res,
+        }, indent=2))
+        sys.exit(0 if ok else 1)
     if "Error" in res or "failed" in res:
         print(f"❌ {res}")
         sys.exit(1)

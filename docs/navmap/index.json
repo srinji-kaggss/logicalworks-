@@ -1546,7 +1546,7 @@
       "has_cli": false,
       "has_tests": true,
       "integration": "integrated",
-      "last_commit_days": 2,
+      "last_commit_days": 3,
       "loc": 624,
       "owning_issue": null,
       "packet": null,
@@ -1850,7 +1850,7 @@
       "has_tests": false,
       "integration": "integrated",
       "last_commit_days": 3,
-      "loc": 127,
+      "loc": 141,
       "owning_issue": null,
       "packet": null,
       "purpose": "lightweight Ruby-like DSL for workflow orchestration.",
@@ -1927,7 +1927,7 @@
       "has_cli": true,
       "has_tests": true,
       "integration": "integrated",
-      "last_commit_days": 2,
+      "last_commit_days": 3,
       "loc": 509,
       "owning_issue": null,
       "packet": null,
@@ -2012,7 +2012,8 @@
         "lgwks_files",
         "lgwks_input",
         "lgwks_search",
-        "lgwks_search_engine"
+        "lgwks_search_engine",
+        "lgwks_workflows"
       ]
     },
     "lgwks_fabric_projection": {
@@ -2057,18 +2058,18 @@
       "deps": [
         "lgwks_extract"
       ],
-      "has_cli": false,
+      "has_cli": true,
       "has_tests": false,
       "integration": "integrated",
       "last_commit_days": 3,
-      "loc": 101,
+      "loc": 121,
       "owning_issue": null,
       "packet": null,
       "purpose": "the `extract` and `convert` verbs: the read-anything port made into CLI surface.",
       "staleness": "active",
       "subsystem": "Research / web acquisition / extract",
       "used_by": [
-        "lgwks_workflows"
+        "lgwks(dispatcher)"
       ]
     },
     "lgwks_foundation": {
@@ -2637,7 +2638,7 @@
       "has_cli": true,
       "has_tests": true,
       "integration": "integrated",
-      "last_commit_days": 2,
+      "last_commit_days": 3,
       "loc": 307,
       "owning_issue": null,
       "packet": null,
@@ -2676,7 +2677,7 @@
       "has_cli": false,
       "has_tests": false,
       "integration": "integrated",
-      "last_commit_days": 2,
+      "last_commit_days": 3,
       "loc": 66,
       "owning_issue": null,
       "packet": null,
@@ -2750,7 +2751,7 @@
       "has_cli": true,
       "has_tests": false,
       "integration": "integrated",
-      "last_commit_days": 2,
+      "last_commit_days": 3,
       "loc": 106,
       "owning_issue": null,
       "packet": null,
@@ -2818,7 +2819,7 @@
       "has_cli": false,
       "has_tests": true,
       "integration": "integrated",
-      "last_commit_days": 1,
+      "last_commit_days": 0,
       "loc": 339,
       "owning_issue": null,
       "packet": null,
@@ -3026,7 +3027,7 @@
       "has_cli": true,
       "has_tests": true,
       "integration": "integrated",
-      "last_commit_days": 2,
+      "last_commit_days": 3,
       "loc": 279,
       "owning_issue": null,
       "packet": null,
@@ -3247,7 +3248,7 @@
       "has_cli": false,
       "has_tests": false,
       "integration": "unreferenced",
-      "last_commit_days": 2,
+      "last_commit_days": 3,
       "loc": 271,
       "owning_issue": null,
       "packet": null,
@@ -4409,7 +4410,7 @@
         "lgwks_clock",
         "lgwks_crawl",
         "lgwks_do",
-        "lgwks_files",
+        "lgwks_extract",
         "lgwks_hashing",
         "lgwks_keyvault",
         "lgwks_manifest",
@@ -4427,7 +4428,7 @@
       "has_tests": false,
       "integration": "integrated",
       "last_commit_days": 2,
-      "loc": 1155,
+      "loc": 1210,
       "owning_issue": null,
       "packet": null,
       "purpose": "unified AI workflow harness.",
@@ -4637,7 +4638,7 @@
       "orphan": 3,
       "staling": 5
     },
-    "loc": 60621,
+    "loc": 60710,
     "modules": 181
   }
 }

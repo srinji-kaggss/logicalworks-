@@ -93,6 +93,10 @@ class Baseline:
             return False
         return self._seen[fp].get("dismiss_count", 0) >= 2
 
+    def has(self, fp: str) -> bool:
+        """Return True when a finding fingerprint already exists in the baseline."""
+        return fp in self._seen
+
     def get_history_penalty(self, fp: str) -> float:
         """Calculate penalty based on dismissal history (0..0.2). (H5)"""
         if fp not in self._seen:
@@ -859,13 +863,23 @@ if __name__ == "__main__":
     repo_path = Path(args.scan).resolve()
     
     try:
+        prior_baseline = Baseline(args.baseline) if args.baseline else None
         findings = run(repo_path, baseline_path=args.baseline, emit_sarif=args.sarif, update_baseline=args.update_baseline)
         print(f"Scan complete: {len(findings)} findings.")
         
-        # Exit 1 if any open high-severity findings
-        high_risk = [f for f in findings if f.get("status") == "open" and f.get("severity") == "high"]
+        # Exit 1 only for open high-severity findings that are new to the supplied
+        # baseline. Historical findings remain visible and stay in the baseline,
+        # but do not make every subsequent gate unusable.
+        high_risk = []
+        for finding in findings:
+            if finding.get("status") != "open" or finding.get("severity") != "high":
+                continue
+            fp = _finding_fingerprint(finding)
+            if prior_baseline is not None and prior_baseline.has(fp):
+                continue
+            high_risk.append(finding)
         if high_risk:
-            print(f"FAILED: {len(high_risk)} high-severity findings remain open.")
+            print(f"FAILED: {len(high_risk)} new high-severity findings remain open.")
             for f in high_risk[:5]:
                  print(f"  - {f['summary']} in {f['links']['file']}")
             sys.exit(1)

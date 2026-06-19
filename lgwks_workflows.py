@@ -67,25 +67,25 @@ _WORKFLOWS: dict[str, dict] = {
     "aetherius": {
         "description": "autonomous intelligence kernel (The Forge): Synthesis -> Dialectic -> Valuation -> Refinement -> Ingestion",
         "args": {"goal": "str", "--json": "bool"},
-        "verbs": ["aetherius"],
+        "verbs": ["ops workflow aetherius"],
         "tokens": "~5",
     },
     "research": {
         "description": "AUP gate → browser crawl (session-aware) → embed → synthesize",
         "args": {"query": "str", "--depth": "int", "--plan": "str", "--yes": "bool"},
-        "verbs": ["aup check", "crawl", "spawn"],
+        "verbs": ["gate aup", "crawl", "state spawn"],
         "tokens": "~1",
     },
     "deep-research": {
         "description": "multi-source synthesis: crawl N sources → cross-reference → verify claims",
         "args": {"query": "str", "--sources": "int", "--depth": "int", "--verify": "bool"},
-        "verbs": ["aup check", "crawl", "spawn", "solve"],
+        "verbs": ["gate aup", "crawl", "state spawn", "solve"],
         "tokens": "~3",
     },
     "quick-scan": {
         "description": "fast AUP + single-page inspect (no crawl, no embed)",
         "args": {"query": "str|url", "--max-chars": "int"},
-        "verbs": ["aup check", "extract"],
+        "verbs": ["gate aup", "crawl"],
         "tokens": "~0.1",
     },
     "code": {
@@ -139,19 +139,19 @@ _WORKFLOWS: dict[str, dict] = {
     "health-check": {
         "description": "doctor + store + env integrity + manifest sanity",
         "args": {"--json": "bool"},
-        "verbs": ["doctor", "store", "manifest"],
+        "verbs": ["doctor", "manifest"],
         "tokens": "~0",
     },
     "onboard": {
         "description": "first-time machine setup: browser + deps + dirs + keyvault",
         "args": {"--skip-browser": "bool", "--engine": "str"},
-        "verbs": ["initialize", "keyvault check"],
+        "verbs": ["human initialize", "auth"],
         "tokens": "~0",
     },
     "migration-check": {
         "description": "compare two codebase versions for breaking changes",
         "args": {"--repo": "str", "--from": "str", "--to": "str", "--json": "bool"},
-        "verbs": ["solve", "repo", "refactor"],
+        "verbs": ["solve", "repo audit", "review"],
         "tokens": "~1",
     },
 }
@@ -447,11 +447,13 @@ def _do_research_inline(args: argparse.Namespace) -> int:
     try:
         manifest = lgwks_substrate.build_run(sub_args)
         root = manifest.get("artifacts", {}).get("root", "")
+        docs = manifest.get("counts", {}).get("documents", 0)
+        chunks = manifest.get("counts", {}).get("chunks", 0)
         p2 = PhaseResult(
             name="substrate:crawl",
-            ok=manifest.get("counts", {}).get("documents", 0) > 0,
-            exit_code=0,
-            message=f"{manifest.get('counts', {}).get('documents', 0)} docs, {manifest.get('counts', {}).get('chunks', 0)} chunks",
+            ok=docs > 0,
+            exit_code=0 if docs > 0 else 2,
+            message=f"{docs} docs, {chunks} chunks",
             artifact={
                 "run_id": manifest.get("run_id", ""),
                 "run_dir": root,
@@ -560,11 +562,13 @@ def _do_deep_research(args: argparse.Namespace) -> int:
             )
             manifest = lgwks_substrate.build_run(sub_args)
             root = manifest.get("artifacts", {}).get("root", "")
+            docs = manifest.get("counts", {}).get("documents", 0)
+            chunks = manifest.get("counts", {}).get("chunks", 0)
             p2 = PhaseResult(
                 name="substrate:crawl",
-                ok=manifest.get("counts", {}).get("documents", 0) > 0,
-                exit_code=0,
-                message=f"{manifest.get('counts', {}).get('documents', 0)} docs, {manifest.get('counts', {}).get('chunks', 0)} chunks",
+                ok=docs > 0,
+                exit_code=0 if docs > 0 else 2,
+                message=f"{docs} docs, {chunks} chunks",
                 artifact={
                     "run_id": manifest.get("run_id", ""),
                     "run_dir": root,
@@ -678,7 +682,7 @@ def _do_quick_scan(args: argparse.Namespace) -> int:
             p2 = PhaseResult(
                 name="substrate:quick-scan",
                 ok=docs > 0,
-                exit_code=0,
+                exit_code=0 if docs > 0 else 2,
                 message=f"{docs} docs, {chunks} chunks",
                 artifact={
                     "run_id": manifest.get("run_id", ""),
@@ -740,10 +744,21 @@ def _do_health_check(args: argparse.Namespace) -> int:
     p1 = _run_phase("doctor:env", lambda: _doctor_env())
     run.phases.append(p1)
 
-    # Manifest sanity
-    p2 = _run_phase("manifest:sanity", lambda: lgwks_manifest.manifest_command(
-        argparse.Namespace(json=True, render=False, for_agent=False)))
-    run.phases.append(p2)
+    # Manifest sanity: inspect in-process, do not print a nested manifest into workflow JSON.
+    try:
+        manifest = lgwks_manifest.build_manifest()
+        verbs = manifest.get("verbs", [])
+        workflows = manifest.get("workflows", {})
+        ok = manifest.get("manifest") == lgwks_manifest.VERSION and bool(verbs)
+        run.phases.append(PhaseResult(
+            name="manifest:sanity",
+            ok=ok,
+            exit_code=0 if ok else 2,
+            message="pass" if ok else "manifest missing live verbs",
+            artifact={"verb_count": len(verbs), "workflow_count": len(workflows)},
+        ))
+    except Exception as exc:
+        run.phases.append(PhaseResult(name="manifest:sanity", ok=False, exit_code=2, message=str(exc)))
 
     run.exit_code = max(p.exit_code for p in run.phases)
     run.verdict = verdict_from_phases(run.phases)
@@ -842,10 +857,50 @@ def _do_prove(args: argparse.Namespace) -> int:
 
 
 def _do_extract(args: argparse.Namespace) -> int:
-    import lgwks_files
-    # Map 'source' from the workflow namespace to 'target' for the files command
-    args.target = getattr(args, "source", None)
-    return lgwks_files.extract_command(args)
+    import lgwks_extract
+
+    source = getattr(args, "source", "")
+    json_out = getattr(args, "json", False)
+    max_chars = getattr(args, "max_chars", 0) or 20000
+    to = getattr(args, "to", "txt")
+    out = getattr(args, "out", "-")
+
+    run = WorkflowRun(workflow="extract", args={"source": source, "to": to, "out": out}, started_at=_now())
+    t0 = time.time()
+
+    try:
+        doc = lgwks_extract.extract(source, max_chars=max_chars)
+        ok = bool(doc.get("ok"))
+        text = doc.get("text", "") or ""
+        artifact = {
+            "source": doc.get("source", source),
+            "kind": doc.get("kind", ""),
+            "text": text,
+        }
+        if ok and out and out != "-":
+            if to == "json":
+                payload = json.dumps(artifact, ensure_ascii=False, indent=2)
+            elif to == "md":
+                payload = f"# {artifact['source']}\n\n_(extracted from {artifact['kind']})_\n\n{text}\n"
+            else:
+                payload = text
+            Path(out).write_text(payload, encoding="utf-8")
+            artifact["out"] = out
+        run.phases.append(PhaseResult(
+            name="extract:read",
+            ok=ok,
+            exit_code=0 if ok else 1,
+            message=f"{artifact['kind'] or 'unknown'} {len(text)} chars" if ok else "extract failed",
+            artifact=artifact,
+        ))
+    except Exception as exc:
+        run.phases.append(PhaseResult(name="extract:read", ok=False, exit_code=1, message=str(exc)))
+
+    run.exit_code = max(p.exit_code for p in run.phases)
+    run.verdict = verdict_from_phases(run.phases)
+    run.duration_sec = time.time() - t0
+    run.finished_at = _now()
+    return _emit(run, json_out)
 
 
 def _do_compare(args: argparse.Namespace) -> int:

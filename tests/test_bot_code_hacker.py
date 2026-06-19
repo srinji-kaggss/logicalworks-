@@ -12,6 +12,8 @@ Covers:
 from __future__ import annotations
 
 import json
+import subprocess
+import sys
 import textwrap
 import unittest
 from pathlib import Path
@@ -241,6 +243,40 @@ class TestBaselineSuppression(unittest.TestCase):
             baseline = tmp / "baseline.json"
             f1 = hacker.run(tmp, baseline_path=baseline)
             self.assertTrue(any(f["kind"] == "secret_exposure_risk" for f in f1))
+
+    def test_cli_baseline_blocks_only_new_high_findings(self):
+        with TemporaryDirectory() as d:
+            tmp = Path(d)
+            _write(tmp, "secret.py", "token = 'x'\nprint(token)\n")
+            baseline = tmp / "baseline.json"
+            script = Path(hacker.__file__).resolve()
+
+            first = subprocess.run(
+                [sys.executable, str(script), "--scan", str(tmp), "--baseline", str(baseline)],
+                text=True,
+                capture_output=True,
+                timeout=20,
+            )
+            self.assertEqual(first.returncode, 1, first.stdout + first.stderr)
+            self.assertIn("new high-severity findings", first.stdout)
+
+            second = subprocess.run(
+                [sys.executable, str(script), "--scan", str(tmp), "--baseline", str(baseline)],
+                text=True,
+                capture_output=True,
+                timeout=20,
+            )
+            self.assertEqual(second.returncode, 0, second.stdout + second.stderr)
+
+            _write(tmp, "other.py", "token = 'y'\nprint(token)\n")
+            third = subprocess.run(
+                [sys.executable, str(script), "--scan", str(tmp), "--baseline", str(baseline)],
+                text=True,
+                capture_output=True,
+                timeout=20,
+            )
+            self.assertEqual(third.returncode, 1, third.stdout + third.stderr)
+            self.assertIn("new high-severity findings", third.stdout)
 
 
 class TestSARIFExport(unittest.TestCase):
