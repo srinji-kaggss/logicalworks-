@@ -95,46 +95,25 @@ def _curate_results(results: list[dict]) -> tuple[list[dict], list[dict]]:
 
 
 def _web(query: str, read_top: int = 3) -> tuple[str, list[str]]:
-    """Web grounding via the multi-modal search sweep + source extraction (the eyes, finally wired).
-    Best present search provider (googler→ddgr→DDG floor) → top results → read each source to text
-    (PDF/office/html via lgwks_extract). Returns (findings_text, citation_urls). ('', []) = honest
-    no-evidence (every provider empty) — never fabricated. Replaces the firecrawl-402 stub."""
-    try:
-        import lgwks_search
-        import lgwks_extract
-    except Exception:
+    """Web grounding via the AI-First Browser Engine.
+    
+    //why: bypasses 'DOM bs' by using vision/symbolic protocol instead of brittle parsing.
+    """
+    import lgwks_search_engine
+    res = lgwks_search_engine.resolve_fact(query)
+    if not res.get("ok"):
         return "", []
-    sweep = lgwks_search.research_queue(query)
-    results, denied = _curate_results(sweep.get("results", []))
-    if not results:
-        note = ""
-        if denied:
-            note = "\n[url-risk blocked all candidate urls before fetch]"
-        return note, []
-    blocks: list[str] = []
-    cites: list[str] = []
-    # read the top results in full (the source, not just the snippet — OpenAI-DR principle).
-    for r in results[:read_top]:
-        url = r.get("url", "")
-        doc = lgwks_extract.extract(url, max_chars=2500)
-        body = doc["text"] if doc["ok"] else r.get("snippet", "")
-        if body:
-            ch = _quarantine(url, doc.get("kind", "html"), body)   # untrusted → content-addressed cache
-            tag = f" · cache:{ch[:12]}" if ch else ""
-            blocks.append(f"[{','.join(r.get('arms', []))} · {doc['kind']}{tag}] {r.get('title','')}\n{body}\n{url}")
-            cites.append(url)
-    # the rest contribute title+snippet+url (breadth without the token cost of reading every page).
-    for r in results[read_top:]:
-        if r.get("url"):
-            blocks.append(f"[{','.join(r.get('arms', []))}] {r.get('title','')} — {r.get('snippet','')}\n{r['url']}")
-            cites.append(r["url"])
-    note = f"(arms_empty: {sweep.get('arms_empty')})" if sweep.get("arms_empty") else ""
-    if denied:
-        blocks.append("[url-risk gate]\n" + "\n".join(
-            f"{d['decision'].upper()} {d['url']} :: {', '.join(d['reasons'][:2]) or 'policy'}"
-            for d in denied[:10]
-        ))
-    return ("\n\n".join(blocks) + (f"\n{note}" if note else ""), cites)
+    
+    fact = res["fact"]
+    content = fact["content"]
+    url = res.get("url", "")
+    
+    # Store in content-addressed cache for audit/cortex
+    ch = _quarantine(url, "vision-grounded-fact", content)
+    tag = f" · cache:{ch[:12]}" if ch else ""
+    
+    findings = f"[{fact['via']}{tag}] Grounded fact for: {query}\n{content}\n{url}"
+    return findings, [url] if url else []
 
 
 def ground(query: str, want_docs: bool = True, want_web: bool = True) -> dict:
