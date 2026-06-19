@@ -218,6 +218,9 @@ def _do_research(args: argparse.Namespace) -> int:
             run.finished_at = _now()
             return _emit(run, json_out)
 
+    if not getattr(args, "no_brain_recall", False):
+        run.phases.append(_run_brain_recall(query, args))
+
     # Phase 2: research execution via substrate if URL, else akinator stub
     is_url = bool(re.search(r"^https?://", query.strip()))
     if is_url:
@@ -248,16 +251,18 @@ def _do_research(args: argparse.Namespace) -> int:
         try:
             manifest = lgwks_substrate.build_run(sub_args)
             root = manifest.get("artifacts", {}).get("root", "")
+            counts = manifest.get("counts", {})
+            materialized = _research_materialized(manifest)
             p2 = PhaseResult(
                 name="substrate:research",
-                ok=manifest.get("counts", {}).get("documents", 0) > 0,
-                exit_code=0,
-                message=f"{manifest.get('counts',{}).get('documents',0)} docs, {manifest.get('counts',{}).get('chunks',0)} chunks",
+                ok=materialized,
+                exit_code=0 if materialized else 2,
+                message=f"{counts.get('documents',0)} docs, {counts.get('chunks',0)} chunks",
                 artifact={
                     "run_id": manifest.get("run_id", ""),
                     "run_dir": root,
                     "manifest": str(Path(root) / "manifest.json") if root else "",
-                    "counts": manifest.get("counts", {}),
+                    "counts": counts,
                 },
             )
         except Exception as exc:
@@ -301,17 +306,19 @@ def _do_research(args: argparse.Namespace) -> int:
             try:
                 manifest = lgwks_substrate.build_run(sub_args)
                 root = manifest.get("artifacts", {}).get("root", "")
+                counts = manifest.get("counts", {})
+                materialized = _research_materialized(manifest)
                 p2 = PhaseResult(
                     name="substrate:research",
-                    ok=manifest.get("counts", {}).get("documents", 0) > 0,
-                    exit_code=0,
-                    message=f"{manifest.get('counts',{}).get('documents',0)} docs, {manifest.get('counts',{}).get('chunks',0)} chunks",
+                    ok=materialized,
+                    exit_code=0 if materialized else 2,
+                    message=f"{counts.get('documents',0)} docs, {counts.get('chunks',0)} chunks",
                     artifact={
                         "run_id": manifest.get("run_id", ""),
                         "run_dir": root,
                         "resolved_from": query,
                         "resolved_url": resolved_url,
-                        "counts": manifest.get("counts", {}),
+                        "counts": counts,
                     },
                 )
             except Exception as exc:
@@ -438,6 +445,47 @@ def _run_refactor(repo: Path, task: str, changed: str = "", json_out: bool = Fal
     return PhaseResult(name=f"refactor:{task}", ok=(code == 0), exit_code=code, message="pass" if code == 0 else "degraded", artifact={"duration_sec": round(dur, 3)})
 
 
+def _research_materialized(manifest: dict[str, Any]) -> bool:
+    counts = manifest.get("counts", {}) if isinstance(manifest, dict) else {}
+    return int(counts.get("documents", 0) or 0) > 0 and int(counts.get("chunks", 0) or 0) > 0
+
+
+def _run_brain_recall(query: str, args: argparse.Namespace) -> PhaseResult:
+    import lgwks_research_memory
+
+    db_override = getattr(args, "brain_db", "")
+    explicit_db = bool(db_override)
+    try:
+        payload = lgwks_research_memory.recall(
+            query,
+            db_path=db_override or None,
+            limit=int(getattr(args, "recall_limit", 8)),
+        )
+    except Exception as exc:
+        return PhaseResult(name="brain:recall", ok=False, exit_code=2, message=str(exc))
+
+    if not payload.get("ok"):
+        message = payload.get("error", "brain recall unavailable")
+        return PhaseResult(
+            name="brain:recall",
+            ok=not explicit_db,
+            exit_code=2 if explicit_db else 0,
+            message=message,
+            artifact=payload,
+        )
+
+    hits = payload.get("hits", [])
+    missing = payload.get("missing_terms", [])
+    qualifier = f"; missing terms: {', '.join(missing[:5])}" if missing else ""
+    return PhaseResult(
+        name="brain:recall",
+        ok=True,
+        exit_code=0,
+        message=f"{len(hits)} recalled prior-context hits{qualifier}",
+        artifact=payload,
+    )
+
+
 def _emit(run: DoRun, json_out: bool) -> int:
     if json_out:
         print(json.dumps(run.to_dict(), indent=2))
@@ -502,6 +550,9 @@ def add_parser(sub) -> None:
     research.add_argument("query", nargs="?", default="", help="research query string")
     research.add_argument("--depth", type=int, default=1, help="research depth")
     research.add_argument("--model", default="", help="model override")
+    research.add_argument("--brain-db", default="", help="override unified brain SQLite path")
+    research.add_argument("--recall-limit", type=int, default=8, help="prior-context hits to attach")
+    research.add_argument("--no-brain-recall", action="store_true", help="skip unified brain prior-context recall")
     research.add_argument("--json", action="store_true", help="structured DoRun JSON output")
     research.set_defaults(func=do_command)
 
