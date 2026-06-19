@@ -1033,7 +1033,7 @@
       "has_cli": false,
       "has_tests": true,
       "integration": "integrated",
-      "last_commit_days": 4,
+      "last_commit_days": 5,
       "loc": 190,
       "owning_issue": null,
       "packet": null,
@@ -1049,7 +1049,7 @@
       "has_cli": false,
       "has_tests": false,
       "integration": "integrated",
-      "last_commit_days": 11,
+      "last_commit_days": 12,
       "loc": 146,
       "owning_issue": null,
       "packet": null,
@@ -3426,7 +3426,7 @@
       "has_tests": true,
       "integration": "integrated",
       "last_commit_days": 0,
-      "loc": 252,
+      "loc": 276,
       "owning_issue": null,
       "packet": null,
       "purpose": "Read-only recall adapter for the unified cross-repo codebase brain.",
@@ -4662,7 +4662,7 @@
       "orphan": 3,
       "staling": 5
     },
-    "loc": 61027,
+    "loc": 61051,
     "modules": 182
   }
 }

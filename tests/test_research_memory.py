@@ -65,6 +65,42 @@ def test_unified_brain_recall_reads_cross_repo_context(tmp_path: Path):
     assert "durable prior context" in payload["hits"][0]["snippet"]
 
 
+def test_codebase_brain_requires_explicit_db_configuration(monkeypatch):
+    monkeypatch.delenv("LGWKS_AGENT_BRAIN_DB", raising=False)
+
+    payload = lgwks_research_memory.recall("metacognition prior context")
+
+    assert payload["ok"] is False
+    assert payload["configured"] is False
+    assert payload["db"] == ""
+    assert "not configured" in payload["error"]
+    assert "/Users/srinji/ingestion_results" not in json.dumps(payload)
+
+
+def test_do_research_skips_unconfigured_codebase_brain(tmp_path: Path, monkeypatch):
+    monkeypatch.delenv("LGWKS_AGENT_BRAIN_DB", raising=False)
+    manifest = {
+        "run_id": "ok-run",
+        "artifacts": {"root": str(tmp_path / "run")},
+        "counts": {"documents": 1, "chunks": 2, "facts": 0, "vectors": 0},
+    }
+    args = _research_args()
+
+    with mock.patch("lgwks_do._run_aup_check", return_value=PhaseResult("aup:check", True, 0, message="allow")):
+        with mock.patch("lgwks_substrate.build_run", return_value=manifest):
+            with contextlib.redirect_stdout(io.StringIO()) as buf:
+                rc = lgwks_do._do_research(args)
+
+    payload = json.loads(buf.getvalue())
+    assert rc == 0
+    phase = payload["phases"][1]
+    assert phase["name"] == "brain:recall"
+    assert phase["ok"] is True
+    assert phase["exit_code"] == 0
+    assert phase["artifact"]["configured"] is False
+    assert "not configured" in phase["message"]
+
+
 def test_do_research_attaches_brain_recall_phase(tmp_path: Path):
     db = _brain_db(tmp_path / "brain.db")
     manifest = {

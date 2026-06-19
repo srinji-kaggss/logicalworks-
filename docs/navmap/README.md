@@ -1,6 +1,6 @@
 # NAVMAP — lgwks module atlas (generated; do not hand-edit)
 
-> `scripts/gen_navmap.py` from source — re-run to refresh. **182 modules · 61,027 LOC.** This is the canonical repo map: if someone says "review the map" or "check the navmap", they mean this file unless another map is explicitly named. Read/query this FIRST. Strict machine-readable contract: `docs/navmap/index.json` (`lgwks.navmap.v1`).
+> `scripts/gen_navmap.py` from source — re-run to refresh. **182 modules · 61,051 LOC.** This is the canonical repo map: if someone says "review the map" or "check the navmap", they mean this file unless another map is explicitly named. Read/query this FIRST. Strict machine-readable contract: `docs/navmap/index.json` (`lgwks.navmap.v1`).
 
 **Staleness:** `active` 174 · `orphan` 3 · `staling` 5
 
@@ -114,7 +114,7 @@ Row legend: `cli` `test` · `←N` imported by N · `→N` imports N · `Nd` day
 | `hooks.lgwks_subconscious_hook` | vendor-agnostic agent observer. | 146 | active | test ←8 →2 1d |
 | `hooks.subconscious_inbound` | Second-harness U7 — subconscious inbound tap (UserPromptSubmit hook). | 115 | active | test ←8 →3 6d |
 | `lgwks_agent_os` | fleet startup/bootstrap helpers for the Logical Works prompt layer (#1). | 553 | active | cli test ←2 →2 0d |
-| `lgwks_algorithms` | L4 narrow-ML catalog (semantic-escalation-harness stage L4). | 190 | active | test ←1 4d |
+| `lgwks_algorithms` | L4 narrow-ML catalog (semantic-escalation-harness stage L4). | 190 | active | test ←1 5d |
 | `lgwks_capabilities` | the resolver that fixes "the tool isn't where it should be." | 268 | active | ←6 13d |
 | `lgwks_context` | graduated-resolution (LOD) context pack for the next spawn (#9 harness layer). | 199 | active | cli ←2 0d |
 | `lgwks_cycle` | project deploy cycle ledger. | 143 | active | ←4 →4 3d |
@@ -218,7 +218,7 @@ Row legend: `cli` `test` · `←N` imported by N · `→N` imports N · `Nd` day
 
 | module | purpose | loc | stale | rel |
 |---|---|---|---|---|
-| `lgwks_apple` | Apple-local embedding provider seam. | 146 | active | ←2 11d |
+| `lgwks_apple` | Apple-local embedding provider seam. | 146 | active | ←2 12d |
 | `lgwks_coreml` | local text classification via CoreML. | 142 | active | ←1 15d |
 | `lgwks_jepa` | first executable multi-view JEPA package surface. | 307 | active | cli test ←1 →6 3d |
 | `lgwks_model_hub` | repo-resident model loading + developer setup for local CoreML use. | 642 | active | cli test ←5 →3 4d |
@@ -235,7 +235,7 @@ Row legend: `cli` `test` · `←N` imported by N · `→N` imports N · `Nd` day
 | `scripts.gen_navmap` | relational + staleness module atlas for AI navigation (stdlib only). | 354 | active | cli ←5 6d |
 | `scripts.setup_models` | setup_models.py — one-time developer script to download and convert models. | 248 | active | ←5 →1 3d |
 
-## Unclassified (triage)  ·  24 mod · 3,941 LOC
+## Unclassified (triage)  ·  24 mod · 3,965 LOC
 
 | module | purpose | loc | stale | rel |
 |---|---|---|---|---|
@@ -257,7 +257,7 @@ Row legend: `cli` `test` · `←N` imported by N · `→N` imports N · `Nd` day
 | `lgwks_reasoning_port` | runtime-neutral DEEP-REASONING seam. | 150 | active | test ←2 →1 3d |
 | `lgwks_redact` | the single source of truth for credential redaction. | 33 | active | ←3 4d |
 | `lgwks_research` | autonomous deep-research loop (Issue #9, parent #7). | 831 | active | cli ←3 →9 3d |
-| `lgwks_research_memory` | Read-only recall adapter for the unified cross-repo codebase brain. | 252 | active | cli test ←2 →1 0d |
+| `lgwks_research_memory` | Read-only recall adapter for the unified cross-repo codebase brain. | 276 | active | cli test ←2 →1 0d |
 | `lgwks_tokenizer` | the Aetherius Neural Tokenizer (ANT). | 217 | active | ←2 →1 3d |
 | `lgwks_transcript` | tail-reader utility for Claude Code JSONL transcript files. | 144 | active | ←2 4d |
 | `lgwks_transform` | minimal JSONPath/GJSON-like extractor (Issue 159). | 39 | active | ←1 4d |

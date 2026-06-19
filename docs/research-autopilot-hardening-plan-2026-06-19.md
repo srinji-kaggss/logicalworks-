@@ -18,8 +18,10 @@ the compressed cross-repo codebase map before searching.
 
 - Added `lgwks_research_memory.py`, a read-only adapter over the compressed codebase map at
   `/Users/srinji/ingestion_results/unified_agent_brain_multimodal.db`.
-- Added `lgwks state brain stats|recall` so codebase prior context can be inspected directly.
-- Added a `brain:recall` phase to `lgwks do research`, enabled by default.
+- Added `lgwks state brain stats|recall` so codebase prior context can be inspected directly
+  when a DB path is explicitly supplied.
+- Added a `brain:recall` phase to `lgwks do research`; it skips unless `--brain-db`
+  or `LGWKS_AGENT_BRAIN_DB` is configured.
 - Added `--brain-db`, `--recall-limit`, and `--no-brain-recall` controls.
 - Made `do research` fail closed when substrate returns no materialized documents or chunks.
 - Added tests for read-only codebase-brain recall, integrated research recall, and empty-crawl fail-closed behavior.
@@ -33,9 +35,11 @@ Observed local compressed-codebase DB state on 2026-06-19:
 - `perception`: 1234 rows
 
 Invariant: `/Users/srinji/ingestion_results/unified_agent_brain_multimodal.db`
-is a read-only compressed codebase map for LGWKS runtime purposes. Do not use it as
-the operational research memory store, and do not write fresh research runs into it.
-Research writeback needs a separate LGWKS-owned research ledger/index.
+is a live, cron-owned, read-only compressed codebase map for LGWKS runtime purposes.
+LGWKS must not assume it owns that DB, must not write fresh research runs into it,
+and must not touch it by default. Use it only when the operator explicitly passes
+`--db`, `--brain-db`, or `LGWKS_AGENT_BRAIN_DB`. Research writeback needs a separate
+LGWKS-owned research ledger/index.
 
 ## Firecrawl Hardening Notes To Preserve
 
@@ -117,7 +121,7 @@ Start with these commands:
 cd /Users/srinji/logicalworks-
 git status --short --branch
 sed -n '1,220p' docs/navmap/README.md
-./lgwks state brain stats --json
+./lgwks state brain stats --json --db /path/to/explicit/codebase-map.db
 pytest -q tests/test_research_memory.py tests/test_daemon.py
 ```
 

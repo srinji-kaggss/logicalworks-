@@ -454,7 +454,6 @@ def _run_brain_recall(query: str, args: argparse.Namespace) -> PhaseResult:
     import lgwks_research_memory
 
     db_override = getattr(args, "brain_db", "")
-    explicit_db = bool(db_override)
     try:
         payload = lgwks_research_memory.recall(
             query,
@@ -466,10 +465,11 @@ def _run_brain_recall(query: str, args: argparse.Namespace) -> PhaseResult:
 
     if not payload.get("ok"):
         message = payload.get("error", "brain recall unavailable")
+        configured = bool(payload.get("configured"))
         return PhaseResult(
             name="brain:recall",
-            ok=not explicit_db,
-            exit_code=2 if explicit_db else 0,
+            ok=not configured,
+            exit_code=2 if configured else 0,
             message=message,
             artifact=payload,
         )

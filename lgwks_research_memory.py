@@ -18,12 +18,7 @@ from typing import Any
 import lgwks_lexicon as _lex
 from lgwks_lexicon import STOP_EN as _STOP
 
-DEFAULT_BRAIN_DB = Path(
-    os.environ.get(
-        "LGWKS_AGENT_BRAIN_DB",
-        "/Users/srinji/ingestion_results/unified_agent_brain_multimodal.db",
-    )
-)
+DEFAULT_BRAIN_DB: Path | None = None
 
 
 @dataclass(frozen=True)
@@ -52,6 +47,26 @@ def _connect_readonly(db_path: Path) -> sqlite3.Connection:
     conn = sqlite3.connect(uri, uri=True)
     conn.row_factory = sqlite3.Row
     return conn
+
+
+def _resolve_db(db_path: str | Path | None = None) -> Path | None:
+    if db_path:
+        return Path(db_path)
+    env_path = os.environ.get("LGWKS_AGENT_BRAIN_DB", "").strip()
+    if env_path:
+        return Path(env_path)
+    return DEFAULT_BRAIN_DB
+
+
+def _not_configured(schema: str, **extra: Any) -> dict[str, Any]:
+    return {
+        "schema": schema,
+        "ok": False,
+        "configured": False,
+        "db": "",
+        "error": "codebase brain db not configured; pass --db or set LGWKS_AGENT_BRAIN_DB",
+        **extra,
+    }
 
 
 def _table_exists(conn: sqlite3.Connection, table: str) -> bool:
@@ -92,18 +107,22 @@ def _matched_terms(query_terms: list[str], source: str, text: str) -> list[str]:
 
 
 def stats(db_path: str | Path | None = None) -> dict[str, Any]:
-    path = Path(db_path) if db_path else DEFAULT_BRAIN_DB
+    path = _resolve_db(db_path)
+    if path is None:
+        return _not_configured("lgwks.brain.stats.v1", tables={})
     if not path.exists():
         return {
             "schema": "lgwks.brain.stats.v1",
             "ok": False,
+            "configured": True,
             "db": str(path),
-            "error": "brain db not found",
+            "error": "codebase brain db not found",
             "tables": {},
         }
     out: dict[str, Any] = {
         "schema": "lgwks.brain.stats.v1",
         "ok": True,
+        "configured": True,
         "db": str(path),
         "tables": {},
     }
@@ -130,14 +149,17 @@ def recall(
     embedding assumptions because the DB may contain heterogeneous embedding
     formats from several ingestion passes.
     """
-    path = Path(db_path) if db_path else DEFAULT_BRAIN_DB
+    path = _resolve_db(db_path)
+    if path is None:
+        return _not_configured("lgwks.brain.recall.v1", query=query, hits=[])
     if not path.exists():
         return {
             "schema": "lgwks.brain.recall.v1",
             "ok": False,
+            "configured": True,
             "db": str(path),
             "query": query,
-            "error": "brain db not found",
+            "error": "codebase brain db not found",
             "hits": [],
         }
 
@@ -146,6 +168,7 @@ def recall(
         return {
             "schema": "lgwks.brain.recall.v1",
             "ok": True,
+            "configured": True,
             "db": str(path),
             "query": query,
             "terms": [],
@@ -191,6 +214,7 @@ def recall(
     return {
         "schema": "lgwks.brain.recall.v1",
         "ok": True,
+        "configured": True,
         "db": str(path),
         "query": query,
         "terms": unique_terms,
@@ -208,7 +232,7 @@ def recall(
 
 def _emit_text(payload: dict[str, Any]) -> None:
     if not payload.get("ok"):
-        print(payload.get("error", "brain recall failed"))
+        print(payload.get("error", "codebase brain recall failed"))
         return
     for hit in payload.get("hits", []):
         print(f"[{hit['score']:.2f}] {hit['table']} {hit['source']}")
