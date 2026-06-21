@@ -16,17 +16,18 @@
 %% single graph store, replacing per-run graph.db).
 %%
 %% REMAINING WORK (what's still NOT one model):
-%%   A) two stores still BYPASS the tape entirely (write own SQLite): lgwks_jarvis.*
-%%      (per-run islands) and embed_port.system_graph (JSON blob).
-%%   B) the graph projection is identity-UNALIGNED: entity_graph keys on node_id/hash,
-%%      not cid/artifact_cid, and GraphFabric.apply() is inert pending Phase 2 (#165).
+%%   A) ONE store still BYPASSES the tape entirely (writes own SQLite): lgwks_jarvis.*
+%%      (per-run islands). [embed_port.system_graph converged on the tape — #165 step 1.]
+%%   B) [#165 step 2 LANDED] GraphFabric.apply() is live + entity_graph nodes/edges/
+%%      chunks carry artifact_cid (tape provenance) + tier (world ⊕ tenant). Still open:
+%%      per-row artifact_cid back-linking for the substrate producer + read-side world ⊕
+%%      tenant enforcement on the graph — both fold into step 3's coupled migration.
 %% =====================================================================
 flowchart LR
 
-  subgraph BYPASS["A) STILL BYPASS THE TAPE — the real dupes to retire"]
+  subgraph BYPASS["A) STILL BYPASSES THE TAPE — the last dupe to retire"]
     direction TB
-    JV["lgwks_jarvis.*  — per-run DB islands<br/>runs·sources·documents·chunks·embeddings·nodes·edges<br/>id+run_id · vector_json TEXT · NO tier · re-embeds per run<br/>(NOT a consumer of the gate graph)"]
-    SG["lgwks_embed_port.system_graph<br/>whole ingestion graph as one JSON blob"]
+    JV["lgwks_jarvis.*  — per-run DB islands<br/>runs·sources·documents·chunks·embeddings·nodes·edges<br/>id+run_id · vector_json TEXT · NO tier · re-embeds per run<br/>(NOT a consumer of the gate graph) → #165 step 3"]
   end
 
   subgraph FABRIC["THE 1 — the State Fabric (built; gaps marked)"]
@@ -39,13 +40,12 @@ flowchart LR
       PF["FactProjection + global_facts ✓<br/>fact_hash=cid · world accrual"]
       PP["PostingProjection ✓ (BM25 index)"]
       PR["RelationalProjection ✓<br/>sources/documents/chunks/vectors/frontier<br/>(COMPILED operational surface, not ontology)"]
-      PG["GraphFabric → wraps entity_graph<br/>⚠ apply() INERT + keyed on node_id/hash, NOT cid<br/>→ Phase 2 #165: link nodes/edges to artifact_cid + tier"]
+      PG["GraphFabric → wraps entity_graph ✓ (#165 step 2)<br/>apply() LIVE: extras[graph] → nodes/edges/chunks<br/>stamped artifact_cid (tape provenance) + tier (world ⊕ tenant)"]
     end
     ACCESS["④ Access — lgwks_access.TenantStore (one door)<br/>read/query: tier='world' OR tier=:me · write: tenant only<br/>promote: lgwks_promote (gated · audited · MOVE not copy)<br/>§1-INV: cross-tenant read cryptographically refused"]
   end
 
   JV --> SEAM
-  SG --> SEAM
   TAPE --> SEAM
   SEAM --> PV
   SEAM --> PF
@@ -63,8 +63,7 @@ flowchart LR
   classDef seed fill:#fffbe6,stroke:#c90,color:#640;
   classDef gap  fill:#fff3e0,stroke:#e80,color:#730;
   classDef one  fill:#eaffea,stroke:#0a0,color:#040;
-  class JV,SG dupe;
+  class JV dupe;
   class TAPE,SEAM sor;
   class PV seed;
-  class PG gap;
-  class PF,PP,PR,ACCESS one;
+  class PF,PP,PR,PG,ACCESS one;
