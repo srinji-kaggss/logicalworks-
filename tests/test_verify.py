@@ -102,5 +102,43 @@ class TestPipeline(unittest.TestCase):
         self.assertEqual(v.outcome, Outcome.CANNOT_DECIDE)
 
 
+class TestTierHonesty(unittest.TestCase):
+    """Tiers whose Keel runners are not vendored must return an honest BLOCKED
+    (exit 3) — never a silent no-op (the #235 defect this redesign refuses)."""
+
+    import shutil as _shutil
+    _ROOT = __import__("pathlib").Path(__file__).resolve().parents[1]
+
+    @unittest.skipUnless(_shutil.which("node"), "node not available")
+    def test_ci_runner_blocks_unvendored_tier_with_seal(self):
+        import subprocess
+        from pathlib import Path
+        proc = subprocess.run(
+            ["node", str(self._ROOT / "scripts" / "ci" / "run.mjs"), "--tier", "nightly"],
+            cwd=self._ROOT, text=True, capture_output=True, timeout=60,
+        )
+        self.assertEqual(proc.returncode, 3, proc.stdout + proc.stderr)
+        self.assertIn("BLOCKED", proc.stdout)
+        seals = list((self._ROOT / ".ci-runs").glob("*-nightly/seal.json"))
+        self.assertTrue(seals, "expected a sealed BLOCKED record")
+        payload = json.loads(seals[0].read_text())
+        self.assertEqual(payload["verdict"], "BLOCKED")
+        self.assertEqual(payload["tier"], "nightly")
+
+    @unittest.skipUnless(_shutil.which("node"), "node not available")
+    def test_lgwks_verify_verb_refuses_unvendored_tier(self):
+        import subprocess
+        proc = subprocess.run(
+            [sys.executable, str(self._ROOT / "lgwks"), "verify",
+             "--profile", "lgwks.profile.json", "--tier", "release"],
+            cwd=self._ROOT, text=True, capture_output=True, timeout=60,
+            env={**os.environ, "LGWKS_NO_MODELS": "1"},
+        )
+        self.assertEqual(proc.returncode, 3, proc.stdout + proc.stderr)
+        payload = json.loads(proc.stdout)
+        self.assertEqual(payload["verdict"], "BLOCKED")
+        self.assertEqual(payload["tier"], "release")
+
+
 if __name__ == "__main__":
     unittest.main()
