@@ -140,5 +140,34 @@ class TestTierHonesty(unittest.TestCase):
         self.assertEqual(payload["tier"], "release")
 
 
+class TestMaturityScream(unittest.TestCase):
+    """Multi-axis assessment must SCREAM: report all 20 Keel axes + the concept
+    ladder, and count unmeasured axes as deficiencies (IEC 61508: no credit for
+    an axis you didn't measure). Report-only — it does not block."""
+
+    import shutil as _shutil
+    _ROOT = __import__("pathlib").Path(__file__).resolve().parents[1]
+
+    @unittest.skipUnless(_shutil.which("node"), "node not available")
+    def test_maturity_reports_all_axes_and_unmeasured(self):
+        import subprocess
+        proc = subprocess.run(
+            ["node", str(self._ROOT / "scripts" / "ci" / "maturity.mjs")],
+            cwd=self._ROOT, text=True, capture_output=True, timeout=180,
+            env={**os.environ, "LGWKS_NO_MODELS": "1"},
+        )
+        self.assertEqual(proc.returncode, 0, proc.stdout + proc.stderr)  # report-only
+        self.assertIn("MATURITY SCREAM", proc.stdout)
+        self.assertIn("UNMEASURED", proc.stdout)
+        summary = json.loads((self._ROOT / ".keel" / "maturity.json").read_text())
+        self.assertEqual(summary["total"], 20)
+        # The profile binds only a handful of atoms today, so most are unmeasured.
+        self.assertGreater(summary["unmeasured"], 10)
+        self.assertEqual(summary["evidenced"] + summary["failed"] + summary["unmeasured"], 20)
+        # Ladder is present and ordered least->most stringent.
+        self.assertTrue(summary["ladder"])
+        self.assertEqual(summary["ladder"][-1]["id"], "Excellent")
+
+
 if __name__ == "__main__":
     unittest.main()

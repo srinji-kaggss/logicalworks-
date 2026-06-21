@@ -104,7 +104,7 @@ function seal(runDir, id, tier, verdict, reports, extra = {}) {
   return { manifestPath, manifestHash };
 }
 
-function main() {
+async function main() {
   const args = process.argv.slice(2);
   const tierIdx = args.indexOf('--tier');
   const tier = tierIdx >= 0 ? args[tierIdx + 1] : 'commit';
@@ -143,7 +143,23 @@ function main() {
   }
 
   const verdict = reports.every((r) => r.status === 'pass') ? 'GO' : 'NO-GO';
-  const { manifestPath, manifestHash } = seal(runDir, id, tier, verdict, reports);
+
+  // Maturity scream (report-only, multi-axis): the merge gate above is a 3-axis
+  // floor; this surfaces how the product fares across ALL 20 Keel axes + the
+  // concept ladder. Never blocks the merge verdict — it makes immaturity LOUD.
+  let maturity = null;
+  if (tier === 'commit') {
+    try {
+      const { maturityReport } = await import('./maturity.mjs');
+      console.log('');
+      maturity = maturityReport();
+    } catch (e) {
+      console.log(`  (maturity scream unavailable: ${e && e.message ? e.message : e})`);
+    }
+  }
+
+  const { manifestPath, manifestHash } = seal(runDir, id, tier, verdict, reports,
+    maturity ? { maturity: { evidenced: maturity.evidenced, failed: maturity.failed, unmeasured: maturity.unmeasured, highest_tier_cleared: maturity.highest_tier_cleared } } : {});
 
   console.log('============================================================');
   console.log(`${verdict} — record=${manifestPath.slice(ROOT.length + 1)}  seal=${manifestHash.slice(0, 16)}...`);
@@ -153,10 +169,8 @@ function main() {
   process.exit(verdict === 'GO' ? 0 : 1);
 }
 
-try {
-  main();
-} catch (e) {
+main().catch((e) => {
   console.error('RUNNER FAULT — treat as NO-GO:');
   console.error(e && e.stack ? e.stack : String(e));
   process.exit(2);
-}
+});
