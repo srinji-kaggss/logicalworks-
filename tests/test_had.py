@@ -62,8 +62,8 @@ class TestAbstain(unittest.TestCase):
 class TestLedgerShape(unittest.TestCase):
     def test_counter_hypotheses_recorded(self):
         ir = had.decode("crawl a site",
-                        classify_fn=_clf("jarvis crawl",
-                                         [("jarvis crawl", 0.83), ("workflow research", 0.79),
+                        classify_fn=_clf("crawl",
+                                         [("crawl", 0.83), ("workflow research", 0.79),
                                           ("substrate map", 0.78)], 0.04))
         self.assertEqual(ir.assumption_ledger[0].counter_hypotheses,
                          ["workflow research", "substrate map"])

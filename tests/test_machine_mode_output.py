@@ -2,7 +2,7 @@
 Chunk 2: Machine-mode output hardening.
 
 Subprocess-level tests that verify:
-1. `lgwks --machine jarvis crawl <url>` emits parseable JSON to stdout.
+1. `lgwks --machine crawl <url>` emits parseable JSON to stdout.
 2. `lgwks --machine substrate map <url> --embed-provider deterministic` emits parseable JSON.
 3. Neither command leaks ANSI escape codes, progress output, or setup noise to stdout.
 4. stderr is separate from the machine-readable stdout stream.
@@ -53,7 +53,7 @@ def _has_ansi(text: str) -> bool:
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-# 1. lgwks --machine jarvis crawl --estimate-only (fastest, deterministic)
+# 1. lgwks --machine crawl --estimate-only (fastest, deterministic)
 # ─────────────────────────────────────────────────────────────────────────────
 
 class TestMachineModeJarvisCrawlEstimate(unittest.TestCase):
@@ -324,13 +324,13 @@ class TestMachineModeAppleLocalSubstrateMap(unittest.TestCase):
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-# 4. lgwks --machine jarvis crawl remains deterministic by default
+# 4. lgwks --machine crawl (legacy engine) remains deterministic by default
 #    (no substrate, no apple-local, just the estimate or keyword legacy path)
 # ─────────────────────────────────────────────────────────────────────────────
 
 class TestJarvisCrawlMachineModeDefaultDeterministic(unittest.TestCase):
     """
-    With no --embed-provider flag, jarvis crawl keyword-only must not load
+    With no --embed-provider flag, crawl keyword-only must not load
     lgwks_apple or any non-deterministic embedding provider.
     """
 

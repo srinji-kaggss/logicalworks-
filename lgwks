@@ -77,7 +77,11 @@ def build_parser() -> argparse.ArgumentParser:
     # callers are still served by _apply_deprecation_shim (warn + rewrite); the
     # surface is held by the verb-budget gate in tests/test_cli_contract.py.
     import lgwks_model_hub; lgwks_model_hub.add_parser(sub)
-    import lgwks_jarvis; lgwks_jarvis.add_parser(sub)
+    # `jarvis` top-level verb removed (#218 consolidation finished): `jarvis crawl`
+    # is identical to `crawl --engine legacy` (crawl_command delegates to it) and
+    # `jarvis remap-db` is absorbed as `crawl --remap-db`. Legacy callers are
+    # rewritten by the 2-token deprecation shim below. The module stays — crawl
+    # imports it lazily.
     import lgwks_manifest; lgwks_manifest.add_parser(sub)
     import lgwks_files; lgwks_files.add_parser(sub)
     auth = sub.add_parser("auth", add_help=False, help="compat: capability auth vault")
@@ -246,14 +250,33 @@ _DEPRECATED_VERBS = {
     "agent-os": ["ops", "agent-os"],
 }
 
+# Two-token legacy paths -> canonical rewrite. The leading two tokens are
+# consumed and replaced; remaining argv is appended. Used to retire a former
+# top-level verb whose subcommands fold onto an existing canonical verb (e.g.
+# `jarvis crawl` == `crawl --engine legacy`; `jarvis remap-db` == `crawl --remap-db`).
+_DEPRECATED_SUBVERBS = {
+    ("jarvis", "crawl"): ["crawl"],
+    ("jarvis", "remap-db"): ["crawl", "--remap-db"],
+}
+
 
 def _apply_deprecation_shim(argv: list[str]) -> list[str]:
     """Rewrite a legacy top-level verb to its canonical grouped path.
 
     Warns once on stderr so callers migrate, then delegates. Pure read; only
-    rewrites when the legacy verb is the leading token (never mid-command)."""
+    rewrites when the legacy verb is the leading token (never mid-command).
+    Two-token paths are checked first so `jarvis crawl` resolves before any
+    bare-`jarvis` rule."""
     if not argv:
         return argv
+    if len(argv) >= 2:
+        sub_target = _DEPRECATED_SUBVERBS.get((argv[0], argv[1]))
+        if sub_target is not None:
+            sys.stderr.write(
+                f"[lgwks] deprecated: 'lgwks {argv[0]} {argv[1]}' -> "
+                f"use 'lgwks {' '.join(sub_target)}'\n"
+            )
+            return sub_target + argv[2:]
     target = _DEPRECATED_VERBS.get(argv[0])
     if target is None:
         return argv

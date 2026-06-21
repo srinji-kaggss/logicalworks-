@@ -199,7 +199,7 @@ def _dials(on: bool, anim: bool) -> None:
 # runtime classifier would have to introspect each verb's flags — a much bigger surface to
 # maintain. New verbs default to "mutate" so they appear, not silently disappear.
 _READ_FIRST = ["manifest", "extract", "convert", "refine", "store", "login", "memory", "public", "embed"]
-_MUTATE_NEXT = ["jarvis", "x", "geo"]
+_MUTATE_NEXT = ["x", "geo"]
 _ORCHESTRATORS_LAST = ["solve", "project"]
 _MAX_HINTS = 6
 

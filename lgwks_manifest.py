@@ -398,35 +398,6 @@ _VERB_META: dict[str, dict] = {
         "output": "index status JSON",
         "tokens": "none",
     },
-    "jarvis crawl": {
-        "intent": "research-graph crawl of a site/keyword frontier; URL sources use substrate auth-aware runtime by default",
-        "args": {
-            "source": "url or keyword seed",
-            "--max-pages": "int", "--max-depth": "int", "--estimate-only": "plan only",
-            "--workers": "parallel fetch workers (legacy engine)", "--include-external": "follow off-site links (legacy)",
-            "--keywords": "newline/comma/semicolon-delimited keywords",
-            "--search-expansion": "use googler site: expansion for URL+keyword crawls",
-            "--name": "run name prefix", "--prompt": "research intent",
-            "--engine": "substrate (default for URL) | legacy (original Jarvis path)",
-            "--login-if-needed/--no-login-if-needed": "substrate: detect auth walls and prompt browser session",
-            "--login-url": "substrate: explicit login URL override",
-            "--auth-selector": "substrate: CSS selector for post-auth SPA success detection",
-            "--chromium": "substrate: use Chromium instead of WebKit for browser sessions",
-            "--embed-provider": "substrate: deterministic (default) | auto | ollama | openrouter-vl | apple-local",
-            "--embed-model": "substrate: optional explicit embedding model id",
-        },
-        "output": (
-            "URL crawls: schema=lgwks.jarvis.substrate_crawl.v0, engine=substrate, artifact paths. "
-            "Keyword crawls: legacy run db + prevector graph + embeddings under runs/."
-        ),
-        "tokens": "none (crawl); embedding optional",
-    },
-    "jarvis remap-db": {
-        "intent": "upgrade an existing run database to the current Jarvis schema",
-        "args": {"run_dir": "path to the run directory to remap"},
-        "output": "remapped run db (schema version stamped in source_records)",
-        "tokens": "none",
-    },
     "geo compile": {
         "intent": "GeoExpr JSON (--file or stdin) → typed CommandPlan",
         "args": {"--file": "path to a GeoExpr JSON file; omit to read stdin"},
@@ -875,7 +846,7 @@ _VERB_META: dict[str, dict] = {
         "tokens": "none",
     },
     "fetch": {
-        "intent": "single-page browser fetch/extract for one URL (`jarvis crawl` is the crawler)",
+        "intent": "single-page browser fetch/extract for one URL (`crawl` is the multi-page crawler)",
         "args": {"url": "target URL", "--max-chars": "int", "--wait": "ms", "--json": "structured"},
         "output": "rendered page text + optional links/html",
         "tokens": "none (browser fetch)",
@@ -967,15 +938,20 @@ _VERB_META: dict[str, dict] = {
     "crawl": {
         "intent": "unified URL/keyword crawl: substrate auth-aware bridge (default for URLs) or legacy jarvis engine → classify → embed → artifact tree",
         "args": {
-            "target": "URL to crawl or keyword seed",
+            "target": "URL to crawl or keyword seed (optional when --remap-db is given)",
             "--engine": "crawl engine: substrate (auth-aware) or jarvis/legacy (deterministic)",
             "--login-url": "explicit login page URL (substrate)",
             "--auth-selector": "CSS selector confirming successful login (substrate)",
             "--embed-provider": "embedding provider (substrate)",
             "--embed-model": "embedding model (substrate)",
             "--estimate-only": "print a compute estimate and exit",
+            "--workers": "parallel fetch workers (legacy engine)",
+            "--include-external": "follow off-site links (legacy engine)",
+            "--keywords": "newline/comma/semicolon-delimited keywords (legacy engine)",
+            "--search-expansion": "use googler site: expansion (legacy engine)",
+            "--remap-db": "RUN_DIR: upgrade an existing run database to the current schema, then exit (former `jarvis remap-db`)",
         },
-        "output": "lgwks.jarvis.substrate_crawl.v0 JSON (substrate) or manifest.json with artifact paths",
+        "output": "lgwks.jarvis.substrate_crawl.v0 JSON (substrate) or manifest.json with artifact paths; --remap-db: remapped run db",
         "tokens": "image/video embedding only",
     },
     "crdt info": {

@@ -30,11 +30,17 @@ def _run(*args: str, timeout: int = 30) -> subprocess.CompletedProcess:
 # (see _DEPRECATED_VERBS in `lgwks`) or a hard-removal record below.
 CANONICAL_VERBS = {
     "research", "crawl", "review", "repo", "graph", "route", "gate", "state",
-    "ops", "doctor", "model-hub", "jarvis", "manifest", "extract", "convert",
+    "ops", "doctor", "model-hub", "manifest", "extract", "convert",
     "auth", "fetch", "verify", "human", "solve", "do", "wf-run", "x",
 }
 # Collapsed into canonical grouped forms; served by deprecation shim (warn+rewrite).
 SHIMMED_VERBS = {"run": "state run", "context": "state context", "agent-os": "ops agent-os"}
+# Two-token legacy paths whose subcommands fold onto an existing canonical verb.
+# `jarvis crawl` == `crawl --engine legacy` (crawl_command delegates to it);
+# `jarvis remap-db` == `crawl --remap-db`. The parent verb (`jarvis`) is gone
+# from the top-level surface; the 2-token deprecation shim rewrites callers.
+SHIMMED_SUBVERBS = {("jarvis", "crawl"): "crawl", ("jarvis", "remap-db"): "crawl --remap-db"}
+_SUBSHIM_PARENTS = {parent for parent, _ in SHIMMED_SUBVERBS}
 # Hard-removed: were thin aliases of `research` (probe's help was even false).
 REMOVED_VERBS = {"begin", "probe"}
 
@@ -64,7 +70,7 @@ def test_collapsed_aliases_are_not_top_level():
     """begin/probe (removed) and run/context/agent-os (shimmed) must not pollute
     the canonical surface — they are no longer distinct top-level intent labels."""
     verbs = _top_level_verbs()
-    for gone in REMOVED_VERBS | set(SHIMMED_VERBS):
+    for gone in REMOVED_VERBS | set(SHIMMED_VERBS) | _SUBSHIM_PARENTS:
         assert gone not in verbs, f"{gone!r} is still a top-level verb after collapse"
 
 
@@ -107,11 +113,26 @@ def test_model_hub_list_shortcut_still_works():
     assert "ModernBERT" in proc.stdout
 
 
-def test_jarvis_estimate_shortcut_is_machine_parseable_json():
-    proc = _run("jarvis", "crawl", "https://example.com", "--estimate-only")
+def test_crawl_estimate_is_machine_parseable_json():
+    """Canonical crawl emits a parseable estimate (formerly `jarvis crawl`)."""
+    proc = _run("crawl", "https://example.com", "--engine", "legacy", "--estimate-only")
     assert proc.returncode == 0, proc.stderr
     payload = json.loads(proc.stdout)
     assert payload["estimated_seconds"] > 0
+
+
+def test_jarvis_subverbs_shim_warns_and_delegates_then_parent_is_gone():
+    """`jarvis crawl` / `jarvis remap-db` are rewritten onto `crawl` (warn+delegate),
+    keeping stdout clean JSON; the bare `jarvis` parent no longer exists."""
+    # subcommand still works, stdout stays pure JSON, warning on stderr
+    proc = _run("jarvis", "crawl", "https://example.com", "--estimate-only")
+    assert proc.returncode == 0, proc.stderr
+    assert "deprecated" in proc.stderr and "crawl" in proc.stderr
+    assert json.loads(proc.stdout)["estimated_seconds"] > 0
+    # bare parent verb is removed from the surface
+    bare = _run("jarvis")
+    assert bare.returncode != 0
+    assert "invalid choice" in bare.stderr or "invalid choice" in bare.stdout
 
 
 def test_context_accepts_documented_positional_run_dir(tmp_path: Path):

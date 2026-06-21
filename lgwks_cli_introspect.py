@@ -28,7 +28,7 @@ DOMAINS: dict[str, list[str]] = {
     "Subconscious": ["map", "engine", "session", "solve", "debug", "intent", "doctor",
                      "spawn", "portal", "do", "agent-os", "begin", "tui"],
     # Research and knowledge work — the conscious-layer tools
-    "Research":  ["jarvis", "fetch", "refine", "preview", "extract", "convert",
+    "Research":  ["fetch", "refine", "preview", "extract", "convert",
                   "x", "manifest", "login", "cohere", "comprehend", "geo", "public",
                   "akinator", "run", "context", "model-hub", "capture", "jepa",
                   "workflow", "probe", "research", "crawl", "wf-run"],

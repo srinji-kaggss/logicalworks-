@@ -351,7 +351,7 @@ def test_repo_for_command_coverage():
     repo_aware_verbs = {"gh", "repo", "review", "session", "graph", "solve", "debug", "intent", "entity-graph"}
     for verb in repo_aware_verbs:
         assert home._repo_for_command(verb, repo) == ["--repo", str(repo)]
-    for verb in ("doctor", "jarvis", "akinator", "fetch", "crawl", "plan", "pr", "issue"):
+    for verb in ("doctor", "akinator", "fetch", "crawl", "plan", "pr", "issue"):
         assert home._repo_for_command(verb, repo) == []
 
 
