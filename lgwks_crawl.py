@@ -10,6 +10,7 @@ and maps them onto the engine — one crawl surface, no duplicated bridge logic.
 from __future__ import annotations
 
 import argparse
+import sys
 from typing import Any
 
 import lgwks_substrate_io as _io  # canonical filesystem slug (one source of truth)
@@ -105,7 +106,16 @@ def crawl_command(args: argparse.Namespace) -> int:
     """Unified crawl command: maps the canonical flag surface onto lgwks_jarvis."""
     import lgwks_jarvis as jarvis
 
+    # remap-db: absorbed surface of the former `jarvis remap-db` verb.
+    remap_dir = getattr(args, "remap_db", None)
+    if remap_dir:
+        return jarvis.remap_db_command(argparse.Namespace(run_dir=remap_dir))
+
     target = args.target
+    if not target:
+        print("crawl: a target URL/keyword seed is required (or use --remap-db RUN_DIR)",
+              file=sys.stderr)
+        return 2
     is_url = target.startswith(("http://", "https://"))
 
     # User-facing --engine: substrate (default, URL→auth-aware) or jarvis/legacy
@@ -157,7 +167,7 @@ def add_parser(sub) -> None:
         "crawl",
         help="unified URL/keyword crawler (substrate auth-aware bridge + legacy jarvis)",
     )
-    crawl.add_argument("target", help="URL to crawl or keyword seed")
+    crawl.add_argument("target", nargs="?", help="URL to crawl or keyword seed")
     crawl.add_argument(
         "--engine", choices=["substrate", "jarvis", "legacy"], default="substrate",
         help="crawl engine: 'substrate' (auth-aware, default for URLs) or 'jarvis'/'legacy' (deterministic)",
@@ -171,6 +181,21 @@ def add_parser(sub) -> None:
     crawl.add_argument("--chunk-overlap", type=int, default=48)
     crawl.add_argument("--estimate-only", action="store_true", help="print a compute estimate and exit")
     crawl.add_argument("--json", action="store_true", help="output JSON manifest")
+
+    # legacy-engine pass-through (the former top-level `jarvis crawl` surface,
+    # consumed by crawl_command via getattr; #218 consolidation finished — the
+    # top-level `jarvis` verb was removed in favour of `crawl --engine legacy`).
+    crawl.add_argument("--workers", type=int, default=2, help="(legacy) parallel fetch workers")
+    crawl.add_argument("--include-external", action="store_true", help="(legacy) follow off-site links")
+    crawl.add_argument("--keywords", help="(legacy) newline/comma/semicolon-delimited keywords")
+    crawl.add_argument("--prompt", default="map the machine-state understanding", help="research intent")
+    crawl.add_argument("--max-terms", type=int, default=120, help="(legacy) max concept terms")
+    crawl.add_argument("--compress-limit", type=int, default=96, help="(legacy) term compression limit")
+    crawl.add_argument("--similarity-threshold", type=float, default=0.72, help="(legacy) dedup threshold")
+    # remap-db: the only unique surface of the former `jarvis remap-db` verb,
+    # absorbed here as a flag (no positional target needed).
+    crawl.add_argument("--remap-db", dest="remap_db", metavar="RUN_DIR",
+                       help="upgrade an existing run database to the current schema, then exit")
 
     # #34 substrate auth-aware bridge flags
     crawl.add_argument("--login-if-needed", dest="login_if_needed", action="store_true", default=True,

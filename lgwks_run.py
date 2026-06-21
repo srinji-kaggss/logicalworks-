@@ -4,7 +4,7 @@ lgwks_run — the post-gate execution spine (Issue #7, ADR-001).
 
 This is the moment after the form, the intent map, and all five DiD gates plus the conduct review
 have clicked GREEN. The plan is frozen; the crawler must now run. This module is the trust-boundary
-wrapper around the crawl mechanics — it is NOT the crawl algorithm (that is `lgwks jarvis crawl`).
+wrapper around the crawl mechanics — it is NOT the crawl algorithm (that is `lgwks crawl --engine legacy`).
 Its job is to make "all gates passed -> fetch the declared set -> honest artifacts" unviolable:
 
   1. fail-closed gate precondition  — every required verdict must be present AND passed (L1/L6/L9).
