@@ -1,5 +1,5 @@
 .PHONY: install test test-python test-rust check-registry clean doctor models help \
-        verify verify-commit verify-nightly verify-release
+        verify verify-commit verify-nightly verify-release verify-maturity
 
 test: check-registry test-python test-rust
 
@@ -15,6 +15,11 @@ verify-nightly:
 
 verify-release:
 	@node scripts/ci/run.mjs --tier release
+
+# Multi-axis maturity scream (report-only): all 20 Keel axes + concept ladder.
+# IEC 61508 discipline — an unmeasured axis earns no credit. Does not block.
+verify-maturity:
+	@node scripts/ci/maturity.mjs
 
 check-registry:
 	python3 scripts/check_schema_registry.py
