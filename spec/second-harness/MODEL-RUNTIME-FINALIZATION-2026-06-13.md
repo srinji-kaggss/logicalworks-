@@ -208,7 +208,13 @@ The daemon remains the operating system around it.
 
 ## 6. Immediate implementation contracts
 
-To finalize this in code, the next contracts should be:
+> ✅ **STATUS UPDATE (2026-06-14): these all SHIPPED — this table is now historical.** Reconciled ids:
+> `lgwks.daemon.event_envelope.v1` shipped as **`lgwks.daemon.event.v2`** (#118/#140) · `lgwks.model.mesh.v1`
+> (#119) · `lgwks.context.packet.v1` (#122) · `lgwks.capability.action.v1` (#120) · `lgwks.workflow.trigger.v1`
+> (#121) · `lgwks.voice.event.v1` (#123). See `docs/schemas/REGISTRY.md` for live rows;
+> `Desktop/LogicOS-Conflict-Ledger-2026-06-14.md` C-03/C-04.
+
+To finalize this in code, the next contracts should be (**historical — see status above**):
 
 | Contract | Purpose |
 |---|---|
