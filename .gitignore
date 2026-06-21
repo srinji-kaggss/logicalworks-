@@ -37,3 +37,5 @@ findings_final.json
 .venv-models/
 models/
 store/
+graphify-out/
+findings/
