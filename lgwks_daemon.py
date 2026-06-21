@@ -37,11 +37,67 @@ POLL_INTERVAL_S = 0.5
 # Cortex trajectory build cadence (heavier than the 0.5s queue poll — tokenizes
 # transcript turns). mtime-guarded so a quiet transcript costs nothing.
 CORTEX_INTERVAL_S = 5.0
+# A transcript not written within this window is a closed/idle session, not a
+# live one — discovery ignores it so the daemon never pins itself to a corpse.
+CAPTURE_MAX_AGE_S = 3600.0
 START_TIMEOUT_S = 5.0
 STOP_TIMEOUT_S = 5.0
 
 
 from lgwks_clock import now_iso as _now  # one source of truth for timestamps
+
+
+def _claude_projects_dir() -> Path:
+    """Root that holds Claude Code session transcripts (env-overridable so the
+    discovery path can be pointed at a fixture in tests)."""
+    override = os.environ.get("LGWKS_CLAUDE_PROJECTS_DIR", "").strip()
+    if override:
+        return Path(override)
+    return Path.home() / ".claude" / "projects"
+
+
+def discover_live_transcript(
+    projects_dir: Path,
+    *,
+    now: float,
+    max_age_s: float = CAPTURE_MAX_AGE_S,
+    repo_root: Path | None = None,
+) -> str | None:
+    """Find the freshest live transcript to capture — no hook, no env binding.
+
+    This is what makes the daemon the autonomous core of capture: rather than
+    waiting to be told which session to tail (the prior failure mode — pinned to
+    a dead subagent transcript, capturing nothing forever), it finds the session
+    in flight on its own.
+
+    A candidate is a `*.jsonl` directly under a project dir (subagent transcripts
+    live one level deeper, under `<session>/subagents/`, so the shallow glob
+    excludes them by construction) that was modified within `max_age_s` of `now`.
+    The freshest wins; the daemon's own repo project dir is only a final tiebreak.
+    Returns the path string, or None when no session is live.
+    """
+    if not projects_dir.exists():
+        return None
+    repo_tag = str(repo_root).replace("/", "-") if repo_root is not None else None
+    best: tuple[float, int, str] | None = None  # (mtime, repo_pref, path)
+    try:
+        for proj in projects_dir.iterdir():
+            if not proj.is_dir():
+                continue
+            pref = 1 if (repo_tag and proj.name == repo_tag) else 0
+            for tx in proj.glob("*.jsonl"):
+                try:
+                    mtime = tx.stat().st_mtime
+                except OSError:
+                    continue
+                if now - mtime > max_age_s:
+                    continue
+                key = (mtime, pref, str(tx))
+                if best is None or key > best:
+                    best = key
+    except OSError:
+        return None
+    return best[2] if best else None
 
 
 def _pid_alive(pid: int) -> bool:
@@ -556,6 +612,27 @@ class SessionDaemon:
             time.sleep(0.1)
         raise RuntimeError(f"daemon pid {pid} did not stop within {STOP_TIMEOUT_S}s")
 
+    def _resolve_capture_target(self, bound: str, *, now: float) -> str | None:
+        """Decide which transcript to capture this tick.
+
+        The bound transcript (from `--transcript-path`/`LGWKS_TRANSCRIPT_PATH`)
+        wins only when it is itself a live, real, non-subagent session — i.e. an
+        explicit pin is honoured while it stays valid. Otherwise the daemon
+        DISCOVERS the freshest live transcript on its own. This is the fix for
+        the zero-capture failure: a daemon pinned at startup to a dead subagent
+        transcript now falls through to discovery instead of tailing a corpse.
+        """
+        if bound and "/subagents/" not in bound:
+            p = Path(bound)
+            try:
+                if p.exists() and (now - p.stat().st_mtime) <= CAPTURE_MAX_AGE_S:
+                    return bound
+            except OSError:
+                pass
+        return discover_live_transcript(
+            _claude_projects_dir(), now=now, repo_root=self.paths.repo_root
+        )
+
     def _maybe_process_cortex(self, transcript: str, last_mtime: float) -> float:
         """Tail the bound transcript into cortex trajectories — best-effort.
 
@@ -639,7 +716,10 @@ class SessionDaemon:
                 )
             heartbeat_due = time.time()
             cortex_due = time.time()
-            last_mtime = 0.0
+            # Per-transcript watermarks: discovery may switch the capture target
+            # (sessions open and close), and each target has its own mtime
+            # progress. A single scalar would lose progress on every switch.
+            cortex_watermarks: dict[str, float] = {}
             while running:
                 now = time.time()
                 if now >= heartbeat_due:
@@ -663,7 +743,10 @@ class SessionDaemon:
                 # tails its bound transcript into cortex trajectories on its own;
                 # a harness hook is only an optional low-latency push-trigger.
                 if now >= cortex_due:
-                    last_mtime = self._maybe_process_cortex(transcript, last_mtime)
+                    target = self._resolve_capture_target(transcript, now=now)
+                    if target:
+                        wm = cortex_watermarks.get(target, 0.0)
+                        cortex_watermarks[target] = self._maybe_process_cortex(target, wm)
                     cortex_due = now + CORTEX_INTERVAL_S
 
                 time.sleep(POLL_INTERVAL_S)
