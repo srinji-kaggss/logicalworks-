@@ -117,6 +117,45 @@ class TestSubstrateBuild(unittest.TestCase):
             self.assertGreater(manifest["embedding"]["global_fact_vectors_written"], 0)
             self.assertTrue(Path(manifest["global_artifacts"]["fact_vector_db"]).exists())
 
+    def test_identical_content_dedups_to_one_content_addressed_node(self):
+        """'wget but better': byte-identical content across docs (mirrored page,
+        repeated boilerplate, re-crawl) collapses to ONE content-addressed chunk
+        node carrying provenance for every occurrence — and is embedded once."""
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td) / "repo"
+            root.mkdir()
+            body = ("An RRSP minimum transfer requires form T2033. Settlement is "
+                    "T plus one business day under the regulation everyone follows.")
+            (root / "a.md").write_text(body, encoding="utf-8")
+            (root / "b.md").write_text(body, encoding="utf-8")  # identical
+
+            args = type("Args", (), {
+                "target": str(root), "project": "dedup-test", "source_type": "folder",
+                "max_pages": 10, "max_depth": 1, "max_files": 10, "max_chars": 10000,
+                "chunk_words": 80, "chunk_overlap": 10, "fact_threshold": 0.6,
+                "embed_provider": "auto", "embed_model": "", "login_if_needed": True,
+                "login_url": "", "success_selector": None, "max_auto_bypass_attempts": 3,
+                "max_auth_handoffs": 3, "browser_engine": "chromium",
+                "click_discovery": False, "max_clicks_per_page": 20,
+            })()
+
+            with mock.patch.object(
+                substrate.lgwks_run, "embed_dual",
+                return_value={
+                    "det": {"vector": [0.1], "provider": "deterministic", "dims": 1},
+                    "sem": {"vector": [0.1], "provider": "ollama:q", "dims": 1},
+                },
+            ):
+                manifest = substrate.build_run(args)
+
+            run_dir = Path(manifest["artifacts"]["root"])
+            chunks = [json.loads(l) for l in (run_dir / "chunks.jsonl").read_text(encoding="utf-8").splitlines()]
+            self.assertEqual(manifest["counts"]["documents"], 2)
+            shared = [c for c in chunks if "T2033" in c["text"]]
+            self.assertEqual(len(shared), 1, "identical content must collapse to ONE node")
+            self.assertEqual(len(shared[0]["provenance"]), 2, "both doc occurrences must be recorded")
+            self.assertTrue(shared[0]["chunk_id"].startswith("chunk-"))
+
     def test_crawl_site_prompts_auth_then_retries(self):
         state = {"saved": False}
 
