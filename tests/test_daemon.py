@@ -6,6 +6,7 @@ import json
 import argparse
 import contextlib
 import io
+import os
 import tempfile
 import time
 import unittest
@@ -19,6 +20,14 @@ class TestSessionDaemon(unittest.TestCase):
     def setUp(self):
         self.tmp = Path(tempfile.mkdtemp())
         (self.tmp / "store").mkdir(exist_ok=True)
+        # Hermetic capture: point transcript discovery at an EMPTY dir so a
+        # daemon started without an explicit transcript can't reach into the
+        # developer's real ~/.claude live session (which would both pollute the
+        # temp store and slow shutdown while it tokenizes hundreds of turns).
+        self._empty_projects = self.tmp / "claude-projects"
+        self._empty_projects.mkdir(exist_ok=True)
+        self._prev_projects = os.environ.get("LGWKS_CLAUDE_PROJECTS_DIR")
+        os.environ["LGWKS_CLAUDE_PROJECTS_DIR"] = str(self._empty_projects)
         self.daemon = daemon_mod.SessionDaemon(self.tmp)
 
     def tearDown(self):
@@ -26,6 +35,10 @@ class TestSessionDaemon(unittest.TestCase):
             self.daemon.stop()
         except Exception:
             pass
+        if self._prev_projects is None:
+            os.environ.pop("LGWKS_CLAUDE_PROJECTS_DIR", None)
+        else:
+            os.environ["LGWKS_CLAUDE_PROJECTS_DIR"] = self._prev_projects
 
     def test_doctor_reports_root(self):
         report = self.daemon.doctor()
