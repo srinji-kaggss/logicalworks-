@@ -17,6 +17,7 @@ fix the daemon (see CLAUDE.md no-gate-weakening).
 from __future__ import annotations
 
 import json
+import os
 import sqlite3
 import tempfile
 import threading
@@ -26,6 +27,31 @@ from pathlib import Path
 import lgwks_daemon as daemon_mod
 import lgwks_daemon_event as evt
 from lgwks_daemon_store import DaemonEventStore
+
+
+# Hermetic capture isolation for the whole suite: a daemon started here must not
+# self-discover the developer's real ~/.claude live session (#245 transcript
+# self-discovery). On a long live session the first synchronous cortex pass
+# tokenizes hundreds of turns and starves the 5s clean-stop (#247) — making the
+# lifecycle invariants flaky. Point discovery at an empty dir. Mirrors the
+# isolation already in tests/test_daemon.py; not an assertion weakening.
+_PREV_PROJECTS: str | None = None
+_PROJECTS_TMP: Path | None = None
+
+
+def setUpModule() -> None:
+    global _PREV_PROJECTS, _PROJECTS_TMP
+    _PROJECTS_TMP = Path(tempfile.mkdtemp()) / "claude-projects"
+    _PROJECTS_TMP.mkdir(parents=True, exist_ok=True)
+    _PREV_PROJECTS = os.environ.get("LGWKS_CLAUDE_PROJECTS_DIR")
+    os.environ["LGWKS_CLAUDE_PROJECTS_DIR"] = str(_PROJECTS_TMP)
+
+
+def tearDownModule() -> None:
+    if _PREV_PROJECTS is None:
+        os.environ.pop("LGWKS_CLAUDE_PROJECTS_DIR", None)
+    else:
+        os.environ["LGWKS_CLAUDE_PROJECTS_DIR"] = _PREV_PROJECTS
 
 
 def _event(tenant: str, session: str, agent: str, *, kind: str = "human_message",

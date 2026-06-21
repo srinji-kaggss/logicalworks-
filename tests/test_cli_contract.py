@@ -22,11 +22,77 @@ def _run(*args: str, timeout: int = 30) -> subprocess.CompletedProcess:
     )
 
 
-def test_documented_shortcuts_are_registered():
+# ── Orchestration surface contract (no-regrowth gate) ──────────────────────
+# The canonical top-level verb set. Adding a verb without updating this set
+# fails the gate on purpose: every top-level verb is a distinct intent label in
+# the cortex training stream, so surface growth must be a deliberate decision,
+# not an accident. Removing a verb here must be matched by a deprecation shim
+# (see _DEPRECATED_VERBS in `lgwks`) or a hard-removal record below.
+CANONICAL_VERBS = {
+    "research", "crawl", "review", "repo", "graph", "route", "gate", "state",
+    "ops", "doctor", "model-hub", "jarvis", "manifest", "extract", "convert",
+    "auth", "fetch", "verify", "human", "solve", "do", "wf-run", "x",
+}
+# Collapsed into canonical grouped forms; served by deprecation shim (warn+rewrite).
+SHIMMED_VERBS = {"run": "state run", "context": "state context", "agent-os": "ops agent-os"}
+# Hard-removed: were thin aliases of `research` (probe's help was even false).
+REMOVED_VERBS = {"begin", "probe"}
+
+
+def _top_level_verbs() -> set[str]:
     proc = _run("--help")
     assert proc.returncode == 0
-    for command in ("agent-os", "run", "context", "model-hub", "jarvis", "auth", "fetch", "manifest"):
-        assert command in proc.stdout
+    # argparse prints the choice set as {a,b,c} on the usage line(s).
+    import re
+    m = re.search(r"\{([a-z0-9,_-]+)\}", proc.stdout)
+    assert m, f"could not parse verb set from help:\n{proc.stdout}"
+    return set(m.group(1).split(","))
+
+
+def test_top_level_surface_matches_canonical_set_no_regrowth():
+    """Verb-budget gate: the top-level surface is exactly CANONICAL_VERBS.
+
+    Fails on regrowth (a new verb nobody approved) AND on silent loss."""
+    verbs = _top_level_verbs()
+    extra = verbs - CANONICAL_VERBS
+    missing = CANONICAL_VERBS - verbs
+    assert not extra, f"verb surface regrew (un-budgeted top-level verbs): {sorted(extra)}"
+    assert not missing, f"canonical verbs disappeared: {sorted(missing)}"
+
+
+def test_collapsed_aliases_are_not_top_level():
+    """begin/probe (removed) and run/context/agent-os (shimmed) must not pollute
+    the canonical surface — they are no longer distinct top-level intent labels."""
+    verbs = _top_level_verbs()
+    for gone in REMOVED_VERBS | set(SHIMMED_VERBS):
+        assert gone not in verbs, f"{gone!r} is still a top-level verb after collapse"
+
+
+def test_hard_removed_verbs_error():
+    for gone in REMOVED_VERBS:
+        proc = _run(gone, "anything")
+        assert proc.returncode != 0, f"{gone!r} should be hard-removed but exited 0"
+        assert "invalid choice" in proc.stderr or "invalid choice" in proc.stdout
+
+
+def test_deprecation_shim_warns_and_delegates():
+    """`lgwks run`/`context`/`agent-os` still work but warn and rewrite to the
+    canonical grouped command (preserves legacy callers; one migration nudge)."""
+    proc = _run("run", "--demo")
+    assert proc.returncode == 0, proc.stderr
+    assert "deprecated" in proc.stderr and "state run" in proc.stderr
+    assert "run demo-crm" in proc.stdout  # delegated payload is unchanged
+
+
+def test_route_act_is_the_front_door():
+    """The single agentic entrypoint maps NL intent -> typed action and refuses
+    to auto-execute mutations (safety membrane)."""
+    proc = _run("route", "act", "delete all the logs", "--dry-run")
+    assert proc.returncode != 0, "mutation intent must not report ok"
+    payload = json.loads(proc.stdout)
+    assert payload["schema"] == "lgwks.route.act.v1"
+    assert payload["blocked"] is True
+    assert payload["action"]["effect_class"] == "write"
 
 
 def test_run_demo_shortcut_still_works():

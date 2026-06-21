@@ -396,6 +396,42 @@ def _should_index(path: Path) -> bool:
     return True
 
 
+def _indexable_file_roots(root: Path | None = None):
+    """Yield indexable file paths under `root` (git provenance when available,
+    rglob fallback). Shares the indexer's own inclusion rule (`_should_index`)
+    so staleness checks see exactly the files the index would contain."""
+    import subprocess
+    r = root or ROOT
+    try:
+        rels = subprocess.check_output(
+            ["git", "ls-files"], cwd=str(r), text=True
+        ).splitlines()
+        candidates = (r / rel for rel in rels)
+    except Exception:
+        candidates = (p for p in r.rglob("*"))
+    for path in candidates:
+        if path.is_file() and _should_index(path):
+            yield path
+
+
+def index_stale(root: Path | None = None) -> bool:
+    """True when any indexable source file changed after the index was built.
+
+    Deterministic: compares file mtimes against the index `created_at`. A missing
+    or zero timestamp is treated as stale (force rebuild). Used by `route act`
+    to keep one-shot codebase search fresh without a hard dependency."""
+    created_at = float(status().get("created_at") or 0.0)
+    if created_at <= 0.0:
+        return True
+    try:
+        for path in _indexable_file_roots(root):
+            if path.stat().st_mtime > created_at:
+                return True
+    except Exception:
+        return True
+    return False
+
+
 def _parse_generic_code(file: Path, root: Path) -> list[CodeEntity]:
     """Generic regex-based parser for most programming languages."""
     try:
