@@ -666,5 +666,45 @@ class TestLoadAllGraphs(unittest.TestCase):
             self.assertEqual(results[0]["repo"], "myrepo")
 
 
+class TestLoadGraphifyTapeConvergence(unittest.TestCase):
+    """#165 step 1: an imported graph is recorded on the State Fabric tape (SoR),
+    content-addressed by cid, instead of living only in the bypass system_graph
+    table. The system_graph export coexists; no-gate callers are unchanged."""
+
+    def test_graph_recorded_on_tape_by_cid(self):
+        from lgwks_storage import StorageGate
+        from axiom.cid import compute_cid
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            gj = Path(tmpdir) / "logicalworks-_graph" / "graph.json"
+            gj.parent.mkdir()
+            data = json.dumps(_graph_json(6, 5))
+            gj.write_text(data)
+            dst = Path(tmpdir) / "brain.db"
+            gate = StorageGate(Path(tmpdir) / "fabric", tenant_id="tenant-a")
+            try:
+                result = load_graphify(gj, dst, gate=gate)
+                expected_cid = compute_cid(data.encode("utf-8", errors="ignore"))
+                # routed through the gate: cid returned and the graph is on the tape/fact-list
+                self.assertEqual(result["artifact_cid"], expected_cid)
+                self.assertIsNotNone(gate._fact_port.lookup_fact(expected_cid))
+                # the system_graph export still exists alongside the SoR
+                conn = sqlite3.connect(str(dst))
+                count = conn.execute("SELECT COUNT(*) FROM system_graph").fetchone()[0]
+                conn.close()
+                self.assertEqual(count, 1)
+            finally:
+                gate.close()
+
+    def test_no_gate_unchanged_no_cid(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            gj = Path(tmpdir) / "x_graph" / "graph.json"
+            gj.parent.mkdir()
+            gj.write_text(json.dumps(_graph_json()))
+            dst = Path(tmpdir) / "brain.db"
+            result = load_graphify(gj, dst)  # no gate
+            self.assertNotIn("artifact_cid", result)
+
+
 if __name__ == "__main__":
     unittest.main()
