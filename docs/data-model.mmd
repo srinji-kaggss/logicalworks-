@@ -1,79 +1,70 @@
 %%{init: {"flowchart": {"htmlLabels": true, "curve": "basis"}} }%%
 %% =====================================================================
 %% lgwks — THE ONE DATA MODEL: the State Fabric (whole pipeline)
-%% Authority: spec/second-harness/ARCH-two-db-multitenant.md ("one conceptual DB,
-%%   world shared + tenant called in at query") + lgwks_fabric_projection
-%%   ("the universal projection seam … a Projection is any derived view — the
-%%    vector store, the posting list, THE ENTITY GRAPH, … rebuildable by tape replay").
+%% Authority: spec/second-harness/ARCH-two-db-multitenant.md + lgwks_fabric_projection.
 %%
 %% THE 1 = ONE Source of Record (CausalTape) + MANY cid-keyed, tier-tagged
-%% PROJECTIONS joined through one seam, read through one access locus (TenantStore,
-%% own ⊕ world). It is NOT "one giant table" — it is one tape, many derived views.
+%% PROJECTIONS joined through one seam (StorageGate.ingest_artifact), read through
+%% ONE access locus (lgwks_access.TenantStore, own ⊕ world). NOT one giant table —
+%% one tape, many derived/rebuildable views. The relational SQL surface is a
+%% COMPILED projection, never the ontology.
 %%
-%% THE DUPES = stores that each write their OWN SQLite file directly, bypassing the
-%% tape. That bypass is the single thing they are all missing: no shared cid, no
-%% tier/world, no rebuildability, no co-location. FIX = make each a registered
-%% projection (write via StorageGate); DELETE its bespoke write path once it
-%% replays from the tape.
+%% Status (verified at HEAD): the fabric is largely built. lgwks_storage registers
+%% 4 projections — VectorProjection(→vector_records), PostingProjection(BM25),
+%% FactProjection(+global_facts), RelationalProjection(sources/documents/chunks/
+%% vectors/facts/frontier), and GraphFabric(wraps entity_graph; #169 made it the
+%% single graph store, replacing per-run graph.db).
+%%
+%% REMAINING WORK (what's still NOT one model):
+%%   A) two stores still BYPASS the tape entirely (write own SQLite): lgwks_jarvis.*
+%%      (per-run islands) and embed_port.system_graph (JSON blob).
+%%   B) the graph projection is identity-UNALIGNED: entity_graph keys on node_id/hash,
+%%      not cid/artifact_cid, and GraphFabric.apply() is inert pending Phase 2 (#165).
 %% =====================================================================
 flowchart LR
 
-  subgraph DUPES["TODAY — stores that BYPASS the tape (the semantic dupes)"]
+  subgraph BYPASS["A) STILL BYPASS THE TAPE — the real dupes to retire"]
     direction TB
-    JV["lgwks_jarvis.*  (per-run DB islands)<br/>runs·sources·documents·chunks·embeddings·nodes·edges…<br/>id+run_id · vector_json TEXT · NO tier"]
-    EG["lgwks_entity_graph  nodes·edges·chunks<br/>node_id/chunk_id · hash · NO tier"]
-    SV["lgwks_storage.vectors  (projection-shaped but parallel)<br/>vector_json TEXT"]
-    SG["lgwks_embed_port.system_graph<br/>whole graph as one JSON blob"]
+    JV["lgwks_jarvis.*  — per-run DB islands<br/>runs·sources·documents·chunks·embeddings·nodes·edges<br/>id+run_id · vector_json TEXT · NO tier · re-embeds per run<br/>(NOT a consumer of the gate graph)"]
+    SG["lgwks_embed_port.system_graph<br/>whole ingestion graph as one JSON blob"]
   end
 
-  subgraph MISS["THE ONE THING THEY ALL MISS"]
+  subgraph FABRIC["THE 1 — the State Fabric (built; gaps marked)"]
     direction TB
-    X["NOT projections of the one tape →<br/>① no shared identity (content_sha256=hash=cid, 3 PK names)<br/>② no world ⊕ tenant tier<br/>③ no co-location (node→chunk→embed→fact split across files)<br/>④ not rebuildable from a SoR<br/>⑤ gaps: AST symbols · multimodal · cross-run accrual"]
-  end
-
-  subgraph FABRIC["THE 1 — the State Fabric"]
-    direction TB
-    TAPE["① SoR — CausalTape (lgwks_storage)<br/>append-only · per-tenant hash chain · content-idempotent<br/>EVERYTHING else is a derived, rebuildable view of this"]
-    SEAM["② Projection seam — StorageGate.ingest_artifact<br/>(lgwks_fabric_projection)<br/>append → fan out to register_projection(…) views"]
-    subgraph VIEWS["③ Projections — cid-keyed, tier-tagged, co-located"]
+    TAPE["① SoR — CausalTape (lgwks_storage)<br/>append-only · per-tenant hash chain · content-idempotent<br/>every view below is derived + rebuildable by tape replay"]
+    SEAM["② Seam — StorageGate.ingest_artifact (lgwks_fabric_projection)<br/>append → fan out to register_projection(…)"]
+    subgraph VIEWS["③ Projections (registered)"]
       direction TB
-      PG["entity-graph view<br/>nodes + edges (cid PK, tier, kind, rel, weight)"]
-      PV["vector view = vector_records (THE SEED)<br/>cid PK · tier(space_id+tenant) · BLOB · modality · store-once"]
-      PC["chunk/document/source view (cid PK, tier)"]
-      PF["fact view + global_facts (fact_hash=cid, world accrual)"]
-      PP["token-posting view (BM25 index)"]
-      PS["NEW: AST symbols view (cid PK, tier) — ingestion code_symbols parity"]
+      PV["VectorProjection → vector_records  ✓SEED<br/>cid PK · tier(space_id+tenant) · BLOB · modality · store-once"]
+      PF["FactProjection + global_facts ✓<br/>fact_hash=cid · world accrual"]
+      PP["PostingProjection ✓ (BM25 index)"]
+      PR["RelationalProjection ✓<br/>sources/documents/chunks/vectors/frontier<br/>(COMPILED operational surface, not ontology)"]
+      PG["GraphFabric → wraps entity_graph<br/>⚠ apply() INERT + keyed on node_id/hash, NOT cid<br/>→ Phase 2 #165: link nodes/edges to artifact_cid + tier"]
     end
-    ACCESS["④ Access locus — lgwks_access.TenantStore (one door)<br/>read/query: tier='world' OR tier=:me  ·  write: tenant only<br/>promote: lgwks_promote (gated · audited · MOVE not copy)<br/>§1-INV: cross-tenant read cryptographically refused"]
+    ACCESS["④ Access — lgwks_access.TenantStore (one door)<br/>read/query: tier='world' OR tier=:me · write: tenant only<br/>promote: lgwks_promote (gated · audited · MOVE not copy)<br/>§1-INV: cross-tenant read cryptographically refused"]
   end
 
-  JV --> X
-  EG --> X
-  SV --> X
-  SG --> X
-  X --> SEAM
-
+  JV --> SEAM
+  SG --> SEAM
   TAPE --> SEAM
-  SEAM --> PG
   SEAM --> PV
-  SEAM --> PC
   SEAM --> PF
   SEAM --> PP
-  SEAM --> PS
-  PG --> ACCESS
+  SEAM --> PR
+  SEAM --> PG
   PV --> ACCESS
-  PC --> ACCESS
   PF --> ACCESS
   PP --> ACCESS
-  PS --> ACCESS
+  PR --> ACCESS
+  PG --> ACCESS
 
   classDef dupe fill:#fee,stroke:#c00,stroke-dasharray:5 3,color:#900;
-  classDef miss fill:#fff3f3,stroke:#c33,color:#700;
   classDef sor  fill:#eef4ff,stroke:#36c,color:#024;
   classDef seed fill:#fffbe6,stroke:#c90,color:#640;
+  classDef gap  fill:#fff3e0,stroke:#e80,color:#730;
   classDef one  fill:#eaffea,stroke:#0a0,color:#040;
-  class JV,EG,SV,SG dupe;
-  class X miss;
+  class JV,SG dupe;
   class TAPE,SEAM sor;
   class PV seed;
-  class PG,PC,PF,PP,PS,ACCESS one;
+  class PG gap;
+  class PF,PP,PR,ACCESS one;
