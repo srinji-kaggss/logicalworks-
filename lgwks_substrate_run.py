@@ -460,7 +460,10 @@ def build_run(args: argparse.Namespace) -> dict[str, Any]:
     # State Fabric: the entity graph is the gate-owned, cumulative GraphFabric
     # projection (the per-run graph.db was removed in #169). Exports + stats are
     # sourced from the cumulative graph; `query --neighbors` reads it via the gate.
-    gate.graph_fabric.ingest_chunks(graph_input_rows)
+    # #165 step 2: tag the cumulative graph with this gate's tier (world ⊕ tenant
+    # ownership). Per-row artifact_cid back-linking to the tape lands in step 3's
+    # coupled migration, where each chunk's tape entry is threaded explicitly.
+    gate.graph_fabric.ingest_chunks(graph_input_rows, tier=gate.tenant_id)
     graph_json = run_dir / "graph.json"
     graph_mmd = run_dir / "graph.mmd"
     gate.graph_fabric.export_json(graph_json)
