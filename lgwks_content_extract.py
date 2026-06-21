@@ -234,9 +234,109 @@ def prune_html(html: str) -> str:
     return "".join(out)
 
 
-def extract_main_content(html: str, base_url: str = "", *, max_chars: int = 0) -> str:
-    """Seam entrypoint: prune boilerplate, then convert to clean markdown via the
-    canonical converter. Returns markdown text (optionally length-capped)."""
+def _tokenize_text(text: str) -> list[str]:
+    """Split text into lowercase tokens. Pure stdlib: re.findall."""
+    tokens = re.findall(r'\b\w+\b', text.lower())
+    return tokens
+
+
+def _split_into_blocks(text: str) -> list[str]:
+    """Split text into semantic blocks (non-empty paragraphs/lines).
+
+    A block is a contiguous sequence of non-whitespace lines, separated by
+    blank lines. Returns blocks that have at least 2 tokens each.
+    """
+    blocks = []
+    current_block_lines = []
+
+    for line in text.split('\n'):
+        line = line.strip()
+        if not line:
+            # Blank line: flush current block if it has content
+            if current_block_lines:
+                block_text = '\n'.join(current_block_lines)
+                if len(_tokenize_text(block_text)) >= 2:
+                    blocks.append(block_text)
+                current_block_lines = []
+        else:
+            current_block_lines.append(line)
+
+    # Flush final block
+    if current_block_lines:
+        block_text = '\n'.join(current_block_lines)
+        if len(_tokenize_text(block_text)) >= 2:
+            blocks.append(block_text)
+
+    return blocks
+
+
+def _filter_by_bm25(text: str, query: str) -> str:
+    """Filter text blocks by BM25 relevance to query.
+
+    Keeps only blocks that score > 0 against the query (relevance-thresholding,
+    like crawl4ai's BM25ContentFilter). If NO block matches the query, the text is
+    returned unfiltered — a query that hits nothing must not silently empty the page.
+
+    Args:
+        text: markdown text to filter
+        query: search query (space-separated terms)
+
+    Returns:
+        Concatenated relevant blocks in original order, preserving line breaks.
+    """
+    # Route to the canonical BM25 primitive (lgwks_pipeline.bm25_score) — do not
+    # mint a second copy of the formula (cohesion rule, #223). Lazy import keeps
+    # this extraction seam dependency-free at module load, matching the existing
+    # `from lgwks_html import ...` pattern below in extract_main_content.
+    from lgwks_pipeline import bm25_score
+
+    query_tokens = _tokenize_text(query)
+    if not query_tokens:
+        return text
+
+    blocks = _split_into_blocks(text)
+    if not blocks:
+        return text
+
+    # Tokenize once; compute avg_doc_len from the actual blocks (the canonical
+    # caller in lgwks_pipeline does the same) rather than a hardcoded constant.
+    block_tokens = [_tokenize_text(b) for b in blocks]
+    avg_doc_len = sum(len(t) for t in block_tokens) / max(len(block_tokens), 1)
+
+    relevant = {
+        block
+        for block, tokens in zip(blocks, block_tokens)
+        if bm25_score(query_tokens, tokens, avg_doc_len=avg_doc_len) > 0
+    }
+    if not relevant:
+        # Query matched no block — don't empty the page; return it unfiltered.
+        return text
+
+    # Keep relevant blocks in original document order.
+    return '\n\n'.join(b for b in blocks if b in relevant)
+
+
+def extract_main_content(
+    html: str,
+    base_url: str = "",
+    *,
+    max_chars: int = 0,
+    query: str = "",
+) -> str:
+    """Seam entrypoint: prune boilerplate, convert to markdown, optionally filter by query.
+
+    Args:
+        html: HTML source to extract from.
+        base_url: Base URL for link resolution.
+        max_chars: Max output length (0 = unlimited).
+        query: Optional BM25 query filter. When empty (default), returns all content
+               (byte-identical to prior behavior). When non-empty, keeps only the
+               blocks that score against the query (relevance-thresholding); a query
+               matching nothing leaves the content unfiltered.
+
+    Returns:
+        Clean markdown text, optionally filtered by query relevance and length-capped.
+    """
     from lgwks_html import html_to_markdown
 
     pruned = prune_html(html)
@@ -244,4 +344,9 @@ def extract_main_content(html: str, base_url: str = "", *, max_chars: int = 0) -
     if not text.strip():
         # pruning removed everything (e.g. tiny page) — fall back to full convert
         text, _, _, _ = html_to_markdown(html, base_url)
+
+    # Apply BM25 filtering if query is non-empty
+    if query and query.strip():
+        text = _filter_by_bm25(text, query)
+
     return text[:max_chars] if max_chars and max_chars > 0 else text
