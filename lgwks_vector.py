@@ -493,7 +493,10 @@ def migrate_code_embeddings(
     """
     import json as _json
 
-    src_conn = sqlite3.connect(str(src_path))
+    import lgwks_sqlite  # canonical hardened connect (#223 family 4)
+
+    # Read-only source: wal=False so we never rewrite the source DB's journal mode.
+    src_conn = lgwks_sqlite.connect(src_path, wal=False)
     dst_conn = create_store(dst_path)
 
     rows = src_conn.execute(

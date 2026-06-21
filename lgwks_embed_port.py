@@ -28,7 +28,6 @@ from __future__ import annotations
 import json
 import os
 import re
-import sqlite3
 import subprocess
 import sys
 import tempfile
@@ -569,7 +568,10 @@ def migrate_json_embeddings(
     _validate_ident(embedding_col)
     _validate_ident(type_col)
 
-    src = sqlite3.connect(str(src_db))
+    import lgwks_sqlite  # canonical hardened connect (#223 family 4)
+
+    # Read-only source: wal=False so we never rewrite the source DB's journal mode.
+    src = lgwks_sqlite.connect(src_db, wal=False)
     dst_conn = create_store(dst_db)
 
     # Use double-quotes for identifiers in the query (extra safety)
@@ -655,7 +657,9 @@ def load_graphify(
     edge_count = len(graph.get("links", graph.get("edges", [])))
     graph_name = name or graph_json_path.parent.name
 
-    conn = sqlite3.connect(str(dst_db))
+    import lgwks_sqlite  # canonical hardened connect (#223 family 4)
+
+    conn = lgwks_sqlite.connect(dst_db)
     conn.executescript(_SYSTEM_GRAPH_DDL)
     conn.execute("DELETE FROM system_graph WHERE name = ?", (graph_name,))
     conn.execute(
