@@ -33,7 +33,7 @@ import sys
 import tempfile
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Optional, Union
+from typing import Any, Optional, Union
 
 SCHEMA = "lgwks.embed.port.v1"
 
@@ -645,17 +645,26 @@ def load_graphify(
     *,
     name: str = "",
     repo: str = "",
+    gate: Any = None,
 ) -> dict:
-    """Load a graphify graph.json into the system_graph table of dst_db.
+    """Load a graphify graph.json, recording it on the State Fabric tape.
 
-    Idempotent — replaces any existing row with the same name.
-    Returns: {"graph": name, "nodes": N, "edges": M, "destination": path}
+    Convergence (#165 step 1 — see docs/data-model.mmd): when `gate` (a
+    StorageGate) is provided, the graph is recorded as a content-addressed
+    `reasoning` artifact on the tape — the Source of Record. The `system_graph`
+    table is then a human-readable derived EXPORT, not the source of truth. With
+    no gate, behaviour is unchanged (system_graph only).
+
+    Idempotent — replaces any existing system_graph row with the same name; the
+    tape dedups by content cid. Returns a summary dict (includes `artifact_cid`
+    when routed through the gate).
     """
     data = graph_json_path.read_text()
     graph = json.loads(data)
     node_count = len(graph.get("nodes", []))
     edge_count = len(graph.get("links", graph.get("edges", [])))
     graph_name = name or graph_json_path.parent.name
+    repo_val = repo or graph_name
 
     import lgwks_sqlite  # canonical hardened connect (#223 family 4)
 
@@ -664,27 +673,53 @@ def load_graphify(
     conn.execute("DELETE FROM system_graph WHERE name = ?", (graph_name,))
     conn.execute(
         "INSERT INTO system_graph (name, graph_json, repo, node_count, edge_count) VALUES (?,?,?,?,?)",
-        (graph_name, data, repo or graph_name, node_count, edge_count),
+        (graph_name, data, repo_val, node_count, edge_count),
     )
     conn.commit()
     conn.close()
 
-    return {
+    result = {
         "graph": graph_name,
-        "repo": repo or graph_name,
+        "repo": repo_val,
         "nodes": node_count,
         "edges": edge_count,
         "destination": str(dst_db),
     }
 
+    # Convergence: record the graph on the tape (SoR), content-addressed by cid,
+    # so it joins the one data model instead of living only in a bypass table.
+    if gate is not None:
+        from axiom.cid import compute_cid
+        artifact_cid = compute_cid(data.encode("utf-8", errors="ignore"))
+        gate.ingest_fact(
+            artifact_cid,
+            data,
+            "reasoning",
+            "system-graph-import",
+            meta={
+                "title": graph_name,
+                "repo": repo_val,
+                "node_count": node_count,
+                "edge_count": edge_count,
+                "chunk_kind": "system_graph",
+            },
+        )
+        result["artifact_cid"] = artifact_cid
 
-def load_all_graphs(ingestion_dir: Path, dst_db: Path) -> list[dict]:
-    """Load all graph.json files found under ingestion_dir into dst_db."""
+    return result
+
+
+def load_all_graphs(ingestion_dir: Path, dst_db: Path, *, gate: Any = None) -> list[dict]:
+    """Load all graph.json files found under ingestion_dir into dst_db.
+
+    When `gate` is provided, each graph is also recorded on the tape (SoR) — see
+    load_graphify.
+    """
     results = []
     for graph_json in sorted(ingestion_dir.glob("**/graph.json")):
         repo = graph_json.parent.name.replace("_graph", "")
         try:
-            results.append(load_graphify(graph_json, dst_db, repo=repo))
+            results.append(load_graphify(graph_json, dst_db, repo=repo, gate=gate))
         except Exception as exc:
             results.append({"graph": str(graph_json), "error": str(exc)})
     return results
