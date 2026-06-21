@@ -190,5 +190,88 @@ class TestCortexIdempotencyAndAutonomousCapture(unittest.TestCase):
             self.assertEqual(d._maybe_process_cortex("/x/subagents/a.jsonl", 0.0), 0.0)
 
 
+class TestTranscriptSelfDiscovery(unittest.TestCase):
+    """The daemon must find the live session on its own — no hook, no correct
+    env binding. This is the fix for the zero-capture failure: a daemon pinned
+    at startup to a dead subagent transcript tailed a corpse forever."""
+
+    def _mk_projects(self, td: Path):
+        """A fake ~/.claude/projects layout: top-level transcripts + a subagent
+        transcript nested under <session>/subagents/ (which must be ignored)."""
+        import json
+        import os
+        proj_a = td / "projects" / "-Users-x-repo"
+        proj_b = td / "projects" / "-Users-x"
+        (proj_a / "old-sess" / "subagents").mkdir(parents=True)
+        proj_b.mkdir(parents=True)
+        line = json.dumps({"turn_id": "t1", "role": "user", "content": "hi"}) + "\n"
+        old = proj_a / "old.jsonl"; old.write_text(line)
+        fresh = proj_b / "fresh.jsonl"; fresh.write_text(line)
+        sub = proj_a / "old-sess" / "subagents" / "agent-1.jsonl"; sub.write_text(line)
+        # Deterministic mtimes (no wall-clock dependence): old is ancient,
+        # fresh + subagent sit at t=2000.
+        os.utime(old, (1000, 1000))
+        os.utime(fresh, (2000, 2000))
+        os.utime(sub, (2000, 2000))
+        return td / "projects", fresh, sub
+
+    def test_picks_freshest_nonsubagent_transcript(self):
+        import lgwks_daemon
+        with tempfile.TemporaryDirectory() as td:
+            projects, fresh, _sub = self._mk_projects(Path(td))
+            got = lgwks_daemon.discover_live_transcript(
+                projects, now=2000.0, max_age_s=3600.0
+            )
+            self.assertEqual(got, str(fresh))
+
+    def test_subagent_transcripts_are_never_discovered(self):
+        import lgwks_daemon
+        with tempfile.TemporaryDirectory() as td:
+            projects, _fresh, sub = self._mk_projects(Path(td))
+            got = lgwks_daemon.discover_live_transcript(
+                projects, now=2000.0, max_age_s=3600.0
+            )
+            self.assertNotEqual(got, str(sub))
+            self.assertNotIn("/subagents/", got or "")
+
+    def test_idle_sessions_beyond_window_are_not_live(self):
+        import lgwks_daemon
+        with tempfile.TemporaryDirectory() as td:
+            projects, _fresh, _sub = self._mk_projects(Path(td))
+            # window so tight even "fresh" (now=2000) is excluded
+            got = lgwks_daemon.discover_live_transcript(
+                projects, now=1_000_000.0, max_age_s=10.0
+            )
+            self.assertIsNone(got)
+
+    def test_resolver_drops_dead_binding_and_discovers(self):
+        import lgwks_daemon
+        with tempfile.TemporaryDirectory() as td:
+            projects, fresh, _sub = self._mk_projects(Path(td))
+            import os
+            os.environ["LGWKS_CLAUDE_PROJECTS_DIR"] = str(projects)
+            try:
+                d = lgwks_daemon.SessionDaemon(Path(td))
+                # bound to a dead subagent transcript -> must fall through
+                target = d._resolve_capture_target(
+                    "/p/x/subagents/agent.jsonl", now=2000.0
+                )
+                self.assertEqual(target, str(fresh))
+            finally:
+                os.environ.pop("LGWKS_CLAUDE_PROJECTS_DIR", None)
+
+    def test_resolver_honours_a_live_explicit_pin(self):
+        import lgwks_daemon
+        import time
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            pinned = root / "pinned.jsonl"
+            pinned.write_text("{}\n")
+            d = lgwks_daemon.SessionDaemon(root)
+            # a real, fresh, non-subagent pin wins over discovery
+            target = d._resolve_capture_target(str(pinned), now=time.time())
+            self.assertEqual(target, str(pinned))
+
+
 if __name__ == "__main__":
     unittest.main()
