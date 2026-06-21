@@ -31,6 +31,7 @@ from pathlib import Path
 from typing import Iterable, Any, Optional
 
 import lgwks_sqlite
+import lgwks_hashing  # canonical content-id seam (#223 C-10): no local sha re-derivation
 
 ROOT = Path(__file__).resolve().parent
 RUN_ROOT = ROOT / "vision" / "research" / "research-network" / "runs"
@@ -63,7 +64,9 @@ def slugify(value: str, limit: int = 48) -> str:
 
 
 def sha(value: str, n: int = 16) -> str:
-    return hashlib.sha256(value.encode("utf-8", errors="ignore")).hexdigest()[:n]
+    """Truncated content-id. Delegates to the canonical hashing seam (#223 C-10);
+    byte-identical to the prior local hashlib.sha256(...)[:n] re-derivation."""
+    return lgwks_hashing.content_id(value, n)
 
 
 def tokens(text: str) -> list[str]:
@@ -823,7 +826,7 @@ def crawl_command(args: argparse.Namespace) -> int:
             "source_id": source_id,
             "title": result.title,
             "path": str(raw_path),
-            "content_sha256": hashlib.sha256(result.text.encode("utf-8", errors="ignore")).hexdigest(),
+            "content_sha256": lgwks_hashing.digest(result.text),
             "word_count": word_count(result.text),
             "chunk_count": len(chunks),
         }
@@ -836,7 +839,7 @@ def crawl_command(args: argparse.Namespace) -> int:
             # contained the chunk, and where) is preserved as doc->chunk containment
             # edges, so dedup is lossless. Mirrors lgwks_substrate_run.build_run — one
             # canonical dedup primitive, not a parallel scheme.
-            content_sha = hashlib.sha256(chunk.encode("utf-8", errors="ignore")).hexdigest()
+            content_sha = lgwks_hashing.digest(chunk)
             chunk_id = f"chunk-{content_sha[:16]}"
             occurrence_edge = {
                 "id": f"edge-{sha(doc_id + chunk_id)}",
