@@ -71,11 +71,11 @@ def build_parser() -> argparse.ArgumentParser:
     doctor = sub.add_parser("doctor", help="shortcut: report local capability and daemon health")
     doctor.set_defaults(func=_doctor_dispatch)
 
-    # Backward-compatible public commands documented in README.md. Keep these
-    # thin aliases while the grouped 10-verb surface remains canonical.
-    import lgwks_agent_os; lgwks_agent_os.add_parser(sub)
-    import lgwks_run; lgwks_run.add_parser(sub)
-    import lgwks_context; lgwks_context.add_parser(sub)
+    # Backward-compatible public commands documented in README.md.
+    # NOTE: the run/context/agent-os top-level aliases were collapsed into their
+    # canonical grouped forms (state run, state context, ops agent-os). Legacy
+    # callers are still served by _apply_deprecation_shim (warn + rewrite); the
+    # surface is held by the verb-budget gate in tests/test_cli_contract.py.
     import lgwks_model_hub; lgwks_model_hub.add_parser(sub)
     import lgwks_jarvis; lgwks_jarvis.add_parser(sub)
     import lgwks_manifest; lgwks_manifest.add_parser(sub)
@@ -109,16 +109,10 @@ def build_parser() -> argparse.ArgumentParser:
     hum_sub.add_parser("initialize", help="first-time setup").set_defaults(func=_initialize_dispatch)
 
     # ── AGENT SHORTCUTS ─────────────────────────────────────────────────────
-    
-    # begin — starts session + subconscious engine
-    beg = sub.add_parser("begin", help="shortcut: begin task session")
-    beg.add_argument("goal")
-    beg.set_defaults(func=_begin_dispatch)
-
-    # probe — run engine on current intent
-    prb = sub.add_parser("probe", help="shortcut: run subconscious engine")
-    prb.add_argument("intent")
-    prb.set_defaults(func=_probe_dispatch)
+    # begin/probe were removed: both were thin aliases that just called
+    # research_command (probe's "subconscious engine" help was false — it ran
+    # research). Use `research <prompt>` / `research <prompt> --json`, or the
+    # single agentic front door `route act <intent>`.
 
     # solve — deterministic git-worry prover (diagnose → relate → narrate)
     import lgwks_solve; lgwks_solve.add_parser(sub)
@@ -137,14 +131,6 @@ def build_parser() -> argparse.ArgumentParser:
 
     return parser
 
-
-def _begin_dispatch(args) -> int:
-    import lgwks_research
-    return lgwks_research.research_command(argparse.Namespace(prompt=args.goal, deep=False, repo=".", json=False))
-
-def _probe_dispatch(args) -> int:
-    import lgwks_research
-    return lgwks_research.research_command(argparse.Namespace(prompt=args.intent, deep=False, repo=".", json=True))
 
 def _multiply_dispatch(args) -> int:
     import lgwks_multiply
@@ -251,7 +237,36 @@ class TransformStdout:
         self.original_stdout.flush()
 
 
+# Legacy top-level verb -> canonical grouped path. These aliases were kept
+# "temporarily" while the grouped surface was built; collapsing them removes
+# duplicate intent labels from the cortex training stream (semantic exclusivity).
+_DEPRECATED_VERBS = {
+    "run": ["state", "run"],
+    "context": ["state", "context"],
+    "agent-os": ["ops", "agent-os"],
+}
+
+
+def _apply_deprecation_shim(argv: list[str]) -> list[str]:
+    """Rewrite a legacy top-level verb to its canonical grouped path.
+
+    Warns once on stderr so callers migrate, then delegates. Pure read; only
+    rewrites when the legacy verb is the leading token (never mid-command)."""
+    if not argv:
+        return argv
+    target = _DEPRECATED_VERBS.get(argv[0])
+    if target is None:
+        return argv
+    sys.stderr.write(
+        f"[lgwks] deprecated: 'lgwks {argv[0]}' -> use 'lgwks {' '.join(target)}'\n"
+    )
+    return target + argv[1:]
+
+
 def main(argv: list[str] | None = None) -> int:
+    if argv is None:
+        argv = sys.argv[1:]
+    argv = _apply_deprecation_shim(argv)
     parser = build_parser()
     args, unknown = parser.parse_known_args(argv)
     if unknown: parser.error(f"unrecognized arguments: {' '.join(unknown)}")

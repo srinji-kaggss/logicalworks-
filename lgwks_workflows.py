@@ -133,7 +133,7 @@ _WORKFLOWS: dict[str, dict] = {
     "audit-trail": {
         "description": "pull git history ±N commits and generate an audit report",
         "args": {"--repo": "str", "--commits": "int", "--json": "bool"},
-        "verbs": ["solve", "run index"],
+        "verbs": ["solve", "state run index"],
         "tokens": "~0.5",
     },
     "health-check": {
