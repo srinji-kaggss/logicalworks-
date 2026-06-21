@@ -113,14 +113,18 @@ CREATE TABLE IF NOT EXISTS nodes (
     node_id  TEXT PRIMARY KEY,
     type     TEXT NOT NULL,
     label    TEXT NOT NULL,
-    attrs    TEXT NOT NULL DEFAULT '{}'  -- JSON
+    attrs    TEXT NOT NULL DEFAULT '{}',  -- JSON
+    artifact_cid TEXT,                    -- #165 step 2: contributing artifact (tape provenance)
+    tier     TEXT                         -- #165 step 2: world ⊕ tenant ownership
 );
 CREATE TABLE IF NOT EXISTS edges (
     edge_id  TEXT PRIMARY KEY,
     src      TEXT NOT NULL REFERENCES nodes(node_id),
     dst      TEXT NOT NULL REFERENCES nodes(node_id),
     rel      TEXT NOT NULL,
-    attrs    TEXT NOT NULL DEFAULT '{}'  -- JSON
+    attrs    TEXT NOT NULL DEFAULT '{}',  -- JSON
+    artifact_cid TEXT,                    -- #165 step 2: contributing artifact (tape provenance)
+    tier     TEXT                         -- #165 step 2: world ⊕ tenant ownership
 );
 CREATE TABLE IF NOT EXISTS chunks (
     chunk_id  TEXT PRIMARY KEY,
@@ -129,13 +133,39 @@ CREATE TABLE IF NOT EXISTS chunks (
     text      TEXT NOT NULL,
     hash      TEXT NOT NULL,
     schema    TEXT NOT NULL DEFAULT 'UNKNOWN',
-    labels    TEXT NOT NULL DEFAULT '[]'  -- JSON array of entity types found
+    labels    TEXT NOT NULL DEFAULT '[]',  -- JSON array of entity types found
+    artifact_cid TEXT,                     -- #165 step 2: contributing artifact (tape provenance)
+    tier     TEXT                          -- #165 step 2: world ⊕ tenant ownership
 );
 CREATE INDEX IF NOT EXISTS idx_edges_src ON edges(src);
 CREATE INDEX IF NOT EXISTS idx_edges_dst ON edges(dst);
 CREATE INDEX IF NOT EXISTS idx_chunks_doc ON chunks(doc_id);
 CREATE INDEX IF NOT EXISTS idx_chunks_schema ON chunks(schema);
 """
+
+# Indices over the #165-step-2 cid/tier columns. Created AFTER the column migration
+# so they also apply to legacy graph.db files whose tables predate those columns.
+_CID_INDEX_DDL = """
+CREATE INDEX IF NOT EXISTS idx_nodes_tier ON nodes(tier);
+CREATE INDEX IF NOT EXISTS idx_edges_tier ON edges(tier);
+CREATE INDEX IF NOT EXISTS idx_nodes_artifact ON nodes(artifact_cid);
+CREATE INDEX IF NOT EXISTS idx_edges_artifact ON edges(artifact_cid);
+"""
+
+# #165 step 2: cid/tier columns are added to pre-existing graph.db files in place
+# (existing rows keep NULL — backward compatible). New-DB DDL above already has them;
+# this only matters for graphs created before step 2. node-level artifact_cid is the
+# MOST-RECENT contributing artifact (last-writer-wins under INSERT OR REPLACE); the
+# authoritative many-to-many provenance lives on `mentions` edges. Refining node
+# provenance to a dedicated table is deferred to #165 step 3.
+_MIGRATION_COLUMNS = (
+    ("nodes", "artifact_cid"),
+    ("nodes", "tier"),
+    ("edges", "artifact_cid"),
+    ("edges", "tier"),
+    ("chunks", "artifact_cid"),
+    ("chunks", "tier"),
+)
 
 
 @dataclass
@@ -148,8 +178,22 @@ class GraphDB:
         self.db_path.parent.mkdir(parents=True, exist_ok=True)
         self._conn = lgwks_sqlite.connect(self.db_path, check_same_thread=False)
         self._conn.executescript(_DDL)
+        self._migrate_cid_columns()
+        self._conn.executescript(_CID_INDEX_DDL)
         self._conn.commit()
         self._crdt_path = self.db_path.with_suffix(self.db_path.suffix + ".crdt.json")
+
+    def _migrate_cid_columns(self) -> None:
+        """Add #165-step-2 cid/tier columns to graph.db files created before step 2.
+
+        Idempotent: ALTER TABLE ADD COLUMN only when the column is absent (existing
+        rows keep NULL). New DBs already carry the columns from _DDL, so this is a
+        no-op for them.
+        """
+        for table, column in _MIGRATION_COLUMNS:
+            cols = {row[1] for row in self._conn.execute(f"PRAGMA table_info({table})")}
+            if column not in cols:
+                self._conn.execute(f"ALTER TABLE {table} ADD COLUMN {column} TEXT")
 
     def _require_nonempty(self, value: str, field: str) -> str:
         value = value.strip()
@@ -203,17 +247,36 @@ class GraphDB:
         if self._conn:
             self._conn.close()
 
-    def upsert_node(self, node_id: str, node_type: str, label: str, attrs: dict | None = None) -> None:
+    def upsert_node(
+        self,
+        node_id: str,
+        node_type: str,
+        label: str,
+        attrs: dict | None = None,
+        *,
+        artifact_cid: str | None = None,
+        tier: str | None = None,
+    ) -> None:
         node_id = self._require_nonempty(node_id, "node_id")
         node_type = self._require_nonempty(node_type, "node_type")
         label = self._require_nonempty(label, "label")
         self._track_node_membership(node_id)
         self._conn.execute(
-            "INSERT OR REPLACE INTO nodes (node_id, type, label, attrs) VALUES (?, ?, ?, ?)",
-            (node_id, node_type, label, json.dumps(attrs or {})),
+            "INSERT OR REPLACE INTO nodes (node_id, type, label, attrs, artifact_cid, tier) "
+            "VALUES (?, ?, ?, ?, ?, ?)",
+            (node_id, node_type, label, json.dumps(attrs or {}), artifact_cid, tier),
         )
 
-    def upsert_edge(self, src: str, dst: str, rel: str, attrs: dict | None = None) -> None:
+    def upsert_edge(
+        self,
+        src: str,
+        dst: str,
+        rel: str,
+        attrs: dict | None = None,
+        *,
+        artifact_cid: str | None = None,
+        tier: str | None = None,
+    ) -> None:
         src = self._require_nonempty(src, "src")
         dst = self._require_nonempty(dst, "dst")
         rel = self._require_nonempty(rel, "rel")
@@ -221,15 +284,19 @@ class GraphDB:
         self._track_node_membership(src)
         self._track_node_membership(dst)
         self._track_edge_membership(edge_id)
-        # Ensure referenced nodes exist as UNKNOWN stubs if not yet inserted
+        # Ensure referenced nodes exist as UNKNOWN stubs if not yet inserted. Stub
+        # rows carry the same tier/provenance as the edge so they are not orphaned
+        # outside the world ⊕ tenant view.
         for nid in (src, dst):
             self._conn.execute(
-                "INSERT OR IGNORE INTO nodes (node_id, type, label) VALUES (?, 'UNKNOWN', ?)",
-                (nid, nid),
+                "INSERT OR IGNORE INTO nodes (node_id, type, label, artifact_cid, tier) "
+                "VALUES (?, 'UNKNOWN', ?, ?, ?)",
+                (nid, nid, artifact_cid, tier),
             )
         self._conn.execute(
-            "INSERT OR REPLACE INTO edges (edge_id, src, dst, rel, attrs) VALUES (?, ?, ?, ?, ?)",
-            (edge_id, src, dst, rel, json.dumps(attrs or {})),
+            "INSERT OR REPLACE INTO edges (edge_id, src, dst, rel, attrs, artifact_cid, tier) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?)",
+            (edge_id, src, dst, rel, json.dumps(attrs or {}), artifact_cid, tier),
         )
 
     def remove_edge(self, src: str, dst: str, rel: str) -> None:
@@ -259,12 +326,15 @@ class GraphDB:
         url: str = "",
         schema: str = "UNKNOWN",
         labels: list[str] | None = None,
+        *,
+        artifact_cid: str | None = None,
+        tier: str | None = None,
     ) -> None:
         h = lgwks_hashing.content_id(text)
         self._conn.execute(
-            "INSERT OR REPLACE INTO chunks (chunk_id, doc_id, url, text, hash, schema, labels) "
-            "VALUES (?, ?, ?, ?, ?, ?, ?)",
-            (chunk_id, doc_id, url, text, h, schema, json.dumps(labels or [])),
+            "INSERT OR REPLACE INTO chunks (chunk_id, doc_id, url, text, hash, schema, labels, "
+            "artifact_cid, tier) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            (chunk_id, doc_id, url, text, h, schema, json.dumps(labels or []), artifact_cid, tier),
         )
 
     def commit(self) -> None:
@@ -455,12 +525,18 @@ def ingest_chunk(
     db: GraphDB,
     chunk: dict[str, Any],
     classifier_fn: Any | None = None,
+    *,
+    artifact_cid: str | None = None,
+    tier: str | None = None,
 ) -> int:
     """Ingest one parsed chunk into the graph. Returns the number of mentions found.
 
     chunk keys expected: chunk_id, document_id, url, text, hash, [schema|chunk_kind]
     classifier_fn: legacy callable(text) -> {"schema","confidence"}; when None the
         unified model port supplies schema classification (the canonical path).
+    artifact_cid/tier: #165 step 2 — tape provenance + world ⊕ tenant ownership
+        stamped on every node/edge/chunk this call writes. Falls back to the same
+        keys carried on the chunk dict (substrate chunks already carry artifact_cid).
 
     Extraction escalates through the model port's ladder (regex → Foundation), so
     the engine, not this caller, owns the resolve-degrade policy. //why: schema from
@@ -500,14 +576,19 @@ def ingest_chunk(
     ]
     labels = list({m.entity_type for m in mentions})
 
-    db.upsert_chunk(chunk_id, doc_id, text, url=url, schema=schema, labels=labels)
+    # Provenance: explicit arg wins; else the chunk's own artifact_cid/tier (#165).
+    acid = artifact_cid or chunk.get("artifact_cid")
+    row_tier = tier or chunk.get("tier")
+
+    db.upsert_chunk(chunk_id, doc_id, text, url=url, schema=schema, labels=labels,
+                    artifact_cid=acid, tier=row_tier)
 
     # Build nodes + edges from mentions
     for mention in mentions:
         nid = f"{mention.entity_type}:{mention.text.lower()}"
-        db.upsert_node(nid, mention.entity_type, mention.text)
+        db.upsert_node(nid, mention.entity_type, mention.text, artifact_cid=acid, tier=row_tier)
         # Edge: chunk → entity
-        db.upsert_edge(chunk_id, nid, "mentions")
+        db.upsert_edge(chunk_id, nid, "mentions", artifact_cid=acid, tier=row_tier)
 
     # Co-occurrence edges between entity mentions in same chunk
     for i, a in enumerate(mentions):
@@ -516,7 +597,7 @@ def ingest_chunk(
                 continue  # skip same-type co-occurrence (too noisy)
             src = f"{a.entity_type}:{a.text.lower()}"
             dst = f"{b.entity_type}:{b.text.lower()}"
-            db.upsert_edge(src, dst, "co-occurs")
+            db.upsert_edge(src, dst, "co-occurs", artifact_cid=acid, tier=row_tier)
 
     return len(mentions)
 
@@ -525,6 +606,9 @@ def ingest_chunks(
     db: GraphDB,
     chunks: list[dict[str, Any]],
     classifier_fn: Any | None = None,
+    *,
+    artifact_cid: str | None = None,
+    tier: str | None = None,
 ) -> dict[str, int]:
     """Ingest a batch of chunks. Commits after all inserts.
 
@@ -532,11 +616,15 @@ def ingest_chunks(
     mentions we surface a loud warning with a hint instead of silently building an
     empty graph — the failure mode that made `entity-graph` look broken on
     ordinary (non-FundServ) substrate output.
+
+    artifact_cid/tier (#165 step 2): tape provenance + world ⊕ tenant ownership
+    applied to every row written; per-chunk artifact_cid/tier keys override.
     """
     total_mentions = 0
     empty = 0
     for chunk in chunks:
-        found = ingest_chunk(db, chunk, classifier_fn=classifier_fn)
+        found = ingest_chunk(db, chunk, classifier_fn=classifier_fn,
+                             artifact_cid=artifact_cid, tier=tier)
         total_mentions += found
         empty += 1 if found == 0 else 0
     db.commit()

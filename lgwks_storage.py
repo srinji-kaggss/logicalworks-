@@ -414,10 +414,12 @@ class TokenIndex:
 class GraphFabric:
     """Projection #3: entity graph seam.
 
-    Currently a lightweight wrapper around lgwks_entity_graph.GraphDB. In Phase 2
-    this will link graph nodes/edges back to artifact_cids and tokenization_ids.
-    For Phase 1 it exposes the same upsert_chunk/upsert_node/upsert_edge API so
-    callers can begin routing graph writes through the gate.
+    Wraps lgwks_entity_graph.GraphDB. #165 step 2: apply() is live — an ingest that
+    carries graph structure on extras["graph"] is projected into the graph with
+    each node/edge/chunk stamped with the artifact's cid (tape provenance) and tier
+    (world ⊕ tenant ownership). The upsert_*/ingest_chunks wrappers carry the same
+    cid/tier so direct callers (substrate_run) cid-align too. Artifacts with no
+    graph leave apply() inert, so non-graph ingest paths are unchanged.
     """
 
     name = "graph"
@@ -429,29 +431,60 @@ class GraphFabric:
         self._db = graph_mod.GraphDB(db_path)
 
     def apply(self, ctx: fp.IngestContext) -> fp.ProjectionResult:
-        # Phase 1: entity/relation edges are not carried on the bare artifact
-        # envelope yet (extracted + wired in Phase 2 / #165). Registered but inert
-        # so routing graph writes through the gate later is extend-not-refactor.
-        return fp.ProjectionResult(self.name, applied=False)
+        # #165 step 2: when the ingest carries graph structure on the sidecar
+        # (extras["graph"] = {"nodes":[…], "edges":[…], "chunks":[…]}), project it
+        # into the gate graph stamped with this artifact's cid + tier — so graph
+        # rows are content-addressed back to the tape and scoped world ⊕ tenant.
+        # Artifacts that carry no graph (plain facts, vectors) leave this inert,
+        # which is why every existing ingest path is unchanged.
+        graph = ctx.extras.get("graph") if ctx.extras else None
+        if not graph:
+            return fp.ProjectionResult(self.name, applied=False)
 
-    def upsert_chunk(self, chunk_id: str, doc_id: str, text: str, url: str = "", schema: str = "UNKNOWN", labels: list[str] | None = None) -> None:
-        self._db.upsert_chunk(chunk_id, doc_id, text, url=url, schema=schema, labels=labels or [])
+        acid = ctx.artifact.artifact_cid
+        tier = ctx.artifact.tenant_id
+        written = 0
+        for ch in graph.get("chunks", []) or []:
+            self._db.upsert_chunk(
+                ch["chunk_id"], ch.get("doc_id", ""), ch.get("text", ""),
+                url=ch.get("url", ""), schema=ch.get("schema", "UNKNOWN"),
+                labels=ch.get("labels") or [], artifact_cid=acid, tier=tier,
+            )
+            written += 1
+        for nd in graph.get("nodes", []) or []:
+            self._db.upsert_node(
+                nd["node_id"], nd["type"], nd["label"], nd.get("attrs"),
+                artifact_cid=acid, tier=tier,
+            )
+            written += 1
+        for ed in graph.get("edges", []) or []:
+            self._db.upsert_edge(
+                ed["src"], ed["dst"], ed["rel"], ed.get("attrs"),
+                artifact_cid=acid, tier=tier,
+            )
+            written += 1
+        self._db.commit()
+        return fp.ProjectionResult(self.name, applied=True, written=written)
 
-    def upsert_node(self, node_id: str, node_type: str, label: str, attrs: dict | None = None) -> None:
-        self._db.upsert_node(node_id, node_type, label, attrs)
+    def upsert_chunk(self, chunk_id: str, doc_id: str, text: str, url: str = "", schema: str = "UNKNOWN", labels: list[str] | None = None, *, artifact_cid: str | None = None, tier: str | None = None) -> None:
+        self._db.upsert_chunk(chunk_id, doc_id, text, url=url, schema=schema, labels=labels or [], artifact_cid=artifact_cid, tier=tier)
 
-    def upsert_edge(self, src: str, dst: str, rel: str, attrs: dict | None = None) -> None:
-        self._db.upsert_edge(src, dst, rel, attrs)
+    def upsert_node(self, node_id: str, node_type: str, label: str, attrs: dict | None = None, *, artifact_cid: str | None = None, tier: str | None = None) -> None:
+        self._db.upsert_node(node_id, node_type, label, attrs, artifact_cid=artifact_cid, tier=tier)
 
-    def ingest_chunks(self, chunks: list[dict[str, Any]]) -> None:
+    def upsert_edge(self, src: str, dst: str, rel: str, attrs: dict | None = None, *, artifact_cid: str | None = None, tier: str | None = None) -> None:
+        self._db.upsert_edge(src, dst, rel, attrs, artifact_cid=artifact_cid, tier=tier)
+
+    def ingest_chunks(self, chunks: list[dict[str, Any]], *, artifact_cid: str | None = None, tier: str | None = None) -> None:
         """Route a batch of chunk rows into the wrapped entity graph.
 
         Mirrors the direct graph write in lgwks_substrate_run; idempotent because
-        GraphDB upserts nodes/edges by id. Commits internally.
+        GraphDB upserts nodes/edges by id. Commits internally. artifact_cid/tier
+        (#165 step 2) stamp tape provenance + world ⊕ tenant ownership on every row.
         """
         import lgwks_entity_graph as graph_mod
 
-        graph_mod.ingest_chunks(self._db, chunks)
+        graph_mod.ingest_chunks(self._db, chunks, artifact_cid=artifact_cid, tier=tier)
 
     def neighbors(self, node_id: str, direction: str = "both", rel: str | None = None, limit: int = 100) -> list[dict]:
         return self._db.neighbors(node_id, direction=direction, rel=rel, limit=limit)
@@ -724,6 +757,7 @@ class StorageGate:
         *,
         vector_record: vec_mod.VectorRecord | None = None,
         index_tokens: bool = True,
+        extras: dict[str, Any] | None = None,
     ) -> fp.IngestReceipt:
         """Ingest a canonical tokenized artifact into the State Fabric.
 
@@ -767,7 +801,7 @@ class StorageGate:
             )
 
         # 3. Fan out to registered projections, each fully isolated.
-        ctx = fp.IngestContext(artifact=artifact, vector_record=vector_record, index_tokens=index_tokens)
+        ctx = fp.IngestContext(artifact=artifact, vector_record=vector_record, index_tokens=index_tokens, extras=extras or {})
         for projection in self._projections:
             results.append(fp.run_isolated(projection, ctx))
 
