@@ -1,80 +1,79 @@
 %%{init: {"flowchart": {"htmlLabels": true, "curve": "basis"}} }%%
 %% =====================================================================
-%% lgwks — THE ONE CONCEPTUAL DATA MODEL
-%% Authority: spec/second-harness/ARCH-two-db-multitenant.md
-%%   ("it is all one conceptual DB — world data shared, tenant data
-%%    called in at query; basic version = one WHERE clause + WAL")
-%% Identity: axiom/cid.compute_cid  ·  lgwks_hashing (no ad-hoc sha, no run_id identity)
-%% This is the TARGET: JarvisDB's run-scoped model converges here; its
-%% parallel tables (red, dashed) are the semantic dupes to delete.
+%% lgwks — THE ONE DATA MODEL: the State Fabric (whole pipeline)
+%% Authority: spec/second-harness/ARCH-two-db-multitenant.md ("one conceptual DB,
+%%   world shared + tenant called in at query") + lgwks_fabric_projection
+%%   ("the universal projection seam … a Projection is any derived view — the
+%%    vector store, the posting list, THE ENTITY GRAPH, … rebuildable by tape replay").
+%%
+%% THE 1 = ONE Source of Record (CausalTape) + MANY cid-keyed, tier-tagged
+%% PROJECTIONS joined through one seam, read through one access locus (TenantStore,
+%% own ⊕ world). It is NOT "one giant table" — it is one tape, many derived views.
+%%
+%% THE DUPES = stores that each write their OWN SQLite file directly, bypassing the
+%% tape. That bypass is the single thing they are all missing: no shared cid, no
+%% tier/world, no rebuildability, no co-location. FIX = make each a registered
+%% projection (write via StorageGate); DELETE its bespoke write path once it
+%% replays from the tape.
 %% =====================================================================
-flowchart TB
+flowchart LR
 
-  subgraph ID["① IDENTITY — the single dedup key"]
-    CID["axiom/cid.compute_cid()<br/>blake2b-256 over canonical bytes<br/>verify/require at every store + read"]
-    HASH["lgwks_hashing.content_id / digest<br/>(the C-10 anti-drift seam:<br/>no module re-derives hashlib.sha256)"]
-    HASH --> CID
+  subgraph DUPES["TODAY — stores that BYPASS the tape (the semantic dupes)"]
+    direction TB
+    JV["lgwks_jarvis.*  (per-run DB islands)<br/>runs·sources·documents·chunks·embeddings·nodes·edges…<br/>id+run_id · vector_json TEXT · NO tier"]
+    EG["lgwks_entity_graph  nodes·edges·chunks<br/>node_id/chunk_id · hash · NO tier"]
+    SV["lgwks_storage.vectors  (projection-shaped but parallel)<br/>vector_json TEXT"]
+    SG["lgwks_embed_port.system_graph<br/>whole graph as one JSON blob"]
   end
 
-  subgraph SOR["② SOURCE OF RECORD — append-only, content-idempotent"]
-    TAPE["CausalTape (lgwks_storage)<br/>per-tenant hash chain:<br/>entry_hash · prev_hash · sequence<br/>relational tables are PROJECTIONS of this"]
+  subgraph MISS["THE ONE THING THEY ALL MISS"]
+    direction TB
+    X["NOT projections of the one tape →<br/>① no shared identity (content_sha256=hash=cid, 3 PK names)<br/>② no world ⊕ tenant tier<br/>③ no co-location (node→chunk→embed→fact split across files)<br/>④ not rebuildable from a SoR<br/>⑤ gaps: AST symbols · multimodal · cross-run accrual"]
   end
 
-  subgraph GATE["③ INGEST — one write path"]
-    SG["StorageGate.ingest_artifact<br/>(lgwks_fabric_projection)<br/>append → project → register global fact"]
+  subgraph FABRIC["THE 1 — the State Fabric"]
+    direction TB
+    TAPE["① SoR — CausalTape (lgwks_storage)<br/>append-only · per-tenant hash chain · content-idempotent<br/>EVERYTHING else is a derived, rebuildable view of this"]
+    SEAM["② Projection seam — StorageGate.ingest_artifact<br/>(lgwks_fabric_projection)<br/>append → fan out to register_projection(…) views"]
+    subgraph VIEWS["③ Projections — cid-keyed, tier-tagged, co-located"]
+      direction TB
+      PG["entity-graph view<br/>nodes + edges (cid PK, tier, kind, rel, weight)"]
+      PV["vector view = vector_records (THE SEED)<br/>cid PK · tier(space_id+tenant) · BLOB · modality · store-once"]
+      PC["chunk/document/source view (cid PK, tier)"]
+      PF["fact view + global_facts (fact_hash=cid, world accrual)"]
+      PP["token-posting view (BM25 index)"]
+      PS["NEW: AST symbols view (cid PK, tier) — ingestion code_symbols parity"]
+    end
+    ACCESS["④ Access locus — lgwks_access.TenantStore (one door)<br/>read/query: tier='world' OR tier=:me  ·  write: tenant only<br/>promote: lgwks_promote (gated · audited · MOVE not copy)<br/>§1-INV: cross-tenant read cryptographically refused"]
   end
 
-  subgraph STORE["④ ONE STORE — cid-keyed, tier-tagged (run_id is NOT the scope)"]
-    NODES["nodes(cid PK, tier, kind, label, weight, meta)"]
-    EDGES["edges(cid PK, tier, from_cid, to_cid, kind, weight, evidence)"]
-    CHUNKS["chunks(cid PK, tier, text, content_sha256, word_count)"]
-    VEC["vector_records(cid PK, space_id, tenant, modality,<br/>embedding BLOB, source_cid)<br/>embedding stored ONCE per cid per space"]
-    GF["global_facts(fact_hash PK, seen_count, importance_score)"]
-    SYM["symbols(cid PK, tier, file_cid, name, kind, line, signature)<br/>NEW — AST layer (gap vs ingestion code_symbols)"]
-  end
+  JV --> X
+  EG --> X
+  SV --> X
+  SG --> X
+  X --> SEAM
 
-  subgraph ACC["⑤ TIER RESOLUTION — own ⊕ world (one WHERE clause + WAL)"]
-    ACCESS["lgwks_access.TenantStore / CapabilityPort<br/>scopes: tenant:rw + world:r<br/>read filter: tier='world' OR tier=:me<br/>cross-tenant read = cryptographically refused (§1-INV)"]
-    PROMOTE["lgwks_promote.promote()<br/>ONLY tenant→world path · capability-gated<br/>· audited on cognition chain<br/>MOVE not copy: cid excludes tenant → a copy collides on PK"]
-  end
+  TAPE --> SEAM
+  SEAM --> PG
+  SEAM --> PV
+  SEAM --> PC
+  SEAM --> PF
+  SEAM --> PP
+  SEAM --> PS
+  PG --> ACCESS
+  PV --> ACCESS
+  PC --> ACCESS
+  PF --> ACCESS
+  PP --> ACCESS
+  PS --> ACCESS
 
-  subgraph CONS["⑥ CONSUMERS"]
-    JARVIS["lgwks_jarvis (research crawl)<br/>CONVERGES onto ④/⑤"]
-    OTHER["query · score · refactor · daemon · review"]
-  end
-
-  CID --> TAPE
-  TAPE --> SG
-  SG --> NODES
-  SG --> EDGES
-  SG --> CHUNKS
-  SG --> VEC
-  SG --> GF
-  SG --> SYM
-  NODES --> ACCESS
-  EDGES --> ACCESS
-  CHUNKS --> ACCESS
-  VEC --> ACCESS
-  GF --> ACCESS
-  SYM --> ACCESS
-  ACCESS --> JARVIS
-  ACCESS --> OTHER
-  PROMOTE -. "tenant tier ⇒ world tier" .-> STORE
-
-  subgraph DEL["✗ DELETE — JarvisDB parallel model (the semantic dupes)"]
-    D1["JarvisDB.embeddings table (run-scoped)<br/>= dup of vector_records"]
-    D2["emit_embedding dedups on run_id<br/>= per-run RE-EMBED of identical content"]
-    D3["run_id as identity/scope axis<br/>→ demote to a 'discovered_in_run' provenance edge"]
-    D4["hashlib.sha256(...)[:16] in lgwks_jarvis<br/>= C-10 dup of lgwks_hashing / axiom.cid"]
-  end
-  JARVIS -. "replaces" .-> D1
-  JARVIS -. "replaces" .-> D2
-  JARVIS -. "replaces" .-> D3
-  JARVIS -. "replaces" .-> D4
-
-  classDef del fill:#fee,stroke:#c00,stroke-width:1px,stroke-dasharray:5 3,color:#900;
-  classDef one fill:#eaffea,stroke:#0a0,color:#040;
-  classDef neu fill:#eef4ff,stroke:#36c,color:#024;
-  class D1,D2,D3,D4 del;
-  class NODES,EDGES,CHUNKS,VEC,GF one;
-  class SYM neu;
+  classDef dupe fill:#fee,stroke:#c00,stroke-dasharray:5 3,color:#900;
+  classDef miss fill:#fff3f3,stroke:#c33,color:#700;
+  classDef sor  fill:#eef4ff,stroke:#36c,color:#024;
+  classDef seed fill:#fffbe6,stroke:#c90,color:#640;
+  classDef one  fill:#eaffea,stroke:#0a0,color:#040;
+  class JV,EG,SV,SG dupe;
+  class X miss;
+  class TAPE,SEAM sor;
+  class PV seed;
+  class PG,PC,PF,PP,PS,ACCESS one;
