@@ -34,6 +34,9 @@ HEARTBEAT_INTERVAL_S = 1.0
 # A live pid with no heartbeat for this long is a hung daemon, not a healthy one.
 HEARTBEAT_STALE_S = 10.0
 POLL_INTERVAL_S = 0.5
+# Cortex trajectory build cadence (heavier than the 0.5s queue poll — tokenizes
+# transcript turns). mtime-guarded so a quiet transcript costs nothing.
+CORTEX_INTERVAL_S = 5.0
 START_TIMEOUT_S = 5.0
 STOP_TIMEOUT_S = 5.0
 
@@ -553,6 +556,32 @@ class SessionDaemon:
             time.sleep(0.1)
         raise RuntimeError(f"daemon pid {pid} did not stop within {STOP_TIMEOUT_S}s")
 
+    def _maybe_process_cortex(self, transcript: str, last_mtime: float) -> float:
+        """Tail the bound transcript into cortex trajectories — best-effort.
+
+        Returns the transcript mtime last processed (the new watermark). Skips
+        when: no transcript bound, file missing, a subagent transcript (stale
+        session, #227 F3), or the file is unchanged since last pass. Idempotent
+        at the cortex layer, so a redundant pass is harmless. NEVER raises — a
+        capture failure must not take down the daemon (PRD-08).
+        """
+        if not transcript or "/subagents/" in transcript:
+            return last_mtime
+        try:
+            p = Path(transcript)
+            if not p.exists():
+                return last_mtime
+            mtime = p.stat().st_mtime
+            if mtime <= last_mtime:
+                return last_mtime
+            session_id = p.stem or f"claude:{self.paths.repo_root.name}"
+            import lgwks_cortex
+            cortex = lgwks_cortex.TranscriptCortex(self.paths.repo_root)
+            cortex.process_transcript(p, session_id, n=0)
+            return mtime
+        except Exception:
+            return last_mtime
+
     def run_forever(self, *, transcript_path: str | None = None) -> int:
         self.paths.root.mkdir(parents=True, exist_ok=True)
         _cleanup_stale_lock(self.paths)
@@ -609,6 +638,8 @@ class SessionDaemon:
                     )
                 )
             heartbeat_due = time.time()
+            cortex_due = time.time()
+            last_mtime = 0.0
             while running:
                 now = time.time()
                 if now >= heartbeat_due:
@@ -627,6 +658,13 @@ class SessionDaemon:
                 items = store.dequeue(tenant_id, limit=1)
                 for item in items:
                     _dispatch_item(store, item, repo_root=self.paths.repo_root)
+
+                # Autonomous capture: the daemon (not a hook) is the core. It
+                # tails its bound transcript into cortex trajectories on its own;
+                # a harness hook is only an optional low-latency push-trigger.
+                if now >= cortex_due:
+                    last_mtime = self._maybe_process_cortex(transcript, last_mtime)
+                    cortex_due = now + CORTEX_INTERVAL_S
 
                 time.sleep(POLL_INTERVAL_S)
             store.append(
