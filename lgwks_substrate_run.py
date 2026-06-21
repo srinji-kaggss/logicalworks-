@@ -179,6 +179,10 @@ def build_run(args: argparse.Namespace) -> dict[str, Any]:
     graph_input_rows: list[dict[str, Any]] = []
     provider_counts: Counter[str] = Counter()
     semantic_vectors = 0
+    # Content-addressed chunk dedup, run-wide (across docs): content hash -> node.
+    # Identical content (re-crawl, repeated boilerplate, shared sections) collapses
+    # to ONE node + ONE embedding instead of N. See the chunk loop below.
+    chunk_by_content: dict[str, dict[str, Any]] = {}
 
     gate = lgwks_storage.get_gate(args.project or Path(args.target).name)
     
@@ -203,7 +207,31 @@ def build_run(args: argparse.Namespace) -> dict[str, Any]:
             "word_count": len(__import__("re").findall(r"\S+", doc["text"])),
         })
         for pos, piece in enumerate(text._chunk_text(doc["text"], size=args.chunk_words, overlap=args.chunk_overlap)):
-            chunk_id = f"chunk-{io._sha(doc_id + str(pos) + piece)[:16]}"
+            # Content-addressed chunk identity: the chunk id IS its content hash, so
+            # identical content (re-crawl, or the same section/boilerplate across
+            # pages) resolves to ONE node in the run DAG. wget dedups by URL; we
+            # dedup by content — strictly stronger, and it matches the State
+            # Fabric's own content-address idempotency (which otherwise discards the
+            # duplicate AFTER we already paid to embed it). Every occurrence still
+            # emits a doc->content graph edge, so no provenance is lost.
+            content_hash = io._sha(piece)
+            chunk_id = f"chunk-{content_hash[:16]}"
+            chunk_url = doc["source"] if source_kind == "url" else ""
+            occurrence = {"document_id": doc_id, "position": pos, "url": chunk_url}
+            seen = chunk_by_content.get(chunk_id)
+            if seen is not None:
+                # Duplicate content within this run: record provenance, reuse the
+                # node + its embeddings, and skip the (expensive) re-embed entirely.
+                seen["row"]["provenance"].append(occurrence)
+                graph_input_rows.append({
+                    "chunk_id": chunk_id,
+                    "document_id": doc_id,
+                    "url": chunk_url,
+                    "text": piece,
+                    "hash": content_hash,
+                    "schema": seen["chunk_kind"].upper(),
+                })
+                continue
             fact_score = text._fact_score(piece)
             stem = text._stem_text(piece, args.fact_threshold)
             chunk_kind = text._chunk_kind(piece, fact_score)
@@ -211,23 +239,24 @@ def build_run(args: argparse.Namespace) -> dict[str, Any]:
                 "chunk_id": chunk_id,
                 "document_id": doc_id,
                 "source": doc["source"],
-                "url": doc["source"] if source_kind == "url" else "",
+                "url": chunk_url,
                 "text": piece,
                 "stem_text": stem,
-                "hash": io._sha(piece),
+                "hash": content_hash,
                 "fact_score": fact_score,
                 "chunk_kind": chunk_kind,
                 "position": pos,
+                "provenance": [occurrence],
             }
             chunk_rows.append(chunk_row)
+            chunk_by_content[chunk_id] = {"row": chunk_row, "chunk_kind": chunk_kind}
             gate.ingest_fact(chunk_id, piece, chunk_kind, capability="ingest_chunk", meta={"doc_id": doc_id, "pos": pos})
             graph_input_rows.append({
-
                 "chunk_id": chunk_id,
                 "document_id": doc_id,
-                "url": chunk_row["url"],
+                "url": chunk_url,
                 "text": piece,
-                "hash": chunk_row["hash"],
+                "hash": content_hash,
                 "schema": chunk_kind.upper(),
             })
             if stem:

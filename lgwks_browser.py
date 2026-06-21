@@ -142,6 +142,16 @@ def available(engine: str = "webkit") -> tuple[bool, str]:
 
 
 def _text_from(html: str, max_chars: int) -> str:
+    # Boilerplate-pruned clean markdown via the content-extract seam (was a crude
+    # regex tag-strip). "wget but better": drop nav/chrome/ads to the content core.
+    # Falls back to the regex strip if extraction yields nothing.
+    try:
+        import lgwks_content_extract
+        text = lgwks_content_extract.extract_main_content(html, max_chars=max_chars)
+        if text.strip():
+            return text
+    except Exception:
+        pass
     return _WS.sub("\n\n", _TAG.sub("", html)).strip()[:max_chars]
 
 
