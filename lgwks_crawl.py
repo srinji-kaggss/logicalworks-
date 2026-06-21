@@ -54,10 +54,13 @@ def _pick_fingerprint(seed: int = 0) -> dict[str, Any]:
 
 
 def _text_from_html(html: str, max_chars: int = 8000, base_url: str = "") -> str:
-    """Extract readable markdown text from rendered HTML (canonical converter)."""
-    from lgwks_html import html_to_markdown
-    text, _, _, _ = html_to_markdown(html, base_url)
-    return text[:max_chars]
+    """Extract readable markdown text from rendered HTML.
+
+    Routes through the content-extract seam (boilerplate pruning → canonical
+    markdown). "wget but better": strip nav/chrome/ads to the content core
+    before conversion. See lgwks_content_extract for the parser/heuristic."""
+    import lgwks_content_extract
+    return lgwks_content_extract.extract_main_content(html, base_url, max_chars=max_chars)
 
 
 def _extract_links(html: str, base: str) -> list[dict[str, str]]:
