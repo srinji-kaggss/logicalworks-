@@ -39,3 +39,5 @@ models/
 store/
 graphify-out/
 findings/
+.ci-runs/
+.keel/
