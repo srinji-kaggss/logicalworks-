@@ -506,5 +506,84 @@ class TestSubstrateBridgeArgMapping(unittest.TestCase):
         self.assertEqual(sub_args.embed_model, "qwen3-embedding:8b")
 
 
+class LegacyEngineContentDedupTests(unittest.TestCase):
+    """#261 pillar 1: the legacy (--engine legacy) crawler must use content-addressed
+    chunk identity so identical content across documents collapses to one node + one
+    embedding, with provenance preserved as doc->chunk containment edges. Mirrors the
+    substrate dedup locked by tests/test_substrate.py."""
+
+    def _legacy_args(self):
+        return argparse.Namespace(
+            source="https://dedup.test",
+            keywords=None,
+            keyword_terms=None,
+            name="dedup",
+            engine="legacy",
+            max_pages=2,
+            max_depth=0,
+            workers=1,
+            chunk_words=450,
+            chunk_overlap=70,
+            similarity_threshold=0.72,
+            max_terms=80,
+            estimate_only=False,
+            search_expansion=False,
+            include_external=False,
+            compress_limit=96,
+            prompt="",
+        )
+
+    def test_identical_content_across_docs_dedups_and_keeps_provenance(self):
+        import sqlite3
+
+        body = (
+            "Deterministic compression collapses identical content to one node. "
+            "This paragraph is byte-identical across both fetched documents so the "
+            "content-addressed chunk identity must produce a single chunk row and a "
+            "single embedding, while every containing document keeps a provenance edge."
+        )
+
+        def fake_seeds(source, keywords, max_pages, expansion):
+            return ([("https://dedup.test/a", "seed"), ("https://dedup.test/b", "seed")], [])
+
+        def fake_fetch(url, timeout=20):
+            return _lgwks.FetchResult(
+                url=url, title=f"Doc {url[-1]}", text=body, links=[], status="ok", elapsed=0.01
+            )
+
+        with tempfile.TemporaryDirectory() as td:
+            run_root = Path(td) / "runs"
+            with mock.patch.object(_lgwks, "RUN_ROOT", run_root), \
+                 mock.patch.object(_lgwks, "build_seed_urls", fake_seeds), \
+                 mock.patch.object(_lgwks, "fetch_url", fake_fetch):
+                with contextlib.redirect_stdout(io.StringIO()), \
+                     contextlib.redirect_stderr(io.StringIO()):
+                    rc = _lgwks.crawl_command(self._legacy_args())
+            self.assertEqual(rc, 0)
+
+            db_files = list(run_root.glob("*/db/research.sqlite"))
+            self.assertEqual(len(db_files), 1, "expected exactly one legacy run dir")
+            conn = sqlite3.connect(db_files[0])
+            try:
+                docs = conn.execute("select count(*) from documents").fetchone()[0]
+                chunks = conn.execute("select count(*) from chunks").fetchone()[0]
+                chunk_embeds = conn.execute(
+                    "select count(*) from embeddings where scope='chunk'"
+                ).fetchone()[0]
+                contains = conn.execute(
+                    "select count(*) from edges where kind='contains'"
+                ).fetchone()[0]
+            finally:
+                conn.close()
+
+        # Two distinct documents fetched...
+        self.assertEqual(docs, 2)
+        # ...but identical content collapses to ONE chunk node + ONE embedding...
+        self.assertEqual(chunks, 1)
+        self.assertEqual(chunk_embeds, 1)
+        # ...with a provenance edge from EACH document (lossless dedup).
+        self.assertEqual(contains, 2)
+
+
 if __name__ == "__main__":
     unittest.main()
