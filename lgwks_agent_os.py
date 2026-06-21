@@ -26,6 +26,8 @@ from dataclasses import asdict, dataclass, field
 from pathlib import Path
 from typing import Any
 
+from lgwks_audit import audit_append as _audit_append  # one canonical hardened writer (#223)
+
 ROOT = Path(__file__).resolve().parent
 PROMPTS_ROOT = ROOT / "vision" / "prompts"
 CONTEXT_DIR = PROMPTS_ROOT / "context"
@@ -290,27 +292,18 @@ class FleetOrchestrator:
     # Audit
     # ------------------------------------------------------------------
     def _audit(self, record: SpawnRecord) -> None:
-        try:
-            self.audit_log.parent.mkdir(parents=True, exist_ok=True)
-            payload = {
-                "ts": time.time(),
-                "event": "spawn" if record.status == "queued" else "collect" if record.status in ("collected", "pending", "parse_error") else "close" if record.status == "closed" else record.status,
-                "agent_id": record.agent_id,
-                "branch": record.branch,
-                "worktree": str(record.worktree_path),
-                "prompt_hash": record.prompt_hash,
-                "context_hash": record.context_hash,
-                "status": record.status,
-                "detail": record.detail,
-            }
-            line = json.dumps(payload, sort_keys=True, ensure_ascii=False)
-            with self.audit_log.open("a", encoding="utf-8") as fh:
-                fh.write(line + "\n")
-                fh.flush()
-                os.fsync(fh.fileno())
-            os.chmod(self.audit_log, 0o600)
-        except Exception:
-            pass  # audit loss is non-blocking
+        payload = {
+            "ts": time.time(),
+            "event": "spawn" if record.status == "queued" else "collect" if record.status in ("collected", "pending", "parse_error") else "close" if record.status == "closed" else record.status,
+            "agent_id": record.agent_id,
+            "branch": record.branch,
+            "worktree": str(record.worktree_path),
+            "prompt_hash": record.prompt_hash,
+            "context_hash": record.context_hash,
+            "status": record.status,
+            "detail": record.detail,
+        }
+        _audit_append(self.audit_log, payload)  # canonical hardened writer (#223)
 
 
 # ---------------------------------------------------------------------------

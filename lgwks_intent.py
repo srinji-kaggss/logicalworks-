@@ -83,8 +83,6 @@ def _audit_log_path() -> Path:
 
 
 def _audit(intent_file: str, matched: str, next_cmd: str, probed: dict[str, Any]) -> None:
-    log = _audit_log_path()
-    log.parent.mkdir(parents=True, exist_ok=True)
     record = {
         "ts": time.time(),
         "intent_file": intent_file,
@@ -93,8 +91,7 @@ def _audit(intent_file: str, matched: str, next_cmd: str, probed: dict[str, Any]
         "risk": _classify_risk(next_cmd),
         "probed_state": probed,
     }
-    with open(log, "a", encoding="utf-8") as fh:
-        fh.write(json.dumps(record, ensure_ascii=False) + "\n")
+    _audit_append(_audit_log_path(), record)  # canonical hardened writer (#223)
 
 
 # ── input validation ────────────────────────────────────────────────────────
@@ -116,6 +113,7 @@ def _validate_next_if_keys(next_if: dict[str, str]) -> dict[str, str]:
 
 
 from lgwks_redact import scrub as _scrub  # one source of truth for credential redaction
+from lgwks_audit import audit_append as _audit_append  # one canonical hardened writer (#223)
 
 
 def _safe_substitute(cmd: str, intent: "IntentDoc") -> str:

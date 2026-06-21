@@ -45,6 +45,7 @@ def _gh_meta(items: list[Any] | None = None, warnings: list[str] | None = None, 
 
 from lgwks_substrate_config import REPO_SLUG_RE as _SLUG_RE  # one source of truth
 from lgwks_redact import scrub as _scrub  # one source of truth for credential redaction
+from lgwks_audit import audit_append as _audit_append  # one canonical hardened writer (#223)
 _RATE_LIMIT_RE = re.compile(r"rate limit|API rate limit exceeded|403 Forbidden", re.IGNORECASE)
 
 
@@ -55,18 +56,17 @@ def _audit_log_path() -> Path:
 
 
 def _audit(verb: str, args: dict[str, Any], outcome: str) -> None:
-    """Append structured audit record for every mutation-capable call."""
-    log = _audit_log_path()
-    log.parent.mkdir(parents=True, exist_ok=True)
+    """Append structured audit record for every mutation-capable call. The
+    canonical writer redacts credential-named keys + embedded secrets, so the
+    args dict is passed through whole (no manual key-drop needed)."""
     record = {
         "ts": time.time(),
         "verb": verb,
-        "args": {k: v for k, v in args.items() if k not in ("token", "password", "secret")},
+        "args": args,
         "outcome": outcome,
         "cwd": str(Path.cwd()),
     }
-    with open(log, "a", encoding="utf-8") as fh:
-        fh.write(json.dumps(record, ensure_ascii=False) + "\n")
+    _audit_append(_audit_log_path(), record)
 
 
 # ── input validation ────────────────────────────────────────────────────────

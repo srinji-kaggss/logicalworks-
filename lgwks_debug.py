@@ -44,16 +44,13 @@ def _audit_log_path() -> Path:
 
 
 def _audit(command: str, exit_code: int, findings_count: int) -> None:
-    log = _audit_log_path()
-    log.parent.mkdir(parents=True, exist_ok=True)
     record = {
         "ts": time.time(),
         "command": command,
         "exit_code": exit_code,
         "findings_count": findings_count,
     }
-    with open(log, "a", encoding="utf-8") as fh:
-        fh.write(json.dumps(record, ensure_ascii=False) + "\n")
+    _audit_append(_audit_log_path(), record)  # canonical hardened writer (#223)
 
 
 # ── input validation ──────────────────────────────────────────────────────
@@ -71,6 +68,7 @@ def _validate_command(cmd_parts: list[str]) -> tuple[bool, str]:
 
 
 from lgwks_redact import scrub as _scrub  # one source of truth for credential redaction
+from lgwks_audit import audit_append as _audit_append  # one canonical hardened writer (#223)
 
 
 # ── pattern database ─────────────────────────────────────────────────────────

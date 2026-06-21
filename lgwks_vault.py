@@ -11,7 +11,6 @@ Boundary (T0): values never touch a log, a prompt, a URL, or argv.
 from __future__ import annotations
 
 import base64
-import fcntl
 import hashlib
 import json
 import os
@@ -21,6 +20,7 @@ from pathlib import Path
 from typing import Any
 
 import lgwks_sign
+from lgwks_audit import audit_append as _audit_append  # one canonical hardened writer (#223)
 
 try:
     from cryptography.exceptions import InvalidTag
@@ -82,29 +82,10 @@ class AuditEvent:
 
 def _audit(event: AuditEvent) -> None:
     """Append an audit record. Never raises — audit failures are non-blocking
-    to vault operations but are flagged in the returned metadata."""
-    try:
-        _AUDIT_DIR.mkdir(parents=True, exist_ok=True)
-        # Set permissions on directory first
-        if _AUDIT_DIR.stat().st_mode & 0o777 != 0o700:
-            os.chmod(_AUDIT_DIR, 0o700)
-        
-        record = json.dumps(event.to_dict(), sort_keys=True, ensure_ascii=False)
-        with _AUDIT_LOG.open("a", encoding="utf-8") as fh:
-            # HARDEN: exclusive lock around audit append (H6)
-            fcntl.flock(fh.fileno(), fcntl.LOCK_EX)
-            try:
-                fh.write(record + "\n")
-                fh.flush()
-                os.fsync(fh.fileno())
-            finally:
-                fcntl.flock(fh.fileno(), fcntl.LOCK_UN)
-        
-        # Ensure file permissions
-        if _AUDIT_LOG.stat().st_mode & 0o777 != 0o600:
-            os.chmod(_AUDIT_LOG, 0o600)
-    except Exception:
-        pass  # audit loss is logged as a detail field on the operation return
+    to vault operations but are flagged in the returned metadata. Delegates to
+    the canonical hardened writer (fcntl lock, dir 0700 / file 0600, fsync,
+    redaction); _AUDIT_LOG is read at call time so tests can repoint it (#223)."""
+    _audit_append(_AUDIT_LOG, event.to_dict())
 
 
 # ---------------------------------------------------------------------------
