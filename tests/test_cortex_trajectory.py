@@ -132,5 +132,63 @@ class TestCortexTrajectoryEmission(unittest.TestCase):
                 gate.close()
 
 
+class TestCortexIdempotencyAndAutonomousCapture(unittest.TestCase):
+    """The daemon (not a hook) is the core capture path: it must be able to
+    re-process a growing transcript without duplicating training turns."""
+
+    def _write(self, path: Path, turns: list[dict]) -> None:
+        import json
+        path.write_text("\n".join(json.dumps(t) for t in turns) + "\n", encoding="utf-8")
+
+    def test_reprocessing_is_idempotent(self):
+        import lgwks_cortex
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            transcript = root / "s.jsonl"
+            self._write(transcript, [
+                {"turn_id": "t1", "role": "user", "content": "map the repo"},
+                {"turn_id": "t2", "role": "assistant", "content": "done"},
+            ])
+            cortex = lgwks_cortex.TranscriptCortex(root)
+            first = cortex.process_transcript(transcript, "sess", n=0)
+            self.assertEqual(len(first), 2)
+            # Re-run on the same transcript: every turn already seen -> 0 new.
+            again = cortex.process_transcript(transcript, "sess", n=0)
+            self.assertEqual(len(again), 0)
+            out = root / "store" / "cortex" / "sess.cortex.jsonl"
+            self.assertEqual(sum(1 for _ in out.open()), 2)  # no duplicate lines
+
+    def test_growing_transcript_appends_only_new_turns(self):
+        import lgwks_cortex
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            transcript = root / "s.jsonl"
+            self._write(transcript, [{"turn_id": "t1", "role": "user", "content": "first"}])
+            cortex = lgwks_cortex.TranscriptCortex(root)
+            cortex.process_transcript(transcript, "sess", n=0)
+            self._write(transcript, [
+                {"turn_id": "t1", "role": "user", "content": "first"},
+                {"turn_id": "t2", "role": "assistant", "content": "second"},
+            ])
+            new = cortex.process_transcript(transcript, "sess", n=0)
+            self.assertEqual([t.turn_id for t in new], ["t2"])
+
+    def test_daemon_autonomous_capture_and_subagent_refusal(self):
+        import lgwks_daemon
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            transcript = root / "live.jsonl"
+            self._write(transcript, [{"turn_id": "t1", "role": "user", "content": "hello"}])
+            d = lgwks_daemon.SessionDaemon(root)
+            # Autonomous pass builds the trajectory, no hook involved.
+            m1 = d._maybe_process_cortex(str(transcript), 0.0)
+            self.assertGreater(m1, 0.0)
+            self.assertTrue((root / "store" / "cortex" / "live.cortex.jsonl").exists())
+            # Unchanged mtime -> skipped (watermark unchanged).
+            self.assertEqual(d._maybe_process_cortex(str(transcript), m1), m1)
+            # Subagent transcript -> refused (stale-session guard, #227 F3).
+            self.assertEqual(d._maybe_process_cortex("/x/subagents/a.jsonl", 0.0), 0.0)
+
+
 if __name__ == "__main__":
     unittest.main()

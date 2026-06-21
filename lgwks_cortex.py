@@ -79,10 +79,17 @@ class TranscriptCortex:
             gate = lgwks_storage.get_gate("cortex", tenant_id=session_id)
 
         processed: list[CortexTurn] = []
+        # Idempotency: a turn already persisted for this session is never
+        # re-emitted. This is what makes repeated/autonomous polling of a
+        # growing transcript safe — without it the daemon loop would duplicate
+        # trajectory turns and corrupt the training corpus.
+        seen = self._persisted_turn_ids(session_id)
         try:
             raw_turns = lgwks_transcript.tail(transcript_path, n=n, include_content=True)
 
             for turn in raw_turns:
+                if turn["turn_id"] in seen:
+                    continue
                 content = turn.get("content", "")
 
                 # Layer 2: Business Logic (ModernBERT Salience)
@@ -119,6 +126,7 @@ class TranscriptCortex:
                 # goes on the Causal Tape (+ TokenIndex); the JSONL is a mirror.
                 self._emit_trajectory(gate, ct, content, tokens)
                 self._persist_turn(ct)
+                seen.add(ct.turn_id)
                 processed.append(ct)
         finally:
             if own_gate:
@@ -160,6 +168,30 @@ class TranscriptCortex:
             gate.ingest_artifact(artifact)
         except Exception:
             pass
+
+    def _persisted_turn_ids(self, session_id: str) -> set[str]:
+        """turn_ids already written to this session's cortex trajectory file.
+
+        Read once per process_transcript call; the cortex .cortex.jsonl is a flat
+        append log with no native dedup, so this set is the idempotency key for
+        re-runs (CLI re-invocation, daemon polling a growing transcript)."""
+        path = self.cortex_dir / f"{session_id}.cortex.jsonl"
+        if not path.exists():
+            return set()
+        seen: set[str] = set()
+        try:
+            with path.open(encoding="utf-8") as f:
+                for line in f:
+                    line = line.strip()
+                    if not line:
+                        continue
+                    try:
+                        seen.add(json.loads(line)["turn_id"])
+                    except (json.JSONDecodeError, KeyError):
+                        continue
+        except OSError:
+            return seen
+        return seen
 
     def _extract_entities(self, text: str) -> list[str]:
         """Find repo entities (files, modules) mentioned in text."""
