@@ -190,5 +190,28 @@ def index_command(args) -> int:
     """CLI entrypoint for indexing."""
     from pathlib import Path
     cortex = TranscriptCortex(Path(args.repo))
-    cortex.process_transcript(Path(args.path), args.session_id)
+    turns = cortex.process_transcript(Path(args.path), args.session_id, n=getattr(args, "n", 0))
+    count = len(turns) if turns is not None else 0
+    if getattr(args, "json", False):
+        import json as _json
+        print(_json.dumps({"schema": "lgwks.cortex.index.v1", "ok": True,
+                           "session_id": args.session_id, "turns": count,
+                           "transcript": str(args.path)}))
+    else:
+        print(f"cortex: indexed {count} turn(s) from {args.path} -> {args.session_id}.cortex.jsonl")
     return 0
+
+
+def add_parser(sub) -> None:
+    """Register `state cortex index` — tail a transcript into per-turn cortex
+    trajectory records (PRD-06 U5). Previously orphaned: index_command existed
+    with no CLI parser, so the transcript->trajectory step was unreachable."""
+    p = sub.add_parser("cortex", help="transcript cortex — index a JSONL transcript into trajectory records (PRD-06)")
+    cp = p.add_subparsers(dest="cortex_cmd", required=True)
+    idx = cp.add_parser("index", help="tail a transcript into {session}.cortex.jsonl trajectory records")
+    idx.add_argument("path", help="path to the JSONL transcript to index")
+    idx.add_argument("--session-id", required=True, help="session id (names the .cortex.jsonl output)")
+    idx.add_argument("--repo", default=".", help="repo root (cortex store lives under <repo>/store/cortex)")
+    idx.add_argument("-n", type=int, default=0, help="last N turns (0 = whole transcript)")
+    idx.add_argument("--json", action="store_true", help="machine-readable result")
+    idx.set_defaults(func=index_command)

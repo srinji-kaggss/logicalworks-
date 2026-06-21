@@ -97,3 +97,21 @@ def test_route_engine_dispatches_to_subconscious_engine():
     payload = json.loads(proc.stdout)
     assert payload["schema"] == "lgwks.engine.schema.v1"
     assert payload["pathways"][0] == "ops daemon research"
+
+
+def test_state_cortex_index_builds_trajectory(tmp_path: Path):
+    """The transcript->trajectory step is CLI-reachable (was orphaned: index_command
+    had no parser). Feeds the PRD-06 cortex / training-data pipeline."""
+    transcript = tmp_path / "t.jsonl"
+    transcript.write_text(
+        json.dumps({"type": "user", "message": {"role": "user", "content": "map the codebase"}}) + "\n"
+        + json.dumps({"type": "assistant", "message": {"role": "assistant", "content": "done"}}) + "\n",
+        encoding="utf-8",
+    )
+    proc = _run("state", "cortex", "index", str(transcript),
+                "--session-id", "contract-cortex", "--repo", str(tmp_path), "--json")
+    assert proc.returncode == 0, proc.stderr
+    payload = json.loads(proc.stdout)
+    assert payload["schema"] == "lgwks.cortex.index.v1"
+    assert payload["ok"] is True
+    assert (tmp_path / "store" / "cortex" / "contract-cortex.cortex.jsonl").exists()
