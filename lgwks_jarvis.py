@@ -748,6 +748,7 @@ def crawl_command(args: argparse.Namespace) -> int:
     chunk_vectors: dict[str, list[float]] = {}
     chunk_texts: dict[str, str] = {}
     chunk_to_doc: dict[str, str] = {}
+    seen_chunk_hashes: set[str] = set()
 
     while queue and len(seen) < args.max_pages:
         batch: list[tuple[str, int, str]] = []
@@ -830,7 +831,30 @@ def crawl_command(args: argparse.Namespace) -> int:
         doc_rows.append(doc_row)
         emit_embedding(db, run_id, "document", doc_id, result.text[:20_000])
         for pos, chunk in enumerate(chunks):
-            chunk_id = f"chunk-{sha(doc_id + str(pos) + chunk)}"
+            # Content-addressed chunk identity: identical content collapses to one
+            # node + one embedding across documents/positions. Provenance (which doc
+            # contained the chunk, and where) is preserved as doc->chunk containment
+            # edges, so dedup is lossless. Mirrors lgwks_substrate_run.build_run — one
+            # canonical dedup primitive, not a parallel scheme.
+            content_sha = hashlib.sha256(chunk.encode("utf-8", errors="ignore")).hexdigest()
+            chunk_id = f"chunk-{content_sha[:16]}"
+            occurrence_edge = {
+                "id": f"edge-{sha(doc_id + chunk_id)}",
+                "run_id": run_id,
+                "from_id": doc_id,
+                "to_id": chunk_id,
+                "kind": "contains",
+                "weight": 1.0,
+                "evidence": None,
+                "metadata_json": json.dumps({"position": pos}, sort_keys=True),
+            }
+            db.insert("edges", occurrence_edge)
+            edge_rows.append(occurrence_edge)
+            if content_sha in seen_chunk_hashes:
+                # Duplicate content this run: provenance recorded via the edge above;
+                # do not re-insert the row or re-embed identical content.
+                continue
+            seen_chunk_hashes.add(content_sha)
             stype = semantic_type_scores(chunk)
             chunk_row = {
                 "id": chunk_id,
@@ -839,7 +863,7 @@ def crawl_command(args: argparse.Namespace) -> int:
                 "source_id": source_id,
                 "position": pos,
                 "text": chunk,
-                "content_sha256": hashlib.sha256(chunk.encode("utf-8", errors="ignore")).hexdigest(),
+                "content_sha256": content_sha,
                 "word_count": word_count(chunk),
                 "semantic_type_json": json.dumps(stype, sort_keys=True),
             }
