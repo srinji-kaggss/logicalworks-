@@ -48,6 +48,46 @@ class TestAetheriusTokenizerByteLevel(unittest.TestCase):
             traj2 = tk.tokenize_trajectory({"content": "", "entities": ["lgwks_storage.py"]})
             self.assertEqual(traj.tokens, traj2.tokens)
 
+    def test_distinct_entities_get_distinct_token_ids(self):
+        # #293 acceptance: injectivity. A token collision = a false posting in the
+        # TokenIndex (an entity query returns the wrong artifact). Map a corpus of
+        # distinct entities and assert no two share an id. 4000 names sits far below
+        # the 56-bit birthday point (~2^28), so this is a hard guarantee, not luck —
+        # at the old 4-byte width the same corpus already risked a collision.
+        with tempfile.TemporaryDirectory() as td:
+            tk = self._tok(Path(td))
+            names = [f"entity_{i}_{i*7 % 13}.py" for i in range(4000)]
+            ids = []
+            for name in names:
+                traj = tk.tokenize_trajectory({"content": "", "entities": [name]})
+                ent = [t for t in traj.tokens if t >= atok.ENTITY_TOKEN_BASE]
+                self.assertEqual(len(ent), 1)
+                ids.append(ent[0])
+            self.assertEqual(len(set(ids)), len(names), "distinct entities collided on a token id")
+
+    def test_entity_token_stays_within_integer_column_ceiling(self):
+        # The TokenIndex.token column is a SQLite signed INTEGER (max 2^63-1).
+        # Guards the ENTITY_HASH_BYTES width: an 8-byte hash would overflow it.
+        with tempfile.TemporaryDirectory() as td:
+            tk = self._tok(Path(td))
+            ceiling = 2 ** 63 - 1
+            for name in ("a", "z" * 200, "lgwks_storage.py", "—unicode—name—"):
+                traj = tk.tokenize_trajectory({"content": "", "entities": [name]})
+                ent = [t for t in traj.tokens if t >= atok.ENTITY_TOKEN_BASE]
+                self.assertTrue(all(t <= ceiling for t in ent), f"entity token overflows INTEGER: {name}")
+
+    def test_byte_roundtrip_for_all_content_under_256(self):
+        # #293 acceptance: round-trip byte fidelity for content < 256. Every byte
+        # value 0..255 that survives UTF-8 round-trips through the content tokens.
+        with tempfile.TemporaryDirectory() as td:
+            tk = self._tok(Path(td))
+            text = "".join(chr(c) for c in range(1, 128)) + "café—naïve—Ω"
+            traj = tk.tokenize_trajectory({"content": text, "entities": []})
+            beg, end = tk.vocab["[BEG]"], tk.vocab["[END]"]
+            body = traj.tokens[traj.tokens.index(beg) + 1:traj.tokens.index(end)]
+            self.assertTrue(all(0 <= t <= 255 for t in body))
+            self.assertEqual(bytes(body).decode("utf-8"), text)
+
     def test_content_recorded_verbatim_not_spell_corrected(self):
         # Ground-truth fidelity (#180): a near-primitive typo ("gxt" is Levenshtein-1
         # from "git") must be tokenized EXACTLY as typed — the tape records what
