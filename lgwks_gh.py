@@ -27,6 +27,7 @@ from pathlib import Path
 from typing import Any
 
 import lgwks_ui as ui
+import lgwks_clock as _clock  # canonical timestamps (#223 foundation-bypass)
 
 
 # ── machine-first helpers ───────────────────────────────────────────────────
@@ -424,9 +425,9 @@ def _repo_state(repo: str | None) -> RepoState:
             d = json.loads(out)
             pushed = d.get("defaultBranchRef", {}).get("target", {}).get("pushedDate", "")
             if pushed:
-                from datetime import datetime, timezone
+                from datetime import datetime
                 dt = datetime.fromisoformat(pushed.replace("Z", "+00:00"))
-                age = (datetime.now(timezone.utc) - dt).total_seconds() / 3600
+                age = (_clock.now_aware() - dt).total_seconds() / 3600
                 state.last_commit_age_hours = round(age, 1)
         except Exception:
             pass

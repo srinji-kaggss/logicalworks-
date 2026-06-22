@@ -23,6 +23,7 @@ Runnable offline today: `--dry` uses synthetic pages (no network) so the spine i
 from __future__ import annotations
 
 import argparse
+import lgwks_clock as _clock  # canonical timestamps (#223 foundation-bypass)
 import lgwks_hashing
 import ipaddress
 import json
@@ -74,7 +75,7 @@ def write_universal_index(
     index = {
         "schema": UNIVERSAL_SCHEMA,
         "run_id": run_id,
-        "created_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
+        "created_at": _clock.now_iso(),  # canonical UTC ISO (#223; Z→+00:00, completes #151)
         "repo": str(repo.resolve()) if repo else str(ROOT.resolve()),
         "source": source,
         "artifacts": artifacts,

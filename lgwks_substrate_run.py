@@ -11,7 +11,7 @@ from __future__ import annotations
 
 import argparse
 import json
-import time
+import lgwks_clock as _clock  # canonical timestamps (#223 foundation-bypass)
 from collections import Counter
 from datetime import date
 from pathlib import Path
@@ -146,7 +146,7 @@ def _policy_pack_gaps(
 
 def build_run(args: argparse.Namespace) -> dict[str, Any]:
     source_kind = _source_type(args.target, args.source_type)
-    run_id = f"{io._slug(args.project or Path(args.target).name)}-{time.strftime('%Y%m%d-%H%M%S')}"
+    run_id = f"{io._slug(args.project or Path(args.target).name)}-{_clock.stamp_compact()}"  # canonical UTC stamp (#223; was local)
     run_dir = RUN_ROOT / run_id
     run_dir.mkdir(parents=True, exist_ok=True)
 
@@ -539,7 +539,7 @@ def build_run(args: argparse.Namespace) -> dict[str, Any]:
         "target": args.target,
         "source_type": source_kind,
         "project": args.project or io._slug(Path(args.target).name),
-        "created_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
+        "created_at": _clock.now_iso(),  # canonical UTC ISO (#223; Z→+00:00, completes #151)
         "embedding": {
             "provider_requested": args.embed_provider,
             "model_requested": args.embed_model,

@@ -5,7 +5,7 @@ from __future__ import annotations
 import argparse
 import json
 import sys
-import time
+import lgwks_clock as _clock  # canonical timestamps (#223 foundation-bypass)
 from pathlib import Path
 from typing import Any
 
@@ -122,7 +122,7 @@ def _anchor_records(
             },
             "world_refs": [{"kind": "concept", "id": anchor["anchor"]}],
             "tags": ["jepa", "latent-anchor", "multiview"],
-            "created_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
+            "created_at": _clock.now_iso(),  # canonical UTC ISO (#223; Z→+00:00, completes #151)
         })
     return records
 
@@ -172,7 +172,7 @@ def build_package(args: argparse.Namespace) -> dict[str, Any]:
         portal_path = repo / ".lgwks" / "portals" / f"{portal_packet['key'].replace(':', '_')}.json"
         portal_path.parent.mkdir(parents=True, exist_ok=True)
         portal_path.write_text(json.dumps(portal_packet, indent=2, ensure_ascii=False), encoding="utf-8")
-    key = f"jepa:{_sha((str(repo or '') + '|' + combined + '|' + time.strftime('%Y%m%d')))}"
+    key = f"jepa:{_sha((str(repo or '') + '|' + combined + '|' + _clock.date_compact()))}"  # canonical UTC date (#223; was local)
     reduced = project_artifacts.reduce_bot_records(
         _anchor_records(anchors, raw_views, repo, portal_packet)
     )
@@ -195,7 +195,7 @@ def build_package(args: argparse.Namespace) -> dict[str, Any]:
     packet = {
         "schema": JEPA_SCHEMA,
         "key": key,
-        "created_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
+        "created_at": _clock.now_iso(),  # canonical UTC ISO (#223; Z→+00:00, completes #151)
         "repo": str(repo) if repo else "",
         "views": [_view_packet(v) for v in raw_views],
         "latent": {"anchors": anchors, "view_count": len(raw_views)},

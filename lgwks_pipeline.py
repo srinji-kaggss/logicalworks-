@@ -30,7 +30,7 @@ import math
 import os
 import re
 import sys
-import time
+import lgwks_clock as _clock  # canonical timestamps (#223 foundation-bypass)
 import urllib.error
 import urllib.request
 from concurrent.futures import ThreadPoolExecutor, as_completed
@@ -1016,7 +1016,7 @@ def _parameter_snapshot() -> dict[str, Any]:
 
 def run_pipeline(args: argparse.Namespace) -> dict[str, Any]:
     """Full DAG.  Returns manifest dict."""
-    ts = time.strftime("%Y%m%d-%H%M%S", time.gmtime())
+    ts = _clock.stamp_compact()  # canonical UTC stamp (#223 foundation-bypass)
     run_id = f"pipeline-{_sha(args.target + ts)}-{ts}"
     out_dir = PIPELINE_STORE / run_id
     out_dir.mkdir(parents=True, exist_ok=True)
@@ -1217,7 +1217,7 @@ def run_pipeline(args: argparse.Namespace) -> dict[str, Any]:
         "schema": PIPELINE_MANIFEST_SCHEMA,
         "run_id": run_id,
         "target": args.target,
-        "created_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
+        "created_at": _clock.now_iso(),  # canonical UTC ISO (#223; Z→+00:00, completes #151)
         "counts": {
             "ingested": len(all_chunks),
             "prefetched_vectors": len(prefetched_vecs),

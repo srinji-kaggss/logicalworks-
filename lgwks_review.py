@@ -19,6 +19,7 @@ import re
 import subprocess
 import sys
 import time
+import lgwks_clock as _clock  # canonical timestamps (#223 foundation-bypass)
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Optional
@@ -270,7 +271,7 @@ def _generate_report_md(
     medium_count = sum(1 for f in reduced["findings_normalized"] if f.get("severity") == "medium")
     low_count = sum(1 for f in reduced["findings_normalized"] if f.get("severity") == "low")
 
-    date_str = time.strftime("%Y-%m-%d %H:%M:%S UTC", time.gmtime())
+    date_str = _clock.now_human()  # canonical UTC display (#223 foundation-bypass)
 
     md = f"""# Session Report — {date_str}
 
@@ -460,7 +461,7 @@ def review_command(args: argparse.Namespace) -> int:
 
     # 2. Run selected bots
     all_findings = []
-    ts = time.strftime("%Y%m%d-%H%M%S", time.gmtime())
+    ts = _clock.stamp_compact()  # canonical UTC stamp (#223 foundation-bypass)
     run_id = f"run:{ts}:" + lgwks_hashing.content_id(str(repo), 8)
 
     # Legacy static check findings map to BOT_RECORD_SCHEMA
@@ -486,7 +487,7 @@ def review_command(args: argparse.Namespace) -> int:
             },
             "world_refs": [{"kind": "concept", "id": f.check}],
             "tags": ["review", "static-heuristic"],
-            "created_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
+            "created_at": _clock.now_iso(),  # canonical UTC ISO (#223; Z→+00:00, completes #151)
         })
 
     for p_bot in plan["bots"]:
@@ -600,7 +601,7 @@ def review_command(args: argparse.Namespace) -> int:
     machine_packet.update({
         "l_score": l_score,
         "l_budget_used": f"{int(round((l_score / l_budget) * 100)) if l_budget else 0}%",
-        "session_date": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
+        "session_date": _clock.now_iso(),  # canonical UTC ISO (#223; Z→+00:00, completes #151)
         "grounded_claim_count": len(reduced["findings_normalized"]),
         "invented_claim_count": invented_claim_count,
         "synth_status": synth_status,

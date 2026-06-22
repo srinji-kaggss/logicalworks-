@@ -33,7 +33,6 @@ import urllib.parse
 import urllib.request
 from collections import Counter, defaultdict, deque
 from dataclasses import dataclass
-from datetime import datetime, timezone
 from html.parser import HTMLParser
 from pathlib import Path
 from typing import Iterable, Any, Optional
@@ -42,6 +41,7 @@ import lgwks_sqlite
 import lgwks_substrate_io as _io  # canonical filesystem slug (#223 family 5)
 import lgwks_lexicon as _lex  # canonical lexical analyzer (#223 family 3)
 import lgwks_vecmath as _vm  # canonical vector math + feature-hash mechanism (#223 family 2)
+import lgwks_clock as _clock  # canonical timestamps (#223 foundation-bypass)
 import lgwks_hashing  # canonical content-id seam (#223 C-10): no local sha re-derivation
 import lgwks_storage  # #165 step 3: the one State Fabric gate (retires JarvisDB islands)
 import lgwks_vector as vec_mod  # embeddings → cid-keyed vector_records
@@ -68,7 +68,8 @@ SEMANTIC_TYPES = {
 
 
 def utc_now() -> str:
-    return datetime.now(timezone.utc).replace(microsecond=0).isoformat()
+    """Canonical UTC ISO stamp. Byte-exact delegate to lgwks_clock.now_iso (#223)."""
+    return _clock.now_iso()
 
 
 def slugify(value: str, limit: int = 48) -> str:
@@ -513,7 +514,7 @@ def crawl_command(args: argparse.Namespace) -> int:
     keywords = parse_keywords(args.keyword_terms, args.keywords)
     source = args.source
     run_name = args.name or slugify(source or " ".join(keywords))
-    run_id = f"{run_name}-{datetime.now().strftime('%Y%m%d-%H%M%S')}"
+    run_id = f"{run_name}-{_clock.stamp_compact()}"  # canonical UTC stamp (was local time)
     estimate = estimate_seconds(args.max_pages, args.workers, len(keywords))
     if getattr(args, "estimate_only", False):
         print(json.dumps({"estimated_seconds": estimate, "estimated_minutes": round(estimate / 60, 2)}, indent=2))

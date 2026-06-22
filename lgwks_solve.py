@@ -24,7 +24,6 @@ import json
 import re
 import sys
 from dataclasses import dataclass, field
-from datetime import datetime, timezone
 from pathlib import Path
 
 try:
@@ -36,6 +35,7 @@ try:
 except Exception:
     lgwks_tongue = None  # type: ignore
 import lgwks_ui as ui
+import lgwks_clock as _clock  # canonical timestamps (#223 foundation-bypass)
 from lgwks_steering import Steering
 
 _GLYPH = {"gather": "◇", "graph": "◈", "diagnose": "◆", "prove": "✦"}
@@ -90,7 +90,7 @@ class Finding:
 
 
 def _today() -> tuple[int, int, int]:
-    n = datetime.now(timezone.utc)
+    n = _clock.now_aware()  # canonical UTC instant (#223 foundation-bypass)
     return n.year, n.month, n.day
 
 
