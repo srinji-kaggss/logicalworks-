@@ -7,6 +7,7 @@ ledger that AI workers can replay and humans can audit.
 
 from __future__ import annotations
 
+import lgwks_chain
 import lgwks_hashing
 import json
 import time
@@ -14,7 +15,7 @@ from pathlib import Path
 
 import lgwks_sign
 
-GENESIS = "0" * 64
+GENESIS = lgwks_chain.GENESIS
 from lgwks_substrate_config import SLUG_SCRUB_RE as SAFE  # one source of truth
 
 
@@ -50,21 +51,33 @@ def read_jsonl(path: Path) -> list[dict]:
     return rows
 
 
+# Map the canonical primitive's structured errors back to this store's taxonomy.
+# (bad-link == prev mismatch, bad-record == seq mismatch — both were "bad-sequence".)
+_ERR = {"": "", "bad-link": "bad-sequence", "bad-record": "bad-sequence",
+        "bad-hash": "bad-hash", "read-error": "read-error"}
+
+
+def _cycle_log(path: Path, key: bytes) -> "lgwks_chain.HashChainLog":
+    """This ledger as the canonical hash-chain primitive — VERIFY ONLY.
+
+    The cycle chain is batch-built by make_cycles and written by a full overwrite
+    (write_jsonl), not incrementally appended, so this log injects no build_core/
+    serialize. It shares only the link-walk invariant + this store's hash
+    construction (mac(canon(row), key)) and its 1-based seq.
+    """
+    return lgwks_chain.HashChainLog(
+        path,
+        key=key,
+        hash_core=lambda core, prev, k: cycle_hash(core, k),  # mac(canon(core), k)
+        verify_record=lambda rec, index, prev: rec.get("seq") == index + 1,  # 1-based seq
+    )
+
+
 def verify_cycles(path: Path, key: bytes | None = None) -> dict:
     key = key if key is not None else lgwks_sign.signing_key()[0]
-    prev = GENESIS
-    rows: list[dict] = []
-    try:
-        rows = read_jsonl(path)
-    except Exception as exc:
-        return {"chain_ok": False, "cycles": 0, "chain_head": GENESIS, "error": str(exc)}
-    for idx, row in enumerate(rows, start=1):
-        if row.get("seq") != idx or row.get("prev") != prev:
-            return {"chain_ok": False, "cycles": len(rows), "chain_head": prev, "error": "bad-sequence"}
-        if cycle_hash(row, key) != row.get("hash"):
-            return {"chain_ok": False, "cycles": len(rows), "chain_head": prev, "error": "bad-hash"}
-        prev = row["hash"]
-    return {"chain_ok": True, "cycles": len(rows), "chain_head": prev, "error": ""}
+    s = _cycle_log(path, key).scan()
+    return {"chain_ok": s["ok"], "cycles": s["count"], "chain_head": s["head"],
+            "error": _ERR.get(s["error"], s["error"])}
 
 
 def prompt_ref(prompt: str) -> str:

@@ -21,6 +21,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 import lgwks_chain
 import lgwks_cognition as cognition
+import lgwks_cycle as cycle
 import lgwks_hashing
 import lgwks_memory as memory
 import lgwks_sign
@@ -177,6 +178,56 @@ class TestCognitionLegacyCompat(unittest.TestCase):
         self.assertEqual(rec["seq"], 2)  # 0-based: third record
         self.assertEqual(rec["prev"], prev)
         self.assertTrue(cognition.CognitionLog("legacy", key=key).verify())
+
+
+class TestCycleVerifyOnPrimitive(unittest.TestCase):
+    """lgwks_cycle is a VERIFY-ONLY caller: its chain is batch-built and overwritten,
+    not appended. verify_cycles must agree with make_cycles output through the
+    canonical link-walk, and flip to broken on any tamper."""
+
+    def setUp(self):
+        self._td = tempfile.TemporaryDirectory()
+        self._path = Path(self._td.name) / "cycles.jsonl"
+        self._key = lgwks_sign.signing_key()[0]
+
+    def tearDown(self):
+        self._td.cleanup()
+
+    def _write(self, rows):
+        cycle.write_jsonl(self._path, rows)
+
+    def test_make_cycles_roundtrips_through_primitive(self):
+        rows = cycle.make_cycles("demo", "a prompt", cycles=4, tokens_per_cycle=8000,
+                                 keywords=["x", "y"], rollback_ref="ref", key=self._key)
+        self._write(rows)
+        result = cycle.verify_cycles(self._path, self._key)
+        self.assertTrue(result["chain_ok"])
+        self.assertEqual(result["cycles"], 4)
+        self.assertEqual(result["chain_head"], rows[-1]["hash"])
+        self.assertEqual(result["error"], "")
+
+    def test_tampered_hash_breaks_chain(self):
+        rows = cycle.make_cycles("demo", "p", cycles=3, tokens_per_cycle=8000,
+                                 keywords=["k"], rollback_ref="r", key=self._key)
+        rows[1]["query"] = rows[1]["query"] + " tampered"  # body changed, hash stale
+        self._write(rows)
+        result = cycle.verify_cycles(self._path, self._key)
+        self.assertFalse(result["chain_ok"])
+        self.assertEqual(result["error"], "bad-hash")
+
+    def test_reordered_rows_break_chain(self):
+        rows = cycle.make_cycles("demo", "p", cycles=3, tokens_per_cycle=8000,
+                                 keywords=["k"], rollback_ref="r", key=self._key)
+        rows[0], rows[1] = rows[1], rows[0]  # seq/prev no longer line up
+        self._write(rows)
+        result = cycle.verify_cycles(self._path, self._key)
+        self.assertFalse(result["chain_ok"])
+        self.assertEqual(result["error"], "bad-sequence")
+
+    def test_empty_ledger_verifies(self):
+        result = cycle.verify_cycles(self._path, self._key)
+        self.assertTrue(result["chain_ok"])
+        self.assertEqual(result["cycles"], 0)
 
 
 class TestPrimitiveDiscipline(unittest.TestCase):

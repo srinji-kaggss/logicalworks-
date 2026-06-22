@@ -17,8 +17,12 @@ still verify):
   - `build_core(n_existing, prev, kind, data) -> dict` — the record body and its
     field names/order/seq-base (cognition is 0-based, memory 1-based, etc.).
   - `hash_core(core, prev, key) -> str` — the per-store hash construction
-    (`digest(core)` vs `mac(core+prev)` vs `mac(canon(core))`).
-  - `serialize(rec) -> str` — `json.dumps` flavour (e.g. `ensure_ascii`).
+    (`digest(core)` vs `mac(core+prev)` vs `mac(canon(core))`). The only required
+    injection: it defines the chain's integrity and is shared by verify + append.
+  - `build_core(n_existing, prev, kind, data) -> dict` + `serialize(rec) -> str` —
+    the record body / field-order / seq-base and the `json.dumps` flavour. Required
+    only to `append`; a **verify-only** log (e.g. `lgwks_cycle`, whose chain is
+    batch-built and overwritten elsewhere, not incrementally appended) omits both.
   - optional `sign(hash, key) -> str` written to `sign_field` (cognition's
     separate signature; memory folds the MAC into the hash and passes None).
     When given, the signature is emitted on every record (the callable decides
@@ -51,9 +55,9 @@ class HashChainLog:
         path: str | Path,
         *,
         key: bytes | None,
-        build_core: Callable[[int, str, str, dict], dict],
         hash_core: Callable[[dict, str, Optional[bytes]], str],
-        serialize: Callable[[dict], str],
+        build_core: Optional[Callable[[int, str, str, dict], dict]] = None,
+        serialize: Optional[Callable[[dict], str]] = None,
         kinds: Optional[set[str]] = None,
         sign: Optional[Callable[[str, Optional[bytes]], str]] = None,
         verify_record: Optional[Callable[[dict, int, str], bool]] = None,
@@ -76,20 +80,25 @@ class HashChainLog:
         """The hashed core = the record minus the fields added after hashing."""
         return {k: v for k, v in rec.items() if k not in (self._hash_field, self._sign_field)}
 
-    def _verify_rows(self, rows: list[dict]) -> bool:
+    def _walk(self, rows: list[dict]) -> tuple[bool, str, str]:
+        """The one link-walk. Returns (ok, head_hash, error). error in
+        {'', 'bad-kind', 'bad-link', 'bad-hash', 'bad-record'}."""
         prev = GENESIS
         for index, rec in enumerate(rows):
             if self._kinds is not None and rec.get("kind") not in self._kinds:
-                return False
+                return False, prev, "bad-kind"
             if rec.get("prev") != prev:
-                return False
+                return False, prev, "bad-link"
             core = self._strip(rec)
             if self._hash_core(core, prev, self._key) != rec.get(self._hash_field):
-                return False
+                return False, prev, "bad-hash"
             if self._verify_record is not None and not self._verify_record(rec, index, prev):
-                return False
+                return False, prev, "bad-record"
             prev = rec[self._hash_field]  # non-None: the hash check above passed
-        return True
+        return True, prev, ""
+
+    def _verify_rows(self, rows: list[dict]) -> bool:
+        return self._walk(rows)[0]
 
     def read(self) -> list[dict]:
         if not self._path.exists():
@@ -114,9 +123,25 @@ class HashChainLog:
         except (json.JSONDecodeError, KeyError, OSError):
             return False
 
+    def scan(self) -> dict:
+        """Structured sibling of verify() for callers that need a rich audit
+        result (count / head / error), e.g. lgwks_cycle.verify_cycles. Never
+        raises: a read/parse failure maps to ok=False, error='read-error'."""
+        if not self._path.exists():
+            return {"ok": True, "count": 0, "head": GENESIS, "error": ""}
+        try:
+            rows = self.read()
+        except (json.JSONDecodeError, KeyError, OSError):
+            return {"ok": False, "count": 0, "head": GENESIS, "error": "read-error"}
+        ok, head, error = self._walk(rows)
+        return {"ok": ok, "count": len(rows), "head": head, "error": error}
+
     # -- the canonical append control flow ------------------------------
     def append(self, kind: str, data: dict) -> dict:
         """Append one chained entry under an exclusive lock; refuse a broken chain."""
+        if self._build_core is None or self._serialize is None:
+            raise TypeError("verify-only HashChainLog: no build_core/serialize to append with")
+        build_core, serialize = self._build_core, self._serialize
         self._path.parent.mkdir(parents=True, exist_ok=True)
         with self._path.open("a+", encoding="utf-8") as fh:
             fcntl.flock(fh.fileno(), fcntl.LOCK_EX)
@@ -136,14 +161,14 @@ class HashChainLog:
                 else:
                     prev = GENESIS
 
-                core = self._build_core(len(rows), prev, kind, data)
+                core = build_core(len(rows), prev, kind, data)
                 h = self._hash_core(core, prev, self._key)
                 rec: dict[str, Any] = {**core, self._hash_field: h}
                 if self._sign is not None:
                     rec[self._sign_field] = self._sign(h, self._key)
 
                 fh.seek(0, 2)  # EOF
-                fh.write(self._serialize(rec) + "\n")
+                fh.write(serialize(rec) + "\n")
                 fh.flush()
                 os.fsync(fh.fileno())
                 return rec
