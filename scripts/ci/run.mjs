@@ -48,6 +48,14 @@ const COMMIT_LANES = [
   { id: 'authority.qualify', gate: 'qualification', cmd: [NODE, keel('qualify.mjs')] },
   { id: 'authority.qualify.selftest', gate: 'qualification', cmd: [NODE, keel('qualify.mjs'), '--self-test'] },
   { id: 'target.gate', gate: 'commit', cmd: [NODE, keel('run.mjs'), '--profile', PROFILE] },
+  // The Python test suite is part of the always-on floor: the Keel lanes above prove
+  // the verification ALGEBRA, but said nothing about the unit/integration behaviour.
+  // That blind spot let a git-identity hermeticity bug (19 tests doing `git commit`
+  // with no configured identity → exit 128 on a clean runner) ship green. Hermetic by
+  // construction: deps pinned via uv; conftest provides a git identity floor.
+  { id: 'pytest.suite', gate: 'commit', cmd: ['uv', 'run', '--python', '3.12',
+      '--with', 'pytest', '--with', 'cryptography', '--with', 'pyyaml', '--with', 'networkx',
+      'python', '-m', 'pytest', 'tests/', 'axiom/tests/', '-q'] },
 ];
 
 // Tiers whose Keel runners are NOT vendored at the pinned SHA. Honest BLOCKED, never

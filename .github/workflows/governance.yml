@@ -15,8 +15,14 @@ jobs:
       - name: every lgwks.*.vN literal has a registry row
         run: python3 scripts/check_schema_registry.py
 
+  # NOTE: the authoritative, independently-auditable gate is the LOCAL Keel CI
+  # (`node scripts/ci/run.mjs`), where this suite is the `pytest.suite` lane. This
+  # GitHub job is a convenience mirror of that one lane so PRs get test signal — it
+  # is deliberately NOT the full authority (the full runner also enforces the
+  # security floor gate, currently a pre-existing NO-GO tracked separately). Keep
+  # the command below byte-identical to the `pytest.suite` lane to avoid drift.
   tests:
-    name: test suite
+    name: test suite (mirrors local Keel pytest.suite lane)
     runs-on: ubuntu-latest
     timeout-minutes: 20
     steps:
@@ -24,8 +30,8 @@ jobs:
       - uses: astral-sh/setup-uv@v5
       # Deps are undeclared (no manifest by design — local-first uv-run repo).
       # cryptography: vault/daemon; pyyaml: lgwks_config; networkx: graphify/cluster.
-      # Browser-dependent paths (health-check) correctly report degraded and skip;
-      # eval-graph + leidenalg(<3.13) tests skip when their fixtures/deps are absent.
+      # git identity comes from tests/conftest.py (hermetic floor); browser paths
+      # report degraded and skip; eval-graph + leidenalg(<3.13) tests skip cleanly.
       - name: full test suite (tests/ + axiom/tests/)
         run: >
           uv run --python 3.12
