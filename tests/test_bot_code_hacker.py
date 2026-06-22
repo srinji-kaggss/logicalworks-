@@ -93,15 +93,24 @@ class TestH2UnsafeFileMutation(unittest.TestCase):
             _write(tmp, "target.py", src)
             return hacker.run(tmp)
 
-    def test_shutil_rmtree_flagged(self):
-        findings = self._scan("import shutil\nshutil.rmtree('/tmp/foo')\n")
-        kinds = [f["kind"] for f in findings]
-        self.assertIn("unsafe_file_mutation", kinds)
+    def test_rmtree_on_tainted_path_flagged(self):
+        # #313: the risk is deleting an ATTACKER-CONTROLLED path, not any delete.
+        findings = self._scan("import shutil\nd = input()\nshutil.rmtree(d)\n")
+        self.assertIn("unsafe_file_mutation", [f["kind"] for f in findings])
 
-    def test_os_remove_flagged(self):
-        findings = self._scan("import os\nos.remove('x.py')\n")
-        kinds = [f["kind"] for f in findings]
-        self.assertIn("unsafe_file_mutation", kinds)
+    def test_os_remove_on_tainted_path_flagged(self):
+        findings = self._scan("import os\np = input()\nos.remove(p)\n")
+        self.assertIn("unsafe_file_mutation", [f["kind"] for f in findings])
+
+    def test_delete_on_controlled_path_not_flagged(self):
+        # #313: bare deletes of controlled/constant paths (the 62-FP family — temp
+        # cleanup, fixture teardown) must NOT be flagged. Smarter, not noisier.
+        for src in ("import shutil\nshutil.rmtree('/tmp/foo')\n",
+                    "import os\nos.remove('x.py')\n",
+                    "p = Path('build') / 'out'\np.unlink()\n"):
+            findings = self._scan(src)
+            self.assertNotIn("unsafe_file_mutation", [f["kind"] for f in findings],
+                             f"controlled-path delete should not flag: {src!r}")
 
 
 class TestH4TaintAnalysis(unittest.TestCase):
@@ -145,7 +154,8 @@ class TestH4TaintAnalysis(unittest.TestCase):
         findings = self._scan(src)
         secret_finds = [f for f in findings if f["kind"] == "secret_exposure_risk"]
         self.assertTrue(secret_finds)
-        self.assertTrue(any("env_var" in f["summary"] for f in secret_finds))
+        # Reads a secret-named env key (API_KEY) → SECRET taint → flagged on print.
+        self.assertTrue(any(f.get("severity") in ("high", "critical") for f in secret_finds))
 
     def test_non_secret_var_not_flagged(self):
         """A variable with an innocent name (not matching _SECRET_RE) that
@@ -159,9 +169,8 @@ class TestH4TaintAnalysis(unittest.TestCase):
         self.assertFalse(secret_finds, "innocent variable should not be flagged")
 
     def test_secret_named_var_always_tracked(self):
-        """A variable named 'token' is always tracked as a potential secret
-        source because the name itself is a strong signal — but the report
-        shows it was tracked by name (secret_var), not inferred."""
+        """A variable whose name is a strong credential signal ('token') is tracked as a
+        SECRET source by name — printing it is flagged at a gate-blocking severity."""
         src = """\
             token = "csrf-token-123"
             print(token)
@@ -169,7 +178,7 @@ class TestH4TaintAnalysis(unittest.TestCase):
         findings = self._scan(src)
         secret_finds = [f for f in findings if f["kind"] == "secret_exposure_risk"]
         self.assertTrue(secret_finds)
-        self.assertTrue(any("secret_var" in f["summary"] for f in secret_finds))
+        self.assertTrue(any(f.get("severity") in ("high", "critical") for f in secret_finds))
 
 
 class TestH3NetworkEgress(unittest.TestCase):
@@ -263,7 +272,7 @@ class TestBaselineSuppression(unittest.TestCase):
             # Read-only run blocks a new high finding and DOES NOT write the baseline.
             first = scan()
             self.assertEqual(first.returncode, 1, first.stdout + first.stderr)
-            self.assertIn("new high-severity findings", first.stdout)
+            self.assertIn("findings remain open", first.stdout)
             self.assertFalse(baseline.exists(), "read-only scan must not self-certify by writing the baseline")
 
             # Same verdict every time — no fail-once-then-absorb.
@@ -287,7 +296,7 @@ class TestBaselineSuppression(unittest.TestCase):
                 timeout=20,
             )
             self.assertEqual(third.returncode, 1, third.stdout + third.stderr)
-            self.assertIn("new high-severity findings", third.stdout)
+            self.assertIn("findings remain open", third.stdout)
 
 
 class TestSARIFExport(unittest.TestCase):
