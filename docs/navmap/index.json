@@ -75,6 +75,7 @@
         "lgwks_algorithms",
         "lgwks_apple",
         "lgwks_artifact_tokenized",
+        "lgwks_audit",
         "lgwks_audit_graph",
         "lgwks_aup",
         "lgwks_auth_runtime",
@@ -88,7 +89,6 @@
         "lgwks_cache",
         "lgwks_capabilities",
         "lgwks_capability",
-        "lgwks_capability_action",
         "lgwks_capture",
         "lgwks_cli_introspect",
         "lgwks_clock",
@@ -98,6 +98,7 @@
         "lgwks_comprehend",
         "lgwks_concept",
         "lgwks_config",
+        "lgwks_content_extract",
         "lgwks_context",
         "lgwks_coreml",
         "lgwks_cortex",
@@ -140,7 +141,6 @@
         "lgwks_input",
         "lgwks_intent",
         "lgwks_intent_classifier",
-        "lgwks_intent_router",
         "lgwks_jailbreak",
         "lgwks_jarvis",
         "lgwks_jepa",
@@ -204,7 +204,6 @@
         "lgwks_tokenizer_registry",
         "lgwks_tongue",
         "lgwks_transcript",
-        "lgwks_transform",
         "lgwks_ui",
         "lgwks_urlrisk",
         "lgwks_vault",
@@ -225,17 +224,9 @@
         "tools.calibrate_intent_thresholds",
         "tools.train_intent_classifier"
       ],
-      "orphan": [
-        "lgwks_ingest",
-        "lgwks_query",
-        "lgwks_subconscious"
-      ],
       "staling": [
-        "lgwks_bulk_harvest",
-        "lgwks_preview",
-        "lgwks_surprise",
-        "lgwks_voice_event",
-        "lgwks_workflow_trigger"
+        "lgwks_capability_action",
+        "lgwks_chunking"
       ]
     },
     "by_subsystem": {
@@ -256,8 +247,7 @@
         "lgwks_bot_slop_math",
         "lgwks_bot_stress",
         "lgwks_cohere",
-        "lgwks_debug",
-        "lgwks_surprise"
+        "lgwks_debug"
       ],
       "CLI / home / membrane surface": [
         "lgwks_foundation",
@@ -285,7 +275,6 @@
         "lgwks_storage",
         "lgwks_urlrisk",
         "lgwks_verify",
-        "lgwks_voice_event",
         "scripts.check_schema_registry"
       ],
       "Graph / AST / code intelligence": [
@@ -329,24 +318,20 @@
         "lgwks_project_deploy",
         "lgwks_project_plan",
         "lgwks_project_review",
-        "lgwks_query",
         "lgwks_repl",
         "lgwks_session",
         "lgwks_solve",
         "lgwks_spawn",
-        "lgwks_subconscious",
         "lgwks_substrate_run",
         "lgwks_synthesizer",
         "lgwks_tongue",
         "lgwks_workercap",
         "lgwks_workflow_aetherius",
-        "lgwks_workflow_trigger",
         "lgwks_workflows"
       ],
       "Ingestion spine (I1\u2013I12)": [
         "lgwks_admission",
         "lgwks_admission_store",
-        "lgwks_bulk_harvest",
         "lgwks_capability",
         "lgwks_capability_action",
         "lgwks_crdt",
@@ -367,7 +352,6 @@
         "lgwks_concept",
         "lgwks_intent",
         "lgwks_intent_classifier",
-        "lgwks_intent_router",
         "lgwks_machine",
         "lgwks_multiply",
         "lgwks_route",
@@ -395,9 +379,7 @@
         "lgwks_files",
         "lgwks_geoexpr",
         "lgwks_html",
-        "lgwks_ingest",
         "lgwks_jarvis",
-        "lgwks_preview",
         "lgwks_public",
         "lgwks_search",
         "lgwks_search_engine",
@@ -424,9 +406,12 @@
       "Unclassified (triage)": [
         "lgwks_access",
         "lgwks_artifact_tokenized",
+        "lgwks_audit",
+        "lgwks_chunking",
         "lgwks_cli_introspect",
         "lgwks_clock",
         "lgwks_config",
+        "lgwks_content_extract",
         "lgwks_cortex",
         "lgwks_fabric_projection",
         "lgwks_fabric_reader",
@@ -442,7 +427,6 @@
         "lgwks_research",
         "lgwks_tokenizer",
         "lgwks_transcript",
-        "lgwks_transform",
         "lgwks_vecmath",
         "scripts.build_model_mesh"
       ]
@@ -454,7 +438,7 @@
       "has_cli": false,
       "has_tests": false,
       "integration": "integrated",
-      "last_commit_days": 12,
+      "last_commit_days": 15,
       "loc": 20,
       "owning_issue": null,
       "packet": null,
@@ -470,17 +454,14 @@
         "lgwks_engine",
         "lgwks_inline",
         "lgwks_intent_classifier",
-        "lgwks_intent_router",
         "lgwks_manifest",
         "lgwks_model_mesh",
         "lgwks_proc",
-        "lgwks_query",
         "lgwks_research",
         "lgwks_run",
         "lgwks_schema",
         "lgwks_tokenizer",
         "lgwks_vector",
-        "lgwks_voice_event",
         "scripts"
       ]
     },
@@ -489,7 +470,7 @@
       "has_cli": false,
       "has_tests": false,
       "integration": "integrated",
-      "last_commit_days": 12,
+      "last_commit_days": 15,
       "loc": 171,
       "owning_issue": null,
       "packet": null,
@@ -505,17 +486,14 @@
         "lgwks_engine",
         "lgwks_inline",
         "lgwks_intent_classifier",
-        "lgwks_intent_router",
         "lgwks_manifest",
         "lgwks_model_mesh",
         "lgwks_proc",
-        "lgwks_query",
         "lgwks_research",
         "lgwks_run",
         "lgwks_schema",
         "lgwks_tokenizer",
         "lgwks_vector",
-        "lgwks_voice_event",
         "scripts"
       ]
     },
@@ -524,7 +502,7 @@
       "has_cli": false,
       "has_tests": false,
       "integration": "integrated",
-      "last_commit_days": 12,
+      "last_commit_days": 15,
       "loc": 52,
       "owning_issue": null,
       "packet": null,
@@ -540,17 +518,14 @@
         "lgwks_engine",
         "lgwks_inline",
         "lgwks_intent_classifier",
-        "lgwks_intent_router",
         "lgwks_manifest",
         "lgwks_model_mesh",
         "lgwks_proc",
-        "lgwks_query",
         "lgwks_research",
         "lgwks_run",
         "lgwks_schema",
         "lgwks_tokenizer",
         "lgwks_vector",
-        "lgwks_voice_event",
         "scripts"
       ]
     },
@@ -559,7 +534,7 @@
       "has_cli": false,
       "has_tests": false,
       "integration": "integrated",
-      "last_commit_days": 12,
+      "last_commit_days": 15,
       "loc": 144,
       "owning_issue": null,
       "packet": null,
@@ -575,17 +550,14 @@
         "lgwks_engine",
         "lgwks_inline",
         "lgwks_intent_classifier",
-        "lgwks_intent_router",
         "lgwks_manifest",
         "lgwks_model_mesh",
         "lgwks_proc",
-        "lgwks_query",
         "lgwks_research",
         "lgwks_run",
         "lgwks_schema",
         "lgwks_tokenizer",
         "lgwks_vector",
-        "lgwks_voice_event",
         "scripts"
       ]
     },
@@ -594,7 +566,7 @@
       "has_cli": false,
       "has_tests": false,
       "integration": "integrated",
-      "last_commit_days": 12,
+      "last_commit_days": 15,
       "loc": 92,
       "owning_issue": null,
       "packet": null,
@@ -610,17 +582,14 @@
         "lgwks_engine",
         "lgwks_inline",
         "lgwks_intent_classifier",
-        "lgwks_intent_router",
         "lgwks_manifest",
         "lgwks_model_mesh",
         "lgwks_proc",
-        "lgwks_query",
         "lgwks_research",
         "lgwks_run",
         "lgwks_schema",
         "lgwks_tokenizer",
         "lgwks_vector",
-        "lgwks_voice_event",
         "scripts"
       ]
     },
@@ -629,7 +598,7 @@
       "has_cli": false,
       "has_tests": false,
       "integration": "integrated",
-      "last_commit_days": 12,
+      "last_commit_days": 15,
       "loc": 112,
       "owning_issue": null,
       "packet": null,
@@ -645,17 +614,14 @@
         "lgwks_engine",
         "lgwks_inline",
         "lgwks_intent_classifier",
-        "lgwks_intent_router",
         "lgwks_manifest",
         "lgwks_model_mesh",
         "lgwks_proc",
-        "lgwks_query",
         "lgwks_research",
         "lgwks_run",
         "lgwks_schema",
         "lgwks_tokenizer",
         "lgwks_vector",
-        "lgwks_voice_event",
         "scripts"
       ]
     },
@@ -664,7 +630,7 @@
       "has_cli": false,
       "has_tests": false,
       "integration": "integrated",
-      "last_commit_days": 12,
+      "last_commit_days": 15,
       "loc": 106,
       "owning_issue": null,
       "packet": null,
@@ -680,17 +646,14 @@
         "lgwks_engine",
         "lgwks_inline",
         "lgwks_intent_classifier",
-        "lgwks_intent_router",
         "lgwks_manifest",
         "lgwks_model_mesh",
         "lgwks_proc",
-        "lgwks_query",
         "lgwks_research",
         "lgwks_run",
         "lgwks_schema",
         "lgwks_tokenizer",
         "lgwks_vector",
-        "lgwks_voice_event",
         "scripts"
       ]
     },
@@ -699,7 +662,7 @@
       "has_cli": false,
       "has_tests": false,
       "integration": "integrated",
-      "last_commit_days": 8,
+      "last_commit_days": 11,
       "loc": 4,
       "owning_issue": null,
       "packet": null,
@@ -716,7 +679,7 @@
       "has_cli": false,
       "has_tests": false,
       "integration": "integrated",
-      "last_commit_days": 4,
+      "last_commit_days": 7,
       "loc": 220,
       "owning_issue": null,
       "packet": null,
@@ -736,7 +699,7 @@
       "has_cli": false,
       "has_tests": true,
       "integration": "integrated",
-      "last_commit_days": 1,
+      "last_commit_days": 4,
       "loc": 126,
       "owning_issue": null,
       "packet": null,
@@ -763,7 +726,7 @@
       "has_cli": false,
       "has_tests": true,
       "integration": "integrated",
-      "last_commit_days": 6,
+      "last_commit_days": 9,
       "loc": 88,
       "owning_issue": null,
       "packet": null,
@@ -789,7 +752,7 @@
       "has_cli": false,
       "has_tests": true,
       "integration": "integrated",
-      "last_commit_days": 6,
+      "last_commit_days": 8,
       "loc": 77,
       "owning_issue": null,
       "packet": null,
@@ -815,7 +778,7 @@
       "has_cli": false,
       "has_tests": true,
       "integration": "integrated",
-      "last_commit_days": 1,
+      "last_commit_days": 4,
       "loc": 85,
       "owning_issue": null,
       "packet": null,
@@ -841,7 +804,7 @@
       "has_cli": false,
       "has_tests": true,
       "integration": "integrated",
-      "last_commit_days": 6,
+      "last_commit_days": 8,
       "loc": 70,
       "owning_issue": null,
       "packet": null,
@@ -867,7 +830,7 @@
       "has_cli": false,
       "has_tests": true,
       "integration": "integrated",
-      "last_commit_days": 6,
+      "last_commit_days": 9,
       "loc": 77,
       "owning_issue": null,
       "packet": null,
@@ -893,7 +856,7 @@
       "has_cli": false,
       "has_tests": true,
       "integration": "integrated",
-      "last_commit_days": 1,
+      "last_commit_days": 4,
       "loc": 146,
       "owning_issue": null,
       "packet": null,
@@ -920,7 +883,7 @@
       "has_cli": false,
       "has_tests": true,
       "integration": "integrated",
-      "last_commit_days": 6,
+      "last_commit_days": 8,
       "loc": 115,
       "owning_issue": null,
       "packet": null,
@@ -949,7 +912,7 @@
       "has_cli": true,
       "has_tests": true,
       "integration": "integrated",
-      "last_commit_days": 3,
+      "last_commit_days": 6,
       "loc": 518,
       "owning_issue": null,
       "packet": null,
@@ -972,7 +935,7 @@
       "has_cli": true,
       "has_tests": true,
       "integration": "integrated",
-      "last_commit_days": 3,
+      "last_commit_days": 5,
       "loc": 487,
       "owning_issue": "#72",
       "packet": "I8",
@@ -995,7 +958,7 @@
       "has_cli": false,
       "has_tests": false,
       "integration": "integrated",
-      "last_commit_days": 3,
+      "last_commit_days": 5,
       "loc": 312,
       "owning_issue": null,
       "packet": null,
@@ -1008,6 +971,7 @@
     },
     "lgwks_agent_os": {
       "deps": [
+        "lgwks_audit",
         "lgwks_hashing",
         "lgwks_proc"
       ],
@@ -1015,7 +979,7 @@
       "has_tests": true,
       "integration": "integrated",
       "last_commit_days": 0,
-      "loc": 553,
+      "loc": 546,
       "owning_issue": null,
       "packet": null,
       "purpose": "fleet startup/bootstrap helpers for the Logical Works prompt layer (#1).",
@@ -1031,7 +995,7 @@
       "has_cli": false,
       "has_tests": true,
       "integration": "integrated",
-      "last_commit_days": 5,
+      "last_commit_days": 7,
       "loc": 190,
       "owning_issue": null,
       "packet": null,
@@ -1047,7 +1011,7 @@
       "has_cli": false,
       "has_tests": false,
       "integration": "integrated",
-      "last_commit_days": 12,
+      "last_commit_days": 14,
       "loc": 146,
       "owning_issue": null,
       "packet": null,
@@ -1066,7 +1030,7 @@
       "has_cli": false,
       "has_tests": true,
       "integration": "integrated",
-      "last_commit_days": 4,
+      "last_commit_days": 6,
       "loc": 186,
       "owning_issue": null,
       "packet": null,
@@ -1076,7 +1040,30 @@
       "used_by": [
         "lgwks_cortex",
         "lgwks_fabric_projection",
+        "lgwks_jarvis",
         "lgwks_storage"
+      ]
+    },
+    "lgwks_audit": {
+      "deps": [
+        "lgwks_redact"
+      ],
+      "has_cli": false,
+      "has_tests": true,
+      "integration": "integrated",
+      "last_commit_days": 0,
+      "loc": 94,
+      "owning_issue": null,
+      "packet": null,
+      "purpose": "the one canonical hardened audit-append primitive (#223 family 1).",
+      "staleness": "active",
+      "subsystem": "Unclassified (triage)",
+      "used_by": [
+        "lgwks_agent_os",
+        "lgwks_debug",
+        "lgwks_gh",
+        "lgwks_intent",
+        "lgwks_vault"
       ]
     },
     "lgwks_audit_graph": {
@@ -1087,7 +1074,7 @@
       "has_cli": false,
       "has_tests": true,
       "integration": "integrated",
-      "last_commit_days": 6,
+      "last_commit_days": 8,
       "loc": 215,
       "owning_issue": null,
       "packet": null,
@@ -1108,7 +1095,7 @@
       "has_cli": true,
       "has_tests": true,
       "integration": "integrated",
-      "last_commit_days": 3,
+      "last_commit_days": 5,
       "loc": 720,
       "owning_issue": null,
       "packet": null,
@@ -1126,7 +1113,7 @@
       "has_cli": false,
       "has_tests": false,
       "integration": "integrated",
-      "last_commit_days": 3,
+      "last_commit_days": 5,
       "loc": 225,
       "owning_issue": null,
       "packet": null,
@@ -1150,7 +1137,7 @@
       "has_cli": true,
       "has_tests": false,
       "integration": "integrated",
-      "last_commit_days": 2,
+      "last_commit_days": 5,
       "loc": 1060,
       "owning_issue": null,
       "packet": null,
@@ -1169,7 +1156,7 @@
       "has_cli": true,
       "has_tests": false,
       "integration": "integrated",
-      "last_commit_days": 4,
+      "last_commit_days": 6,
       "loc": 288,
       "owning_issue": null,
       "packet": null,
@@ -1190,7 +1177,7 @@
       "has_cli": false,
       "has_tests": true,
       "integration": "integrated",
-      "last_commit_days": 0,
+      "last_commit_days": 2,
       "loc": 891,
       "owning_issue": null,
       "packet": null,
@@ -1209,7 +1196,7 @@
       "has_cli": false,
       "has_tests": true,
       "integration": "integrated",
-      "last_commit_days": 3,
+      "last_commit_days": 5,
       "loc": 398,
       "owning_issue": null,
       "packet": null,
@@ -1228,7 +1215,7 @@
       "has_cli": false,
       "has_tests": true,
       "integration": "integrated",
-      "last_commit_days": 3,
+      "last_commit_days": 5,
       "loc": 586,
       "owning_issue": null,
       "packet": null,
@@ -1246,7 +1233,7 @@
       "has_cli": false,
       "has_tests": true,
       "integration": "integrated",
-      "last_commit_days": 3,
+      "last_commit_days": 5,
       "loc": 307,
       "owning_issue": null,
       "packet": null,
@@ -1260,6 +1247,7 @@
     "lgwks_browser": {
       "deps": [
         "lgwks_auth_runtime",
+        "lgwks_content_extract",
         "lgwks_multimodal",
         "lgwks_substrate_config"
       ],
@@ -1267,7 +1255,7 @@
       "has_tests": true,
       "integration": "integrated",
       "last_commit_days": 0,
-      "loc": 682,
+      "loc": 692,
       "owning_issue": null,
       "packet": null,
       "purpose": "bot-resilient, JS-rendering fetch via a real browser (playwright). The eyes for pages",
@@ -1276,31 +1264,12 @@
       "used_by": [
         "lgwks(dispatcher)",
         "lgwks_crawl",
-        "lgwks_ingest",
         "lgwks_search",
         "lgwks_search_engine",
         "lgwks_substrate",
         "lgwks_substrate_crawl",
         "lgwks_workflows"
       ]
-    },
-    "lgwks_bulk_harvest": {
-      "deps": [
-        "lgwks_clock",
-        "lgwks_cortex",
-        "lgwks_hashing"
-      ],
-      "has_cli": true,
-      "has_tests": false,
-      "integration": "cli_only",
-      "last_commit_days": 3,
-      "loc": 101,
-      "owning_issue": null,
-      "packet": null,
-      "purpose": "multi-source historical ingestion (Phase 1 Expeditor).",
-      "staleness": "staling",
-      "subsystem": "Ingestion spine (I1\u2013I12)",
-      "used_by": []
     },
     "lgwks_cache": {
       "deps": [
@@ -1309,7 +1278,7 @@
       "has_cli": false,
       "has_tests": false,
       "integration": "integrated",
-      "last_commit_days": 4,
+      "last_commit_days": 7,
       "loc": 114,
       "owning_issue": null,
       "packet": null,
@@ -1326,7 +1295,7 @@
       "has_cli": false,
       "has_tests": false,
       "integration": "integrated",
-      "last_commit_days": 13,
+      "last_commit_days": 15,
       "loc": 268,
       "owning_issue": null,
       "packet": null,
@@ -1347,7 +1316,7 @@
       "has_cli": true,
       "has_tests": true,
       "integration": "integrated",
-      "last_commit_days": 3,
+      "last_commit_days": 5,
       "loc": 306,
       "owning_issue": "#72",
       "packet": "I8",
@@ -1359,6 +1328,7 @@
         "lgwks_admission",
         "lgwks_admission_store",
         "lgwks_capability_action",
+        "lgwks_entity_graph",
         "lgwks_promote",
         "lgwks_vector",
         "scripts"
@@ -1372,17 +1342,15 @@
       ],
       "has_cli": false,
       "has_tests": true,
-      "integration": "integrated",
-      "last_commit_days": 5,
+      "integration": "unreferenced",
+      "last_commit_days": 8,
       "loc": 232,
       "owning_issue": null,
       "packet": null,
       "purpose": "the execution boundary (#120).",
-      "staleness": "active",
+      "staleness": "staling",
       "subsystem": "Ingestion spine (I1\u2013I12)",
-      "used_by": [
-        "lgwks_workflow_trigger"
-      ]
+      "used_by": []
     },
     "lgwks_capture": {
       "deps": [
@@ -1393,7 +1361,7 @@
       "has_cli": true,
       "has_tests": true,
       "integration": "integrated",
-      "last_commit_days": 4,
+      "last_commit_days": 7,
       "loc": 183,
       "owning_issue": null,
       "packet": null,
@@ -1403,6 +1371,20 @@
       "used_by": [
         "lgwks_jepa"
       ]
+    },
+    "lgwks_chunking": {
+      "deps": [],
+      "has_cli": false,
+      "has_tests": true,
+      "integration": "unreferenced",
+      "last_commit_days": 0,
+      "loc": 262,
+      "owning_issue": null,
+      "packet": null,
+      "purpose": "canonical text chunking strategies.",
+      "staleness": "staling",
+      "subsystem": "Unclassified (triage)",
+      "used_by": []
     },
     "lgwks_cli_introspect": {
       "deps": [],
@@ -1426,7 +1408,7 @@
       "has_cli": false,
       "has_tests": false,
       "integration": "integrated",
-      "last_commit_days": 4,
+      "last_commit_days": 7,
       "loc": 28,
       "owning_issue": null,
       "packet": null,
@@ -1436,7 +1418,6 @@
       "used_by": [
         "lgwks_axiom",
         "lgwks_bot_code_hacker",
-        "lgwks_bulk_harvest",
         "lgwks_cortex",
         "lgwks_daemon",
         "lgwks_daemon_event",
@@ -1446,7 +1427,6 @@
         "lgwks_project_artifacts",
         "lgwks_repo",
         "lgwks_session",
-        "lgwks_surprise",
         "lgwks_synthesizer",
         "lgwks_workflows"
       ]
@@ -1460,14 +1440,15 @@
       "has_cli": true,
       "has_tests": true,
       "integration": "integrated",
-      "last_commit_days": 3,
-      "loc": 756,
+      "last_commit_days": 0,
+      "loc": 792,
       "owning_issue": null,
       "packet": null,
       "purpose": "semantic codebase database for AI-native code understanding.",
       "staleness": "active",
       "subsystem": "Graph / AST / code intelligence",
       "used_by": [
+        "lgwks_route",
         "lgwks_tokenizer"
       ]
     },
@@ -1480,7 +1461,7 @@
       "has_cli": false,
       "has_tests": false,
       "integration": "integrated",
-      "last_commit_days": 2,
+      "last_commit_days": 5,
       "loc": 190,
       "owning_issue": null,
       "packet": null,
@@ -1508,7 +1489,7 @@
       "has_cli": true,
       "has_tests": true,
       "integration": "integrated",
-      "last_commit_days": 3,
+      "last_commit_days": 6,
       "loc": 170,
       "owning_issue": null,
       "packet": null,
@@ -1527,7 +1508,7 @@
       "has_cli": true,
       "has_tests": true,
       "integration": "integrated",
-      "last_commit_days": 3,
+      "last_commit_days": 6,
       "loc": 203,
       "owning_issue": null,
       "packet": null,
@@ -1546,7 +1527,7 @@
       "has_cli": false,
       "has_tests": true,
       "integration": "integrated",
-      "last_commit_days": 3,
+      "last_commit_days": 5,
       "loc": 624,
       "owning_issue": null,
       "packet": null,
@@ -1562,7 +1543,7 @@
       "has_cli": false,
       "has_tests": true,
       "integration": "integrated",
-      "last_commit_days": 4,
+      "last_commit_days": 6,
       "loc": 133,
       "owning_issue": null,
       "packet": null,
@@ -1575,12 +1556,32 @@
         "lgwks_pipeline"
       ]
     },
+    "lgwks_content_extract": {
+      "deps": [
+        "lgwks_html",
+        "lgwks_pipeline"
+      ],
+      "has_cli": false,
+      "has_tests": true,
+      "integration": "integrated",
+      "last_commit_days": 0,
+      "loc": 353,
+      "owning_issue": null,
+      "packet": null,
+      "purpose": "boilerplate-pruning HTML \u2192 clean-text extractor.",
+      "staleness": "active",
+      "subsystem": "Unclassified (triage)",
+      "used_by": [
+        "lgwks_browser",
+        "lgwks_crawl"
+      ]
+    },
     "lgwks_context": {
       "deps": [],
       "has_cli": true,
       "has_tests": false,
       "integration": "integrated",
-      "last_commit_days": 0,
+      "last_commit_days": 2,
       "loc": 199,
       "owning_issue": null,
       "packet": null,
@@ -1597,7 +1598,7 @@
       "has_cli": false,
       "has_tests": false,
       "integration": "integrated",
-      "last_commit_days": 15,
+      "last_commit_days": 18,
       "loc": 142,
       "owning_issue": null,
       "packet": null,
@@ -1618,24 +1619,25 @@
         "lgwks_tokenizer",
         "lgwks_transcript"
       ],
-      "has_cli": false,
+      "has_cli": true,
       "has_tests": false,
       "integration": "integrated",
-      "last_commit_days": 4,
-      "loc": 195,
+      "last_commit_days": 0,
+      "loc": 250,
       "owning_issue": null,
       "packet": null,
       "purpose": "the Transcript Cortex (PRD-06 U5).",
       "staleness": "active",
       "subsystem": "Unclassified (triage)",
       "used_by": [
-        "lgwks_bulk_harvest",
-        "lgwks_subconscious"
+        "lgwks(dispatcher)",
+        "lgwks_daemon"
       ]
     },
     "lgwks_crawl": {
       "deps": [
         "lgwks_browser",
+        "lgwks_content_extract",
         "lgwks_html",
         "lgwks_jarvis",
         "lgwks_substrate_io"
@@ -1643,8 +1645,8 @@
       "has_cli": true,
       "has_tests": true,
       "integration": "integrated",
-      "last_commit_days": 2,
-      "loc": 192,
+      "last_commit_days": 0,
+      "loc": 220,
       "owning_issue": null,
       "packet": null,
       "purpose": "unified crawler dispatcher.",
@@ -1660,7 +1662,7 @@
       "has_cli": true,
       "has_tests": true,
       "integration": "integrated",
-      "last_commit_days": 6,
+      "last_commit_days": 9,
       "loc": 409,
       "owning_issue": "#73",
       "packet": "I9",
@@ -1685,7 +1687,7 @@
       "has_cli": false,
       "has_tests": false,
       "integration": "integrated",
-      "last_commit_days": 3,
+      "last_commit_days": 5,
       "loc": 143,
       "owning_issue": null,
       "packet": null,
@@ -1702,6 +1704,7 @@
     "lgwks_daemon": {
       "deps": [
         "lgwks_clock",
+        "lgwks_cortex",
         "lgwks_crdt",
         "lgwks_daemon_event",
         "lgwks_daemon_export",
@@ -1714,7 +1717,7 @@
       "has_tests": true,
       "integration": "integrated",
       "last_commit_days": 0,
-      "loc": 1223,
+      "loc": 1344,
       "owning_issue": null,
       "packet": null,
       "purpose": "minimal background lifecycle shell for the referee runtime.",
@@ -1735,7 +1738,7 @@
       "has_cli": true,
       "has_tests": true,
       "integration": "integrated",
-      "last_commit_days": 3,
+      "last_commit_days": 5,
       "loc": 373,
       "owning_issue": null,
       "packet": null,
@@ -1746,9 +1749,7 @@
         "hooks",
         "lgwks_capability_action",
         "lgwks_daemon",
-        "lgwks_daemon_store",
-        "lgwks_query",
-        "lgwks_voice_event"
+        "lgwks_daemon_store"
       ]
     },
     "lgwks_daemon_export": {
@@ -1758,7 +1759,7 @@
       "has_cli": false,
       "has_tests": true,
       "integration": "integrated",
-      "last_commit_days": 4,
+      "last_commit_days": 7,
       "loc": 158,
       "owning_issue": null,
       "packet": null,
@@ -1778,7 +1779,7 @@
       "has_cli": false,
       "has_tests": true,
       "integration": "integrated",
-      "last_commit_days": 2,
+      "last_commit_days": 4,
       "loc": 1039,
       "owning_issue": null,
       "packet": null,
@@ -1788,20 +1789,20 @@
       "used_by": [
         "hooks",
         "lgwks_daemon",
-        "lgwks_dsl",
-        "lgwks_query"
+        "lgwks_dsl"
       ]
     },
     "lgwks_debug": {
       "deps": [
+        "lgwks_audit",
         "lgwks_redact",
         "lgwks_ui"
       ],
       "has_cli": true,
       "has_tests": true,
       "integration": "integrated",
-      "last_commit_days": 4,
-      "loc": 510,
+      "last_commit_days": 0,
+      "loc": 508,
       "owning_issue": null,
       "packet": null,
       "purpose": "automated debugging: turn \"it's broken\" into \"here's why + next step.\"",
@@ -1828,7 +1829,7 @@
       "has_cli": true,
       "has_tests": false,
       "integration": "integrated",
-      "last_commit_days": 0,
+      "last_commit_days": 2,
       "loc": 546,
       "owning_issue": null,
       "packet": null,
@@ -1838,7 +1839,7 @@
       "used_by": [
         "lgwks(dispatcher)",
         "lgwks_capability_action",
-        "lgwks_workflow_trigger",
+        "lgwks_route",
         "lgwks_workflows"
       ]
     },
@@ -1849,7 +1850,7 @@
       "has_cli": true,
       "has_tests": false,
       "integration": "integrated",
-      "last_commit_days": 0,
+      "last_commit_days": 2,
       "loc": 141,
       "owning_issue": null,
       "packet": null,
@@ -1873,7 +1874,7 @@
       "has_cli": true,
       "has_tests": false,
       "integration": "integrated",
-      "last_commit_days": 3,
+      "last_commit_days": 5,
       "loc": 207,
       "owning_issue": null,
       "packet": null,
@@ -1892,14 +1893,15 @@
     "lgwks_embed_port": {
       "deps": [
         "axiom",
+        "lgwks_sqlite",
         "lgwks_vecmath",
         "lgwks_vector"
       ],
       "has_cli": false,
       "has_tests": true,
       "integration": "integrated",
-      "last_commit_days": 3,
-      "loc": 687,
+      "last_commit_days": 0,
+      "loc": 726,
       "owning_issue": null,
       "packet": "I4",
       "purpose": "embedder runtime (lgwks.embed.port.v1).",
@@ -1907,7 +1909,6 @@
       "subsystem": "Ingestion spine (I1\u2013I12)",
       "used_by": [
         "lgwks_engine",
-        "lgwks_ingest",
         "lgwks_jailbreak",
         "lgwks_reasoning_port",
         "lgwks_run",
@@ -1927,7 +1928,7 @@
       "has_cli": true,
       "has_tests": true,
       "integration": "integrated",
-      "last_commit_days": 3,
+      "last_commit_days": 5,
       "loc": 509,
       "owning_issue": null,
       "packet": null,
@@ -1943,6 +1944,7 @@
     },
     "lgwks_entity_graph": {
       "deps": [
+        "lgwks_capability",
         "lgwks_crdt",
         "lgwks_hashing",
         "lgwks_model_port",
@@ -1951,8 +1953,8 @@
       "has_cli": true,
       "has_tests": true,
       "integration": "integrated",
-      "last_commit_days": 3,
-      "loc": 731,
+      "last_commit_days": 0,
+      "loc": 861,
       "owning_issue": null,
       "packet": null,
       "purpose": "offline document entity graph builder.",
@@ -1964,7 +1966,6 @@
         "lgwks_graph",
         "lgwks_model_port",
         "lgwks_pipeline",
-        "lgwks_query",
         "lgwks_storage",
         "lgwks_substrate"
       ]
@@ -1977,7 +1978,7 @@
       "has_cli": false,
       "has_tests": false,
       "integration": "integrated",
-      "last_commit_days": 3,
+      "last_commit_days": 5,
       "loc": 768,
       "owning_issue": null,
       "packet": null,
@@ -2000,7 +2001,7 @@
       "has_cli": false,
       "has_tests": true,
       "integration": "integrated",
-      "last_commit_days": 2,
+      "last_commit_days": 4,
       "loc": 324,
       "owning_issue": null,
       "packet": null,
@@ -2024,7 +2025,7 @@
       "has_cli": false,
       "has_tests": false,
       "integration": "integrated",
-      "last_commit_days": 4,
+      "last_commit_days": 6,
       "loc": 122,
       "owning_issue": null,
       "packet": null,
@@ -2043,7 +2044,7 @@
       "has_cli": false,
       "has_tests": true,
       "integration": "integrated",
-      "last_commit_days": 4,
+      "last_commit_days": 6,
       "loc": 88,
       "owning_issue": null,
       "packet": null,
@@ -2061,7 +2062,7 @@
       "has_cli": true,
       "has_tests": false,
       "integration": "integrated",
-      "last_commit_days": 0,
+      "last_commit_days": 2,
       "loc": 121,
       "owning_issue": null,
       "packet": null,
@@ -2077,7 +2078,7 @@
       "has_cli": true,
       "has_tests": false,
       "integration": "integrated",
-      "last_commit_days": 10,
+      "last_commit_days": 12,
       "loc": 200,
       "owning_issue": null,
       "packet": null,
@@ -2100,7 +2101,7 @@
       "has_cli": true,
       "has_tests": false,
       "integration": "integrated",
-      "last_commit_days": 3,
+      "last_commit_days": 5,
       "loc": 95,
       "owning_issue": null,
       "packet": null,
@@ -2118,7 +2119,7 @@
       "has_cli": false,
       "has_tests": true,
       "integration": "integrated",
-      "last_commit_days": 12,
+      "last_commit_days": 15,
       "loc": 263,
       "owning_issue": null,
       "packet": null,
@@ -2136,7 +2137,7 @@
       "has_cli": false,
       "has_tests": true,
       "integration": "integrated",
-      "last_commit_days": 4,
+      "last_commit_days": 6,
       "loc": 267,
       "owning_issue": null,
       "packet": null,
@@ -2157,7 +2158,7 @@
       "has_cli": false,
       "has_tests": true,
       "integration": "integrated",
-      "last_commit_days": 3,
+      "last_commit_days": 5,
       "loc": 150,
       "owning_issue": null,
       "packet": null,
@@ -2181,7 +2182,7 @@
       "has_cli": true,
       "has_tests": false,
       "integration": "integrated",
-      "last_commit_days": 2,
+      "last_commit_days": 5,
       "loc": 402,
       "owning_issue": null,
       "packet": null,
@@ -2189,12 +2190,12 @@
       "staleness": "active",
       "subsystem": "Research / web acquisition / extract",
       "used_by": [
-        "lgwks_expression",
-        "lgwks_preview"
+        "lgwks_expression"
       ]
     },
     "lgwks_gh": {
       "deps": [
+        "lgwks_audit",
         "lgwks_redact",
         "lgwks_substrate_config",
         "lgwks_ui"
@@ -2202,7 +2203,7 @@
       "has_cli": true,
       "has_tests": true,
       "integration": "integrated",
-      "last_commit_days": 4,
+      "last_commit_days": 0,
       "loc": 899,
       "owning_issue": null,
       "packet": null,
@@ -2222,7 +2223,7 @@
       "has_cli": false,
       "has_tests": true,
       "integration": "integrated",
-      "last_commit_days": 1,
+      "last_commit_days": 3,
       "loc": 1619,
       "owning_issue": null,
       "packet": null,
@@ -2237,8 +2238,7 @@
         "lgwks_portal",
         "lgwks_repl",
         "lgwks_repo",
-        "lgwks_review",
-        "lgwks_subconscious"
+        "lgwks_review"
       ]
     },
     "lgwks_graph_viz": {
@@ -2250,7 +2250,7 @@
       "has_cli": false,
       "has_tests": true,
       "integration": "integrated",
-      "last_commit_days": 0,
+      "last_commit_days": 2,
       "loc": 1207,
       "owning_issue": null,
       "packet": null,
@@ -2273,7 +2273,7 @@
       "has_cli": false,
       "has_tests": false,
       "integration": "integrated",
-      "last_commit_days": 2,
+      "last_commit_days": 4,
       "loc": 144,
       "owning_issue": null,
       "packet": null,
@@ -2296,7 +2296,7 @@
       "has_cli": false,
       "has_tests": true,
       "integration": "integrated",
-      "last_commit_days": 1,
+      "last_commit_days": 3,
       "loc": 454,
       "owning_issue": null,
       "packet": null,
@@ -2312,7 +2312,7 @@
       "has_cli": false,
       "has_tests": true,
       "integration": "integrated",
-      "last_commit_days": 4,
+      "last_commit_days": 7,
       "loc": 88,
       "owning_issue": null,
       "packet": null,
@@ -2326,7 +2326,6 @@
         "lgwks_axiom",
         "lgwks_bot_code_hacker",
         "lgwks_bot_slop_math",
-        "lgwks_bulk_harvest",
         "lgwks_cache",
         "lgwks_capture",
         "lgwks_codebase",
@@ -2345,7 +2344,7 @@
         "lgwks_had",
         "lgwks_hooks",
         "lgwks_intent_classifier",
-        "lgwks_intent_router",
+        "lgwks_jarvis",
         "lgwks_jepa",
         "lgwks_machine",
         "lgwks_memory",
@@ -2355,7 +2354,6 @@
         "lgwks_research",
         "lgwks_review",
         "lgwks_run",
-        "lgwks_subconscious",
         "lgwks_substrate_crawl",
         "lgwks_substrate_io",
         "lgwks_tokenizer",
@@ -2378,7 +2376,7 @@
       "has_cli": false,
       "has_tests": true,
       "integration": "integrated",
-      "last_commit_days": 3,
+      "last_commit_days": 0,
       "loc": 964,
       "owning_issue": null,
       "packet": null,
@@ -2400,7 +2398,7 @@
       "has_cli": true,
       "has_tests": true,
       "integration": "integrated",
-      "last_commit_days": 4,
+      "last_commit_days": 7,
       "loc": 891,
       "owning_issue": null,
       "packet": null,
@@ -2418,7 +2416,7 @@
       "has_cli": false,
       "has_tests": true,
       "integration": "integrated",
-      "last_commit_days": 6,
+      "last_commit_days": 8,
       "loc": 352,
       "owning_issue": null,
       "packet": null,
@@ -2426,9 +2424,9 @@
       "staleness": "active",
       "subsystem": "Research / web acquisition / extract",
       "used_by": [
+        "lgwks_content_extract",
         "lgwks_crawl",
         "lgwks_extract",
-        "lgwks_ingest",
         "lgwks_substrate",
         "lgwks_substrate_crawl"
       ]
@@ -2443,7 +2441,7 @@
       "has_cli": true,
       "has_tests": true,
       "integration": "integrated",
-      "last_commit_days": 6,
+      "last_commit_days": 9,
       "loc": 371,
       "owning_issue": null,
       "packet": "I7",
@@ -2456,33 +2454,12 @@
         "scripts"
       ]
     },
-    "lgwks_ingest": {
-      "deps": [
-        "lgwks_browser",
-        "lgwks_html",
-        "lgwks_run",
-        "lgwks_substrate_crawl",
-        "lgwks_substrate_io",
-        "lgwks_substrate_text"
-      ],
-      "has_cli": false,
-      "has_tests": false,
-      "integration": "unreferenced",
-      "last_commit_days": 3,
-      "loc": 374,
-      "owning_issue": null,
-      "packet": null,
-      "purpose": "the advanced web-crawler workflow, as ONE function an AI agent runs.",
-      "staleness": "orphan",
-      "subsystem": "Research / web acquisition / extract",
-      "used_by": []
-    },
     "lgwks_inline": {
       "deps": [],
       "has_cli": false,
       "has_tests": true,
       "integration": "integrated",
-      "last_commit_days": 4,
+      "last_commit_days": 6,
       "loc": 136,
       "owning_issue": null,
       "packet": null,
@@ -2508,7 +2485,7 @@
       "has_cli": false,
       "has_tests": false,
       "integration": "integrated",
-      "last_commit_days": 4,
+      "last_commit_days": 7,
       "loc": 530,
       "owning_issue": null,
       "packet": "I2",
@@ -2521,6 +2498,7 @@
     },
     "lgwks_intent": {
       "deps": [
+        "lgwks_audit",
         "lgwks_gh",
         "lgwks_redact",
         "lgwks_ui"
@@ -2528,15 +2506,14 @@
       "has_cli": true,
       "has_tests": true,
       "integration": "integrated",
-      "last_commit_days": 4,
-      "loc": 556,
+      "last_commit_days": 0,
+      "loc": 554,
       "owning_issue": null,
       "packet": null,
       "purpose": "schema-driven intent router. A 10-line declaration drives automation.",
       "staleness": "active",
       "subsystem": "Membrane / intent / steering",
       "used_by": [
-        "lgwks_intent_router",
         "lgwks_map",
         "lgwks_redact"
       ]
@@ -2552,7 +2529,7 @@
       "has_cli": false,
       "has_tests": true,
       "integration": "integrated",
-      "last_commit_days": 1,
+      "last_commit_days": 3,
       "loc": 498,
       "owning_issue": null,
       "packet": null,
@@ -2567,25 +2544,6 @@
         "tools"
       ]
     },
-    "lgwks_intent_router": {
-      "deps": [
-        "lgwks_hashing",
-        "lgwks_intent",
-        "lgwks_manifest",
-        "lgwks_model_hub"
-      ],
-      "has_cli": true,
-      "has_tests": true,
-      "integration": "cli_only",
-      "last_commit_days": 1,
-      "loc": 326,
-      "owning_issue": null,
-      "packet": null,
-      "purpose": "deterministic intent routing with tiny-bert.",
-      "staleness": "active",
-      "subsystem": "Membrane / intent / steering",
-      "used_by": []
-    },
     "lgwks_jailbreak": {
       "deps": [
         "lgwks_model_port"
@@ -2593,7 +2551,7 @@
       "has_cli": false,
       "has_tests": false,
       "integration": "integrated",
-      "last_commit_days": 3,
+      "last_commit_days": 5,
       "loc": 174,
       "owning_issue": null,
       "packet": null,
@@ -2607,22 +2565,26 @@
     },
     "lgwks_jarvis": {
       "deps": [
+        "lgwks_artifact_tokenized",
+        "lgwks_hashing",
         "lgwks_sqlite",
+        "lgwks_storage",
         "lgwks_substrate",
-        "lgwks_vecmath"
+        "lgwks_vecmath",
+        "lgwks_vector"
       ],
       "has_cli": true,
       "has_tests": false,
       "integration": "integrated",
-      "last_commit_days": 1,
-      "loc": 1228,
+      "last_commit_days": 0,
+      "loc": 1122,
       "owning_issue": null,
       "packet": null,
       "purpose": "legacy deterministic research graph crawler.",
       "staleness": "active",
       "subsystem": "Research / web acquisition / extract",
       "used_by": [
-        "lgwks(dispatcher)",
+        "lgwks_chunking",
         "lgwks_crawl"
       ]
     },
@@ -2638,7 +2600,7 @@
       "has_cli": true,
       "has_tests": true,
       "integration": "integrated",
-      "last_commit_days": 3,
+      "last_commit_days": 5,
       "loc": 307,
       "owning_issue": null,
       "packet": null,
@@ -2654,7 +2616,7 @@
       "has_cli": true,
       "has_tests": false,
       "integration": "integrated",
-      "last_commit_days": 10,
+      "last_commit_days": 12,
       "loc": 132,
       "owning_issue": null,
       "packet": null,
@@ -2677,7 +2639,7 @@
       "has_cli": false,
       "has_tests": false,
       "integration": "integrated",
-      "last_commit_days": 3,
+      "last_commit_days": 5,
       "loc": 66,
       "owning_issue": null,
       "packet": null,
@@ -2692,7 +2654,7 @@
         "lgwks_map",
         "lgwks_memory",
         "lgwks_portal",
-        "lgwks_query"
+        "lgwks_route"
       ]
     },
     "lgwks_machine": {
@@ -2703,7 +2665,7 @@
       "has_cli": false,
       "has_tests": true,
       "integration": "integrated",
-      "last_commit_days": 4,
+      "last_commit_days": 7,
       "loc": 273,
       "owning_issue": null,
       "packet": null,
@@ -2727,7 +2689,7 @@
       "has_tests": false,
       "integration": "integrated",
       "last_commit_days": 0,
-      "loc": 1370,
+      "loc": 1346,
       "owning_issue": null,
       "packet": null,
       "purpose": "the machine-first contract. `lgwks manifest` \u2192 one JSON blob an AGENT reads instead",
@@ -2737,7 +2699,6 @@
         "lgwks(dispatcher)",
         "lgwks_geoexpr",
         "lgwks_intent_classifier",
-        "lgwks_intent_router",
         "lgwks_spawn",
         "lgwks_workflows",
         "tools"
@@ -2751,7 +2712,7 @@
       "has_cli": true,
       "has_tests": false,
       "integration": "integrated",
-      "last_commit_days": 3,
+      "last_commit_days": 5,
       "loc": 106,
       "owning_issue": null,
       "packet": null,
@@ -2777,7 +2738,7 @@
       "has_cli": true,
       "has_tests": true,
       "integration": "integrated",
-      "last_commit_days": 3,
+      "last_commit_days": 5,
       "loc": 272,
       "owning_issue": null,
       "packet": null,
@@ -2799,7 +2760,7 @@
       "has_cli": true,
       "has_tests": true,
       "integration": "integrated",
-      "last_commit_days": 4,
+      "last_commit_days": 6,
       "loc": 642,
       "owning_issue": null,
       "packet": null,
@@ -2808,7 +2769,6 @@
       "subsystem": "Models / runtime (opaque dep)",
       "used_by": [
         "lgwks(dispatcher)",
-        "lgwks_intent_router",
         "lgwks_jepa",
         "lgwks_run",
         "scripts"
@@ -2819,7 +2779,7 @@
       "has_cli": false,
       "has_tests": true,
       "integration": "integrated",
-      "last_commit_days": 0,
+      "last_commit_days": 2,
       "loc": 339,
       "owning_issue": null,
       "packet": null,
@@ -2845,7 +2805,7 @@
       "has_cli": false,
       "has_tests": true,
       "integration": "integrated",
-      "last_commit_days": 3,
+      "last_commit_days": 5,
       "loc": 300,
       "owning_issue": null,
       "packet": null,
@@ -2873,7 +2833,7 @@
       "has_cli": false,
       "has_tests": false,
       "integration": "integrated",
-      "last_commit_days": 3,
+      "last_commit_days": 5,
       "loc": 350,
       "owning_issue": null,
       "packet": null,
@@ -2882,7 +2842,6 @@
       "subsystem": "Models / runtime (opaque dep)",
       "used_by": [
         "lgwks_browser",
-        "lgwks_ingest",
         "lgwks_run",
         "lgwks_substrate_run"
       ]
@@ -2894,7 +2853,7 @@
       "has_cli": false,
       "has_tests": false,
       "integration": "integrated",
-      "last_commit_days": 17,
+      "last_commit_days": 20,
       "loc": 204,
       "owning_issue": null,
       "packet": null,
@@ -2905,7 +2864,6 @@
         "lgwks(dispatcher)",
         "lgwks_expression",
         "lgwks_geoexpr",
-        "lgwks_preview",
         "lgwks_workflows"
       ]
     },
@@ -2917,7 +2875,7 @@
       "has_cli": false,
       "has_tests": false,
       "integration": "integrated",
-      "last_commit_days": 3,
+      "last_commit_days": 5,
       "loc": 140,
       "owning_issue": null,
       "packet": null,
@@ -2940,7 +2898,7 @@
       "has_cli": false,
       "has_tests": true,
       "integration": "integrated",
-      "last_commit_days": 3,
+      "last_commit_days": 5,
       "loc": 66,
       "owning_issue": null,
       "packet": null,
@@ -2956,7 +2914,7 @@
       "has_cli": false,
       "has_tests": true,
       "integration": "integrated",
-      "last_commit_days": 3,
+      "last_commit_days": 6,
       "loc": 186,
       "owning_issue": null,
       "packet": null,
@@ -2972,7 +2930,7 @@
       "has_cli": false,
       "has_tests": false,
       "integration": "integrated",
-      "last_commit_days": 3,
+      "last_commit_days": 5,
       "loc": 43,
       "owning_issue": null,
       "packet": null,
@@ -3007,7 +2965,7 @@
       "has_cli": true,
       "has_tests": true,
       "integration": "integrated",
-      "last_commit_days": 3,
+      "last_commit_days": 5,
       "loc": 1328,
       "owning_issue": null,
       "packet": null,
@@ -3015,6 +2973,7 @@
       "staleness": "active",
       "subsystem": "Ingestion spine (I1\u2013I12)",
       "used_by": [
+        "lgwks_content_extract",
         "lgwks_dsl"
       ]
     },
@@ -3027,7 +2986,7 @@
       "has_cli": true,
       "has_tests": true,
       "integration": "integrated",
-      "last_commit_days": 3,
+      "last_commit_days": 5,
       "loc": 279,
       "owning_issue": null,
       "packet": null,
@@ -3039,30 +2998,12 @@
         "lgwks_jepa"
       ]
     },
-    "lgwks_preview": {
-      "deps": [
-        "lgwks_geoexpr",
-        "lgwks_multiply",
-        "lgwks_ui"
-      ],
-      "has_cli": true,
-      "has_tests": false,
-      "integration": "cli_only",
-      "last_commit_days": 17,
-      "loc": 214,
-      "owning_issue": null,
-      "packet": null,
-      "purpose": "the safe sibling of `lgwks x`. Same brace math, no execution, human rendering.",
-      "staleness": "staling",
-      "subsystem": "Research / web acquisition / extract",
-      "used_by": []
-    },
     "lgwks_proc": {
       "deps": [],
       "has_cli": false,
       "has_tests": false,
       "integration": "integrated",
-      "last_commit_days": 4,
+      "last_commit_days": 7,
       "loc": 41,
       "owning_issue": null,
       "packet": null,
@@ -3086,7 +3027,7 @@
       "has_cli": true,
       "has_tests": false,
       "integration": "integrated",
-      "last_commit_days": 3,
+      "last_commit_days": 6,
       "loc": 125,
       "owning_issue": null,
       "packet": null,
@@ -3110,7 +3051,7 @@
       "has_cli": false,
       "has_tests": false,
       "integration": "integrated",
-      "last_commit_days": 1,
+      "last_commit_days": 3,
       "loc": 1159,
       "owning_issue": null,
       "packet": null,
@@ -3144,7 +3085,7 @@
       "has_cli": false,
       "has_tests": false,
       "integration": "integrated",
-      "last_commit_days": 1,
+      "last_commit_days": 3,
       "loc": 470,
       "owning_issue": null,
       "packet": null,
@@ -3165,7 +3106,7 @@
       "has_cli": false,
       "has_tests": false,
       "integration": "integrated",
-      "last_commit_days": 1,
+      "last_commit_days": 3,
       "loc": 121,
       "owning_issue": null,
       "packet": null,
@@ -3187,7 +3128,7 @@
       "has_cli": false,
       "has_tests": false,
       "integration": "integrated",
-      "last_commit_days": 1,
+      "last_commit_days": 3,
       "loc": 122,
       "owning_issue": null,
       "packet": null,
@@ -3208,7 +3149,7 @@
       "has_cli": false,
       "has_tests": false,
       "integration": "integrated",
-      "last_commit_days": 7,
+      "last_commit_days": 9,
       "loc": 146,
       "owning_issue": null,
       "packet": null,
@@ -3226,7 +3167,7 @@
       "has_cli": true,
       "has_tests": false,
       "integration": "integrated",
-      "last_commit_days": 2,
+      "last_commit_days": 5,
       "loc": 187,
       "owning_issue": null,
       "packet": null,
@@ -3237,26 +3178,6 @@
         "lgwks_project_deploy"
       ]
     },
-    "lgwks_query": {
-      "deps": [
-        "axiom",
-        "lgwks_daemon_event",
-        "lgwks_daemon_store",
-        "lgwks_entity_graph",
-        "lgwks_lexicon"
-      ],
-      "has_cli": false,
-      "has_tests": false,
-      "integration": "unreferenced",
-      "last_commit_days": 3,
-      "loc": 271,
-      "owning_issue": null,
-      "packet": null,
-      "purpose": "the unified daemon query surface (#124).",
-      "staleness": "orphan",
-      "subsystem": "Harness / daemon / orchestration",
-      "used_by": []
-    },
     "lgwks_rank": {
       "deps": [
         "lgwks_vecmath"
@@ -3264,7 +3185,7 @@
       "has_cli": true,
       "has_tests": true,
       "integration": "integrated",
-      "last_commit_days": 3,
+      "last_commit_days": 5,
       "loc": 541,
       "owning_issue": null,
       "packet": "I6",
@@ -3284,7 +3205,7 @@
       "has_cli": false,
       "has_tests": true,
       "integration": "integrated",
-      "last_commit_days": 3,
+      "last_commit_days": 5,
       "loc": 150,
       "owning_issue": null,
       "packet": null,
@@ -3301,7 +3222,7 @@
       "has_cli": false,
       "has_tests": false,
       "integration": "integrated",
-      "last_commit_days": 4,
+      "last_commit_days": 7,
       "loc": 33,
       "owning_issue": null,
       "packet": null,
@@ -3309,6 +3230,7 @@
       "staleness": "active",
       "subsystem": "Unclassified (triage)",
       "used_by": [
+        "lgwks_audit",
         "lgwks_debug",
         "lgwks_gh",
         "lgwks_intent"
@@ -3322,7 +3244,7 @@
       "has_cli": true,
       "has_tests": true,
       "integration": "integrated",
-      "last_commit_days": 3,
+      "last_commit_days": 5,
       "loc": 362,
       "owning_issue": null,
       "packet": null,
@@ -3343,7 +3265,7 @@
       "has_cli": false,
       "has_tests": true,
       "integration": "integrated",
-      "last_commit_days": 3,
+      "last_commit_days": 5,
       "loc": 457,
       "owning_issue": null,
       "packet": null,
@@ -3369,7 +3291,7 @@
       "has_cli": true,
       "has_tests": true,
       "integration": "integrated",
-      "last_commit_days": 3,
+      "last_commit_days": 5,
       "loc": 756,
       "owning_issue": null,
       "packet": null,
@@ -3400,7 +3322,7 @@
       "has_cli": true,
       "has_tests": false,
       "integration": "integrated",
-      "last_commit_days": 3,
+      "last_commit_days": 5,
       "loc": 831,
       "owning_issue": null,
       "packet": null,
@@ -3429,7 +3351,7 @@
       "has_cli": true,
       "has_tests": true,
       "integration": "integrated",
-      "last_commit_days": 3,
+      "last_commit_days": 5,
       "loc": 665,
       "owning_issue": null,
       "packet": null,
@@ -3444,7 +3366,10 @@
     },
     "lgwks_route": {
       "deps": [
+        "lgwks_codebase",
+        "lgwks_do",
         "lgwks_engine",
+        "lgwks_lexicon",
         "lgwks_machine",
         "lgwks_map"
       ],
@@ -3452,7 +3377,7 @@
       "has_tests": false,
       "integration": "integrated",
       "last_commit_days": 0,
-      "loc": 53,
+      "loc": 266,
       "owning_issue": null,
       "packet": null,
       "purpose": "unified intent routing.",
@@ -3491,7 +3416,7 @@
       "used_by": [
         "lgwks(dispatcher)",
         "lgwks_axiom",
-        "lgwks_ingest",
+        "lgwks_chunking",
         "lgwks_intent_classifier",
         "lgwks_model_port",
         "lgwks_multimodal",
@@ -3509,7 +3434,7 @@
       "has_cli": true,
       "has_tests": true,
       "integration": "integrated",
-      "last_commit_days": 6,
+      "last_commit_days": 8,
       "loc": 283,
       "owning_issue": null,
       "packet": null,
@@ -3531,7 +3456,7 @@
       "has_cli": true,
       "has_tests": true,
       "integration": "integrated",
-      "last_commit_days": 3,
+      "last_commit_days": 6,
       "loc": 382,
       "owning_issue": null,
       "packet": "I5",
@@ -3553,7 +3478,7 @@
       "has_cli": false,
       "has_tests": true,
       "integration": "integrated",
-      "last_commit_days": 4,
+      "last_commit_days": 6,
       "loc": 525,
       "owning_issue": null,
       "packet": null,
@@ -3581,7 +3506,7 @@
       "has_cli": false,
       "has_tests": false,
       "integration": "integrated",
-      "last_commit_days": 2,
+      "last_commit_days": 4,
       "loc": 126,
       "owning_issue": null,
       "packet": null,
@@ -3604,7 +3529,7 @@
       "has_cli": true,
       "has_tests": true,
       "integration": "integrated",
-      "last_commit_days": 4,
+      "last_commit_days": 7,
       "loc": 556,
       "owning_issue": null,
       "packet": null,
@@ -3623,7 +3548,7 @@
       "has_cli": false,
       "has_tests": false,
       "integration": "integrated",
-      "last_commit_days": 18,
+      "last_commit_days": 21,
       "loc": 53,
       "owning_issue": null,
       "packet": null,
@@ -3647,7 +3572,7 @@
       "has_cli": false,
       "has_tests": false,
       "integration": "integrated",
-      "last_commit_days": 3,
+      "last_commit_days": 6,
       "loc": 100,
       "owning_issue": null,
       "packet": null,
@@ -3663,7 +3588,7 @@
       "has_cli": false,
       "has_tests": true,
       "integration": "integrated",
-      "last_commit_days": 3,
+      "last_commit_days": 5,
       "loc": 195,
       "owning_issue": null,
       "packet": null,
@@ -3685,7 +3610,7 @@
       "has_cli": true,
       "has_tests": true,
       "integration": "integrated",
-      "last_commit_days": 2,
+      "last_commit_days": 5,
       "loc": 432,
       "owning_issue": null,
       "packet": null,
@@ -3708,7 +3633,7 @@
       "has_cli": true,
       "has_tests": true,
       "integration": "integrated",
-      "last_commit_days": 9,
+      "last_commit_days": 12,
       "loc": 207,
       "owning_issue": null,
       "packet": null,
@@ -3725,7 +3650,7 @@
       "has_cli": false,
       "has_tests": false,
       "integration": "integrated",
-      "last_commit_days": 3,
+      "last_commit_days": 6,
       "loc": 299,
       "owning_issue": null,
       "packet": null,
@@ -3737,6 +3662,7 @@
         "lgwks_admission_store",
         "lgwks_daemon",
         "lgwks_daemon_store",
+        "lgwks_embed_port",
         "lgwks_entity_graph",
         "lgwks_jarvis",
         "lgwks_promote",
@@ -3752,7 +3678,7 @@
       "has_cli": false,
       "has_tests": false,
       "integration": "integrated",
-      "last_commit_days": 18,
+      "last_commit_days": 20,
       "loc": 101,
       "owning_issue": null,
       "packet": null,
@@ -3780,8 +3706,8 @@
       "has_cli": false,
       "has_tests": true,
       "integration": "integrated",
-      "last_commit_days": 4,
-      "loc": 837,
+      "last_commit_days": 0,
+      "loc": 880,
       "owning_issue": null,
       "packet": null,
       "purpose": "D4 Three-Syscall Storage Gate (ADR-068).",
@@ -3791,27 +3717,11 @@
         "lgwks_cortex",
         "lgwks_fabric_projection",
         "lgwks_fabric_reader",
+        "lgwks_jarvis",
         "lgwks_substrate",
         "lgwks_substrate_config",
         "lgwks_substrate_run"
       ]
-    },
-    "lgwks_subconscious": {
-      "deps": [
-        "lgwks_cortex",
-        "lgwks_hashing"
-      ],
-      "has_cli": false,
-      "has_tests": false,
-      "integration": "unreferenced",
-      "last_commit_days": 4,
-      "loc": 115,
-      "owning_issue": null,
-      "packet": null,
-      "purpose": "the Subconscious Engine (PRD-06 U6).",
-      "staleness": "orphan",
-      "subsystem": "Harness / daemon / orchestration",
-      "used_by": []
     },
     "lgwks_substrate": {
       "deps": [
@@ -3830,7 +3740,7 @@
       "has_cli": false,
       "has_tests": true,
       "integration": "integrated",
-      "last_commit_days": 0,
+      "last_commit_days": 2,
       "loc": 223,
       "owning_issue": null,
       "packet": null,
@@ -3852,7 +3762,7 @@
       "has_cli": false,
       "has_tests": false,
       "integration": "integrated",
-      "last_commit_days": 4,
+      "last_commit_days": 6,
       "loc": 109,
       "owning_issue": null,
       "packet": null,
@@ -3894,7 +3804,7 @@
       "has_cli": false,
       "has_tests": false,
       "integration": "integrated",
-      "last_commit_days": 4,
+      "last_commit_days": 7,
       "loc": 434,
       "owning_issue": null,
       "packet": null,
@@ -3902,7 +3812,6 @@
       "staleness": "active",
       "subsystem": "Research / web acquisition / extract",
       "used_by": [
-        "lgwks_ingest",
         "lgwks_substrate",
         "lgwks_substrate_run"
       ]
@@ -3915,7 +3824,7 @@
       "has_cli": false,
       "has_tests": false,
       "integration": "integrated",
-      "last_commit_days": 4,
+      "last_commit_days": 6,
       "loc": 145,
       "owning_issue": null,
       "packet": null,
@@ -3929,7 +3838,6 @@
         "lgwks_do",
         "lgwks_embed",
         "lgwks_geoexpr",
-        "lgwks_ingest",
         "lgwks_run",
         "lgwks_search_engine",
         "lgwks_storage",
@@ -3956,7 +3864,7 @@
       "has_tests": false,
       "integration": "integrated",
       "last_commit_days": 0,
-      "loc": 796,
+      "loc": 841,
       "owning_issue": null,
       "packet": null,
       "purpose": "build, query, and baseline orchestration for substrate runs.",
@@ -3964,6 +3872,7 @@
       "subsystem": "Harness / daemon / orchestration",
       "used_by": [
         "lgwks_daemon",
+        "lgwks_jarvis",
         "lgwks_run",
         "lgwks_storage",
         "lgwks_substrate"
@@ -3976,7 +3885,7 @@
       "has_cli": false,
       "has_tests": false,
       "integration": "integrated",
-      "last_commit_days": 10,
+      "last_commit_days": 13,
       "loc": 137,
       "owning_issue": null,
       "packet": null,
@@ -3984,8 +3893,8 @@
       "staleness": "active",
       "subsystem": "Substrate / storage / schema",
       "used_by": [
+        "lgwks_chunking",
         "lgwks_embed",
-        "lgwks_ingest",
         "lgwks_pipeline",
         "lgwks_substrate",
         "lgwks_substrate_run"
@@ -4000,7 +3909,7 @@
       "has_cli": false,
       "has_tests": false,
       "integration": "integrated",
-      "last_commit_days": 10,
+      "last_commit_days": 13,
       "loc": 253,
       "owning_issue": null,
       "packet": null,
@@ -4012,22 +3921,6 @@
         "lgwks_substrate_run"
       ]
     },
-    "lgwks_surprise": {
-      "deps": [
-        "lgwks_clock"
-      ],
-      "has_cli": true,
-      "has_tests": false,
-      "integration": "cli_only",
-      "last_commit_days": 4,
-      "loc": 81,
-      "owning_issue": null,
-      "packet": null,
-      "purpose": "the Surprise Detection Loop (Phase 1 Hardening).",
-      "staleness": "staling",
-      "subsystem": "Bots / detection / static analysis",
-      "used_by": []
-    },
     "lgwks_synthesizer": {
       "deps": [
         "lgwks_clock",
@@ -4037,7 +3930,7 @@
       "has_cli": false,
       "has_tests": true,
       "integration": "integrated",
-      "last_commit_days": 3,
+      "last_commit_days": 6,
       "loc": 222,
       "owning_issue": null,
       "packet": null,
@@ -4055,7 +3948,7 @@
       "has_cli": false,
       "has_tests": false,
       "integration": "integrated",
-      "last_commit_days": 3,
+      "last_commit_days": 6,
       "loc": 217,
       "owning_issue": null,
       "packet": null,
@@ -4074,7 +3967,7 @@
       "has_cli": false,
       "has_tests": true,
       "integration": "integrated",
-      "last_commit_days": 4,
+      "last_commit_days": 6,
       "loc": 190,
       "owning_issue": null,
       "packet": null,
@@ -4093,7 +3986,7 @@
       "has_cli": false,
       "has_tests": false,
       "integration": "integrated",
-      "last_commit_days": 3,
+      "last_commit_days": 6,
       "loc": 236,
       "owning_issue": null,
       "packet": null,
@@ -4102,17 +3995,16 @@
       "subsystem": "Harness / daemon / orchestration",
       "used_by": [
         "lgwks_research",
-        "lgwks_solve",
-        "lgwks_voice_event"
+        "lgwks_solve"
       ]
     },
     "lgwks_transcript": {
       "deps": [],
       "has_cli": false,
-      "has_tests": false,
+      "has_tests": true,
       "integration": "integrated",
-      "last_commit_days": 4,
-      "loc": 144,
+      "last_commit_days": 0,
+      "loc": 234,
       "owning_issue": null,
       "packet": null,
       "purpose": "tail-reader utility for Claude Code JSONL transcript files.",
@@ -4123,28 +4015,12 @@
         "lgwks_cortex"
       ]
     },
-    "lgwks_transform": {
-      "deps": [],
-      "has_cli": false,
-      "has_tests": false,
-      "integration": "integrated",
-      "last_commit_days": 4,
-      "loc": 39,
-      "owning_issue": null,
-      "packet": null,
-      "purpose": "minimal JSONPath/GJSON-like extractor (Issue 159).",
-      "staleness": "active",
-      "subsystem": "Unclassified (triage)",
-      "used_by": [
-        "lgwks(dispatcher)"
-      ]
-    },
     "lgwks_ui": {
       "deps": [],
       "has_cli": false,
       "has_tests": false,
       "integration": "integrated",
-      "last_commit_days": 13,
+      "last_commit_days": 15,
       "loc": 117,
       "owning_issue": null,
       "packet": null,
@@ -4162,7 +4038,6 @@
         "lgwks_intent",
         "lgwks_manifest",
         "lgwks_multiply",
-        "lgwks_preview",
         "lgwks_refactor",
         "lgwks_repl",
         "lgwks_repo",
@@ -4181,7 +4056,7 @@
       "has_cli": false,
       "has_tests": false,
       "integration": "integrated",
-      "last_commit_days": 4,
+      "last_commit_days": 7,
       "loc": 244,
       "owning_issue": null,
       "packet": null,
@@ -4194,20 +4069,22 @@
     },
     "lgwks_vault": {
       "deps": [
+        "lgwks_audit",
         "lgwks_sign",
         "lgwks_substrate_config"
       ],
       "has_cli": false,
       "has_tests": true,
       "integration": "integrated",
-      "last_commit_days": 4,
-      "loc": 422,
+      "last_commit_days": 0,
+      "loc": 403,
       "owning_issue": null,
       "packet": null,
       "purpose": "hardened INTENT-VAULT store (build #3, enterprise grade).",
       "staleness": "active",
       "subsystem": "Membrane / intent / steering",
       "used_by": [
+        "lgwks_audit",
         "lgwks_cache",
         "lgwks_cognition"
       ]
@@ -4217,7 +4094,7 @@
       "has_cli": false,
       "has_tests": false,
       "integration": "integrated",
-      "last_commit_days": 3,
+      "last_commit_days": 5,
       "loc": 82,
       "owning_issue": null,
       "packet": null,
@@ -4250,8 +4127,8 @@
       "has_cli": false,
       "has_tests": false,
       "integration": "integrated",
-      "last_commit_days": 1,
-      "loc": 550,
+      "last_commit_days": 0,
+      "loc": 553,
       "owning_issue": null,
       "packet": "I1",
       "purpose": "vector-space + cid contract (lgwks.vector.record.v1).",
@@ -4264,6 +4141,7 @@
         "lgwks_fabric_projection",
         "lgwks_fabric_reader",
         "lgwks_inbound",
+        "lgwks_jarvis",
         "lgwks_promote",
         "lgwks_session",
         "lgwks_storage",
@@ -4276,8 +4154,8 @@
       "has_cli": true,
       "has_tests": true,
       "integration": "integrated",
-      "last_commit_days": 1,
-      "loc": 327,
+      "last_commit_days": 0,
+      "loc": 344,
       "owning_issue": null,
       "packet": null,
       "purpose": "the Verifier oracle (spec-01), hardened with provenance tracking.",
@@ -4297,7 +4175,7 @@
       "has_cli": true,
       "has_tests": true,
       "integration": "integrated",
-      "last_commit_days": 3,
+      "last_commit_days": 6,
       "loc": 297,
       "owning_issue": "#74",
       "packet": "I10",
@@ -4309,23 +4187,6 @@
         "scripts"
       ]
     },
-    "lgwks_voice_event": {
-      "deps": [
-        "axiom",
-        "lgwks_daemon_event"
-      ],
-      "has_cli": false,
-      "has_tests": true,
-      "integration": "unreferenced",
-      "last_commit_days": 5,
-      "loc": 151,
-      "owning_issue": null,
-      "packet": null,
-      "purpose": "speech ingress, never a gate bypass (#123).",
-      "staleness": "staling",
-      "subsystem": "Governance / gates / refusal / auth",
-      "used_by": []
-    },
     "lgwks_waste": {
       "deps": [
         "lgwks_cognition"
@@ -4333,7 +4194,7 @@
       "has_cli": true,
       "has_tests": true,
       "integration": "integrated",
-      "last_commit_days": 7,
+      "last_commit_days": 10,
       "loc": 339,
       "owning_issue": "#75",
       "packet": "I11",
@@ -4351,7 +4212,7 @@
       "has_cli": false,
       "has_tests": false,
       "integration": "integrated",
-      "last_commit_days": 17,
+      "last_commit_days": 20,
       "loc": 99,
       "owning_issue": null,
       "packet": null,
@@ -4376,7 +4237,7 @@
       "has_cli": true,
       "has_tests": false,
       "integration": "integrated",
-      "last_commit_days": 4,
+      "last_commit_days": 7,
       "loc": 156,
       "owning_issue": null,
       "packet": null,
@@ -4386,22 +4247,6 @@
       "used_by": [
         "lgwks_workflows"
       ]
-    },
-    "lgwks_workflow_trigger": {
-      "deps": [
-        "lgwks_capability_action"
-      ],
-      "has_cli": false,
-      "has_tests": true,
-      "integration": "unreferenced",
-      "last_commit_days": 6,
-      "loc": 194,
-      "owning_issue": null,
-      "packet": null,
-      "purpose": "event-chain grammar for latent workflows (#121).",
-      "staleness": "staling",
-      "subsystem": "Harness / daemon / orchestration",
-      "used_by": []
     },
     "lgwks_workflows": {
       "deps": [
@@ -4436,8 +4281,7 @@
       "subsystem": "Harness / daemon / orchestration",
       "used_by": [
         "lgwks(dispatcher)",
-        "lgwks_manifest",
-        "lgwks_workflow_trigger"
+        "lgwks_manifest"
       ]
     },
     "scripts.build_capability_embeddings": {
@@ -4448,7 +4292,7 @@
       "has_cli": false,
       "has_tests": false,
       "integration": "integrated",
-      "last_commit_days": 7,
+      "last_commit_days": 9,
       "loc": 102,
       "owning_issue": null,
       "packet": null,
@@ -4458,9 +4302,9 @@
       "used_by": [
         "lgwks_embed_port",
         "lgwks_engine",
-        "lgwks_intent_router",
         "lgwks_manifest",
-        "lgwks_model_hub"
+        "lgwks_model_hub",
+        "lgwks_verify"
       ]
     },
     "scripts.build_capability_idf": {
@@ -4471,7 +4315,7 @@
       "has_cli": false,
       "has_tests": false,
       "integration": "integrated",
-      "last_commit_days": 7,
+      "last_commit_days": 9,
       "loc": 77,
       "owning_issue": null,
       "packet": null,
@@ -4481,9 +4325,9 @@
       "used_by": [
         "lgwks_embed_port",
         "lgwks_engine",
-        "lgwks_intent_router",
         "lgwks_manifest",
-        "lgwks_model_hub"
+        "lgwks_model_hub",
+        "lgwks_verify"
       ]
     },
     "scripts.build_model_mesh": {
@@ -4493,7 +4337,7 @@
       "has_cli": false,
       "has_tests": false,
       "integration": "integrated",
-      "last_commit_days": 6,
+      "last_commit_days": 8,
       "loc": 45,
       "owning_issue": null,
       "packet": null,
@@ -4503,9 +4347,9 @@
       "used_by": [
         "lgwks_embed_port",
         "lgwks_engine",
-        "lgwks_intent_router",
         "lgwks_manifest",
-        "lgwks_model_hub"
+        "lgwks_model_hub",
+        "lgwks_verify"
       ]
     },
     "scripts.check_schema_registry": {
@@ -4513,7 +4357,7 @@
       "has_cli": false,
       "has_tests": false,
       "integration": "integrated",
-      "last_commit_days": 9,
+      "last_commit_days": 11,
       "loc": 71,
       "owning_issue": null,
       "packet": null,
@@ -4523,9 +4367,9 @@
       "used_by": [
         "lgwks_embed_port",
         "lgwks_engine",
-        "lgwks_intent_router",
         "lgwks_manifest",
-        "lgwks_model_hub"
+        "lgwks_model_hub",
+        "lgwks_verify"
       ]
     },
     "scripts.gen_navmap": {
@@ -4533,7 +4377,7 @@
       "has_cli": true,
       "has_tests": false,
       "integration": "integrated",
-      "last_commit_days": 6,
+      "last_commit_days": 9,
       "loc": 354,
       "owning_issue": null,
       "packet": null,
@@ -4543,9 +4387,9 @@
       "used_by": [
         "lgwks_embed_port",
         "lgwks_engine",
-        "lgwks_intent_router",
         "lgwks_manifest",
-        "lgwks_model_hub"
+        "lgwks_model_hub",
+        "lgwks_verify"
       ]
     },
     "scripts.setup_models": {
@@ -4555,7 +4399,7 @@
       "has_cli": false,
       "has_tests": false,
       "integration": "integrated",
-      "last_commit_days": 3,
+      "last_commit_days": 6,
       "loc": 248,
       "owning_issue": null,
       "packet": null,
@@ -4565,9 +4409,9 @@
       "used_by": [
         "lgwks_embed_port",
         "lgwks_engine",
-        "lgwks_intent_router",
         "lgwks_manifest",
-        "lgwks_model_hub"
+        "lgwks_model_hub",
+        "lgwks_verify"
       ]
     },
     "tools.calibrate_intent_thresholds": {
@@ -4578,7 +4422,7 @@
       "has_cli": false,
       "has_tests": false,
       "integration": "integrated",
-      "last_commit_days": 1,
+      "last_commit_days": 3,
       "loc": 117,
       "owning_issue": null,
       "packet": null,
@@ -4602,7 +4446,7 @@
       "has_cli": false,
       "has_tests": false,
       "integration": "integrated",
-      "last_commit_days": 16,
+      "last_commit_days": 19,
       "loc": 154,
       "owning_issue": null,
       "packet": null,
@@ -4629,16 +4473,15 @@
   },
   "totals": {
     "by_integration": {
-      "cli_only": 4,
+      "cli_only": 0,
       "integrated": 172,
-      "unreferenced": 5
+      "unreferenced": 2
     },
     "by_staleness": {
-      "active": 173,
-      "orphan": 3,
-      "staling": 5
+      "active": 172,
+      "staling": 2
     },
-    "loc": 60733,
-    "modules": 181
+    "loc": 60246,
+    "modules": 174
   }
 }
