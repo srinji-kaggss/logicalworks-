@@ -38,11 +38,30 @@ from __future__ import annotations
 
 import os
 from dataclasses import dataclass
-from typing import Any, Callable
+from typing import Any, Callable, Protocol, runtime_checkable
 
 import lgwks_model_mesh as mesh
 
 SCHEMA = "lgwks.model.port.v1"
+
+
+@runtime_checkable
+class Embedder(Protocol):
+    """The shared contract for a single-text embedding provider (#152).
+
+    Both lgwks_apple.embed_one and lgwks_openrouter_embed.embed_one conform: call
+    with text → a list[float] (the vector) or None, and NEVER raise (None signals
+    "unavailable / failed", so callers fail closed without try/except). Provider-
+    specific config (model, dims, timeout) rides on their own keyword defaults; the
+    one shared, substitutable shape is embed_one(text).
+
+    The implicit contract that previously lived in two parallel signatures is now
+    explicit and machine-checked — tests/test_embedder_contract.py pins the runtime
+    behaviour; providers bind `_: Embedder = embed_one` under TYPE_CHECKING for
+    static conformance without taking a runtime dependency on this module.
+    """
+
+    def __call__(self, text: str) -> list[float] | None: ...
 
 # The escalation order is owned by the law (mesh), not re-stated here.
 TIER_ORDER = mesh.TIER_ORDER  # ("deterministic", "sensor", "generative")

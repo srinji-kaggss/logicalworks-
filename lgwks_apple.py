@@ -33,7 +33,10 @@ from __future__ import annotations
 import os
 import sys
 from functools import lru_cache
-from typing import Any
+from typing import TYPE_CHECKING, Any
+
+if TYPE_CHECKING:
+    from lgwks_model_port import Embedder  # contract only — no runtime dep on the thin leaf
 
 # Default model: small, widely tested on Apple Silicon.
 DEFAULT_MODEL: str = os.environ.get(
@@ -138,6 +141,10 @@ def embed_one(
     if norm < 1e-10:
         return raw
     return [x / norm for x in raw]
+
+
+if TYPE_CHECKING:
+    _conforms_embedder: Embedder = embed_one  # static conformance to the shared contract (#152)
 
 
 def provider_label(model_id: str = DEFAULT_MODEL) -> str:
