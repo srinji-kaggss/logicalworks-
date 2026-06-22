@@ -632,7 +632,9 @@ def read_db_nodes_edges(run_dir):
     db_path = Path(run_dir) / "db" / "research.sqlite"
     if not db_path.exists():
         raise SystemExit(f"Missing research database: {db_path}")
-    conn = lgwks_sqlite.connect(db_path)
+    # Read-only consumer: wal=False so we gain retry/busy_timeout without
+    # rewriting the existing DB's on-disk journal-mode header (#223 fam-4 rule).
+    conn = lgwks_sqlite.connect(db_path, wal=False)
     nodes = {}
     edges = {}
     for row in conn.execute("select id, kind, label, weight, metadata_json from nodes"):
