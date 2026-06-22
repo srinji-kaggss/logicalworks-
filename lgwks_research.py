@@ -180,6 +180,8 @@ class AutoConfig:
     max_pages: int = 8
     guide_text: str = ""                         # an implementation guide to research (the AI's plan)
     fanout: int = 1                              # cheap bounded preview of next frontier nodes
+    project: str = "research"                    # #165: gate key for the reasoning corpus (stable,
+                                                 # not per-run — keeps research off the island path)
 
     def __post_init__(self):
         # clamp adversary-supplied bounds (hacker F8) and drop unknown functions (no silent calls).
@@ -360,6 +362,34 @@ def _write_index(out_dir: Path, cfg: AutoConfig, stop: str, surviving: list[str]
     path = out_dir / "INDEX.json"
     _write_json(path, payload)
     return path
+
+
+def _emit_reasoning_artifact(cfg: AutoConfig, run_id: str, report_path: Path) -> None:
+    """#165 Phase 2 item 4: land the run's REPORT on the State Fabric tape as a
+    `reasoning` artifact, so the autonomous reasoning corpus is queryable through
+    the same gate as crawl/ingest output (and becomes future training trajectories
+    per the Standalone-model mandate).
+
+    Keyed on cfg.project — a STABLE gate, never per-run — so research artifacts
+    accumulate in the project's fabric instead of spawning per-run islands (the
+    anti-pattern #165 exists to retire). Best-effort and fully isolated: the tape
+    is a mirror of the on-disk REPORT here, never its source of record, so a gate
+    hiccup must not fail a completed research run (same contract as write_pack).
+    """
+    try:
+        if not report_path.exists():
+            return
+        import lgwks_storage
+        text = report_path.read_text(encoding="utf-8")
+        cid = lgwks_hashing.content_id(f"{cfg.project}|{run_id}|REPORT", 16)
+        with lgwks_storage.get_gate(cfg.project) as gate:
+            gate.ingest_fact(
+                cid, text, "reasoning",
+                capability="research_report",
+                meta={"run_id": run_id, "objective": cfg.objective, "artifact": "REPORT.md"},
+            )
+    except Exception:
+        pass  # the reasoning corpus is derived; never fail a finished run on it.
 
 
 def _write_report(out_dir: Path, cfg: AutoConfig, stop: str, surviving: list[str], spent: int,
@@ -724,6 +754,7 @@ def run_auto(cfg: AutoConfig, emit=print) -> AutoResult:
         "objective": cfg.objective, "start": cfg.start}))
     report_path = _write_report(out_dir, cfg, stop, surviving, budget.spent, evidence_rounds,
                                 contradicted, plan_summary)
+    _emit_reasoning_artifact(cfg, run_id, report_path)
     index_path = _write_index(out_dir, cfg, stop, surviving, budget.spent, evidence_rounds,
                               agenda, covered, contradicted, report_path)
     try:
@@ -794,6 +825,7 @@ def research_command(args: argparse.Namespace) -> int:
             token_budget=getattr(args, "budget", 120_000),
             crawl_mode="ground" if getattr(args, "live", False) else "estimate",
             max_pages=getattr(args, "sources", 8),
+            project=getattr(args, "project", None) or "research",
         )
         res = run_auto(cfg)
         return 0 if res.ledger_intact else 1

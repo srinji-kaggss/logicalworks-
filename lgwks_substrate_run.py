@@ -185,7 +185,14 @@ def build_run(args: argparse.Namespace) -> dict[str, Any]:
     chunk_by_content: dict[str, dict[str, Any]] = {}
 
     gate = lgwks_storage.get_gate(args.project or Path(args.target).name)
-    
+    # #165 Phase 2: every row that lands in a projection carries its tape provenance
+    # — tokenization_id (which analyzer named it) + artifact_cid (the tape fact cid
+    # it derives from). Chunks/facts are ingested via gate.ingest_fact, which uses the
+    # default word_regex tokenizer, so that id is the lineage tag for every derived
+    # vector. artifact_cid is the chunk/fact's own tape cid (== chunk_id / sha(text)),
+    # so a vector is content-addressed back to the exact tape entry it embeds.
+    tok_id = gate.tokenizers.default_word_regex_id()
+
     for idx, doc in enumerate(docs, start=1):
         source_identity = f"{doc['source']}|{doc['discovered_by']}|{doc['depth']}|{idx}"
         source_id = f"src-{io._sha(source_identity)[:16]}"
@@ -252,6 +259,8 @@ def build_run(args: argparse.Namespace) -> dict[str, Any]:
                 "chunk_kind": chunk_kind,
                 "position": pos,
                 "provenance": [occurrence],
+                "tokenization_id": tok_id,   # #165: lineage tag for the relational projection
+                "artifact_cid": chunk_id,    # #165: tape fact cid (chunk_id IS the chunk's tape cid)
             }
             chunk_rows.append(chunk_row)
             chunk_by_content[chunk_id] = {"row": chunk_row, "chunk_kind": chunk_kind}
@@ -273,6 +282,8 @@ def build_run(args: argparse.Namespace) -> dict[str, Any]:
                     "fact_text": stem,
                     "fact_score": fact_score,
                     "chunk_kind": chunk_kind,
+                    "tokenization_id": tok_id,   # #165
+                    "artifact_cid": chunk_id,    # #165: derived from the chunk's tape entry
                 })
                 for sentence in text._fact_sentences(stem, args.fact_threshold):
                     dual = lgwks_run.embed_dual(
@@ -292,6 +303,7 @@ def build_run(args: argparse.Namespace) -> dict[str, Any]:
                         "vector": fdet["vector"],
                         "fact_score": text._fact_score(sentence),
                         "chunk_kind": chunk_kind,
+                        "tokenization_id": tok_id,   # #165: lineage tag (artifact_cid == fact_hash)
                     })
                     gate.ingest_fact(io._sha(sentence), sentence, chunk_kind, capability="ingest_fact_sentence", meta={"chunk_id": chunk_id})
 
@@ -308,6 +320,7 @@ def build_run(args: argparse.Namespace) -> dict[str, Any]:
                             "vector": fsem["vector"],
                             "fact_score": text._fact_score(sentence),
                             "chunk_kind": chunk_kind,
+                            "tokenization_id": tok_id,   # #165
                         })
 
             vector_text = stem or piece
@@ -331,6 +344,8 @@ def build_run(args: argparse.Namespace) -> dict[str, Any]:
                 "vector": cdet["vector"],
                 "fact_score": fact_score,
                 "chunk_kind": chunk_kind,
+                "tokenization_id": tok_id,   # #165
+                "artifact_cid": chunk_id,    # #165
             })
             # semantic chunk vector (primary; feeds NeoBERT)
             if dual["sem"]:
@@ -348,6 +363,8 @@ def build_run(args: argparse.Namespace) -> dict[str, Any]:
                     "vector": csem["vector"],
                     "fact_score": fact_score,
                     "chunk_kind": chunk_kind,
+                    "tokenization_id": tok_id,   # #165
+                    "artifact_cid": chunk_id,    # #165
                 })
 
         # ── Media items → media chunks (opt-in) ────────────────────────────────
@@ -385,6 +402,8 @@ def build_run(args: argparse.Namespace) -> dict[str, Any]:
                     "fact_score": 0.0,
                     "chunk_kind": m_modality,
                     "position": -1,
+                    "tokenization_id": tok_id,   # #165
+                    "artifact_cid": m_chunk_id,  # #165
                 })
                 
                 mm = lgwks_multimodal.embed_media(
@@ -403,6 +422,7 @@ def build_run(args: argparse.Namespace) -> dict[str, Any]:
                     "provider": idet["provider"], "is_semantic": False,
                     "dims": idet["dims"], "vector_text": m_label[:2000],
                     "vector": idet["vector"], "fact_score": 0.0, "chunk_kind": m_modality,
+                    "tokenization_id": tok_id, "artifact_cid": m_chunk_id,  # #165
                 })
                 
                 if mm.get("sem"):
@@ -415,6 +435,7 @@ def build_run(args: argparse.Namespace) -> dict[str, Any]:
                         "provider": isem["provider"], "is_semantic": True,
                         "dims": isem["dims"], "vector_text": m_label[:2000],
                         "vector": isem["vector"], "fact_score": 0.0, "chunk_kind": m_modality,
+                        "tokenization_id": tok_id, "artifact_cid": m_chunk_id,  # #165
                     })
                     # #275: no artifact_cid back-link here — unlike the text path,
                     # the media chunk has no gate.ingest_fact tape entry yet (this

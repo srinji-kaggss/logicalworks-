@@ -774,6 +774,43 @@ def _chunk(text: str, size: int = 400) -> list[str]:
     return SlidingWindowChunking(size, 0).chunk(text)
 
 
+def _emit_run_artifacts(run_id: str, prevector_path: Path, embeddings: list[dict]) -> None:
+    """#165 Phase 2 item 3: land the run's pre-vector graph + embedding cache on the
+    State Fabric so a deterministic prover run participates in the same store as
+    crawl/research output.
+
+    The embeddings route through VectorFabric (the canonical vector projection),
+    each stamped with tokenization_id + artifact_cid (== the embedding id, which is
+    the cache row's tape cid) so every vector traces back to its tape entry. The
+    pre-vector graph lands as a `reasoning` artifact. Keyed on a STABLE "run" gate,
+    not per-run, to stay off the island path. Best-effort + isolated: the JSONL
+    files remain the human-readable export; a gate hiccup never fails the run.
+    """
+    try:
+        import lgwks_storage
+        with lgwks_storage.get_gate("run") as gate:
+            tok_id = gate.tokenizers.default_word_regex_id()
+            rows = [
+                {
+                    "fact_hash": e["id"], "fact_text": "", "provider": e.get("provider", "unknown"),
+                    "dims": e.get("dim") or len(e.get("vector") or []), "vector": e.get("vector") or [],
+                    "tokenization_id": tok_id, "artifact_cid": e["id"],
+                }
+                for e in embeddings if e.get("vector")
+            ]
+            if rows:
+                gate.vector_fabric.ingest_fact_vectors(rows)
+            if prevector_path.exists():
+                cid = lgwks_hashing.content_id(f"run|{run_id}|prevector", 16)
+                gate.ingest_fact(
+                    cid, prevector_path.read_text(encoding="utf-8"), "reasoning",
+                    capability="run_prevector",
+                    meta={"run_id": run_id, "artifact": "prevector.graph.json"},
+                )
+    except Exception:
+        pass  # derived mirror of on-disk exports; never fail a completed run on it.
+
+
 # ─────────────────────────────────────────────────────────────────────────────
 # The spine.
 # ─────────────────────────────────────────────────────────────────────────────
@@ -851,6 +888,7 @@ def execute_plan(plan: RunPlan, dry: bool = False, synthetic: dict[str, str] | N
     if embeddings:                          # the objective vector cache (default-on; empty if --no-embed)
         _emit_jsonl(out_dir / "embeddings.jsonl", embeddings)
         log.append("vector_cache", {"count": len(embeddings), "provider": embed_provider})
+    _emit_run_artifacts(plan.run_id, prevector, embeddings)   # #165: mirror onto the State Fabric tape
     log.append("run_end", {"documents": len(docs), "nodes": len(nodes), "edges": len(edges)})
 
     return RunResult(run_id=plan.run_id, fetched=fetched, documents=len(docs), nodes=len(nodes),
