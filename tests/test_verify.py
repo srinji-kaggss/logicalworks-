@@ -103,45 +103,99 @@ class TestPipeline(unittest.TestCase):
 
 
 class TestTierHonesty(unittest.TestCase):
-    """A nightly/release tier that cannot be evaluated must return an honest BLOCKED
-    (exit 3) — never a silent no-op (the #235 defect this redesign refuses). Since #241
-    the runners are vendored, so the honest BLOCKED reason is now 'lgwks.profile.json
-    declares no simulate/sim/soak/latency evidence' — the tier's evidence is not yet
-    tailored. (Either reason is a real unknown; the contract under test is exit 3 + a
-    sealed BLOCKED record, instant — it must NOT fall through to re-run the commit lanes.)"""
+    """A tier that cannot be FULLY evaluated must return an honest BLOCKED (exit 3) — never a
+    silent no-op (the #235 defect) and never a verdict that omits an unmeasured axis (the #311
+    partial-tailoring gap). The BLOCKED contract is exercised against SYNTHETIC profiles via the
+    LGWKS_CI_TARGET_PROFILE seam, so its correctness does not depend on the real lgwks.profile.json
+    being perpetually incomplete (the real profile is now fully tailored — #311). The positive
+    tests assert the real profile's evidence actually evaluates GO."""
 
     import shutil as _shutil
     _ROOT = __import__("pathlib").Path(__file__).resolve().parents[1]
 
-    @unittest.skipUnless(_shutil.which("node"), "node not available")
-    def test_ci_runner_blocks_unevaluable_tier_with_seal(self):
+    def _run_ci(self, tier, target_profile, contents):
         import subprocess
-        from pathlib import Path
-        proc = subprocess.run(
-            ["node", str(self._ROOT / "scripts" / "ci" / "run.mjs"), "--tier", "nightly"],
-            cwd=self._ROOT, text=True, capture_output=True, timeout=60,
-        )
+        import tempfile
+        with tempfile.NamedTemporaryFile("w", suffix=".json", delete=False) as f:
+            f.write(json.dumps(contents))
+            path = f.name
+        try:
+            return subprocess.run(
+                ["node", str(self._ROOT / "scripts" / "ci" / "run.mjs"), "--tier", tier],
+                cwd=self._ROOT, text=True, capture_output=True, timeout=60,
+                env={**os.environ, "LGWKS_CI_TARGET_PROFILE": path},
+            )
+        finally:
+            os.unlink(path)
+
+    @unittest.skipUnless(_shutil.which("node"), "node not available")
+    def test_ci_runner_blocks_untailored_tier_with_seal(self):
+        # A profile declaring NO tier evidence → nightly cannot return a verdict (unknown ≠ pass).
+        proc = self._run_ci("nightly", "empty", {})
         self.assertEqual(proc.returncode, 3, proc.stdout + proc.stderr)
         self.assertIn("BLOCKED", proc.stdout)
         seals = list((self._ROOT / ".ci-runs").glob("*-nightly/seal.json"))
         self.assertTrue(seals, "expected a sealed BLOCKED record")
-        payload = json.loads(seals[0].read_text())
+        payload = json.loads(sorted(seals, key=lambda p: p.stat().st_mtime)[-1].read_text())
         self.assertEqual(payload["verdict"], "BLOCKED")
         self.assertEqual(payload["tier"], "nightly")
 
     @unittest.skipUnless(_shutil.which("node"), "node not available")
-    def test_lgwks_verify_verb_refuses_unevaluable_tier(self):
-        import subprocess
-        proc = subprocess.run(
-            [sys.executable, str(self._ROOT / "lgwks"), "verify",
-             "--profile", "lgwks.profile.json", "--tier", "release"],
-            cwd=self._ROOT, text=True, capture_output=True, timeout=60,
-            env={**os.environ, "LGWKS_NO_MODELS": "1"},
-        )
+    def test_ci_runner_blocks_partially_tailored_tier(self):
+        # release requires simulate+sim+soak+latency; a profile with only simulate+sim must
+        # instant-BLOCK on the missing soak/latency, naming them — NOT silently run partially.
+        proc = self._run_ci("release", "partial", {"simulate": [{"x": 1}], "sim": [{"y": 1}]})
         self.assertEqual(proc.returncode, 3, proc.stdout + proc.stderr)
-        payload = json.loads(proc.stdout)
-        self.assertEqual(payload["verdict"], "BLOCKED")
-        self.assertEqual(payload["tier"], "release")
+        self.assertIn("BLOCKED", proc.stdout)
+        self.assertIn("soak", proc.stdout)  # names the missing block(s) (unknown ≠ pass)
+        self.assertIn("latency", proc.stdout)
+
+    @unittest.skipUnless(_shutil.which("node"), "node not available")
+    def test_lgwks_verify_verb_delegates_to_tier_authority(self):
+        # The verify verb must delegate non-commit tiers to scripts/ci/run.mjs (the single tier
+        # authority), surfacing its honest verdict — here BLOCKED, via the synthetic-profile seam.
+        import subprocess
+        import tempfile
+        with tempfile.NamedTemporaryFile("w", suffix=".json", delete=False) as f:
+            f.write(json.dumps({}))
+            path = f.name
+        try:
+            proc = subprocess.run(
+                [sys.executable, str(self._ROOT / "lgwks"), "verify",
+                 "--profile", "lgwks.profile.json", "--tier", "release"],
+                cwd=self._ROOT, text=True, capture_output=True, timeout=60,
+                env={**os.environ, "LGWKS_NO_MODELS": "1", "LGWKS_CI_TARGET_PROFILE": path},
+            )
+            self.assertEqual(proc.returncode, 3, proc.stdout + proc.stderr)
+            self.assertIn("BLOCKED", proc.stdout + proc.stderr)
+        finally:
+            os.unlink(path)
+
+    @unittest.skipUnless(_shutil.which("node"), "node not available")
+    def test_tier_evidence_is_tailored_and_evaluates_GO(self):
+        """#311: the real profile's dynamic evidence is now tailored, so each lane returns a real
+        verdict instead of BLOCKED. Tested at the lane level (the full tiers also run the heavy
+        commit floor); each lane is gated exactly as scripts/ci/run.mjs wires it —
+        simulate→well_crossed, sim→concurrent_safe, latency→latency_bounded, soak→envelope."""
+        import subprocess
+        profile = json.loads((self._ROOT / "lgwks.profile.json").read_text())
+        for block in ("simulate", "sim", "soak", "latency"):
+            self.assertTrue(profile.get(block), f"release requires a {block} block")
+        keel = self._ROOT / "lgwks_verify" / "keel" / "src"
+        lanes = [
+            ("run-simulate.mjs", ["--concept", "well_crossed"]),
+            ("run-sim.mjs", ["--concept", "concurrent_safe"]),
+            ("run-latency.mjs", ["--concept", "latency_bounded"]),
+            ("run-soak.mjs", []),  # envelope-relative; no concept
+        ]
+        for runner, extra in lanes:
+            proc = subprocess.run(
+                ["node", str(keel / runner), "--profile", "lgwks.profile.json", *extra],
+                cwd=self._ROOT, text=True, capture_output=True, timeout=120,
+                env={**os.environ, "LGWKS_NO_MODELS": "1"},
+            )
+            self.assertEqual(proc.returncode, 0, f"{runner}: {proc.stdout}\n{proc.stderr}")
+            self.assertIn("GO", proc.stdout)
 
 
 class TestMaturityScream(unittest.TestCase):

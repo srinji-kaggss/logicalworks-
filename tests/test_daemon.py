@@ -73,7 +73,18 @@ class TestSessionDaemon(unittest.TestCase):
         status = self.daemon.start(transcript_path=transcript)
         self.assertEqual(status["transcript_path"], transcript)
 
-        state = json.loads(self.daemon.paths.state.read_text(encoding="utf-8"))
+        # start() spawns the worker and returns; state.json is persisted ASYNCHRONOUSLY by
+        # the worker loop (_state_payload). Reading it immediately races the write — a flake
+        # that surfaces under load. Poll for it, mirroring test_start_status_stop's heartbeat
+        # wait, instead of assuming a synchronous write.
+        deadline = time.time() + 5.0
+        state = None
+        while time.time() < deadline:
+            if self.daemon.paths.state.exists():
+                state = json.loads(self.daemon.paths.state.read_text(encoding="utf-8"))
+                break
+            time.sleep(0.05)
+        assert state is not None, "daemon should persist state.json shortly after start()"
         self.assertEqual(state["transcript_path"], transcript)
 
     def test_start_writes_lifecycle_events(self):
