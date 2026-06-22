@@ -21,6 +21,12 @@ still verify):
   - `serialize(rec) -> str` — `json.dumps` flavour (e.g. `ensure_ascii`).
   - optional `sign(hash, key) -> str` written to `sign_field` (cognition's
     separate signature; memory folds the MAC into the hash and passes None).
+    When given, the signature is emitted on every record (the callable decides
+    what an absent key means — e.g. cognition writes "" when unkeyed).
+  - optional `verify_record(rec, index, prev) -> bool` — a per-record predicate
+    for store-specific invariants the generic walk doesn't cover (e.g.
+    cognition's `seq == line_index` and its separate-signature check). The
+    generic checks (kind / prev-linkage / hash recompute) always run first.
 
 stdlib + sibling lgwks_* only.
 """
@@ -49,7 +55,8 @@ class HashChainLog:
         hash_core: Callable[[dict, str, Optional[bytes]], str],
         serialize: Callable[[dict], str],
         kinds: Optional[set[str]] = None,
-        sign: Optional[Callable[[str, bytes], str]] = None,
+        sign: Optional[Callable[[str, Optional[bytes]], str]] = None,
+        verify_record: Optional[Callable[[dict, int, str], bool]] = None,
         hash_field: str = "hash",
         sign_field: str = "sig",
     ) -> None:
@@ -60,6 +67,7 @@ class HashChainLog:
         self._serialize = serialize
         self._kinds = kinds
         self._sign = sign
+        self._verify_record = verify_record
         self._hash_field = hash_field
         self._sign_field = sign_field
 
@@ -70,13 +78,15 @@ class HashChainLog:
 
     def _verify_rows(self, rows: list[dict]) -> bool:
         prev = GENESIS
-        for rec in rows:
+        for index, rec in enumerate(rows):
             if self._kinds is not None and rec.get("kind") not in self._kinds:
                 return False
             if rec.get("prev") != prev:
                 return False
             core = self._strip(rec)
             if self._hash_core(core, prev, self._key) != rec.get(self._hash_field):
+                return False
+            if self._verify_record is not None and not self._verify_record(rec, index, prev):
                 return False
             prev = rec[self._hash_field]  # non-None: the hash check above passed
         return True
@@ -129,7 +139,7 @@ class HashChainLog:
                 core = self._build_core(len(rows), prev, kind, data)
                 h = self._hash_core(core, prev, self._key)
                 rec: dict[str, Any] = {**core, self._hash_field: h}
-                if self._sign is not None and self._key:
+                if self._sign is not None:
                     rec[self._sign_field] = self._sign(h, self._key)
 
                 fh.seek(0, 2)  # EOF
