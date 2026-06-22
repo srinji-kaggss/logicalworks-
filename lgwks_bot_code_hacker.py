@@ -42,12 +42,48 @@ _EXEC_ATTRS = {"system", "popen", "spawnl", "spawnv", "spawnlp", "spawnvp"}
 _BROAD_DELETE = {"rmtree", "remove", "unlink", "rmdir"}
 _WRITE_ATTRS = {"write_text", "write_bytes", "save", "save_as"}
 _NET_MODULES = frozenset({"requests", "urllib.request", "httpx", "aiohttp", "http.client", "urllib3"})
-_NET_SINK_ATTRS = frozenset({"get", "post", "put", "delete", "request", "urlopen"})
+# //why split egress imports from net-client *attrs* (#313): the egress check (H3) flags
+# importing a module that can open an outbound socket. `urllib.parse` (URL string parsing),
+# `urllib.error` (exception classes), `http.server` (INBOUND) cannot egress — flagging them
+# was pure noise. Match egress-capable submodules exactly; match true client packages by top.
+_EGRESS_EXACT = frozenset({"urllib.request", "http.client", "ftplib", "smtplib", "telnetlib"})
+_EGRESS_TOPS = frozenset({"requests", "httpx", "aiohttp", "urllib3", "socket"})
+# Network-client method names. `urlopen` is unambiguous (urllib only); the verb methods
+# (get/post/...) are network sinks ONLY when the receiver is a known network client — a
+# bare `d.get("k")` dict access must never read as an outbound request (#313).
+_NET_VERB_ATTRS = frozenset({"get", "post", "put", "delete", "patch", "head", "options", "request"})
+# Network sink method names by symbol (verbs + urlopen). Exported for graph-level
+# consumers (lgwks_audit_graph) that match callee names without receiver resolution.
+_NET_SINK_ATTRS = _NET_VERB_ATTRS | frozenset({"urlopen"})
+_NET_CLIENT_FACTORIES = frozenset({"Session", "session", "Client", "AsyncClient", "ClientSession", "HTTPConnection", "HTTPSConnection", "PoolManager"})
 _PATH_SINK_ATTRS = frozenset({"read_text", "read_bytes", "write_text", "write_bytes", "open", "rglob", "glob"})
 _SQL_ATTRS = frozenset({"execute", "executescript"})
-_NET_TOPS = frozenset(m.split(".")[0] for m in _NET_MODULES)
 _NET_SAFE_RE = re.compile(r"(portal|network|search|fetch|browser|public|cohere|provider|auth_runtime)", re.I)
-_SECRET_RE = re.compile(r"(token|secret|key|password|api_key|credential|auth|bearer)", re.I)
+# Declares a value/variable a credential — used both for secret-named keys
+# (getenv("API_KEY")) and secret-named variables. //why strict (#313): bare "key", "keys",
+# "cache_key", "auth", "TOKENS" are overwhelmingly non-credential (dict keys, loop vars,
+# config sections, limits); a loose regex turned them into phantom secret sources that
+# leaked into every print of the surrounding payload. Require a qualified credential term.
+_SECRET_NAME_RE = re.compile(
+    r"(password|passwd|secret|credential|bearer|api_?key|access_?key|private_?key|"
+    r"client_?secret|auth_?token|(^|_)token(_|$)|(^|_)apikey(_|$))", re.I)
+# Calls that return a value of the SAME taint class as their RECEIVER — a secret stays a
+# secret through `.strip()`/`.encode()`. (A call that does real work, like verify(token),
+# returns a fresh untainted value, so it is NOT here.)
+_RECV_PRESERVING = frozenset({
+    "strip", "lstrip", "rstrip", "lower", "upper", "title", "encode", "decode",
+    "replace", "hex", "removeprefix", "removesuffix", "casefold",
+})
+# Calls that return a value carrying their ARGUMENTS' taint — wrappers/formatters/path
+# builders. `Path(user_input)` is still attacker-controlled; `sep.join(parts)` and
+# `os.path.join(base, user)` carry the parts' taint; `"t={}".format(secret)` carries the
+# secret. //why (#313): without these, `p = Path(input()); p.read_text()` laundered the
+# taint and the traversal went undetected — a recall hole.
+_ARG_PRESERVING = frozenset({
+    "join", "format", "Path", "PurePath", "PosixPath", "WindowsPath",
+    "str", "bytes", "bytearray", "repr", "fspath",
+    "abspath", "normpath", "realpath", "expanduser", "basename", "dirname", "relpath",
+})
 from lgwks_substrate_config import _LOG_ATTRS  # one source of truth
 _LOG_OBJ_RE = re.compile(r"^(logging|logger|log)", re.I)
 
@@ -153,12 +189,37 @@ class Baseline:
 
 # ── Taint tracker (Layer 2) ───────────────────────────────────────────────
 
+# //why two taint CLASSES, not one lattice (#313): the scanner historically used a
+# single "is it tainted?" bool for two unrelated questions —
+#   SECRET    : does this value CONTAIN a credential? (drives H4 secret-exposure)
+#   INJECTION : is this value ATTACKER-CONTROLLED? (drives H1 shell / H5 SSRF /
+#               H6 path / H7 SQL / H8 file-write)
+# Collapsing them made a diagnostic like `print(f"run: {run_id}")` read as secret
+# exposure and a dict access like `pkt.get("k")` read as a network call. Tagging each
+# source with the class(es) it actually carries, and asking checks the class-specific
+# question, is what makes the static analysis precise without losing recall.
+SECRET = "secret"
+INJECTION = "injection"
+
+# Source-kind → the taint class(es) it carries.
+_KIND_CLASSES: dict[str, frozenset] = {
+    "secret_var": frozenset({SECRET}),          # name matches the credential regex
+    "env_secret": frozenset({SECRET, INJECTION}),  # getenv("API_KEY") — secret AND external
+    "env_value": frozenset({INJECTION}),        # getenv("OUTPUT_DIR") — external, not secret
+    "user_input": frozenset({INJECTION}),       # input(), argv
+    "net_response": frozenset({INJECTION}),
+    "file_read": frozenset({INJECTION}),
+    "inferred_taint": frozenset(),              # caller passes the propagated classes
+}
+
+
 @dataclass
 class Source:
     """A taint source: where a sensitive value enters the system."""
     name: str
     lineno: int
-    kind: str  # 'secret_var', 'env_var', 'user_input', 'file_read'
+    kind: str  # 'secret_var', 'env_secret', 'env_value', 'user_input', 'file_read'
+    classes: frozenset = field(default_factory=frozenset)  # subset of {SECRET, INJECTION}
 
 
 @dataclass
@@ -191,47 +252,138 @@ class TaintTracker:
         self.sources: dict[str, Source] = {}
         self.flows: list[tuple[Source, Sink, float]] = []
 
-    def register_source(self, name: str, lineno: int, kind: str = "secret_var") -> None:
+    def register_source(self, name: str, lineno: int, kind: str = "secret_var",
+                        classes: Optional[frozenset] = None) -> None:
         if name not in self.sources:
-            self.sources[name] = Source(name=name, lineno=lineno, kind=kind)
+            cls = classes if classes is not None else _KIND_CLASSES.get(kind, frozenset())
+            self.sources[name] = Source(name=name, lineno=lineno, kind=kind, classes=cls)
 
-    def is_tainted(self, node: ast.AST) -> bool:
-        """Returns True if the node represents or contains a tainted value.
+    @staticmethod
+    def _arg_is_secret_named(call: ast.Call) -> bool:
+        """A .get()/.getenv() whose key argument names an actual credential.
+
+        //why _SECRET_NAME_RE not _SECRET_RE (#313): the loose regex matched a config
+        section key like `manifest.get("auth")` — "auth" is not a secret — and tainted
+        the whole payload SECRET, leaking into every print of it. The strict regex
+        requires a qualified credential term (api_key/password/token/...)."""
+        return any(
+            isinstance(a, ast.Constant) and isinstance(a.value, str)
+            and len(a.value) > 2 and _SECRET_NAME_RE.search(a.value)
+            for a in call.args
+        )
+
+    def taint_classes(self, node: ast.AST) -> frozenset:
+        """Return the union of taint classes a node carries.
 
         //why no blanket f-string/BinOp rule: a JoinedStr or BinOp is tainted only
         when it *interpolates* a tainted source — `f"https://api/v1"` (all-constant)
-        is not. ast.walk already recurses into the children of an f-string or a
-        concatenation, so a tainted Name or source call nested inside is caught by
-        the checks below. Treating every f-string/BinOp as tainted flagged constant
-        URLs/SQL as injections — the dominant false-positive source.
+        is not. ast.walk recurses into the children of an f-string/concatenation, so a
+        tainted Name or source call nested inside is caught here. Treating every
+        f-string/BinOp as tainted flagged constant URLs/SQL as injections — historically
+        the dominant false-positive source.
         """
+        cls: set[str] = set()
         for child in ast.walk(node):
             if isinstance(child, ast.Name) and child.id in self.sources:
-                return True
-            # Recognize source functions directly
-            if isinstance(child, ast.Call):
-                if isinstance(child.func, ast.Name) and child.func.id == "input":
-                    return True
-                if isinstance(child.func, ast.Attribute) and child.func.attr == "getenv":
-                    return True
-        return False
+                cls |= self.sources[child.id].classes
+            elif isinstance(child, ast.Call):
+                f = child.func
+                if isinstance(f, ast.Name) and f.id == "input":
+                    cls.add(INJECTION)                       # raw user input
+                elif isinstance(f, ast.Attribute):
+                    if f.attr == "getenv":
+                        cls.add(INJECTION)                   # env is externally settable
+                        if self._arg_is_secret_named(child):
+                            cls.add(SECRET)                  # getenv("API_KEY")
+                    elif f.attr in {"get", "pop", "setdefault"} and self._arg_is_secret_named(child):
+                        cls.add(SECRET)                      # cfg.get("api_key") / os.environ.get("TOKEN")
+            if SECRET in cls and INJECTION in cls:
+                break
+        return frozenset(cls)
+
+    def is_tainted(self, node: ast.AST, cls: Optional[str] = None) -> bool:
+        """Returns True if the node carries taint of class `cls` (or any class when
+        cls is None). Checks ask the class-specific question (INJECTION for sink
+        checks, SECRET for exposure) so the two notions never bleed into each other."""
+        classes = self.taint_classes(node)
+        return bool(classes) if cls is None else (cls in classes)
+
+    def propagated_classes(self, value: ast.AST) -> frozenset:
+        """Taint classes carried by the RESULT of evaluating `value` — used for
+        assignment propagation.
+
+        //why distinct from taint_classes (#313): `taint_classes` answers "does this
+        subtree reference a tainted value anywhere" (right for a SINK consuming an arg).
+        Propagation needs "is the produced value itself the tainted one". A secret passed
+        as an ARGUMENT to a call does NOT make the call's return value secret —
+        `verified = verify(token)` yields a verdict, not the token. Crossing call results
+        blindly is what spread SECRET from one `token` to scopes/result/packet/run_id."""
+        if isinstance(value, ast.Name):
+            return self.sources[value.id].classes if value.id in self.sources else frozenset()
+        if isinstance(value, ast.Constant):
+            return frozenset()
+        if isinstance(value, (ast.JoinedStr, ast.FormattedValue, ast.BinOp, ast.BoolOp,
+                              ast.Tuple, ast.List, ast.Set, ast.Starred)):
+            cls: set[str] = set()
+            for child in ast.iter_child_nodes(value):
+                cls |= self.propagated_classes(child)
+            return frozenset(cls)
+        if isinstance(value, ast.Dict):
+            cls = set()
+            for v in value.values:
+                if v is not None:
+                    cls |= self.propagated_classes(v)
+            return frozenset(cls)
+        if isinstance(value, ast.IfExp):
+            return self.propagated_classes(value.body) | self.propagated_classes(value.orelse)
+        if isinstance(value, ast.Await):
+            return self.propagated_classes(value.value)
+        if isinstance(value, ast.Subscript):
+            return self.propagated_classes(value.value)   # a slice of a secret is still secret
+        if isinstance(value, ast.Attribute):
+            return frozenset()                              # a field of an object is a fresh value
+        if isinstance(value, ast.Call):
+            f = value.func
+            fname = f.attr if isinstance(f, ast.Attribute) else (f.id if isinstance(f, ast.Name) else None)
+            if isinstance(f, ast.Attribute):
+                if f.attr == "getenv":
+                    return frozenset({SECRET, INJECTION}) if self._arg_is_secret_named(value) else frozenset({INJECTION})
+                if f.attr in {"get", "pop", "setdefault"} and self._arg_is_secret_named(value):
+                    return frozenset({SECRET})
+                if f.attr in _RECV_PRESERVING:              # secret.strip() stays secret
+                    return self.propagated_classes(f.value)
+            if fname == "input":
+                return frozenset({INJECTION})
+            if fname in _ARG_PRESERVING:                    # Path(x)/join(...)/format(...) carry args' taint
+                cls: set[str] = set()
+                for a in value.args:
+                    cls |= self.propagated_classes(a)
+                return frozenset(cls)
+            return frozenset()                              # generic call result = fresh value
+        return frozenset()
 
     def check_flow(self, node: ast.AST, sink_name: str, sink_lineno: int, sink_kind: str) -> list[tuple[Source, Sink, float]]:
-        """Scan an AST subtree for references to tracked sources.
-        Returns list of (source, sink, confidence) tuples."""
+        """Scan an AST subtree for SECRET-class sources flowing into a sink.
+
+        //why SECRET-only and no string-literal rule (#313): exposure means a runtime
+        *credential* reaches a print/log. A string literal can never carry a runtime
+        secret (a label like "token:" is not a token), and an INJECTION-only value
+        (a path, a run_id, an arg list) is not a secret. Both were prolific FPs."""
         found: list[tuple[Source, Sink, float]] = []
         sink = Sink(name=sink_name, lineno=sink_lineno, kind=sink_kind)
         for child in ast.walk(node):
             if isinstance(child, ast.Name) and child.id in self.sources:
                 src = self.sources[child.id]
-                # Confidence: direct use > f-string > dict value
-                conf = 0.95 if isinstance(node, ast.Call) else 0.75
-                found.append((src, sink, conf))
-            if isinstance(child, ast.Constant) and isinstance(child.value, str):
-                # Check if string literal contains a secret-like value
-                if _SECRET_RE.search(child.value) and len(child.value) > 8:
-                    src = Source(name=f"LITERAL_{child.lineno}", lineno=child.lineno, kind="literal_secret")
-                    found.append((src, sink, 0.6))
+                if SECRET in src.classes:
+                    conf = 0.95 if isinstance(node, ast.Call) else 0.75
+                    found.append((src, sink, conf))
+            elif isinstance(child, ast.Call) and isinstance(child.func, ast.Attribute):
+                # Inline secret read with no intervening assignment: print(os.getenv("API_KEY"))
+                f = child.func
+                if (f.attr == "getenv" or f.attr in {"get", "pop", "setdefault"}) and self._arg_is_secret_named(child):
+                    src = Source(name=f"{f.attr}({child.args[0].value!r})", lineno=child.lineno,  # type: ignore[attr-defined]
+                                 kind="env_secret", classes=frozenset({SECRET, INJECTION}))
+                    found.append((src, sink, 0.8))
         return found
 
 
@@ -416,7 +568,13 @@ class _Visitor(ast.NodeVisitor):
         self.findings: list[dict] = []
         self.taint = TaintTracker()
         self._net_safe = _is_net_safe(rel)
-        
+        # Names that resolve to a network module/client (import alias, or a var bound to
+        # requests.Session()/httpx.Client()/...). Only `.get/.post/...` on one of these is
+        # an outbound request — distinguishing it from a dict's `.get()`. (#313, H5)
+        self.net_names: set[str] = set()
+        # Bare function names imported from a net module: `from requests import get`.
+        self.net_funcs: set[str] = set()
+
         # Cache reachability for this file once
         self._file_reachability = 0.0
         if graph and hasattr(graph, "predecessors"):
@@ -492,23 +650,29 @@ class _Visitor(ast.NodeVisitor):
             elif node.args and not isinstance(node.args[0], (ast.List, ast.Tuple)):
                 arg0 = node.args[0]
                 # A tainted string command is a confirmed injection path.
-                if self.taint.is_tainted(arg0):
+                if self.taint.is_tainted(arg0, INJECTION):
                     self._add("dangerous_shell_exec", f"subprocess.{attr}() with tainted string command at line {ln}",
                               "high", 0.8, [], ["exec", "h1"], ln)
                 # //why flag constant-built strings here but NOT for URL/SQL/path sinks:
                 # the safe form of subprocess is a token LIST; building the command as a
                 # single string (f-string/concat) is itself the smell, taint aside. The
                 # same f-string is normal for an HTTP URL or SQL text, so H5/H6/H7 gate
-                # strictly on taint instead.
-                elif isinstance(arg0, (ast.JoinedStr, ast.BinOp)):
+                # strictly on taint instead. EXCEPT list/tuple concatenation
+                # (`["git"] + list(args)`) builds an argv, not a shell string — shell=False,
+                # no injection. (#313)
+                elif isinstance(arg0, (ast.JoinedStr, ast.BinOp)) and not self._binop_builds_sequence(arg0):
                     self._add("dangerous_shell_exec", f"subprocess.{attr}() with string-built command at line {ln}",
                               "high", 0.7, [], ["exec", "h1"], ln)
 
         if attr in _EXEC_ATTRS:
-            # os.system and os.popen are inherently dangerous (deprecated for security)
-            is_tainted = bool(node.args) and self.taint.is_tainted(node.args[0])
-            sev = "critical" if is_tainted else "high"
-            conf = 0.9 if is_tainted else 0.8
+            # os.system/os.popen are discouraged. A tainted argument is a confirmed
+            # injection (critical); a controlled/constant argument is a code smell worth
+            # surfacing but not a merge-blocking injection (medium). //why calibrate by
+            # taint (#313): flagging every os.system at critical inflated test scaffolding
+            # with controlled args into gate failures.
+            is_tainted = bool(node.args) and self.taint.is_tainted(node.args[0], INJECTION)
+            sev = "critical" if is_tainted else "medium"
+            conf = 0.9 if is_tainted else 0.45
             self._add("dangerous_shell_exec", f"os.{attr}() call at line {ln}",
                       sev, conf, [], ["exec", "h1"], ln)
 
@@ -517,35 +681,70 @@ class _Visitor(ast.NodeVisitor):
                 self._add("dangerous_shell_exec", f"{attr}() with dynamic argument at line {ln}",
                           "critical", 0.9, [], ["eval", "exec", "h1"], ln)
 
+    @staticmethod
+    def _binop_builds_sequence(node: ast.AST) -> bool:
+        """True if a BinOp is list/tuple concatenation (argv construction), not string
+        building — detected by a List/Tuple literal on either side, recursively."""
+        if not isinstance(node, ast.BinOp):
+            return False
+        for side in (node.left, node.right):
+            if isinstance(side, (ast.List, ast.Tuple)):
+                return True
+            if isinstance(side, ast.BinOp) and _Visitor._binop_builds_sequence(side):
+                return True
+        return False
+
     # ── H5: SSRF Risk detection ──────────────────────────────────────────────
+
+    def _net_receiver_root(self, recv: ast.AST) -> Optional[str]:
+        """If `recv` resolves to a known network client/module, return its root name.
+
+        Handles `requests.get(...)` (recv = Name 'requests'), `session.get(...)`
+        (recv = Name bound to a Session), and `urllib.request.urlopen` style chains.
+        A plain dict/object (`pkt`, `cfg`) returns None → its `.get()` is not a request."""
+        if isinstance(recv, ast.Name):
+            return recv.id if recv.id in self.net_names else None
+        if isinstance(recv, ast.Attribute):
+            # walk to the root Name of the attribute chain (e.g. urllib.request)
+            cur: ast.AST = recv
+            parts: list[str] = []
+            while isinstance(cur, ast.Attribute):
+                parts.append(cur.attr)
+                cur = cur.value
+            if isinstance(cur, ast.Name):
+                parts.append(cur.id)
+                chain = ".".join(reversed(parts))
+                root = cur.id
+                if root in self.net_names or chain in _NET_MODULES:
+                    return root
+        return None
 
     def _check_h5(self, node: ast.Call) -> None:
         func = node.func
         ln = node.lineno
-        attr = None
-        if isinstance(func, ast.Attribute):
-            attr = func.attr
-        elif isinstance(func, ast.Name):
-            attr = func.id
+        attr = func.attr if isinstance(func, ast.Attribute) else (func.id if isinstance(func, ast.Name) else None)
 
-        if attr in _NET_SINK_ATTRS:
-            # Check for non-constant URL arguments OR tainted caller (e.g. session.get(url))
-            tainted = False
-            for arg in node.args:
-                if self.taint.is_tainted(arg):
-                    tainted = True
-                    break
-            if not tainted and isinstance(node.func, ast.Attribute) and self.taint.is_tainted(node.func.value):
-                tainted = True
+        # Decide whether this call is genuinely an outbound network request.
+        is_net_sink = False
+        if attr == "urlopen":
+            is_net_sink = True                                   # urllib only — unambiguous
+        elif attr in _NET_VERB_ATTRS and isinstance(func, ast.Attribute):
+            if self._net_receiver_root(func.value) is not None:  # requests.get / session.get
+                is_net_sink = True
+        elif isinstance(func, ast.Name) and func.id in self.net_funcs:
+            is_net_sink = True                                   # `from requests import get; get(url)`
 
-            if tainted:
-                # Potential SSRF. Look for suppression heuristic.
-                if "_remote_allowed" in self.guards_found:
-                    return
+        if not is_net_sink:
+            return
+        if "_remote_allowed" in self.guards_found:
+            return
 
-                self._add("ssrf_risk", f"network request to tainted URL '{attr}()' at line {ln}",
-                          "high", 0.7, [], ["network", "ssrf", "h5"], ln)
-                return
+        # SSRF = the URL/target is attacker-controlled. Check the URL argument(s) for
+        # INJECTION taint — a constant or config endpoint is not SSRF.
+        url_tainted = any(self.taint.is_tainted(arg, INJECTION) for arg in node.args)
+        if url_tainted:
+            self._add("ssrf_risk", f"network request to attacker-controlled URL '{attr}()' at line {ln}",
+                      "high", 0.7, [], ["network", "ssrf", "h5"], ln)
 
     # ── H6: Path Traversal detection ─────────────────────────────────────────
 
@@ -559,20 +758,18 @@ class _Visitor(ast.NodeVisitor):
             attr = func.id
 
         if attr in _PATH_SINK_ATTRS:
-            tainted = False
-            for arg in node.args:
-                if self.taint.is_tainted(arg):
-                    tainted = True
-                    break
-            # Check the object itself (e.g. p.read_text())
-            if not tainted and isinstance(node.func, ast.Attribute) and self.taint.is_tainted(node.func.value):
+            # Traversal risk needs an ATTACKER-CONTROLLED path component. A path built
+            # from a fixed name or controlled config (gnn_dir/"nodes.csv") is not it.
+            tainted = any(self.taint.is_tainted(arg, INJECTION) for arg in node.args)
+            # Check the object itself (e.g. p.read_text() where p is tainted)
+            if not tainted and isinstance(node.func, ast.Attribute) and self.taint.is_tainted(node.func.value, INJECTION):
                 tainted = True
 
             if tainted:
                 if "is_relative_to" in self.guards_found:
                     return
 
-                self._add("path_traversal_risk", f"file operation on tainted path '{attr}()' at line {ln}",
+                self._add("path_traversal_risk", f"file operation on attacker-controlled path '{attr}()' at line {ln}",
                           "high", 0.7, [], ["file", "traversal", "h6"], ln)
                 return
 
@@ -588,8 +785,8 @@ class _Visitor(ast.NodeVisitor):
             attr = func.id
 
         if attr in _SQL_ATTRS:
-            # First argument is typically the SQL string
-            if node.args and self.taint.is_tainted(node.args[0]):
+            # First argument is typically the SQL string; injection = attacker-controlled.
+            if node.args and self.taint.is_tainted(node.args[0], INJECTION):
                 self._add("sql_injection_risk", f"dynamic SQL string in '{attr}()' at line {ln}",
                           "high", 0.85, [], ["sql", "injection", "h7"], ln)
 
@@ -605,13 +802,11 @@ class _Visitor(ast.NodeVisitor):
             attr = func.id
 
         if attr in _WRITE_ATTRS:
-            # Check if filename/path is tainted
-            tainted = False
-            if isinstance(node.func, ast.Attribute) and self.taint.is_tainted(node.func.value):
-                tainted = True
-            
+            # Risk = writing to an ATTACKER-CONTROLLED destination path. A write to a
+            # path the program controls (key-derived vault entry, run_id report) is not.
+            tainted = isinstance(node.func, ast.Attribute) and self.taint.is_tainted(node.func.value, INJECTION)
             if tainted:
-                self._add("file_storage_risk", f"file write to tainted path '{attr}()' at line {ln}",
+                self._add("file_storage_risk", f"file write to attacker-controlled path '{attr}()' at line {ln}",
                           "high", 0.7, [], ["file", "upload", "h8"], ln)
 
     # ── H2: unsafe file mutation ─────────────────────────────────────────────
@@ -625,8 +820,16 @@ class _Visitor(ast.NodeVisitor):
         elif isinstance(func, ast.Name):
             attr = func.id
         if attr in _BROAD_DELETE:
-            self._add("unsafe_file_mutation", f"broad delete call '{attr}' at line {ln}",
-                      "high", 0.9, [], ["file", "delete", "h2"], ln)
+            # //why gate on taint (#313): a recursive delete is dangerous when the path is
+            # attacker-controlled (`shutil.rmtree(user_dir)`). Flagging every `tmp.unlink()`
+            # and test-fixture cleanup as "critical" was 62 FPs and trained reviewers to
+            # ignore the class. Fire only when the deletion target is injection-tainted.
+            target_tainted = any(self.taint.is_tainted(arg, INJECTION) for arg in node.args)
+            if not target_tainted and isinstance(node.func, ast.Attribute):
+                target_tainted = self.taint.is_tainted(node.func.value, INJECTION)
+            if target_tainted:
+                self._add("unsafe_file_mutation", f"broad delete '{attr}' on attacker-controlled path at line {ln}",
+                          "critical", 0.9, [], ["file", "delete", "h2"], ln)
 
     # ── H3: unbounded network egress ─────────────────────────────────────────
 
@@ -634,14 +837,25 @@ class _Visitor(ast.NodeVisitor):
         if self._net_safe:
             return
         top = module.split(".")[0]
-        if module in _NET_MODULES or top in _NET_TOPS:
+        # Egress-capable only: exact submodule match (urllib.request, http.client) or a
+        # client package by top (requests, httpx, ...). urllib.parse/error and http.server
+        # cannot open an outbound connection — not egress.
+        if module in _EGRESS_EXACT or top in _EGRESS_TOPS:
             self._add("unbounded_network_egress",
                       f"network import '{module}' in non-network module",
                       "medium", 0.55, [], ["network", "egress", "h3"], lineno)
 
+    @staticmethod
+    def _is_net_module(module: str) -> bool:
+        top = module.split(".")[0]
+        return module in _NET_MODULES or module in _EGRESS_EXACT or top in _EGRESS_TOPS
+
     def visit_Import(self, node: ast.Import) -> None:  # noqa: N802
         for alias in node.names:
             self._flag_net_import(alias.name, node.lineno)
+            if self._is_net_module(alias.name):
+                # the name code calls through: `import httpx as h` -> 'h'; `import requests` -> 'requests'
+                self.net_names.add(alias.asname or alias.name.split(".")[0])
             if "_remote_allowed" in alias.name:
                 self.guards_found.add("_remote_allowed")
         self.generic_visit(node)
@@ -649,6 +863,13 @@ class _Visitor(ast.NodeVisitor):
     def visit_ImportFrom(self, node: ast.ImportFrom) -> None:  # noqa: N802
         if node.module:
             self._flag_net_import(node.module, node.lineno)
+            if self._is_net_module(node.module):
+                for alias in node.names:
+                    bound = alias.asname or alias.name
+                    if alias.name == "urlopen" or alias.name in _NET_VERB_ATTRS:
+                        self.net_funcs.add(bound)            # from requests import get
+                    elif alias.name in _NET_CLIENT_FACTORIES:
+                        self.net_names.add(bound)            # from requests import Session
         for alias in node.names:
             if alias.name in {"_remote_allowed", "is_relative_to"}:
                 self.guards_found.add(alias.name)
@@ -661,36 +882,39 @@ class _Visitor(ast.NodeVisitor):
 
     # ── H4: secret exposure / logging risk WITH taint tracking ──────────────
 
+    def _binds_net_client(self, value: ast.AST) -> bool:
+        """True when `value` produces a network client: requests.Session(),
+        httpx.Client(), a bare imported factory call, or an alias of a net name."""
+        if isinstance(value, ast.Name):
+            return value.id in self.net_names                # s = requests (rebind)
+        if isinstance(value, ast.Call):
+            f = value.func
+            if isinstance(f, ast.Attribute) and f.attr in _NET_CLIENT_FACTORIES:
+                return self._net_receiver_root(f.value) is not None
+            if isinstance(f, ast.Name) and (f.id in _NET_CLIENT_FACTORIES or f.id in self.net_names):
+                return True
+        return False
+
     def visit_Assign(self, node: ast.Assign) -> None:  # noqa: N802
+        # Bind network clients so a later `client.get(url)` resolves as a real request.
+        if self._binds_net_client(node.value):
+            for tgt in node.targets:
+                if isinstance(tgt, ast.Name):
+                    self.net_names.add(tgt.id)
+
+        # Class-aware taint propagation: the target inherits exactly the taint classes
+        # its value carries (SECRET and/or INJECTION). A name matching the credential
+        # regex is itself a SECRET source. //why no generic "inferred_taint" anymore: a
+        # value being "tainted" said nothing about WHICH risk it feeds — that conflation
+        # was the FP engine (#313).
         for tgt in node.targets:
             if isinstance(tgt, ast.Name):
-                is_src = False
-                # If the value being assigned is itself tainted, the target becomes a source.
-                if self.taint.is_tainted(node.value):
-                    self.taint.register_source(tgt.id, node.lineno, kind="inferred_taint")
-                    is_src = True
-                
-                # Check for direct calls to known source functions
-                if not is_src and isinstance(node.value, ast.Call):
-                    if isinstance(node.value.func, ast.Name) and node.value.func.id == "input":
-                        self.taint.register_source(tgt.id, node.lineno, kind="user_input")
-                        is_src = True
-                    elif isinstance(node.value.func, ast.Attribute):
-                        if node.value.func.attr in {"get", "pop", "setdefault"}:
-                            env_hint = any(
-                                isinstance(arg, ast.Constant) and isinstance(arg.value, str)
-                                and _SECRET_RE.search(arg.value)
-                                for arg in node.value.args
-                            )
-                            if env_hint:
-                                self.taint.register_source(tgt.id, node.lineno, kind="env_var")
-                                is_src = True
-                        elif node.value.func.attr == "getenv":
-                            self.taint.register_source(tgt.id, node.lineno, kind="env_var")
-                            is_src = True
-
-                if not is_src and _SECRET_RE.search(tgt.id):
-                    self.taint.register_source(tgt.id, node.lineno, kind="secret_var")
+                classes = set(self.taint.propagated_classes(node.value))
+                if _SECRET_NAME_RE.search(tgt.id):
+                    classes.add(SECRET)
+                if classes:
+                    self.taint.register_source(tgt.id, node.lineno, kind="inferred_taint",
+                                               classes=frozenset(classes))
         self.generic_visit(node)
 
     def _check_h4(self, node: ast.Call) -> None:
@@ -722,7 +946,7 @@ class _Visitor(ast.NodeVisitor):
 
         # Fallback: naive name-only detection for variables we didn't track
         for arg in node.args:
-            if isinstance(arg, ast.Name) and _SECRET_RE.search(arg.id):
+            if isinstance(arg, ast.Name) and _SECRET_NAME_RE.search(arg.id):
                 self._add("secret_exposure_risk",
                           f"possible credential '{arg.id}' in {fname}() at line {ln}",
                           "medium", 0.5,
@@ -874,14 +1098,18 @@ if __name__ == "__main__":
         # but do not make every subsequent gate unusable.
         high_risk = []
         for finding in findings:
-            if finding.get("status") != "open" or finding.get("severity") != "high":
+            # //why both "high" AND "critical": severity() emits "critical" for
+            # final>=0.9. The old gate matched only =="high", so every critical
+            # finding silently bypassed the merge gate — the most severe class was
+            # the one NOT enforced. Fail on both (#313).
+            if finding.get("status") != "open" or finding.get("severity") not in ("high", "critical"):
                 continue
             fp = _finding_fingerprint(finding)
             if prior_baseline is not None and prior_baseline.has(fp):
                 continue
             high_risk.append(finding)
         if high_risk:
-            print(f"FAILED: {len(high_risk)} new high-severity findings remain open.")
+            print(f"FAILED: {len(high_risk)} new high/critical-severity findings remain open.")
             for f in high_risk[:5]:
                  print(f"  - {f['summary']} in {f['links']['file']}")
             sys.exit(1)
