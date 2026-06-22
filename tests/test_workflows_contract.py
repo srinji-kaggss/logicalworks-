@@ -44,8 +44,13 @@ def test_extract_and_convert_are_public_cli_verbs(tmp_path: Path):
 
 def test_workflow_health_check_json_is_single_workflow_object():
     proc = _run("ops", "workflow", "health-check", "--json")
-    assert proc.returncode == 0, proc.stderr
+    # health-check returns 0 when the env is healthy and 2 when degraded (e.g. no
+    # browser installed, as on a clean CI runner) — both are valid outcomes with an
+    # identical JSON contract. Assert the contract + that the process exit code
+    # reflects the reported verdict, NOT that the host happens to have a browser.
+    assert proc.returncode in (0, 2), proc.stderr
     payload = json.loads(proc.stdout)
+    assert proc.returncode == payload["exit_code"]
     assert payload["schema"] == "lgwks.workflow.run.v1"
     assert payload["workflow"] == "health-check"
     assert [p["name"] for p in payload["phases"]] == ["doctor:env", "manifest:sanity"]
