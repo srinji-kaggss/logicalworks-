@@ -25,9 +25,11 @@ ONE explicit zero policy callers select, never re-derive: dot / l2_norm / l2_nor
 
 from __future__ import annotations
 
+import hashlib
 import math
+from typing import Iterable
 
-__all__ = ["cosine", "dot", "l2_norm", "l2_normalize", "ZeroVectorError"]
+__all__ = ["cosine", "dot", "l2_norm", "l2_normalize", "hash_bucket", "hash_embed", "ZeroVectorError"]
 
 
 class ZeroVectorError(ValueError):
@@ -64,6 +66,60 @@ def l2_normalize(v: list[float], *, on_zero: str = "keep") -> list[float]:
         return v
     inv = 1.0 / n
     return [x * inv for x in v]
+
+
+def hash_bucket(feat: str, dims: int, *, encode_errors: str = "strict") -> tuple[int, float]:
+    """The signed-bucket ATOM: one feature string → (bucket index, ±1.0 sign).
+
+    ``d = blake2b(feat, digest_size=8)``; bucket = first 4 bytes mod ``dims``;
+    sign = parity of byte 4. This is the single byte-level definition of the
+    feature-hash mechanism — ``hash_embed`` and the structured composite embedder
+    in ``lgwks_concept`` both go through it, so the bucket/sign derivation cannot
+    drift in one place without the other (#223 family 2). Fully deterministic.
+    """
+    d = hashlib.blake2b(feat.encode("utf-8", errors=encode_errors), digest_size=8).digest()
+    return int.from_bytes(d[:4], "big") % dims, (1.0 if d[4] % 2 == 0 else -1.0)
+
+
+def hash_embed(
+    features: Iterable[str],
+    dims: int,
+    *,
+    weighted: bool = False,
+    encode_errors: str = "strict",
+) -> list[float]:
+    """Deterministic feature-hash embedding — the ONE shared MECHANISM (#223 family 2).
+
+    The signed-bucket blake2b mechanism was copy-pasted across 5 n-gram embedders
+    (run/jarvis/project_artifacts/embed/memory) plus the bucket/sign ATOM in the
+    structured composite embedder ``lgwks_concept.concept_vector``. Each drifted
+    independently and one sibling once rotted to ``np.random`` (#29), turning gating
+    confidence into noise. This is the single tested mechanism; callers keep their
+    OWN feature extraction (the part that legitimately differs) and pass the
+    resulting feature strings here. ``concept`` uses ``hash_bucket`` directly because
+    its per-token position/salt weighting does not fit this uniform-feature shape.
+
+    For every ``feat``: ``d = blake2b(feat, digest_size=8)``; bucket = first 4 bytes
+    mod ``dims``; sign = parity of byte 4; accumulate ``sign * weight``; then L2-
+    normalise and round to 6 dp. Fully deterministic — no RNG, ever.
+
+    weighted       : N-gram weighting (1.0 / 1.5 / 2.0 by space-count) — only the
+                     lexical-fallback embedder in ``lgwks_run`` uses it; others = sign only.
+    encode_errors  : utf-8 error policy. "strict" (default) matches most callers;
+                     jarvis passes "ignore" to mirror its prior ``errors="ignore"``.
+
+    NOT a semantic embedder — it is the deterministic lexical fallback. The real Eye
+    (Qwen) is reached via ``lgwks_run.embed``; this never gates tool authority.
+    """
+    vec = [0.0] * dims
+    for feat in features:
+        bucket, sign = hash_bucket(feat, dims, encode_errors=encode_errors)
+        weight = 1.0
+        if weighted and " " in feat:
+            weight = 1.5 if feat.count(" ") == 1 else 2.0
+        vec[bucket] += sign * weight
+    norm = l2_norm(vec) or 1.0
+    return [round(v / norm, 6) for v in vec]
 
 
 def cosine(a: list[float], b: list[float]) -> float:
