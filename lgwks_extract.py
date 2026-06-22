@@ -51,10 +51,14 @@ _WALL_RE = re.compile(
 )
 _PDF_EXT = {".pdf"}
 _OFFICE_EXT = {".docx", ".xlsx", ".pptx", ".doc", ".xls", ".ppt"}
-_TEXT_EXT = {".txt", ".md", ".csv", ".json", ".yaml", ".yml", ".log", ".toml", ".ini", ".cfg", ".xml",
-             # source files — a coding AI reads code constantly; label it honestly as text, not html.
-             ".py", ".js", ".ts", ".tsx", ".jsx", ".rs", ".go", ".java", ".kt", ".swift", ".rb", ".php",
-             ".c", ".h", ".cpp", ".hpp", ".cc", ".cs", ".sh", ".bash", ".zsh", ".sql", ".lua", ".r"}
+# Text-classification extensions via the canonical composition seam (#150 C-13):
+# the shared set is the one source of truth (substrate_config.TEXT_EXT — includes
+# .jsonl + all source exts); extract DECLARES ".log" as its local extra. Routing
+# onto the canonical fixes the prior accidental drift where extract lacked ".jsonl":
+# such a file is now classified kind="text" instead of kind="html" (the extracted
+# text is identical — both branches read_text — only the label is corrected).
+from lgwks_substrate_config import TEXT_EXT as _BASE_TEXT_EXT, with_extras  # one source of truth
+_TEXT_EXT = with_extras(_BASE_TEXT_EXT, ".log")
 
 
 def _bin(name: str) -> str | None:
