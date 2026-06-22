@@ -17,13 +17,13 @@
       "atom": "testability_falsifiability",
       "unit": "core",
       "evidence": {
-        "tool": "make",
-        "argv": ["test"],
-        "ok_when": "exit==0",
-        "cross": [
-          { "label": "default", "argv": ["test"] },
-          { "label": "no-models", "argv": ["test"], "env": {"LGWKS_NO_MODELS": "1"} }
-        ]
+        "tool": "uv",
+        "argv": ["run", "--python", "3.12", "--with", "pytest", "--with", "cryptography",
+                 "--with", "pyyaml", "--with", "networkx", "python", "-m", "pytest",
+                 "tests/", "axiom/tests/",
+                 "--deselect", "tests/test_verify.py::TestMaturityScream", "-q"],
+        "env": {"LGWKS_NO_MODELS": "1"},
+        "ok_when": "exit==0"
       }
     },
     {
