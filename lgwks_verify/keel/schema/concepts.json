@@ -9,8 +9,8 @@
     {
       "id": "lgwks_floor",
       "origin": "user",
-      "formal": "logicalworks- gate (vendored lgwks tailoring, NOT pristine Keel): symbols resolve AND tests run AND the security scan is clean",
-      "formula": { "all": ["referential_truth", "testability_falsifiability", "security_by_construction"] }
+      "formal": "logicalworks- gate (vendored lgwks tailoring, NOT pristine Keel): symbols resolve AND tests run AND the security scan is clean AND the schema registry is conformant (the #147/#242 schema gate, folded into the single authority)",
+      "formula": { "all": ["referential_truth", "testability_falsifiability", "security_by_construction", "specification_fidelity"] }
     },
     {
       "id": "CoreGroundedCorrect",

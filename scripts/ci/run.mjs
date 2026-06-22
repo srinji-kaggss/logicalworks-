@@ -67,7 +67,10 @@ const COMMIT_LANES = [
   // by a lane below nor explicitly excluded. The structural guarantee against a future
   // silent gap (see coverage_guard.mjs).
   { id: 'coverage.completeness', gate: 'commit', cmd: [NODE, join(HERE, 'coverage_guard.mjs')] },
-  { id: 'schema.registry', gate: 'commit', cmd: ['python3', 'scripts/check_schema_registry.py'] },
+  // schema-registry conformance (#147) is NOT a standalone lane anymore — it is bound as the
+  // `specification_fidelity` atom in lgwks.profile.json and gated by lgwks_floor, so it runs through
+  // the single Keel authority (target.gate). Folding it here retired the parallel governance.yml
+  // job (#242) — one authority, no second copy to drift.
   // Python: the FULL suite (141 files), not a sliver. Hermetic deps via uv; conftest
   // supplies a git-identity floor (a missing one cost 19 silent failures before).
   // `-rs` surfaces every skip + reason into the sealed log — a skip is unmeasured,

@@ -13,7 +13,9 @@ PROVENANCE LOCK (§15.3.3) — two parts, because schema/ is the intended tailor
    Keel is "tailored by an AI through schema, not code edits" (Keel docs/03), so this is by design,
    not drift. The delta is exactly:
      - schema/concepts.json : + concept `lgwks_floor` (origin:user) = all[referential_truth,
-       testability_falsifiability, security_by_construction]  (the logicalworks- gate concept).
+       testability_falsifiability, security_by_construction, specification_fidelity]  (the
+       logicalworks- gate concept; specification_fidelity = the #147/#242 schema-registry gate
+       folded into the single authority).
      - schema/profile.schema.json : unit enum + "core"  (logicalworks- models the repo as one
        "core" unit; both units[].unit and bindings[].unit).
    Nothing else in schema/ differs from keel@9808318. atoms.json is pristine (20 atoms, unchanged).
