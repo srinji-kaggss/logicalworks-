@@ -5,7 +5,7 @@ from __future__ import annotations
 import argparse
 import json
 import sys
-import time
+import lgwks_clock as _clock  # canonical timestamps (#223 foundation-bypass)
 from pathlib import Path
 from typing import Any
 
@@ -25,7 +25,7 @@ from lgwks_portal import _read_context  # one source of truth (capture already i
 
 
 def _capture_key(target: str, context: str) -> str:
-    return f"capture:{_sha(target + '|' + context + '|' + time.strftime('%Y%m%d'))}"
+    return f"capture:{_sha(target + '|' + context + '|' + _clock.date_compact())}"  # canonical UTC date (#223; was local)
 
 
 def _capture_path(key: str) -> Path:
@@ -90,7 +90,7 @@ def build_capture(args: argparse.Namespace) -> dict[str, Any]:
     packet = {
         "schema": CAPTURE_SCHEMA,
         "key": key,
-        "created_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
+        "created_at": _clock.now_iso(),  # canonical UTC ISO (#223; Z→+00:00, completes #151)
         "input": {
             "target": target,
             "effective_target": effective_target,
