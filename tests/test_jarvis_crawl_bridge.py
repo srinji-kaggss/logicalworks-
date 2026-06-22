@@ -556,7 +556,7 @@ class LegacyEngineContentDedupTests(unittest.TestCase):
             return ([("https://dedup.test/a", "seed"), ("https://dedup.test/b", "seed")], [])
 
         def fake_fetch(url, timeout=20):
-            return _lgwks.FetchResult(
+            return _lgwks.CrawlResult(
                 url=url, title=f"Doc {url[-1]}", text=body, links=[], status="ok", elapsed=0.01
             )
 
