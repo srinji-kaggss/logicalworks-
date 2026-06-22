@@ -220,11 +220,14 @@ the Phase-1 narrative above is preserved as the foundation it built on.
      offline — replay rebuilds the deterministic projections; crawl chrome (source/url)
      the tape never recorded comes back empty.
 
+### Resolved after this handoff
+- **ANT analyzer fixes (#293, PR #294 — CLOSED):** the codepoint→byte content fix and the
+  `% 10_000_000`→full-hash entity fix had already landed in #185; #294 finished the job —
+  widened the entity hash 4→7 bytes (56-bit; ~268M-entity birthday point, still inside the
+  SQLite signed-`INTEGER` ceiling) for true corpus injectivity, plus the differential
+  acceptance tests (distinct entities → distinct token ids; full 0..255 byte round-trip).
+
 ### Still open (filed, not done here)
-- **ANT analyzer fixes:** `lgwks_tokenizer.py` `tokenize_trajectory` encodes content
-  with `ord(c)` (codepoint, not byte) — chars >255 collide with the Core/Modal/entity
-  ranges; entity tokens `1_000_000 + hash % 10_000_000` are lossy (collisions → false
-  postings). Matters once ANT streams feed the posting-list DB at scale.
 - **#223 residual:** the six legacy DB-stores (cache/cognition/vault/cycle/waste/memory)
   that re-roll their own append/hash-chain persistence are NOT yet projections over the
   fabric — a separate migration from this writer/reader/hardening work.
