@@ -89,8 +89,13 @@ _BRANDED_RE = re.compile(
 from lgwks_hashing import blake_id as _hash  # canonical blake2b id (one source of truth)
 
 
-def _slug(text: str) -> str:
-    """Canonical label for dedup: lowercase alphanumeric, stripped."""
+def _dedup_key(text: str) -> str:
+    """Canonical concept-dedup key: lowercase alphanumeric, spaces KEPT, stripped.
+
+    Deliberately NOT the filesystem slug (``lgwks_substrate_io.slug``): this
+    preserves intra-word spaces to collapse label variants to one concept, and is
+    never a path. Renamed from ``_slug`` to end the collision (#223 family 5).
+    """
     return re.sub(r"[^a-z0-9 ]+", "", text.lower()).strip()
 
 
@@ -195,7 +200,7 @@ class ConceptExtractor:
             else:
                 label = raw_label
                 alias = ""
-            slug = _slug(label)
+            slug = _dedup_key(label)
             if not slug:
                 continue
             c = self._ensure_concept(slug, label, chunk_id, doc_id, confidence="medium")
@@ -206,7 +211,7 @@ class ConceptExtractor:
             if alias and alias not in c.aliases:
                 c.aliases.append(alias)
                 # Register the alias itself as a concept pointing to canonical
-                alias_slug = _slug(alias)
+                alias_slug = _dedup_key(alias)
                 if alias_slug and alias_slug != slug:
                     self._ensure_concept(alias_slug, alias, chunk_id, doc_id)
                     self._add_rel(slug, alias_slug, "is_alias_of", chunk_id, weight=0.95)
@@ -215,14 +220,14 @@ class ConceptExtractor:
         for m in _ALIAS_RE.finditer(text):
             primary = m.group(1).strip()
             alias = m.group(2).strip()
-            slug = _slug(primary)
+            slug = _dedup_key(primary)
             if not slug:
                 continue
             c = self._ensure_concept(slug, primary, chunk_id, doc_id)
             if alias not in c.aliases:
                 c.aliases.append(alias)
             # Also register alias as a concept that points to primary
-            alias_slug = _slug(alias)
+            alias_slug = _dedup_key(alias)
             if alias_slug and alias_slug != slug:
                 self._ensure_concept(alias_slug, alias, chunk_id, doc_id)
                 self._add_rel(slug, alias_slug, "is_alias_of", chunk_id, weight=0.95)
@@ -232,7 +237,7 @@ class ConceptExtractor:
             brand = m.group(1)
             product = m.group(2)
             label = f"{brand} {product}"
-            slug = _slug(label)
+            slug = _dedup_key(label)
             c = self._ensure_concept(slug, label, chunk_id, doc_id)
             c.attributes.setdefault("vendor", brand)
             c.occurrences += 1
@@ -240,7 +245,7 @@ class ConceptExtractor:
         # 4. Capitalised phrases
         for m in _NAME_RE.finditer(text):
             label = m.group(1)
-            slug = _slug(label)
+            slug = _dedup_key(label)
             if not slug or len(slug) < 3:
                 continue
             # Skip common false positives
@@ -260,7 +265,7 @@ class ConceptExtractor:
             for phrase in capitalised:
                 initials = "".join(w[0].upper() for w in phrase.split() if w)
                 if initials == acr:
-                    slug = _slug(phrase)
+                    slug = _dedup_key(phrase)
                     c = self._ensure_concept(slug, phrase, chunk_id, doc_id)
                     if acr not in c.aliases:
                         c.aliases.append(acr)
@@ -272,7 +277,7 @@ class ConceptExtractor:
             for phrase in capitalised:
                 words = phrase.split()
                 if len(words) >= 2 and words[-1].upper() == acr:
-                    slug = _slug(phrase)
+                    slug = _dedup_key(phrase)
                     c = self._ensure_concept(slug, phrase, chunk_id, doc_id)
                     if acr not in c.aliases:
                         c.aliases.append(acr)
@@ -283,7 +288,7 @@ class ConceptExtractor:
             # Strategy C: acronym is a standalone token that matches an existing concept by word token
             for phrase in capitalised:
                 if acr.lower() in phrase.lower():
-                    slug = _slug(phrase)
+                    slug = _dedup_key(phrase)
                     c = self._ensure_concept(slug, phrase, chunk_id, doc_id)
                     if acr not in c.aliases:
                         c.aliases.append(acr)
@@ -384,7 +389,7 @@ class ConceptExtractor:
             for m in re.finditer(r"\b(integrates? with|depends? on|managed by|provided by|replaces|feeds? into|is a type of|part of|subset of)\s+([A-Z][A-Za-z0-9 ]{2,30})", c.definition, re.IGNORECASE):
                 verb = m.group(1).lower().replace(" ", "_")
                 target_label = m.group(2).strip()
-                target_slug = _slug(target_label)
+                target_slug = _dedup_key(target_label)
                 if target_slug in self._concepts:
                     self._add_rel(slug, target_slug, verb, c.source_chunks[0] if c.source_chunks else "", weight=0.7)
 
@@ -506,7 +511,7 @@ class ConceptGraph:
 
     def resolve(self, query: str) -> Concept | None:
         """Resolve a label/slug/alias/acronym to a canonical concept."""
-        q = _slug(query)
+        q = _dedup_key(query)
         if not q:
             return None
         # 1. Exact slug match

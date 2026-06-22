@@ -41,6 +41,7 @@ from pathlib import Path
 from typing import Iterable, Any, Optional
 
 import lgwks_sqlite
+import lgwks_substrate_io as _io  # canonical filesystem slug (#223 family 5)
 import lgwks_hashing  # canonical content-id seam (#223 C-10): no local sha re-derivation
 import lgwks_storage  # #165 step 3: the one State Fabric gate (retires JarvisDB islands)
 import lgwks_vector as vec_mod  # embeddings → cid-keyed vector_records
@@ -71,9 +72,11 @@ def utc_now() -> str:
 
 
 def slugify(value: str, limit: int = 48) -> str:
-    value = re.sub(r"https?://", "", value.lower())
-    value = re.sub(r"[^a-z0-9]+", "-", value).strip("-")
-    return (value or "jarvis-crawl")[:limit].strip("-") or "jarvis-crawl"
+    """Run-name slug. Byte-exact via canonical ``slug`` (#223 family 5)."""
+    return _io.slug(
+        value, limit=limit, fallback="jarvis-crawl", allow="",
+        strip_scheme=True, restrip_after_truncate=True,
+    )
 
 
 def sha(value: str, n: int = 16) -> str:
