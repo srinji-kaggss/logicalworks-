@@ -103,14 +103,18 @@ class TestPipeline(unittest.TestCase):
 
 
 class TestTierHonesty(unittest.TestCase):
-    """Tiers whose Keel runners are not vendored must return an honest BLOCKED
-    (exit 3) — never a silent no-op (the #235 defect this redesign refuses)."""
+    """A nightly/release tier that cannot be evaluated must return an honest BLOCKED
+    (exit 3) — never a silent no-op (the #235 defect this redesign refuses). Since #241
+    the runners are vendored, so the honest BLOCKED reason is now 'lgwks.profile.json
+    declares no simulate/sim/soak/latency evidence' — the tier's evidence is not yet
+    tailored. (Either reason is a real unknown; the contract under test is exit 3 + a
+    sealed BLOCKED record, instant — it must NOT fall through to re-run the commit lanes.)"""
 
     import shutil as _shutil
     _ROOT = __import__("pathlib").Path(__file__).resolve().parents[1]
 
     @unittest.skipUnless(_shutil.which("node"), "node not available")
-    def test_ci_runner_blocks_unvendored_tier_with_seal(self):
+    def test_ci_runner_blocks_unevaluable_tier_with_seal(self):
         import subprocess
         from pathlib import Path
         proc = subprocess.run(
@@ -126,7 +130,7 @@ class TestTierHonesty(unittest.TestCase):
         self.assertEqual(payload["tier"], "nightly")
 
     @unittest.skipUnless(_shutil.which("node"), "node not available")
-    def test_lgwks_verify_verb_refuses_unvendored_tier(self):
+    def test_lgwks_verify_verb_refuses_unevaluable_tier(self):
         import subprocess
         proc = subprocess.run(
             [sys.executable, str(self._ROOT / "lgwks"), "verify",

@@ -1,0 +1,8 @@
+{
+  "schema": "keel.known-bad-case/v0",
+  "front_end": "profile",
+  "entry": "profile.json",
+  "expect_verdict": "GO",
+  "expect_exit": 0,
+  "description": "Companion control to tool-fixture-misses-blocks: SAME profile but the fixture is honest — 'detects' (exit 1) flags the planted defect and 'accepts' (exit 0) passes the clean input. The tool is qualified by demonstration, so the satisfied gate GOES. Proves Risk #2 is not overhot: it punishes an unproven tool, not an honestly-qualified one."
+}

@@ -1,0 +1,8 @@
+{
+  "schema": "keel.known-bad-case/v0",
+  "front_end": "profile",
+  "entry": "profile.json",
+  "expect_verdict": "NO-GO",
+  "expect_exit": 1,
+  "description": "The punishing gate (docs/09): gate_concept=buildable (2 atoms, satisfiable) but assurance_claim=Excellent (which references many atoms with NO binding here). The claim outruns the evidence, so claim-coherence BLOCKS even though the narrow gate would pass. Proves overclaim => NO-GO."
+}

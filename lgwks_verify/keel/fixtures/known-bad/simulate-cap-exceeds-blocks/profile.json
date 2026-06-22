@@ -1,0 +1,15 @@
+{
+  "_comment": "max_vectors=2 but the sensor enumerates 3 values => enumerateEnvelope errors => unknown => BLOCKS. Proves the simulator never silently samples a subset of the crossing.",
+  "target": { "name": "simulate-cap-exceeds-blocks", "root": ".", "ecosystem": "shell" },
+  "units": [ { "unit": "crate", "discover": { "type": "literal", "values": ["."] } } ],
+  "bindings": [],
+  "gate_concept": "buildable",
+  "simulate": [
+    { "name": "over_cap", "atom": "referential_truth", "max_vectors": 2,
+      "sensors": [ { "name": "x", "values": [1, 2, 3] } ],
+      "harness": { "tool": "bash", "argv": ["-c", "true"], "needs": ["bash"] } },
+    { "name": "tests_ok", "atom": "testability_falsifiability",
+      "sensors": [ { "name": "mode", "values": ["a"] } ],
+      "harness": { "tool": "bash", "argv": ["-c", "true"], "needs": ["bash"] } }
+  ]
+}

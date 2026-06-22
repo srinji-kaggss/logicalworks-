@@ -1,0 +1,8 @@
+{
+  "schema": "keel.known-bad-case/v0",
+  "front_end": "profile",
+  "entry": "profile.json",
+  "expect_verdict": "NO-GO",
+  "expect_exit": 1,
+  "description": "GRADED atom boundary_completeness scores 60/100 = 0.6 (echoed), but the profile threshold is 0.8. The score crosses BELOW the bar so the atom is false and the gate well_crossed is false. Keel MUST return NO-GO. Proves graded->boolean crossing against profile.thresholds (#648 item 8, docs/02 §2.5)."
+}

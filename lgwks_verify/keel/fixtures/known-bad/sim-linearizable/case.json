@@ -1,0 +1,3 @@
+{ "schema": "keel.known-bad-case/v0", "front_end": "sim", "entry": "profile.json",
+  "expect_verdict": "GO", "expect_exit": 0,
+  "description": "#644 multi-actor (docs/04 §4.5): two actors issue commutative writes (w1, w2). Keel enumerates both interleavings; the harness finds every ordering consistent => concurrency_correctness true => concurrent_safe GO." }

@@ -1,0 +1,12 @@
+{
+  "_comment": "Soak GO — both dimensions hold V_NO ≥ target×margin.",
+  "target": { "name": "soak-envelope-held-passes", "root": ".", "ecosystem": "shell" },
+  "units": [ { "unit": "service", "discover": { "type": "literal", "values": ["."] } } ],
+  "bindings": [],
+  "gate_concept": "sound",
+  "envelope": { "target": { "calls_per_sec": 2000, "inferences_per_sec": 50 }, "slo": { "p99_latency_ms": 250 }, "margin": 1.5 },
+  "soak": [
+    { "dimension": "calls_per_sec", "evidence": { "tool": "bash", "argv": ["-c", "echo '{\"schema\":\"capacity-profile/v0\",\"dimension\":\"calls_per_sec\",\"v_no\":3000,\"v_ne\":4200}'"], "needs": ["bash"], "ok_when": "exit==0" } },
+    { "dimension": "inferences_per_sec", "evidence": { "tool": "bash", "argv": ["-c", "echo '{\"schema\":\"capacity-profile/v0\",\"dimension\":\"inferences_per_sec\",\"v_no\":80,\"v_ne\":110}'"], "needs": ["bash"], "ok_when": "exit==0" } }
+  ]
+}

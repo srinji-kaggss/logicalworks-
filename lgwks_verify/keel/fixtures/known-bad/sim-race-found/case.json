@@ -1,0 +1,3 @@
+{ "schema": "keel.known-bad-case/v0", "front_end": "sim", "entry": "profile.json",
+  "expect_verdict": "NO-GO", "expect_exit": 1,
+  "description": "#644: actor A inits, actor B uses. The invariant is 'init before use'. Keel enumerates both interleavings; the schedule [B:use>A:init] violates it => the harness reports inconsistency => concurrency_correctness false => concurrent_safe NO-GO, the race interleaving named. The fault single-unit testing is blind to." }

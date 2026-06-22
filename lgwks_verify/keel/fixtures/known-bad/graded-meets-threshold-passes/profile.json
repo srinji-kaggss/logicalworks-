@@ -1,0 +1,16 @@
+{
+  "_comment": "Graded threshold crossing — meets the bar (GO). boundary_completeness scores 0.92, threshold 0.8.",
+  "target": { "name": "graded-meets-threshold-passes", "root": ".", "ecosystem": "shell" },
+  "units": [
+    { "unit": "crate", "discover": { "type": "literal", "values": ["."] } },
+    { "unit": "module", "discover": { "type": "literal", "values": ["."] } }
+  ],
+  "bindings": [
+    { "atom": "boundary_completeness", "unit": "module", "evidence": { "tool": "bash", "argv": ["-c", "echo 92"], "needs": ["bash"], "ok_when": "exit==0", "score": { "from": "stdout-last-number", "max": 100 } } },
+    { "atom": "precondition_correctness", "unit": "module", "evidence": { "tool": "bash", "argv": ["-c", "true"], "needs": ["bash"], "ok_when": "exit==0" } },
+    { "atom": "postcondition_correctness", "unit": "module", "evidence": { "tool": "bash", "argv": ["-c", "true"], "needs": ["bash"], "ok_when": "exit==0" } },
+    { "atom": "testability_falsifiability", "unit": "crate", "evidence": { "tool": "bash", "argv": ["-c", "true"], "needs": ["bash"], "ok_when": "exit==0" } }
+  ],
+  "gate_concept": "well_crossed",
+  "thresholds": { "boundary_completeness": 0.8 }
+}

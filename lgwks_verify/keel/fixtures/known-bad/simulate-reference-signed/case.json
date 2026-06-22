@@ -1,0 +1,3 @@
+{ "schema": "keel.known-bad-case/v0", "front_end": "simulate", "entry": "profile.json",
+  "expect_verdict": "GO", "expect_exit": 0,
+  "description": "A6 authenticity (the external trust root): the reference loads from a file AND ships an ed25519 detached signature verified against the profile's trust_anchor public key. A valid signature means the golden data was attested by a key-holder OUTSIDE the AI authorship loop — independence the gate otherwise lacks. Harness output 2*x matches the authenticated reference => GO. A tampered reference or wrong key would BLOCK (selftest covers both)." }

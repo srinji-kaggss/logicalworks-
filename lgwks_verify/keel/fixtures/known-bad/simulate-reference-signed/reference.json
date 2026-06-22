@@ -1,0 +1,24 @@
+{
+  "source_ref": "captured from validated v1.2 build; signed by release engineer (key in CM)",
+  "tolerance": 0,
+  "data": [
+    {
+      "when": {
+        "x": 1
+      },
+      "expect": 2
+    },
+    {
+      "when": {
+        "x": 2
+      },
+      "expect": 4
+    },
+    {
+      "when": {
+        "x": 3
+      },
+      "expect": 6
+    }
+  ]
+}

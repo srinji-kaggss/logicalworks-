@@ -7,6 +7,12 @@
   },
   "concepts": [
     {
+      "id": "lgwks_floor",
+      "origin": "user",
+      "formal": "logicalworks- gate (vendored lgwks tailoring, NOT pristine Keel): symbols resolve AND tests run AND the security scan is clean",
+      "formula": { "all": ["referential_truth", "testability_falsifiability", "security_by_construction"] }
+    },
+    {
       "id": "CoreGroundedCorrect",
       "origin": "framework",
       "formal": "referential_truth \u2227 type_soundness \u2227 totality_or_controlled_partiality \u2227 specification_fidelity",
@@ -142,14 +148,73 @@
       }
     },
     {
-      "id": "lgwks_floor",
+      "id": "spec_validated",
       "origin": "user",
-      "formal": "DO-178B compliant CI baseline + Keel semantic security",
+      "formal": "system output matches validated reference data within tolerance (docs/10 A6)",
+      "note": "Instantiated by the input-envelope simulator in REFERENCE mode (src/run-simulate.mjs): the system-under-test output is compared to a declared reference table within tolerance. Truth traces to reference DATA, not the harness author's intuition (A6 validated_aircraft_correlation) \u2014 this is the honest binding of specification_fidelity.",
+      "formula": {
+        "all": [
+          "specification_fidelity"
+        ]
+      }
+    },
+    {
+      "id": "latency_bounded",
+      "origin": "user",
+      "formal": "measured latency/jitter \u2264 cited budget across samples (docs/10 A5)",
+      "note": "Instantiated by the latency tier (src/run-latency.mjs): the operation's measured latency is aggregated (max/p99/jitter) and crossed against a CITED budget. Measurement is empirical (sensor); the budget decision is deterministic. A5: latency and jitter are first-order verdict variables.",
+      "formula": {
+        "all": [
+          "algorithmic_efficiency"
+        ]
+      }
+    },
+    {
+      "id": "concurrent_safe",
+      "origin": "user",
+      "formal": "the consistency oracle holds across every enumerated interleaving (docs/04 \u00a74.5, A1/A7)",
+      "note": "Instantiated by the multi-actor sim tier (src/run-sim.mjs): Keel enumerates the order-preserving interleavings of concurrent actors and crosses the consistency oracle over all of them. The system is concurrent_safe iff no interleaving exhibits a race.",
+      "formula": {
+        "all": [
+          "concurrency_correctness"
+        ]
+      }
+    },
+    {
+      "id": "requirements_based",
+      "origin": "user",
+      "formal": "requirements are traceable to executable checks and reference-data oracles",
+      "note": "DO-178C and ISO 26262 both punish untraceable testing. This concept is the evidence substance: specification fidelity, boundary/pre/post behavior, and falsifiability all carry runnable evidence.",
+      "formula": {
+        "all": [
+          "specification_fidelity",
+          "precondition_correctness",
+          "postcondition_correctness",
+          "boundary_completeness",
+          "testability_falsifiability"
+        ]
+      }
+    },
+    {
+      "id": "safety_critical_floor",
+      "origin": "user",
+      "formal": "strict life-impact floor: buildable, requirements-based, robust, observable, secure, and concurrency-safe",
+      "note": "For DAL A/B/C or ASIL C/D style internal assurance, use this as the enforced gate and assert assurance_claim=Excellent only when every atom has evidence. This concept does not certify; it refuses to accept code that lacks the core evidence shape expected of safety-critical CI.",
       "formula": {
         "all": [
           "referential_truth",
-          "testability_falsifiability",
-          "security_by_construction"
+          "type_soundness",
+          "totality_or_controlled_partiality",
+          "specification_fidelity",
+          "precondition_correctness",
+          "postcondition_correctness",
+          "invariant_preservation",
+          "boundary_completeness",
+          "error_semantics",
+          "security_by_construction",
+          "concurrency_correctness",
+          "observability",
+          "testability_falsifiability"
         ]
       }
     }

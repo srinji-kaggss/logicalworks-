@@ -1,0 +1,8 @@
+{
+  "schema": "keel.known-bad-case/v0",
+  "front_end": "simulate",
+  "entry": "profile.json",
+  "expect_verdict": "NO-GO",
+  "expect_exit": 1,
+  "description": "A6 catches a regression the harness's own exit code would have missed: the system now emits 2*x+1, but the reference data says 2*x (tolerance 0). The harness exits 0 (it 'ran fine') — only the comparison to REFERENCE DATA reveals the deviation => NO-GO. Demonstrates oracle truth from data, not intuition."
+}

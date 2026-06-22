@@ -1,0 +1,15 @@
+{
+  "_comment": "Brittle system: oracle breaks at the off-nominal boundary probe => NO-GO with breaking vector.",
+  "target": { "name": "simulate-boundary-breaks", "root": ".", "ecosystem": "shell" },
+  "units": [ { "unit": "crate", "discover": { "type": "literal", "values": ["."] } } ],
+  "bindings": [],
+  "gate_concept": "buildable",
+  "simulate": [
+    { "name": "input_x_brittle", "atom": "referential_truth",
+      "sensors": [ { "name": "x", "range": [0, 10] } ],
+      "harness": { "tool": "bash", "argv": ["-c", "test \"$KEEL_SENSOR_X\" -ge 0 && test \"$KEEL_SENSOR_X\" -le 10"], "needs": ["bash"] } },
+    { "name": "mode_robust", "atom": "testability_falsifiability",
+      "sensors": [ { "name": "mode", "values": ["a", "b"] } ],
+      "harness": { "tool": "bash", "argv": ["-c", "true"], "needs": ["bash"] } }
+  ]
+}

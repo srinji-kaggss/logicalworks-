@@ -6,32 +6,67 @@
 // per-atom with three-valued ∧, and composes the gate. Determinism: identity is content,
 // no wall-clock, no randomness. Standalone: only Node builtins + Keel's own modules.
 
-import { globSync } from 'node:fs';
-import { join } from 'node:path';
-import { H, hashFile } from './anchor.mjs';
+import { globFingerprint, SRC_GLOBS, EXCLUDE } from './anchor.mjs';
 import { atomNode } from './atoms.mjs';
-import { evalConcept } from './concepts.mjs';
+import { evalConcept, evalFormula } from './concepts.mjs';
 import { mapPool, defaultConcurrency } from './concurrency.mjs';
 
-export const SRC_GLOBS = ['**/*.mjs', '**/*.js', '**/*.ts', '**/*.rs', '**/*.py', '**/*.toml'];
-export const EXCLUDE = ['/.git/', '/.keel/', '/node_modules/', '/target/', '/.worktrees/'];
+// Re-exported for back-compat (front-ends import these from engine). The single definition lives
+// in anchor.mjs so binding-scope fingerprinting (atoms.mjs) shares it — never a divergent copy.
+export { SRC_GLOBS, EXCLUDE } from './anchor.mjs';
 
-/** Content fingerprint of a unit dir: hash of sorted [relpath, contentHash] (staleness spine). */
+/** Content fingerprint of a whole unit dir: every source file (the coarsest, default scope).
+ *  A binding may narrow this to its own `scope` (atoms.unitFingerprint) for finer staleness. */
 export function contentFingerprint(dir, { globs = SRC_GLOBS, exclude = EXCLUDE } = {}) {
-  const files = [];
-  for (const pat of globs) {
-    for (const f of globSync(pat, { cwd: dir })) {
-      if (exclude.some(x => ('/' + f + '/').includes(x))) continue;
-      files.push([f, hashFile(join(dir, f))]);
-    }
-  }
-  files.sort((a, b) => (a[0] < b[0] ? -1 : 1));
-  return H(files);
+  return globFingerprint(dir, globs, exclude);
 }
 
 /** Three-valued ∧ aggregating one atom across its units: false dominates, then unknown. */
 export function kleeneAll(vs) {
   return vs.includes('false') ? 'false' : vs.includes('unknown') ? 'unknown' : 'true';
+}
+
+/** Cross a graded atom's score to a three-valued floor verdict against a profile threshold
+ *  (docs/02 §2.5, #648 item 8). No measurement OR no declared threshold => 'unknown' (the bar is
+ *  the auditor's parameter; absence of a bar blocks, it never silently passes). */
+export function crossGraded(score, threshold) {
+  if (typeof score !== 'number' || Number.isNaN(score)) return 'unknown';
+  if (typeof threshold !== 'number') return 'unknown';
+  return score >= threshold ? 'true' : 'false';
+}
+
+/**
+ * Claim-coherence (the punishing gate; docs/09): you may CLAIM only what you DEMONSTRATED.
+ * Given the formula of the concept a profile asserts it meets (`assurance_claim`) and the measured
+ * atom values, find every atom the claim rests on that has NO definite evidence (unknown/unrun/
+ * unbound). If any exist the claim OUTRUNS the evidence — the run must BLOCK, regardless of how
+ * narrow the enforced `gate_concept` was. This is "deeply punishing of overclaim, without being
+ * overhot": it fires ONLY when you explicitly assert a claim, and only on the gap between assertion
+ * and demonstration — an honest `unknown` on something you never claimed does not block.
+ *
+ * A claim is DEMONSTRATED only when its concept formula actually HOLDS under the measured values —
+ * not merely when every atom was measured. Two honest failure modes are kept distinct:
+ *   - `undemonstrated` (claim formula 'unknown' — a claimed atom is unrun/unbound): the claim
+ *     OUTRAN its evidence ⇒ BLOCK.
+ *   - `refuted` (claim formula 'false' under measured atoms): the evidence DISPROVES the claim
+ *     ⇒ NO-GO.
+ * Prior bug (Open Risk #4, 2026-06-21 handoff): only `unknown` atoms counted as undemonstrated, so
+ * a claimed atom measured FALSE was reported "coherent / demonstrated" — overclaim dressed as proof.
+ * Now a false claimed atom that breaks the formula refutes the claim.
+ * Returns { coherent, claimValue, claimedAtoms, undemonstrated, refuted, refutingAtoms }.
+ */
+export function claimCoherence(claimFormula, atomValues) {
+  const claimedAtoms = [...collectAtoms(claimFormula)];
+  const undemonstrated = claimedAtoms.filter((id) => atomValues[id] !== 'true' && atomValues[id] !== 'false');
+  const claimValue = evalFormula(claimFormula, atomValues);
+  return {
+    coherent: claimValue === 'true',
+    claimValue,
+    claimedAtoms,
+    undemonstrated,
+    refuted: claimValue === 'false',
+    refutingAtoms: claimValue === 'false' ? claimedAtoms.filter((id) => atomValues[id] === 'false') : [],
+  };
 }
 
 /** Collect the atom ids a concept formula references. */
@@ -62,11 +97,13 @@ export function collectAtoms(f, acc = new Set()) {
  * activation = { atomId, atomDef, binding|null, unit, source?, advisory?, role? }
  * returns    = { gate, atomValues, atoms, advisories, crossing, recomputed, reused }
  */
-export async function composeReport({ activations, gate, anchor, concurrency = defaultConcurrency() }) {
+export async function composeReport({ activations, gate, anchor, concurrency = defaultConcurrency(), thresholds = {}, policy = null }) {
   const evaluated = await mapPool(activations, concurrency, async (act) => {
     // pass the channel meta so the node id is namespaced by advisory/source (engine never lets
     // an advisory node's verdict be reused by a gated atom — C3 defence-in-depth in atoms.mjs).
-    const node = atomNode(act.atomDef, act.binding, act.unit, { advisory: act.advisory, source: act.source });
+    // `policy` (execution_policy) confines the evidence run's env (R#3); it does not affect the
+    // node id (the binding's declared env still does), only which ambient vars the tool can read.
+    const node = atomNode(act.atomDef, act.binding, act.unit, { advisory: act.advisory, source: act.source, policy });
     const res = await anchor.evaluateAsync(node);
     return { act, verdict: res.verdict, cached: res.cached };
   });
@@ -84,14 +121,27 @@ export async function composeReport({ activations, gate, anchor, concurrency = d
     crossedPoints += points.length || 1;
     crossedFalse += points.filter(p => p.value === 'false').length;
     crossedUnknown += points.filter(p => p.value === 'unknown').length;
+    // GRADED threshold crossing (#648 item 8): the cached score crosses to boolean HERE, in
+    // post-process, against the profile threshold — keeping the bar out of the cached node so
+    // re-bar never re-runs the tool. No bar => unknown (blocks, never silently passes).
+    let value = verdict.value, graded;
+    if (act.atomDef?.kind === 'graded' && verdict.value === 'graded') {
+      const threshold = thresholds[act.atomId];
+      value = crossGraded(verdict.score, threshold);
+      graded = { score: verdict.score, threshold };
+    }
     const row = {
-      atom: act.atomId, unit: act.unit.id, value: verdict.value,
-      reason: verdict.reason, cached: e.cached, source: act.source,
-      points: points.length > 1 ? points.map(p => ({ label: p.label, value: p.value })) : undefined,
+      atom: act.atomId, unit: act.unit.id, value,
+      reason: (value === 'unknown' && graded && graded.threshold === undefined)
+        ? `graded score ${graded.score} but no profile threshold — set thresholds['${act.atomId}'] (docs/02 §2.5)`
+        : verdict.reason,
+      score: graded?.score, threshold: graded?.threshold,
+      cached: e.cached, source: act.source,
+      points: points.length > 1 ? points.map(p => ({ label: p.label, value: p.value, score: p.score })) : undefined,
     };
     if (act.advisory) { advisories.push({ ...row, role: act.role }); continue; }
     atoms.push(row);
-    (perAtom[act.atomId] ||= []).push(verdict.value);
+    (perAtom[act.atomId] ||= []).push(value);
   }
 
   const atomValues = {};

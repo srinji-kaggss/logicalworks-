@@ -1,0 +1,30 @@
+{"synthetic": false,
+ "schemaVersion": "2025-09-10",
+ "outputs":
+ {"o": ["108724af7a39f0f1.olean"],
+  "m": false,
+  "i": "130bdb30135fde38.ilean",
+  "c": "3e4a83beb64847be.c"},
+ "log":
+ [{"message":
+   ".> LEAN_PATH=/Users/srinji/keel/lean/.lake/build/lib/lean /Users/srinji/.elan/toolchains/leanprover--lean4---v4.31.0/bin/lean /Users/srinji/keel/lean/ExcellentCode/Framework.lean -o /Users/srinji/keel/lean/.lake/build/lib/lean/ExcellentCode/Framework.olean -i /Users/srinji/keel/lean/.lake/build/lib/lean/ExcellentCode/Framework.ilean -c /Users/srinji/keel/lean/.lake/build/ir/ExcellentCode/Framework.c --setup /Users/srinji/keel/lean/.lake/build/ir/ExcellentCode/Framework.setup.json --json",
+   "level": "trace"}],
+ "inputs":
+ [["ExcellentCode.Framework:deps",
+   [["deps",
+     [["keel/ExcellentCode:extraDep", [["@keel:extraDep", "00000000000006bb"]]],
+      ["imports", "00000000000006bb"]]],
+    ["libs",
+     [["import dynlibs", "00000000000006bb"],
+      ["package external libraries", "00000000000006bb"],
+      ["module dynlibs", "00000000000006bb"],
+      ["module plugins", "00000000000006bb"]]]]],
+  ["Lean 4.31.0, commit 68218e876d2a38b1985b8590fff244a83c321783",
+   "fc45ac412f28501c"],
+  ["/Users/srinji/keel/lean/ExcellentCode/Framework.lean", "99f78865a0336673"],
+  ["options", "00000000000006bb"],
+  ["isModule: false", "feefd2a0d3a1847e"],
+  ["Module.name: ExcellentCode.Framework", "edd4b1861a23aecd"],
+  ["Package.id?: (some keel)", "f0ad491bd847cf32"],
+  ["Module.leanArgs: #[]", "00000000000006bb"]],
+ "depHash": "bef92aa6b9a013ab"}

@@ -1,0 +1,7 @@
+{ "_comment": "A5: measured latency exceeds the cited budget => NO-GO.",
+  "target": { "name": "latency-exceeds-budget", "root": ".", "ecosystem": "shell" },
+  "units": [ { "unit": "crate", "discover": { "type": "literal", "values": ["."] } } ],
+  "bindings": [], "gate_concept": "latency_bounded",
+  "latency": [ { "name": "hot_path", "atom": "algorithmic_efficiency", "samples": 4,
+    "budget": { "max_ms": 20, "source_ref": "SLO: p99<=20ms (service contract v3)" },
+    "harness": { "tool": "bash", "argv": ["-c", "echo 50"], "needs": ["bash"] } } ] }

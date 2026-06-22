@@ -13,9 +13,17 @@
 // stores; the runtime is NOT imported (docs/01 §1.8).
 
 import { createHash } from 'node:crypto';
-import { readFileSync, mkdirSync, writeFileSync, existsSync, statSync, appendFileSync } from 'node:fs';
+import { readFileSync, mkdirSync, writeFileSync, existsSync, statSync, appendFileSync, globSync } from 'node:fs';
 import { join } from 'node:path';
 import { singleFlight } from './concurrency.mjs';
+import { signSeal, releaseSigningKey } from './sign.mjs';
+
+// Staleness-fingerprint policy (the file set a content fingerprint covers). Lives here, the lowest
+// layer, because BOTH whole-unit fingerprinting (engine.contentFingerprint) and binding-scope
+// fingerprinting (atoms.unitFingerprint with a declared `scope`) must hash file sets the SAME way —
+// derive-or-define-once, never a slight-difference copy (docs/01 §1.3 design rule).
+export const SRC_GLOBS = ['**/*.mjs', '**/*.js', '**/*.ts', '**/*.rs', '**/*.py', '**/*.toml'];
+export const EXCLUDE = ['/.git/', '/.keel/', '/node_modules/', '/target/', '/.worktrees/'];
 
 /** H — the hash primitive. Stable JSON (sorted keys) so equal content => equal id. */
 export function H(...parts) {
@@ -46,13 +54,33 @@ export function hashPathMeta(path) {
 }
 
 /**
+ * Content fingerprint of a FILE SET under `dir`: the hash of sorted [relpath, contentHash] over
+ * every file matching `globs` (minus `exclude`). The single source for staleness granularity —
+ * the wider the glob set, the coarser the recompute. A whole-unit fingerprint passes SRC_GLOBS;
+ * a binding `scope` passes only the globs that binding's evidence actually depends on, so an edit
+ * outside the scope does NOT change the fingerprint and the bound atom node is NOT recomputed
+ * (symbol-granular staleness grows from here toward .braid — issue ledger item 2 / #647).
+ */
+export function globFingerprint(dir, globs, exclude = EXCLUDE) {
+  const files = [];
+  for (const pat of globs) {
+    for (const f of globSync(pat, { cwd: dir })) {
+      if (exclude.some(x => ('/' + f + '/').includes(x))) continue;
+      files.push([f, hashFile(join(dir, f))]);
+    }
+  }
+  files.sort((a, b) => (a[0] < b[0] ? -1 : 1));
+  return H(files);
+}
+
+/**
  * The Anchor: a content-addressed store of node verdicts under <dir>.
  * - nodeId(kind, params, inputHashes) computes the deterministic id.
  * - evaluate(node) returns the cached verdict if the id matches (stale-proof),
  *   else computes via node.compute(), stores, and returns it.
  */
 export class Anchor {
-  constructor(dir) {
+  constructor(dir, { signingKeyPem = releaseSigningKey() } = {}) {
     this.dir = dir;
     this.store = join(dir, 'nodes');
     mkdirSync(this.store, { recursive: true });
@@ -60,6 +88,9 @@ export class Anchor {
     this.recomputed = 0;
     this.reused = 0;
     this._flight = singleFlight();  // collapse identical nodes computed concurrently
+    // R#5: an optional release private key (PEM). When present, each seal carries a detached
+    // ed25519 signature over its manifest hash — authenticity + transparency, not just integrity.
+    this._signingKeyPem = signingKeyPem;
   }
 
   nodeId(kind, params, inputHashes) {
@@ -142,9 +173,13 @@ export class Anchor {
     const body = stableStringify(manifest) + '\n';
     writeFileSync(path, body);
     const manifest_hash = H(body);
+    // R#5: sign the manifest hash with the release key when configured. The signature attests the
+    // factory produced this seal; combined with the prev-link it makes the chain a transparency
+    // record (a rewritten/forged/replayed seal fails verify-seal.mjs). Unsigned ⇒ sig:null, honest.
+    const sig = this._signingKeyPem ? signSeal(manifest_hash, this._signingKeyPem) : null;
     appendFileSync(join(this.dir, '_chain.jsonl'),
-      stableStringify({ run: runId, manifest_hash, prev }) + '\n');
-    return { path, manifest, manifest_hash, prev };
+      stableStringify({ run: runId, manifest_hash, prev, sig }) + '\n');
+    return { path, manifest, manifest_hash, prev, sig };
   }
 
   /** The manifest hash of the latest seal on this anchor's chain, or null at genesis. */

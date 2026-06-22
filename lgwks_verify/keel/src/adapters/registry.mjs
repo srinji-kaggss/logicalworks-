@@ -27,7 +27,10 @@ export function verifierEvidence(v, dockerPresent) {
   // N declared points (configs/feature-flags/platforms). Carried straight to atoms.mjs, which
   // crosses every point and holds the atom true only if all hold (Kleene ∧). Absent → 1 point.
   const cross = Array.isArray(v.cross) && v.cross.length ? v.cross : undefined;
-  const base = { needs: v.needs || [], cwd: v.cwd, dockerGated: dockerGated || undefined, cross };
+  // scope (#647): the file globs this verifier's evidence depends on — narrows the bound atom's
+  // staleness fingerprint to those files (atoms.unitFingerprint). Absent ⇒ whole-unit (coarse).
+  const scope = Array.isArray(v.scope) && v.scope.length ? v.scope : undefined;
+  const base = { needs: v.needs || [], cwd: v.cwd, dockerGated: dockerGated || undefined, cross, scope };
   return spec.type === 'shell'
     ? { tool: 'bash', argv: ['-c', spec.cmd], ...base }
     : { tool: spec.cmd[0], argv: spec.cmd.slice(1), ...base };

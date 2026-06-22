@@ -1,2 +1,30 @@
-Source SHA: 181707a
-Re-sync command: cp -r /Users/srinji/keel/src/* lgwks_verify/keel/src/ && cp -r /Users/srinji/keel/schema/* lgwks_verify/keel/schema/
+Source SHA: 98083188e4444189873413d6c1fc2c1d9436247e   (~/keel, local-only — Keel docs/06 §6.1)
+Vendored: 2026-06-22 — whole authority at ONE SHA, hardened (all five 2026-06-21 Open Risks; Keel docs/15 §15.4).
+
+PROVENANCE LOCK (§15.3.3) — two parts, because schema/ is the intended tailoring surface:
+
+1. Pristine authority (src/ fixtures/ lean/) — BYTE-IDENTICAL to keel@9808318. Recompute and
+   diff against the source to detect drift / a mixed-SHA or locally-edited vendor:
+     cd lgwks_verify/keel && find src fixtures lean -type f -not -name '.DS_Store' \
+       | LC_ALL=C sort | xargs shasum -a 256 | shasum -a 256 | cut -d' ' -f1
+     => 2b078705afcdb5a2245ad99e713aecc55ba1190a84a55cfb8c9954413193b869   (== keel@9808318 same subtree)
+
+2. Tailored ontology (schema/) — pristine keel@9808318 schema PLUS the lgwks tailoring delta below.
+   Keel is "tailored by an AI through schema, not code edits" (Keel docs/03), so this is by design,
+   not drift. The delta is exactly:
+     - schema/concepts.json : + concept `lgwks_floor` (origin:user) = all[referential_truth,
+       testability_falsifiability, security_by_construction]  (the logicalworks- gate concept).
+     - schema/profile.schema.json : unit enum + "core"  (logicalworks- models the repo as one
+       "core" unit; both units[].unit and bindings[].unit).
+   Nothing else in schema/ differs from keel@9808318. atoms.json is pristine (20 atoms, unchanged).
+
+Re-sync (replace the whole tree at a chosen SHA, then RE-APPLY the §2 tailoring — never a partial
+copy that mixes SHAs; that mix was the bug this re-vendor fixed, logicalworks- #241):
+  rm -rf lgwks_verify/keel/{src,schema,fixtures,lean}
+  cp -R ~/keel/{src,schema,fixtures,lean} lgwks_verify/keel/
+  # then re-add lgwks_floor to schema/concepts.json and "core" to the unit enums; update §1 fingerprint.
+
+History: the prior pin claimed 181707a but the tree was a MIX (anchor@181707a, concepts/concurrency@
+HEAD, engine@neither) AND predated Keel's validate.mjs — so lgwks.profile.json (unit "core",
+gate lgwks_floor) was never schema-validated. The hardened keel validates it; this vendor makes the
+tailoring explicit and the provenance honest.

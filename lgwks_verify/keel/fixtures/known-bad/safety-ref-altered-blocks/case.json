@@ -1,0 +1,8 @@
+{
+  "schema": "keel.known-bad-case/v0",
+  "front_end": "profile",
+  "entry": "profile.json",
+  "expect_verdict": "NO-GO",
+  "expect_exit": 1,
+  "description": "Open Risk #1 (reference verification): the gate (buildable) is satisfied, but the safety_case declares reference_integrity for verification_plan_ref with a hash that does NOT match the committed report.json — the referenced evidence was altered after it was recorded. An unverified reference is NO-GO. Proves a string ref can no longer point at silently-changed content."
+}

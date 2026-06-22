@@ -1,0 +1,71 @@
+{
+  "_comment": "A6: harness exits 0 but output deviates from reference => NO-GO. Truth from data, not exit code.",
+  "target": {
+    "name": "simulate-reference-regression",
+    "root": ".",
+    "ecosystem": "shell"
+  },
+  "units": [
+    {
+      "unit": "crate",
+      "discover": {
+        "type": "literal",
+        "values": [
+          "."
+        ]
+      }
+    }
+  ],
+  "bindings": [],
+  "gate_concept": "spec_validated",
+  "simulate": [
+    {
+      "name": "spec_fidelity_regressed",
+      "atom": "specification_fidelity",
+      "sensors": [
+        {
+          "name": "x",
+          "values": [
+            1,
+            2,
+            3
+          ]
+        }
+      ],
+      "reference": {
+        "tolerance": 0,
+        "source_ref": "golden trace f(x)=2x",
+        "data": [
+          {
+            "when": {
+              "x": 1
+            },
+            "expect": 2
+          },
+          {
+            "when": {
+              "x": 2
+            },
+            "expect": 4
+          },
+          {
+            "when": {
+              "x": 3
+            },
+            "expect": 6
+          }
+        ]
+      },
+      "harness": {
+        "tool": "bash",
+        "argv": [
+          "-c",
+          "echo $(( KEEL_SENSOR_X * 2 + 1 ))"
+        ],
+        "needs": [
+          "bash"
+        ]
+      }
+    }
+  ]
+}

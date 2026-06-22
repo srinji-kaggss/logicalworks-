@@ -1,0 +1,11 @@
+{ "_comment": "A6 authenticity: signed reference verified against an external trust anchor => authenticated GO.",
+  "target": { "name": "simulate-reference-signed", "root": ".", "ecosystem": "shell" },
+  "units": [ { "unit": "crate", "discover": { "type": "literal", "values": ["."] } } ],
+  "bindings": [], "gate_concept": "spec_validated",
+  "trust_anchor": "trust-anchor.pub.pem",
+  "simulate": [
+    { "name": "spec_fidelity_signed", "atom": "specification_fidelity",
+      "sensors": [ { "name": "x", "values": [1, 2, 3] } ],
+      "reference": { "from": "reference.json", "signature_file": "reference.sig.b64" },
+      "harness": { "tool": "bash", "argv": ["-c", "echo $(( KEEL_SENSOR_X * 2 ))"], "needs": ["bash"] } }
+  ] }

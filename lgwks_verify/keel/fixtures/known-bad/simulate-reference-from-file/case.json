@@ -1,0 +1,8 @@
+{
+  "schema": "keel.known-bad-case/v0",
+  "front_end": "simulate",
+  "entry": "profile.json",
+  "expect_verdict": "GO",
+  "expect_exit": 0,
+  "description": "A6 provenance (docs/10): the reference is loaded from a content-hashed FILE (reference.json), not an inline table — its hash folds into the verdict node id so an edited reference requalifies (A8). Harness output 2*x matches the file => GO. Proves trace_to_source_data / immutable_record."
+}

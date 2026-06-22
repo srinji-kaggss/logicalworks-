@@ -1,0 +1,8 @@
+{
+  "schema": "keel.known-bad-case/v0",
+  "front_end": "profile",
+  "entry": "profile.json",
+  "expect_verdict": "NO-GO",
+  "expect_exit": 1,
+  "description": "The framework's namesake, end-to-end: code.rs CALLS render_widget() but never DEFINES it (a hallucinated/unresolved symbol). The referential_truth binding greps for the definition and fails => referential_truth=false. The gate is the FRAMEWORK concept CoreGroundedCorrect (= grounding ∧ type ∧ totality ∧ spec); ∧ short-circuits to false, so Hallucinated=¬CoreGroundedCorrect is COMPUTED true and Keel returns NO-GO. The other three core atoms pass, isolating the cause to grounding. No other fixture gates a framework concept or exercises the Hallucinated path."
+}

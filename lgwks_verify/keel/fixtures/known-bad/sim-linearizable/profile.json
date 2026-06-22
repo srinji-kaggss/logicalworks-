@@ -1,0 +1,7 @@
+{ "_comment": "Commutative ops: every interleaving consistent => GO.",
+  "target": { "name": "sim-linearizable", "root": ".", "ecosystem": "shell" },
+  "units": [ { "unit": "service", "discover": { "type": "literal", "values": ["."] } } ],
+  "bindings": [], "gate_concept": "concurrent_safe",
+  "sim": [ { "name": "commutative_writes", "atom": "concurrency_correctness",
+    "actors": [ { "id": "A", "steps": ["w1"] }, { "id": "B", "steps": ["w2"] } ],
+    "harness": { "tool": "bash", "argv": ["-c", "exit 0"], "needs": ["bash"] } } ] }

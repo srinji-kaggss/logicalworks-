@@ -1,0 +1,8 @@
+{
+  "schema": "keel.known-bad-case/v0",
+  "front_end": "profile",
+  "entry": "profile.json",
+  "expect_verdict": "GO",
+  "expect_exit": 0,
+  "description": "Companion control to graded-below-threshold-blocks: the SAME graded atom scores 92/100 = 0.92 against threshold 0.8, so it crosses to true and the gate well_crossed is GO. Proves the threshold does not spuriously block a meeting score (#648 item 8)."
+}

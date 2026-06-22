@@ -1,0 +1,8 @@
+{
+  "schema": "keel.known-bad-case/v0",
+  "front_end": "profile",
+  "entry": "profile.json",
+  "expect_verdict": "NO-GO",
+  "expect_exit": 1,
+  "description": "Open Risk #4 (claim=evidence): gate_concept=buildable (referential_truth ∧ testability_falsifiability — both bound true, so the narrow gate GOES), but assurance_claim=sound, which also requires type_soundness — bound to a tool that FAILS (exit 1). Every claimed atom is MEASURED (none unknown), so the old claim-coherence called the claim 'demonstrated' and the run went GO. The claim is in fact REFUTED: sound's formula is false. Proves a refuted claim => NO-GO even when the enforced gate would pass — measured is not demonstrated."
+}

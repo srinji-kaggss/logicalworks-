@@ -1,0 +1,8 @@
+{
+  "schema": "keel.known-bad-case/v0",
+  "front_end": "simulate",
+  "entry": "profile.json",
+  "expect_verdict": "GO",
+  "expect_exit": 0,
+  "description": "The simulator (docs/09): sensor x is driven across range [0,10] PLUS the off-nominal probes (-1, 11), and mode across {a,b}. The harness (robust system) holds the oracle on EVERY vector incl. off-nominal => both atoms true => buildable GO. Proves Keel drives the input/sensor envelope and crosses the oracle."
+}
