@@ -309,6 +309,12 @@ class VectorFabric:
                     space_id=f"{provider}:d{dims}",
                     tenant=tenant,
                     source_cid=row["fact_hash"],
+                    # #165 Phase 2: lineage tags. The fact's tape fact cid IS its
+                    # fact_hash (gate.ingest_fact(io._sha(sentence), …)), so the
+                    # embedding is content-addressed back to that tape entry, and
+                    # tokenization_id records which analyzer named the source.
+                    tokenization_id=str(row.get("tokenization_id") or ""),
+                    artifact_cid=str(row.get("artifact_cid") or row["fact_hash"]),
                 )
             except vec_mod.VectorError:
                 # zero vector / contract violation — skip, don't poison the batch.
