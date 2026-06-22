@@ -1,8 +1,18 @@
 """lgwks_jarvis — legacy deterministic research graph crawler.
 
 The Jarvis crawler is intentionally boring at its core: bounded crawl, stable
-IDs, deterministic feature hashing, SQLite records, and explicit frontier
-questions. Neural/LLM providers can improve ranking later without owning truth.
+IDs, deterministic feature hashing, and explicit frontier questions. Neural/LLM
+providers can improve ranking later without owning truth.
+
+#165 step 3: the per-run research.sqlite islands (JarvisDB) were retired. The
+legacy crawler now persists into the one State Fabric via StorageGate — chunks +
+embeddings through the gate (cid-keyed, dedup across runs into vector_records),
+nodes/edges into the cid/tier-aligned gate graph, and analytic records (run,
+snapshot, understanding, drill, question, crawl-event, compression) as
+content-addressed reasoning facts on the Causal Tape. run_id is provenance
+(stamped in artifact meta + a discovered_in_run graph edge), no longer a shard
+key. The gate is keyed on the run *name* (no timestamp) so successive runs of the
+same topic accumulate into one cumulative, cross-run-deduplicated store.
 """
 
 from __future__ import annotations
@@ -32,6 +42,9 @@ from typing import Iterable, Any, Optional
 
 import lgwks_sqlite
 import lgwks_hashing  # canonical content-id seam (#223 C-10): no local sha re-derivation
+import lgwks_storage  # #165 step 3: the one State Fabric gate (retires JarvisDB islands)
+import lgwks_vector as vec_mod  # embeddings → cid-keyed vector_records
+import lgwks_artifact_tokenized as artifact_mod  # canonical tape artifact envelope
 
 ROOT = Path(__file__).resolve().parent
 RUN_ROOT = ROOT / "vision" / "research" / "research-network" / "runs"
@@ -276,283 +289,110 @@ def semantic_type_scores(text: str) -> dict[str, float]:
     return scores
 
 
-class JarvisDB:
-    def __init__(self, path: Path):
-        self.path = path
-        self.conn = lgwks_sqlite.connect(path)
-        self.conn.row_factory = sqlite3.Row
+EMBED_PROVIDER = "deterministic-feature-hash"
+EMBED_SPACE = f"{EMBED_PROVIDER}:d{DEFAULT_DIMS}"
 
-    def close(self):
-        self.conn.commit()
-        self.conn.close()
+# Embedding scopes exported as GNN node features (parity with the retired per-run
+# embeddings table's feature selection).
+_FEATURE_SCOPES = {"understanding-node", "research-understanding", "question-trace"}
 
-    def init(self):
-        cur = self.conn.cursor()
-        cur.executescript(
-            """
-            create table if not exists meta(key text primary key, value text not null);
-            create table if not exists runs(
-              run_id text primary key,
-              name text not null,
-              created_at text not null,
-              schema_version text not null,
-              manifest_path text not null,
-              prompt text not null,
-              keyword_json text not null,
-              config_json text not null
-            );
-            create table if not exists sources(
-              id text primary key,
-              run_id text not null,
-              url text not null,
-              title text not null,
-              axis text not null,
-              tier text not null,
-              raw_path text,
-              status text not null,
-              error text,
-              elapsed_seconds real not null default 0,
-              discovered_by text not null default 'seed',
-              score real not null default 0
-            );
-            create table if not exists documents(
-              id text primary key,
-              run_id text not null,
-              source_id text not null,
-              title text not null,
-              path text not null,
-              content_sha256 text not null,
-              word_count integer not null,
-              chunk_count integer not null
-            );
-            create table if not exists chunks(
-              id text primary key,
-              run_id text not null,
-              document_id text not null,
-              source_id text not null,
-              position integer not null,
-              text text not null,
-              content_sha256 text not null,
-              word_count integer not null,
-              semantic_type_json text not null
-            );
-            create table if not exists embeddings(
-              id text primary key,
-              run_id text not null,
-              scope text not null,
-              target_id text not null,
-              provider text not null,
-              model text not null,
-              dimensions integer not null,
-              vector_json text not null
-            );
-            create table if not exists nodes(
-              id text primary key,
-              run_id text not null,
-              kind text not null,
-              label text not null,
-              weight real not null,
-              metadata_json text not null
-            );
-            create table if not exists edges(
-              id text primary key,
-              run_id text not null,
-              from_id text not null,
-              to_id text not null,
-              kind text not null,
-              weight real not null,
-              evidence text,
-              metadata_json text not null
-            );
-            create table if not exists understandings(
-              id text primary key,
-              run_id text not null,
-              created_at text not null,
-              scope text not null,
-              before_snapshot_id text,
-              after_snapshot_id text,
-              summary text not null,
-              coverage_score real not null,
-              uncertainty_score real not null,
-              evidence_json text not null,
-              schema_json text not null
-            );
-            create table if not exists question_events(
-              id text primary key,
-              run_id text not null,
-              created_at text not null,
-              drill_id text not null,
-              ask_index integer not null,
-              question text not null,
-              what_were_you_thinking text not null,
-              expected_information_gain real not null,
-              answered integer not null default 0,
-              answer text
-            );
-            create table if not exists snapshots(
-              id text primary key,
-              run_id text not null,
-              created_at text not null,
-              phase text not null,
-              page_count integer not null,
-              chunk_count integer not null,
-              node_count integer not null,
-              edge_count integer not null,
-              frontier_json text not null,
-              top_terms_json text not null
-            );
-            create table if not exists drills(
-              id text primary key,
-              run_id text not null,
-              keyword text not null,
-              state text not null,
-              target_pages integer not null,
-              crawled_pages integer not null,
-              ask_count integer not null,
-              compute_estimate_seconds real not null,
-              metadata_json text not null
-            );
-            create table if not exists crawl_events(
-              id text primary key,
-              run_id text not null,
-              created_at text not null,
-              url text not null,
-              status text not null,
-              elapsed_seconds real not null,
-              detail_json text not null
-            );
-            create table if not exists compressed_nodes(
-              id text primary key,
-              run_id text not null,
-              reason text not null,
-              source_node_json text not null,
-              compressed_label text not null,
-              metadata_json text not null
-            );
-            """
+
+class GateWriter:
+    """#165 step 3: persistence adapter for the legacy crawler onto the one State
+    Fabric, replacing the per-run JarvisDB island.
+
+    - record(): analytic records (run/snapshot/understanding/drill/question/
+      crawl-event/compression) -> content-addressed reasoning facts on the tape.
+    - embed(): chunks/documents/terms/understanding/questions -> tape text artifacts
+      with a cid-keyed deterministic embedding in vector_records (store-once across
+      runs; identical content collapses to one record).
+    - node()/edge(): the cid/tier-aligned gate graph (#165 step 2).
+    - project_relational(): the queryable sources/documents/chunks surface.
+
+    run_id is provenance (stamped in artifact meta + node/edge attrs), never a shard
+    key -- the gate is keyed on the run name so successive runs accumulate into one
+    cumulative, cross-run-deduplicated store.
+    """
+
+    def __init__(self, gate: Any, run_id: str):
+        self.gate = gate
+        self.run_id = run_id
+        self.tenant = gate.tenant_id
+        self._tok = gate.tokenizers.default_word_regex_id()
+        self.features: list[dict] = []
+
+    def record(self, kind: str, payload: dict) -> str:
+        """Persist an analytic record as a content-addressed reasoning fact."""
+        text = json.dumps(payload, sort_keys=True)
+        cid = lgwks_hashing.content_id(self.run_id + kind + text)
+        meta = {"run_id": self.run_id}
+        if "id" in payload:
+            meta["record_id"] = payload["id"]
+        self.gate.ingest_fact(cid, text, kind, f"jarvis-{kind}", meta=meta)
+        return cid
+
+    def embed(self, cid: str, text: str, *, scope: str, meta: dict | None = None) -> None:
+        """Ingest a text artifact + its cid-keyed deterministic embedding. Identical
+        content (same cid) collapses to one tape entry + one vector_record."""
+        payload_meta = {"text": text[:20_000], "chunk_kind": scope, "run_id": self.run_id}
+        if meta:
+            payload_meta.update(meta)
+        art = artifact_mod.build_artifact(
+            tenant_id=self.tenant, source="run", run_id=self.run_id, modality="text",
+            tokenization_id=self._tok, token_stream=(), payload_cid=cid,
+            payload_meta=payload_meta, capability_id=f"jarvis-{scope}",
+            timestamp=time.time(), artifact_cid=cid,
         )
-        self.migrate_legacy()
-        cur.execute("insert or replace into meta(key,value) values('schema_version', ?)", (SCHEMA_VERSION,))
-        self.conn.commit()
+        vector = deterministic_embedding(text)
+        vec = vec_mod.encode_record(
+            vector, modality="text", space_id=EMBED_SPACE, tenant=self.tenant,
+            source_cid=cid, tokenization_id=self._tok, artifact_cid=cid,
+        )
+        self.gate.ingest_artifact(art, vector_record=vec, index_tokens=False)
+        if scope in _FEATURE_SCOPES:
+            self.features.append({"id": cid, "scope": scope, "dimensions": DEFAULT_DIMS, "vector": vector})
 
-    def _safe_ident(self, name: str) -> str:
-        """Validate SQL identifier to prevent injection (H7)."""
-        import re
-        if not re.fullmatch(r"[a-zA-Z0-9_]+", name):
-            raise ValueError(f"malicious SQL identifier: {name!r}")
-        return name
+    def node(self, node_id: str, kind: str, label: str, attrs: dict, artifact_cid: str) -> None:
+        self.gate.graph_fabric.upsert_node(
+            node_id, kind, label, {**attrs, "run_id": self.run_id},
+            artifact_cid=artifact_cid, tier=self.tenant,
+        )
 
-    def columns(self, table: str) -> set[str]:
-        self._safe_ident(table)
-        try:
-            rows = self.conn.execute(f"pragma table_info({table})").fetchall()
-        except sqlite3.OperationalError:
-            return set()
-        return {row[1] for row in rows}
+    def edge(self, src: str, dst: str, rel: str, attrs: dict, artifact_cid: str) -> None:
+        self.gate.graph_fabric.upsert_edge(
+            src, dst, rel, {**attrs, "run_id": self.run_id},
+            artifact_cid=artifact_cid, tier=self.tenant,
+        )
 
-    def add_column_if_missing(self, table: str, column: str, definition: str):
-        self._safe_ident(table)
-        self._safe_ident(column)
-        if column not in self.columns(table):
-            self.conn.execute(f"alter table {table} add column {column} {definition}")
+    def project_relational(self, source_rows: list[dict], doc_rows: list[dict], chunk_rows: list[dict]) -> None:
+        self.gate.relational.project_run(
+            source_rows=source_rows, doc_rows=doc_rows, chunk_rows=chunk_rows,
+            fact_rows=[], vector_rows=[], frontier=[],
+        )
 
-    def migrate_legacy(self):
-        embedding_cols = self.columns("embeddings")
-        if embedding_cols and "id" not in embedding_cols:
-            legacy_name = f"embeddings_legacy_{int(time.time())}"
-            self.conn.execute(f"alter table embeddings rename to {legacy_name}")
-            self.conn.execute(
-                """
-                create table embeddings(
-                  id text primary key,
-                  run_id text not null,
-                  scope text not null,
-                  target_id text not null,
-                  provider text not null,
-                  model text not null,
-                  dimensions integer not null,
-                  vector_json text not null
-                )
-                """
-            )
-            self.conn.execute(
-                f"""
-                insert or replace into embeddings(id, run_id, scope, target_id, provider, model, dimensions, vector_json)
-                select 'emb-' || chunk_id, run_id, 'chunk', chunk_id, provider, model, dimensions, vector_json
-                from {legacy_name}
-                """
-            )
-        if self.columns("runs"):
-            self.add_column_if_missing("runs", "schema_version", "text not null default 'legacy'")
-            self.add_column_if_missing("runs", "prompt", "text not null default ''")
-            self.add_column_if_missing("runs", "keyword_json", "text not null default '[]'")
-            self.add_column_if_missing("runs", "config_json", "text not null default '{}'")
-        if self.columns("sources"):
-            self.add_column_if_missing("sources", "error", "text")
-            self.add_column_if_missing("sources", "elapsed_seconds", "real not null default 0")
-            self.add_column_if_missing("sources", "discovered_by", "text not null default 'legacy'")
-            self.add_column_if_missing("sources", "score", "real not null default 0")
-        if self.columns("chunks"):
-            self.add_column_if_missing("chunks", "semantic_type_json", "text not null default '{}'")
+    def commit(self) -> None:
+        self.gate.graph_fabric.commit()
 
-    def insert(self, table: str, row: dict):
-        self._safe_ident(table)
-        keys = list(row)
-        for k in keys:
-            self._safe_ident(k)
-        placeholders = ",".join("?" for _ in keys)
-        cols = ",".join(keys)
-        updates = ",".join(f"{k}=excluded.{k}" for k in keys if k != "id")
-        sql = f"insert into {table}({cols}) values({placeholders})"
-        if "id" in row:
-            sql += f" on conflict(id) do update set {updates}"
-        self.conn.execute(sql, [row[k] for k in keys])
-
-    def count(self, table: str, run_id: str) -> int:
-        self._safe_ident(table)
-        return int(self.conn.execute(f"select count(*) from {table} where run_id=?", (run_id,)).fetchone()[0])
+    def close(self) -> None:
+        self.gate.close()
 
 
-def make_snapshot(db: JarvisDB, run_id: str, phase: str, frontier: list[str], terms: Counter[str]) -> str:
-    snap_id = f"snapshot-{sha(run_id + phase + utc_now() + str(time.time()))}"
-    db.insert(
-        "snapshots",
-        {
-            "id": snap_id,
-            "run_id": run_id,
-            "created_at": utc_now(),
-            "phase": phase,
-            "page_count": db.count("documents", run_id),
-            "chunk_count": db.count("chunks", run_id),
-            "node_count": db.count("nodes", run_id),
-            "edge_count": db.count("edges", run_id),
-            "frontier_json": json.dumps(frontier[:50], sort_keys=True),
-            "top_terms_json": json.dumps(terms.most_common(30), sort_keys=True),
-        },
-    )
-    return snap_id
-
-
-def emit_embedding(db: JarvisDB, run_id: str, scope: str, target_id: str, text: str):
-    existing = db.conn.execute(
-        "select 1 from embeddings where run_id=? and scope=? and target_id=? limit 1",
-        (run_id, scope, target_id),
-    ).fetchone()
-    if existing:
-        return
-    db.insert(
-        "embeddings",
-        {
-            "id": f"emb-{sha(run_id + scope + target_id)}",
-            "run_id": run_id,
-            "scope": scope,
-            "target_id": target_id,
-            "provider": "deterministic-feature-hash",
-            "model": f"hashing-vectorizer-{DEFAULT_DIMS}",
-            "dimensions": DEFAULT_DIMS,
-            "vector_json": json.dumps(deterministic_embedding(text), separators=(",", ":")),
-        },
-    )
+def make_snapshot(writer: GateWriter, phase: str, frontier: list, terms: Counter, counts: dict) -> str:
+    """Record a crawl snapshot as a content-addressed reasoning fact. `counts` is
+    computed from the in-memory row lists (there is no per-run table to count)."""
+    snap = {
+        "id": f"snapshot-{sha(writer.run_id + phase + utc_now() + str(time.time()))}",
+        "run_id": writer.run_id,
+        "created_at": utc_now(),
+        "phase": phase,
+        "page_count": int(counts.get("documents", 0)),
+        "chunk_count": int(counts.get("chunks", 0)),
+        "node_count": int(counts.get("nodes", 0)),
+        "edge_count": int(counts.get("edges", 0)),
+        "frontier_json": json.dumps([str(f) for f in frontier][:50], sort_keys=True),
+        "top_terms_json": json.dumps(terms.most_common(30), sort_keys=True),
+    }
+    return writer.record("snapshot", snap)
 
 
 def estimate_seconds(max_pages: int, workers: int, keyword_count: int, prior_seconds_per_page: float = 8.0) -> float:
@@ -700,12 +540,13 @@ def crawl_command(args: argparse.Namespace) -> int:
     records_dir = run_dir / "records"
     graph_dir = run_dir / "graph"
     gnn_dir = run_dir / "gnn"
-    db_dir = run_dir / "db"
-    for directory in (raw_dir, records_dir, graph_dir, gnn_dir, db_dir):
+    for directory in (raw_dir, records_dir, graph_dir, gnn_dir):
         directory.mkdir(parents=True, exist_ok=True)
 
-    db = JarvisDB(db_dir / "research.sqlite")
-    db.init()
+    # #165 step 3: persist into the one State Fabric (gate keyed on run NAME so runs
+    # of the same topic accumulate + dedup), not a per-run research.sqlite island.
+    gate = lgwks_storage.get_gate(run_name)
+    writer = GateWriter(gate, run_id)
     manifest_path = run_dir / "run-manifest.json"
     config = {
         "max_pages": args.max_pages,
@@ -716,8 +557,8 @@ def crawl_command(args: argparse.Namespace) -> int:
         "compress_limit": getattr(args, "compress_limit", 96),
         "similarity_threshold": getattr(args, "similarity_threshold", 0.72),
     }
-    db.insert(
-        "runs",
+    run_cid = writer.record(
+        "jarvis_run",
         {
             "run_id": run_id,
             "name": run_name,
@@ -729,9 +570,13 @@ def crawl_command(args: argparse.Namespace) -> int:
             "config_json": json.dumps(config, sort_keys=True),
         },
     )
+    # The run is a graph node; each source links back to it via discovered_in_run,
+    # so run_id is recoverable provenance without being a shard key.
+    writer.node(f"run:{run_id}", "run", run_name, {"created_at": utc_now()}, artifact_cid=run_cid)
 
     seeds, warnings = build_seed_urls(source, keywords, args.max_pages, getattr(args, "search_expansion", False))
     if not seeds:
+        writer.close()
         raise SystemExit("no seed URLs found")
 
     estimated_msg = f"Estimated compute: {estimate}s ({round(estimate / 60, 2)} min) for {args.max_pages} pages @ {args.workers} workers"
@@ -739,7 +584,7 @@ def crawl_command(args: argparse.Namespace) -> int:
     for warning in warnings:
         print(f"warning: {warning}", file=sys.stderr)
 
-    before_id = make_snapshot(db, run_id, "before-crawl", [u for u, _ in seeds], Counter())
+    before_id = make_snapshot(writer, "before-crawl", [u for u, _ in seeds], Counter(), {})
     queue: deque[tuple[str, int, str]] = deque((url, 0, origin) for url, origin in seeds)
     seen: set[str] = set()
     fetched: list[FetchResult] = []
@@ -770,11 +615,10 @@ def crawl_command(args: argparse.Namespace) -> int:
                 url, depth, origin = future_map[future]
                 result = future.result()
                 fetched.append(result)
-                event_id = f"event-{sha(run_id + url)}"
-                db.insert(
-                    "crawl_events",
+                writer.record(
+                    "crawl_event",
                     {
-                        "id": event_id,
+                        "id": f"event-{sha(run_id + url)}",
                         "run_id": run_id,
                         "created_at": utc_now(),
                         "url": url,
@@ -814,8 +658,8 @@ def crawl_command(args: argparse.Namespace) -> int:
             "discovered_by": "crawl",
             "score": score_page(result, keywords),
         }
-        db.insert("sources", source_row)
         source_rows.append(source_row)
+        writer.edge(f"run:{run_id}", source_id, "discovered_in_run", {}, artifact_cid=run_cid)
         if result.status != "ok" or not result.text.strip():
             continue
         doc_id = f"doc-{sha(result.url + result.text)}"
@@ -830,15 +674,15 @@ def crawl_command(args: argparse.Namespace) -> int:
             "word_count": word_count(result.text),
             "chunk_count": len(chunks),
         }
-        db.insert("documents", doc_row)
         doc_rows.append(doc_row)
-        emit_embedding(db, run_id, "document", doc_id, result.text[:20_000])
+        writer.embed(doc_id, result.text[:20_000], scope="document", meta={"source_id": source_id})
         for pos, chunk in enumerate(chunks):
             # Content-addressed chunk identity: identical content collapses to one
             # node + one embedding across documents/positions. Provenance (which doc
             # contained the chunk, and where) is preserved as doc->chunk containment
             # edges, so dedup is lossless. Mirrors lgwks_substrate_run.build_run — one
-            # canonical dedup primitive, not a parallel scheme.
+            # canonical dedup primitive. The gate makes the dedup cross-run, not
+            # per-run: an identical chunk seen in a later run reuses the same cid.
             content_sha = lgwks_hashing.digest(chunk)
             chunk_id = f"chunk-{content_sha[:16]}"
             occurrence_edge = {
@@ -851,7 +695,7 @@ def crawl_command(args: argparse.Namespace) -> int:
                 "evidence": None,
                 "metadata_json": json.dumps({"position": pos}, sort_keys=True),
             }
-            db.insert("edges", occurrence_edge)
+            writer.edge(doc_id, chunk_id, "contains", {"position": pos}, artifact_cid=chunk_id)
             edge_rows.append(occurrence_edge)
             if content_sha in seen_chunk_hashes:
                 # Duplicate content this run: provenance recorded via the edge above;
@@ -870,20 +714,21 @@ def crawl_command(args: argparse.Namespace) -> int:
                 "word_count": word_count(chunk),
                 "semantic_type_json": json.dumps(stype, sort_keys=True),
             }
-            db.insert("chunks", chunk_row)
             chunk_rows.append(chunk_row)
             vector = deterministic_embedding(chunk)
             chunk_vectors[chunk_id] = vector
             chunk_texts[chunk_id] = chunk
             chunk_to_doc[chunk_id] = doc_id
-            emit_embedding(db, run_id, "chunk", chunk_id, chunk)
+            writer.embed(chunk_id, chunk, scope="chunk",
+                         meta={"document_id": doc_id, "source_id": source_id, "position": pos})
 
     terms = concept_terms((row["text"] for row in chunk_rows), getattr(args, "max_terms", 80))
     for term, weight in terms.items():
         node_id = f"term-{sha(term)}"
+        type_scores = semantic_type_scores(term)
         metadata = {
             "term": term,
-            "semantic_type": max(semantic_type_scores(term), key=semantic_type_scores(term).get),
+            "semantic_type": max(type_scores, key=lambda k: type_scores[k]),
             "source": "deterministic-ngram",
         }
         row = {
@@ -894,9 +739,9 @@ def crawl_command(args: argparse.Namespace) -> int:
             "weight": float(weight),
             "metadata_json": json.dumps(metadata, sort_keys=True),
         }
-        db.insert("nodes", row)
         node_rows.append(row)
-        emit_embedding(db, run_id, "understanding-node", node_id, term)
+        writer.node(node_id, "concept", term, {**metadata, "weight": float(weight)}, artifact_cid=node_id)
+        writer.embed(node_id, term, scope="understanding-node")
 
     term_ids = {row["label"]: row["id"] for row in node_rows}
     for chunk_id, text in chunk_texts.items():
@@ -913,7 +758,9 @@ def crawl_command(args: argparse.Namespace) -> int:
                 "evidence": text[:240],
                 "metadata_json": json.dumps({"fusion_signal": "lexical"}, sort_keys=True),
             }
-            db.insert("edges", row)
+            writer.edge(chunk_id, term_ids[term], "mentions",
+                        {"fusion_signal": "lexical", "weight": float(text.lower().count(term))},
+                        artifact_cid=chunk_id)
             edge_rows.append(row)
 
     chunk_items = list(chunk_vectors.items())
@@ -934,25 +781,32 @@ def crawl_command(args: argparse.Namespace) -> int:
                     "evidence": None,
                     "metadata_json": json.dumps({"fusion_signal": "hash_embedding", "threshold": getattr(args, "similarity_threshold", 0.72)}, sort_keys=True),
                 }
-                db.insert("edges", row)
+                writer.edge(left_id, right_id, "late_fusion_similarity",
+                            {"fusion_signal": "hash_embedding", "weight": round(score, 4),
+                             "threshold": getattr(args, "similarity_threshold", 0.72)},
+                            artifact_cid=left_id)
                 edge_rows.append(row)
 
     compress_limit = getattr(args, "compress_limit", 96)
     if len(node_rows) > compress_limit:
         for row in sorted(node_rows, key=lambda r: r["weight"])[: len(node_rows) - compress_limit]:
             label = json.loads(row["metadata_json"]).get("semantic_type", "compressed")
-            compressed = {
-                "id": f"compressed-{sha(run_id + row['id'])}",
-                "run_id": run_id,
-                "reason": "compute_limit_low_weight_concept",
-                "source_node_json": json.dumps(row, sort_keys=True),
-                "compressed_label": label,
-                "metadata_json": json.dumps({"compress_limit": compress_limit}, sort_keys=True),
-            }
-            db.insert("compressed_nodes", compressed)
+            writer.record(
+                "compressed_node",
+                {
+                    "id": f"compressed-{sha(run_id + row['id'])}",
+                    "run_id": run_id,
+                    "reason": "compute_limit_low_weight_concept",
+                    "source_node_json": json.dumps(row, sort_keys=True),
+                    "compressed_label": label,
+                    "metadata_json": json.dumps({"compress_limit": compress_limit}, sort_keys=True),
+                },
+            )
 
     frontier_terms = [term for term, _ in terms.most_common(20)]
-    after_id = make_snapshot(db, run_id, "after-crawl", list(queue), terms)
+    counts = {"documents": len(doc_rows), "chunks": len(chunk_rows),
+              "nodes": len(node_rows), "edges": len(edge_rows)}
+    after_id = make_snapshot(writer, "after-crawl", list(queue), terms, counts)
     coverage = min(1.0, len(doc_rows) / max(1, args.max_pages))
     uncertainty = round(1.0 - coverage + (0.15 if warnings else 0), 4)
     understanding_summary = (
@@ -967,8 +821,8 @@ def crawl_command(args: argparse.Namespace) -> int:
             "semantic_types": sorted(SEMANTIC_TYPES),
         }
     }
-    db.insert(
-        "understandings",
+    writer.record(
+        "understanding",
         {
             "id": understanding_id,
             "run_id": run_id,
@@ -983,13 +837,13 @@ def crawl_command(args: argparse.Namespace) -> int:
             "schema_json": json.dumps(understanding_schema, sort_keys=True),
         },
     )
-    emit_embedding(db, run_id, "research-understanding", understanding_id, understanding_summary)
+    writer.embed(understanding_id, understanding_summary, scope="research-understanding")
 
     drill_keywords = keywords or [slugify(source or run_name)]
     for keyword in drill_keywords:
         drill_id = f"drill-{sha(run_id + keyword)}"
-        db.insert(
-            "drills",
+        writer.record(
+            "drill",
             {
                 "id": drill_id,
                 "run_id": run_id,
@@ -1005,8 +859,8 @@ def crawl_command(args: argparse.Namespace) -> int:
         questions = next_questions(keyword, frontier_terms, source_rows, uncertainty)
         for ask_index, (question, thought, gain) in enumerate(questions, start=1):
             qid = f"question-{sha(drill_id + str(ask_index) + question)}"
-            db.insert(
-                "question_events",
+            writer.record(
+                "question",
                 {
                     "id": qid,
                     "run_id": run_id,
@@ -1020,18 +874,33 @@ def crawl_command(args: argparse.Namespace) -> int:
                     "answer": None,
                 },
             )
-            emit_embedding(db, run_id, "question-trace", qid, f"{question}\n{thought}")
+            writer.embed(qid, f"{question}\n{thought}", scope="question-trace")
 
-    db.conn.commit()
+    # The queryable sources/documents/chunks surface (gate relational projection).
+    src_url = {s["id"]: s["url"] for s in source_rows}
+    writer.project_relational(
+        source_rows=[{"source_id": s["id"], "source": s["url"], "title": s["title"],
+                      "discovered_by": s["discovered_by"], "depth": 0} for s in source_rows],
+        doc_rows=[{"document_id": d["id"], "source_id": d["source_id"], "title": d["title"],
+                   "source": src_url.get(d["source_id"], ""), "word_count": d["word_count"]} for d in doc_rows],
+        chunk_rows=[{"chunk_id": c["id"], "document_id": c["document_id"],
+                     "source": src_url.get(c["source_id"], ""), "url": "", "text": c["text"],
+                     "stem_text": "", "hash": c["content_sha256"], "fact_score": 0.0,
+                     "chunk_kind": "chunk", "position": c["position"],
+                     "tokenization_id": writer._tok, "artifact_cid": c["id"]} for c in chunk_rows],
+    )
+    writer.commit()
+
     write_jsonl(records_dir / "sources.jsonl", source_rows)
     write_jsonl(records_dir / "documents.jsonl", doc_rows)
     write_jsonl(records_dir / "chunks.jsonl", chunk_rows)
     write_jsonl(records_dir / "nodes.jsonl", node_rows)
     write_jsonl(records_dir / "edges.jsonl", edge_rows)
-    write_gnn_exports(gnn_dir, run_id, node_rows, edge_rows, db)
+    write_gnn_exports(gnn_dir, run_id, node_rows, edge_rows, writer.features)
     write_graph(graph_dir, run_id, node_rows, edge_rows)
     report_path = write_report(run_dir, run_id, estimate, understanding_summary, terms, source_rows, doc_rows, edge_rows, warnings)
 
+    gate_root = str(gate.root)
     manifest = {
         "run_id": run_id,
         "name": run_name,
@@ -1042,7 +911,7 @@ def crawl_command(args: argparse.Namespace) -> int:
         "estimated_compute_seconds": estimate,
         "artifacts": {
             "root": str(run_dir),
-            "database": str(db.path),
+            "store": gate_root,
             "report": str(report_path),
             "mermaid": str(graph_dir / "research-map.mmd"),
             "html": str(graph_dir / "research-map.html"),
@@ -1060,10 +929,10 @@ def crawl_command(args: argparse.Namespace) -> int:
         "warnings": warnings,
     }
     manifest_path.write_text(json.dumps(manifest, indent=2, sort_keys=True), encoding="utf-8")
-    db.close()
+    writer.close()
     print(f"run: {run_id}")
     print(f"report: {report_path}")
-    print(f"db: {db_dir / 'research.sqlite'}")
+    print(f"store: {gate_root}")
     return 0
 
 
@@ -1090,7 +959,7 @@ def next_questions(keyword: str, frontier_terms: list[str], sources: list[dict],
     ]
 
 
-def write_gnn_exports(gnn_dir: Path, run_id: str, nodes: list[dict], edges: list[dict], db: JarvisDB):
+def write_gnn_exports(gnn_dir: Path, run_id: str, nodes: list[dict], edges: list[dict], features: list[dict]):
     with (gnn_dir / "nodes.csv").open("w", encoding="utf-8", newline="") as fh:
         writer = csv.writer(fh)
         writer.writerow(["id", "label", "kind", "weight"])
@@ -1101,10 +970,8 @@ def write_gnn_exports(gnn_dir: Path, run_id: str, nodes: list[dict], edges: list
         writer.writerow(["source", "target", "kind", "weight"])
         for row in edges:
             writer.writerow([row["from_id"], row["to_id"], row["kind"], row["weight"]])
-    features = []
-    for row in db.conn.execute("select target_id, scope, dimensions, vector_json from embeddings where run_id=?", (run_id,)):
-        if row["scope"] in {"understanding-node", "research-understanding", "question-trace"}:
-            features.append({"id": row["target_id"], "scope": row["scope"], "dimensions": row["dimensions"], "vector": json.loads(row["vector_json"])})
+    # #165 step 3: feature vectors are collected in-memory during the run
+    # (GateWriter.features) rather than re-queried from a per-run embeddings table.
     write_jsonl(gnn_dir / "features.jsonl", features)
     (gnn_dir / "tensor-manifest.json").write_text(
         json.dumps(
@@ -1186,42 +1053,42 @@ def write_report(run_dir: Path, run_id: str, estimate: float, summary: str, term
 
 
 def remap_db_command(args: argparse.Namespace) -> int:
+    """#165 step 3: migrate a legacy per-run research.sqlite island into the one
+    State Fabric gate. The legacy crawler no longer produces these files; this exists
+    to fold any on-disk legacy runs into the cumulative gate store (chunks → cid-keyed
+    embeddings, nodes/edges → cid/tier graph). Reads the old schema directly since the
+    JarvisDB writer was retired."""
     run_dir = Path(args.run_dir).resolve()
     db_path = run_dir / "db" / "research.sqlite"
     if not db_path.exists():
         raise SystemExit(f"database not found: {db_path}")
-    db = JarvisDB(db_path)
-    db.init()
-    run_id_row = db.conn.execute("select run_id from runs limit 1").fetchone()
+    conn = lgwks_sqlite.connect(db_path)
+    conn.row_factory = sqlite3.Row
+    run_id_row = conn.execute("select run_id from runs limit 1").fetchone()
     run_id = run_id_row["run_id"] if run_id_row else run_dir.name
-    terms = Counter()
-    chunk_rows = db.conn.execute("select id, text from chunks where run_id=?", (run_id,)).fetchall()
+    name_row = conn.execute("select name from runs limit 1").fetchone()
+    project = name_row["name"] if name_row else run_dir.name
+
+    writer = GateWriter(lgwks_storage.get_gate(project), run_id)
+    chunk_rows = conn.execute("select id, text from chunks where run_id=?", (run_id,)).fetchall()
     for row in chunk_rows:
-        emit_embedding(db, run_id, "chunk", row["id"], row["text"])
-        terms.update(concept_terms([row["text"]], 20))
-    before = make_snapshot(db, run_id, "remap-before", [], terms)
-    after = make_snapshot(db, run_id, "remap-after", [], terms)
-    summary = f"Remapped legacy DB to {SCHEMA_VERSION}; separated research understanding and question trace schemas."
-    understanding_id = f"understanding-{sha(run_id + summary)}"
-    db.insert(
-        "understandings",
-        {
-            "id": understanding_id,
-            "run_id": run_id,
-            "created_at": utc_now(),
-            "scope": "remap",
-            "before_snapshot_id": before,
-            "after_snapshot_id": after,
-            "summary": summary,
-            "coverage_score": 1.0 if chunk_rows else 0.0,
-            "uncertainty_score": 0.0 if chunk_rows else 1.0,
-            "evidence_json": json.dumps({"legacy_chunks": len(chunk_rows)}, sort_keys=True),
-            "schema_json": json.dumps({"schema_version": SCHEMA_VERSION, "remapped": True}, sort_keys=True),
-        },
-    )
-    emit_embedding(db, run_id, "research-understanding", understanding_id, summary)
-    db.close()
-    print(f"remapped: {db_path}")
+        writer.embed(row["id"], row["text"], scope="chunk")
+    for row in conn.execute("select id, kind, label, weight, metadata_json from nodes where run_id=?", (run_id,)):
+        writer.node(row["id"], row["kind"], row["label"],
+                    json.loads(row["metadata_json"] or "{}"), artifact_cid=row["id"])
+    for row in conn.execute("select from_id, to_id, kind, metadata_json from edges where run_id=?", (run_id,)):
+        writer.edge(row["from_id"], row["to_id"], row["kind"],
+                    json.loads(row["metadata_json"] or "{}"), artifact_cid=row["from_id"])
+    summary = f"Migrated {len(chunk_rows)} legacy chunks from {db_path} into the gate store."
+    writer.record("understanding", {
+        "id": f"understanding-{sha(run_id + summary)}", "run_id": run_id,
+        "created_at": utc_now(), "scope": "remap", "summary": summary,
+        "evidence_json": json.dumps({"legacy_chunks": len(chunk_rows)}, sort_keys=True),
+    })
+    writer.commit()
+    conn.close()
+    writer.close()
+    print(f"migrated legacy DB → gate store: {db_path}")
     return 0
 
 

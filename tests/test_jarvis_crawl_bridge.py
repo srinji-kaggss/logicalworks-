@@ -303,22 +303,24 @@ class TestKeywordOnlyCrawlIsLegacy(unittest.TestCase):
 
 class TestLegacyEngine(unittest.TestCase):
     def test_engine_legacy_url_does_not_call_substrate(self):
-        """--engine legacy must bypass substrate even for URL sources."""
+        """--engine legacy must bypass substrate even for URL sources.
+
+        #165 step 3: the per-run JarvisDB island was retired; the legacy path now
+        persists through the one State Fabric gate. Both run roots are redirected to
+        a temp dir so the gate store never touches the real workspace.
+        """
+        import lgwks_substrate_config as _sc
         args = _make_jarvis_args(source="https://example.com", engine="legacy")
-        with mock.patch.object(_lgwks, "_import_substrate") as m_sub:
-            # Legacy path calls build_seed_urls then raises SystemExit on empty seeds.
-            with mock.patch.object(_lgwks, "build_seed_urls", return_value=([], [])):
-                with mock.patch.object(_lgwks, "RUN_ROOT", Path(tempfile.mkdtemp()) / "runs"):
-                    with mock.patch.object(_lgwks, "JarvisDB") as MockDB:
-                        MockDB.return_value.__enter__ = mock.MagicMock(side_effect=SystemExit("no-seed"))
-                        MockDB.return_value.init = mock.MagicMock()
-                        MockDB.return_value.insert = mock.MagicMock()
-                        MockDB.return_value.close = mock.MagicMock()
-                        MockDB.return_value.conn = mock.MagicMock()
-                        try:
-                            _lgwks.crawl_command(args)
-                        except SystemExit:
-                            pass
+        with tempfile.TemporaryDirectory() as td:
+            with mock.patch.object(_lgwks, "_import_substrate") as m_sub, \
+                 mock.patch.object(_lgwks, "build_seed_urls", return_value=([], [])), \
+                 mock.patch.object(_lgwks, "RUN_ROOT", Path(td) / "jarvis"), \
+                 mock.patch.object(_sc, "RUN_ROOT", Path(td) / "gate"):
+                # Legacy path builds the gate then raises SystemExit on empty seeds.
+                try:
+                    _lgwks.crawl_command(args)
+                except SystemExit:
+                    pass
         m_sub.assert_not_called()
 
 
@@ -534,7 +536,14 @@ class LegacyEngineContentDedupTests(unittest.TestCase):
         )
 
     def test_identical_content_across_docs_dedups_and_keeps_provenance(self):
+        """#165 step 3: the dedup+provenance contract now lives in the one State
+        Fabric gate, not a per-run research.sqlite island. Identical content still
+        collapses to one cid-keyed chunk + one embedding, and each document keeps a
+        `contains` provenance edge. We assert against the gate's projection stores:
+        relational.db (documents/chunks), graph.db (edges), vector_records.db.
+        """
         import sqlite3
+        import lgwks_substrate_config as _sc
 
         body = (
             "Deterministic compression collapses identical content to one node. "
@@ -552,8 +561,10 @@ class LegacyEngineContentDedupTests(unittest.TestCase):
             )
 
         with tempfile.TemporaryDirectory() as td:
-            run_root = Path(td) / "runs"
-            with mock.patch.object(_lgwks, "RUN_ROOT", run_root), \
+            jarvis_root = Path(td) / "jarvis"
+            gate_root = Path(td) / "gate"
+            with mock.patch.object(_lgwks, "RUN_ROOT", jarvis_root), \
+                 mock.patch.object(_sc, "RUN_ROOT", gate_root), \
                  mock.patch.object(_lgwks, "build_seed_urls", fake_seeds), \
                  mock.patch.object(_lgwks, "fetch_url", fake_fetch):
                 with contextlib.redirect_stdout(io.StringIO()), \
@@ -561,24 +572,33 @@ class LegacyEngineContentDedupTests(unittest.TestCase):
                     rc = _lgwks.crawl_command(self._legacy_args())
             self.assertEqual(rc, 0)
 
-            db_files = list(run_root.glob("*/db/research.sqlite"))
-            self.assertEqual(len(db_files), 1, "expected exactly one legacy run dir")
-            conn = sqlite3.connect(db_files[0])
+            # The gate is keyed on the run name ("dedup"); the run accumulates into
+            # exactly one cumulative store under the (temp) substrate run root.
+            store_dirs = [p for p in gate_root.glob("*") if (p / "relational.db").exists()]
+            self.assertEqual(len(store_dirs), 1, "expected exactly one gate store")
+            store = store_dirs[0]
+
+            rel = sqlite3.connect(store / "relational.db")
+            graph = sqlite3.connect(store / "graph.db")
+            vrec = sqlite3.connect(store / "vector_records.db")
             try:
-                docs = conn.execute("select count(*) from documents").fetchone()[0]
-                chunks = conn.execute("select count(*) from chunks").fetchone()[0]
-                chunk_embeds = conn.execute(
-                    "select count(*) from embeddings where scope='chunk'"
+                docs = rel.execute("select count(*) from documents").fetchone()[0]
+                chunks = rel.execute("select count(*) from chunks").fetchone()[0]
+                chunk_cid = rel.execute("select artifact_cid from chunks").fetchone()[0]
+                chunk_embeds = vrec.execute(
+                    "select count(*) from vector_records where artifact_cid=?", (chunk_cid,)
                 ).fetchone()[0]
-                contains = conn.execute(
-                    "select count(*) from edges where kind='contains'"
+                contains = graph.execute(
+                    "select count(*) from edges where rel='contains'"
                 ).fetchone()[0]
             finally:
-                conn.close()
+                rel.close()
+                graph.close()
+                vrec.close()
 
         # Two distinct documents fetched...
         self.assertEqual(docs, 2)
-        # ...but identical content collapses to ONE chunk node + ONE embedding...
+        # ...but identical content collapses to ONE cid-keyed chunk + ONE embedding...
         self.assertEqual(chunks, 1)
         self.assertEqual(chunk_embeds, 1)
         # ...with a provenance edge from EACH document (lossless dedup).
