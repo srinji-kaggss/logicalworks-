@@ -15,10 +15,9 @@ HARDENING (Issue #53):
 from __future__ import annotations
 
 import argparse
-import fcntl
+import lgwks_chain
 import lgwks_hashing
 import json
-import os
 import time
 import urllib.parse
 from collections import Counter
@@ -29,7 +28,7 @@ import lgwks_vecmath as _vm  # canonical vector math (one source of truth)
 
 ROOT = Path(__file__).resolve().parent
 _DIR = ROOT / "store" / "projects"
-_GENESIS = "0" * 64
+_GENESIS = lgwks_chain.GENESIS
 from lgwks_substrate_config import SLUG_SCRUB_RE as _SAFE  # one source of truth
 _KINDS = {"project_scope", "conversation", "theme", "fetch_plan", "fetch_result", "note"}
 from lgwks_lexicon import STOP_EN as _STOP  # canonical stopword set (was a local copy)
@@ -60,105 +59,52 @@ def _read(project: str) -> list[dict]:
     return out
 
 
+def _log(project: str, key: bytes | None) -> lgwks_chain.HashChainLog:
+    """This project's memory chain as the canonical hash-chain primitive (#298).
+
+    The injected callables reproduce this store's exact on-disk record shape + MAC
+    construction (hash = mac(core+prev), serialized with ensure_ascii=False), so
+    the bytes are unchanged and existing memory.jsonl chains still verify.
+    """
+    def build_core(n_existing: int, prev: str, kind: str, data: dict) -> dict:
+        return {
+            "seq": n_existing + 1,
+            "ts": time.time(),
+            "project": project,
+            "kind": kind,
+            "data": data,
+            "prev": prev,
+        }
+
+    def hash_core(core: dict, prev: str, k: bytes | None) -> str:
+        assert k is not None  # memory chains are always keyed (signing_key())
+        return lgwks_sign.mac(_core(core) + prev, k)
+
+    return lgwks_chain.HashChainLog(
+        _path(project),
+        key=key,
+        build_core=build_core,
+        hash_core=hash_core,
+        serialize=lambda rec: json.dumps(rec, sort_keys=True, ensure_ascii=False),
+        kinds=_KINDS,
+    )
+
+
 def verify(project: str, key: bytes | None = None) -> bool:
     key = key if key is not None else lgwks_sign.signing_key()[0]
-    prev = _GENESIS
-    try:
-        rows = _read(project)
-    except Exception:
-        return False
-    for rec in rows:
-        if rec.get("kind") not in _KINDS or rec.get("prev") != prev:
-            return False
-        if lgwks_sign.mac(_core(rec) + prev, key) != rec.get("hash"):
-            return False
-        prev = rec["hash"]
-    return True
-
-
-def _lock_exclusive(fh) -> None:
-    """Exclusive advisory lock. Blocks until acquired. Never raises for our use case
-    (local disk; if the lock fails, the chain is already broken)."""
-    try:
-        fcntl.flock(fh.fileno(), fcntl.LOCK_EX)
-    except (OSError, IOError):
-        pass
-
-
-def _unlock(fh) -> None:
-    try:
-        fcntl.flock(fh.fileno(), fcntl.LOCK_UN)
-    except (OSError, IOError):
-        pass
+    return _log(project, key).verify()
 
 
 def append(project: str, kind: str, data: dict, key: bytes | None = None) -> dict:
-    """Append a record to the project memory chain under exclusive file lock.
+    """Append a record to the project memory chain.
 
-    Single-writer invariant: only one agent/process can append at a time.
-    Readers (verify, _read, context) are safe concurrently because each line
-    is written atomically as a complete JSON record in one syscall.
+    The single-writer invariant (exclusive fcntl lock), verify-before-append, and
+    atomic fsynced line write are owned by the canonical lgwks_chain primitive (#298).
     """
     if kind not in _KINDS:
         raise ValueError(f"unknown memory kind {kind!r}")
-
     key = key if key is not None else lgwks_sign.signing_key()[0]
-    p = _path(project)
-    p.parent.mkdir(parents=True, exist_ok=True)
-
-    # Open in a+ so we can lock the file descriptor before any read or write.
-    with p.open("a+", encoding="utf-8") as fh:
-        _lock_exclusive(fh)
-        try:
-            # Must seek to start for reading; 'a+' puts us at EOF.
-            fh.seek(0)
-            rows: list[dict] = []
-            for line in fh.read().splitlines():
-                if line.strip():
-                    rows.append(json.loads(line))
-
-            if rows:
-                # Verify existing chain integrity before appending
-                prev_local = _GENESIS
-                chain_ok = True
-                for rec in rows:
-                    if rec.get("kind") not in _KINDS or rec.get("prev") != prev_local:
-                        chain_ok = False
-                        break
-                    if lgwks_sign.mac(_core(rec) + prev_local, key) != rec.get("hash"):
-                        chain_ok = False
-                        break
-                    prev_local = rec["hash"]
-                if not chain_ok:
-                    raise ValueError(
-                        f"refusing to append to broken project memory chain: {project}"
-                    )
-                prev = rows[-1]["hash"]
-            else:
-                prev = _GENESIS
-
-            rec = {
-                "seq": len(rows) + 1,
-                "ts": time.time(),
-                "project": project,
-                "kind": kind,
-                "data": data,
-                "prev": prev,
-            }
-            rec["hash"] = lgwks_sign.mac(_core(rec) + prev, key)
-
-            # Atomic line write: complete JSON line in one syscall.
-            # JSON lines are typically < PIPE_BUF (4096 bytes), so this is atomic
-            # on local filesystems. For very large data payloads, truncation risk
-            # is documented — do NOT store multi-MB blobs inline.
-            line = json.dumps(rec, sort_keys=True, ensure_ascii=False) + "\n"
-            fh.write(line)
-            fh.flush()
-            os.fsync(fh.fileno())
-        finally:
-            _unlock(fh)
-
-    return rec
+    return _log(project, key).append(kind, data)
 
 
 def _tokens(text: str) -> list[str]:
