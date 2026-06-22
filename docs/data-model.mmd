@@ -9,7 +9,8 @@
 %% one tape, many derived/rebuildable views. The relational SQL surface is a
 %% COMPILED projection, never the ontology.
 %%
-%% Status (verified at HEAD): the fabric is largely built. lgwks_storage registers
+%% Status (verified at HEAD): the fabric is BUILT end-to-end (write→read→harden; #152
+%% Phases 2–4 + #277 landed PRs #289/#290/#291). lgwks_storage registers
 %% 4 projections — VectorProjection(→vector_records), PostingProjection(BM25),
 %% FactProjection(+global_facts), RelationalProjection(sources/documents/chunks/
 %% vectors/facts/frontier), and GraphFabric(wraps entity_graph; #169 made it the
@@ -28,12 +29,18 @@
 %%      tenant). #276 closed the deferred items: read-side world⊕tenant ENFORCEMENT on graph
 %%      reads (scope_tier filters tier=:me OR 'world' OR NULL; gate-scoped) + per-row
 %%      artifact_cid back-link from the substrate producer. Graph-read door convergence onto
-%%      capability-gated TenantStore is tracked separately (#277, CIAM #98/#99).
-%%   C) STILL NOT converged (#165 explicit scope items 3–4): lgwks_run.py + lgwks_research.py
-%%      do not yet emit their outputs (prevector.graph.json/embeddings.jsonl; rounds/findings/
-%%      REPORT.md) as tape artifacts via ingest_artifact. substrate_run routes chunks+graph
-%%      but not facts/media/vectors as first-class artifacts. (item 2 lgwks_ingest.py is stale
-%%      — file removed.) #165 stays OPEN for these.
+%%      capability-gated TenantStore [#277 LANDED, PR #291]: TenantStore.over_gate makes the
+%%      door projection-generic — graph reads gate on the VERIFIED capability + scope to the
+%%      verified principal; scope_tier is now internal behind the door.
+%%   C) CONVERGED [#165 LANDED, PR #289]: lgwks_run.py + lgwks_research.py mirror their outputs
+%%      (prevector.graph.json/embeddings.jsonl; REPORT.md) onto the tape via the gate (best-
+%%      effort, stable corpus gate — no per-run islands). substrate_run stamps every
+%%      chunk/fact/vector/media row with tokenization_id + artifact_cid (provenance to the tape
+%%      entry). (item 2 lgwks_ingest.py was removed — moot.)
+%%   D) Read + harden [#166 PR #290, #167 PR #291 LANDED]: FabricReader.query unifies
+%%      lexical+token+graph+vector in one result set; `lgwks state fabric {status,tokenizers,
+%%      replay,query}` CLI; CausalTape.verify_chain makes the tape tamper-evident and replay
+%%      refuses an inconsistent tape.
 %% =====================================================================
 flowchart LR
 
@@ -54,7 +61,7 @@ flowchart LR
       PR["RelationalProjection ✓<br/>sources/documents/chunks/vectors/frontier<br/>(COMPILED operational surface, not ontology)"]
       PG["GraphFabric → wraps entity_graph ✓ (#165 step 2)<br/>apply() LIVE: extras[graph] → nodes/edges/chunks<br/>stamped artifact_cid (tape provenance) + tier (world ⊕ tenant)"]
     end
-    ACCESS["④ Access — lgwks_access.TenantStore (one door)<br/>read/query: tier='world' OR tier=:me · write: tenant only<br/>promote: lgwks_promote (gated · audited · MOVE not copy)<br/>§1-INV: cross-tenant read cryptographically refused"]
+    ACCESS["④ Access — lgwks_access.TenantStore (one door · projection-generic, #277)<br/>vectors AND graph: read/query tier='world' OR tier=:me · write: tenant only<br/>graph reads gate on verified capability, scoped to principal (scope_tier internal)<br/>promote: lgwks_promote (gated · audited · MOVE not copy)<br/>§1-INV: cross-tenant read refused; tape tamper-evident (verify_chain, #167)"]
   end
 
   JV --> SEAM

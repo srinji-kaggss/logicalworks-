@@ -170,36 +170,63 @@ add an `IngestContext` field) and must not refactor the ingest path.
     `ingest_fact_vectors` once per batch — so vectors survive `gate.close()`. This was
     a latent gap: `VectorFabric` had no substrate-flow writers before #170.
 
-1. **Phase 2 — wire existing writers to `ingest_artifact()`** (#165)
-   - `lgwks_substrate_run.py`: the legacy per-run `graph.db`/`substrate.db` and the cross-run `GLOBAL_FACT_DB` are now **gone** — relational, graph, and fact-vectors all route through the gate's projections (`project_run` / `graph_fabric.ingest_chunks` / `vector_fabric.ingest_fact_vectors`). Remaining Phase-2 work: move the per-artifact projection into `apply(ctx)` (see next bullet) and emit chunk/media as `ingest_artifact` envelopes rather than the current bulk `project_run` bridge. JSONL mirrors stay as human-readable exports.
-   - **Fill the inert seams via their `apply(ctx)`:** give `GraphFabric.apply` entity/relation extraction (carry edges in `IngestContext.extras` or `payload_meta`); give `RelationalProjection.apply` the per-artifact row projection — no new ingest plumbing needed, just the two method bodies.
-   - `lgwks_ingest.py`: classify with `lgwks.modality.item.v1`, tokenize with ANT, emit artifacts to the gate.
-   - `lgwks_run.py`: emit `embeddings.jsonl` + `prevector.graph.json` as artifacts.
-   - `lgwks_research.py`: emit rounds/findings/REPORT.md as artifacts with `modality=reasoning`.
+## Phases 2–4 — LANDED (2026-06-22)
 
-2. **Phase 3 — unified query surface** (#166)
-   - Update `lgwks_query.py` adapters to read from `VectorFabric`, `TokenIndex`, `GraphFabric`, and tape replay. **Per the UQA inspiration, the target is one posting-list algebra: every projection answers as `(artifact_cid, payload)` postings so vector/token/graph/relational compose by intersection/union, scored by the calibrated gate (UQA `fuse_log_odds`).**
-   - Add CLI: `lgwks fabric status`, `lgwks fabric tokenizers`, `lgwks fabric replay --run <run_id>`.
+The forward plan below shipped on `main`. This section is the completion record;
+the Phase-1 narrative above is preserved as the foundation it built on.
 
-3. **Phase 4 — hardening** (#167)
-   - Cross-tenant leakage red-team against the new gate.
-   - Crash replay: delete a projection and rebuild from the tape (the `Projection` contract requires idempotent `apply`, so replay is well-defined).
-   - Re-tokenize a run with a new tokenizer and verify old projections are unaffected.
-   - **ANT analyzer fixes (file as issue):** `lgwks_tokenizer.py` `tokenize_trajectory` encodes content with `ord(c)` (codepoint, not byte) — chars >255 collide with the Core/Modal/entity token ranges, violating the "byte-level" contract; and entity tokens `1_000_000 + hash % 10_000_000` are lossy (birthday collisions → false postings in the token index). Both matter once token streams feed the posting-list DB.
+1. **Phase 2 — wire writers to the gate** (#165, PR #289) — **DONE.**
+   - Every chunk/fact/vector/media row now carries `tokenization_id` + `artifact_cid`
+     so a vector traces to the exact tape entry it embeds; `VectorFabric.ingest_fact_vectors`
+     and the relational projection both persist that provenance (was NULL).
+   - `lgwks_run.py` mirrors `embeddings.jsonl` → `VectorFabric` (provenance-stamped) +
+     `prevector.graph.json` → `reasoning` artifact; `lgwks_research.py` mirrors
+     `REPORT.md` → `reasoning` artifact. Both best-effort + isolated, keyed on a
+     **stable** corpus gate (research: `cfg.project`; run: `"run"`) — never per-run,
+     so reasoning trajectories accumulate instead of spawning per-run islands.
+   - `lgwks_ingest.py` (original scope item) was deleted in an earlier refactor — moot.
+   - `GraphFabric.apply` is live (#165 step 2, prior work); `RelationalProjection`
+     is populated in bulk by `project_run` and **rebuildable** by `replay_run` (Phase 3).
+   - JSONL/REPORT files remain the human-readable exports.
 
----
+2. **Phase 3 — unified query surface + fabric CLI** (#166, PR #290) — **DONE.**
+   - `FabricReader.query(text)` returns ONE result set across **lexical** (relational
+     FTS5), **token-index** (posting coverage for the surfaced artifacts), **graph**
+     (node resolution + per-term fallback + neighbours), and **vector** (deterministic
+     query embedding → cosine via `VectorFabric.search_similar`, ranked within one
+     `space_id`). Every lexical/vector hit carries `tokenization_id` + `artifact_cid`.
+   - CLI: **`lgwks state fabric {status,tokenizers,replay,query}`** — housed under the
+     existing `state` verb group (T6), so the top-level verb-budget gate stays fixed.
+     `status` = `StorageGate.status()`; `replay --run` = `StorageGate.replay_run()`
+     (rebuild the relational projection from the tape; `ingest_fact` now threads
+     `run_id` so replay is run-scoped).
+   - Honest scope note: there is no canonical text→int word encoder for `word_regex`,
+     so the token-index is reached *through* the artifacts a query resolves to.
 
-## Dependencies / blockers
+3. **Phase 4 — hardening** (#167) + **capability-gated graph door** (#277) — **DONE** (PR #291).
+   - **Tape integrity (true positive, fixed):** the Causal Tape had no verification —
+     `CausalTape.verify_chain()` now checks contiguous sequence + `prev_hash` linkage +
+     `entry_hash` recomputation per tenant; `replay_run` refuses an inconsistent tape;
+     `status()` surfaces `chain_ok`/`chain_error`.
+   - **Cross-tenant (§1-INV):** `TenantStore` is now projection-generic
+     (`TenantStore.over_gate`) — graph reads gate on the **verified capability** and
+     scope to the verified principal; `GraphFabric.scope_tier` is internal behind the
+     door. A reads A⊕world, never B's private graph rows. (#277)
+   - **Crash replay:** wipe the relational projection → deterministic rebuild from the
+     tape; tampered/torn tape refused.
+   - **Re-tokenization:** a new tokenizer adds an independent token-index lineage;
+     the old lineage is untouched; `tokenization_id` distinguishes them.
+   - Documented scope: semantic vectors are model-dependent, not byte-reproducible
+     offline — replay rebuilds the deterministic projections; crawl chrome (source/url)
+     the tape never recorded comes back empty.
 
-- **Issue #150** (centralize duplicated utilities — `_sha` cid-consistency violation) should be reconciled before Phase 2 widens. The gate now imports `lgwks_hashing.content_id` for artifact cids; any future consolidation should preserve that path.
-- No model downloads or network calls were added; no new secrets.
-
----
-
-## Next suggested actions
-
-1. Review + merge this Phase 1 foundation.
-2. File child issues for Phase 2, Phase 3, and Phase 4 under #152.
-3. Pick Phase 2 next: wire `lgwks_substrate_run.py` to the gate while keeping JSONL mirrors as human-readable exports.
+### Still open (filed, not done here)
+- **ANT analyzer fixes:** `lgwks_tokenizer.py` `tokenize_trajectory` encodes content
+  with `ord(c)` (codepoint, not byte) — chars >255 collide with the Core/Modal/entity
+  ranges; entity tokens `1_000_000 + hash % 10_000_000` are lossy (collisions → false
+  postings). Matters once ANT streams feed the posting-list DB at scale.
+- **#223 residual:** the six legacy DB-stores (cache/cognition/vault/cycle/waste/memory)
+  that re-roll their own append/hash-chain persistence are NOT yet projections over the
+  fabric — a separate migration from this writer/reader/hardening work.
 
 Co-Authored-By: Claude <noreply@anthropic.com>
