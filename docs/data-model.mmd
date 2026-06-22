@@ -15,18 +15,25 @@
 %% vectors/facts/frontier), and GraphFabric(wraps entity_graph; #169 made it the
 %% single graph store, replacing per-run graph.db).
 %%
-%% REMAINING WORK (what's still NOT one model):
-%%   A) [#165 step 3 LANDED] lgwks_jarvis.* no longer writes a per-run research.sqlite
-%%      island — the JarvisDB writer is retired. The legacy crawler now persists through
-%%      GateWriter → StorageGate.ingest_artifact (tape SoR + cid-keyed embeddings,
-%%      store-once across runs) and graph_fabric/relational projections. The gate is keyed
-%%      on the run NAME, so successive runs accumulate + cross-run-dedup into ONE store;
-%%      run_id is provenance (artifact meta + node/edge attrs), never a shard key.
-%%      [embed_port.system_graph converged on the tape — #165 step 1.]
-%%   B) [#165 step 2 LANDED] GraphFabric.apply() is live + entity_graph nodes/edges/
-%%      chunks carry artifact_cid (tape provenance) + tier (world ⊕ tenant). Still open:
-%%      per-row artifact_cid back-linking for the substrate producer + read-side world ⊕
-%%      tenant enforcement on the graph.
+%% CONVERGENCE STATUS:
+%%   A) [#165 step 3 LANDED, PR #274] lgwks_jarvis.* no longer writes a per-run
+%%      research.sqlite island — the JarvisDB writer is retired. The legacy crawler now
+%%      persists through GateWriter → StorageGate.ingest_artifact (tape SoR + cid-keyed
+%%      embeddings, store-once across runs) and graph_fabric/relational projections. The
+%%      gate is keyed on the run NAME, so successive runs accumulate + cross-run-dedup into
+%%      ONE store; run_id is provenance (artifact meta + node/edge attrs), never a shard key.
+%%      [embed_port.system_graph converged on the tape — #165 step 1, PR #271.]
+%%   B) [#165 step 2 + enforcement LANDED, PR #272 + #276] GraphFabric.apply() is live +
+%%      entity_graph nodes/edges/chunks carry artifact_cid (tape provenance) + tier (world ⊕
+%%      tenant). #276 closed the deferred items: read-side world⊕tenant ENFORCEMENT on graph
+%%      reads (scope_tier filters tier=:me OR 'world' OR NULL; gate-scoped) + per-row
+%%      artifact_cid back-link from the substrate producer. Graph-read door convergence onto
+%%      capability-gated TenantStore is tracked separately (#277, CIAM #98/#99).
+%%   C) STILL NOT converged (#165 explicit scope items 3–4): lgwks_run.py + lgwks_research.py
+%%      do not yet emit their outputs (prevector.graph.json/embeddings.jsonl; rounds/findings/
+%%      REPORT.md) as tape artifacts via ingest_artifact. substrate_run routes chunks+graph
+%%      but not facts/media/vectors as first-class artifacts. (item 2 lgwks_ingest.py is stale
+%%      — file removed.) #165 stays OPEN for these.
 %% =====================================================================
 flowchart LR
 
