@@ -1,0 +1,18 @@
+# lakefile.toml — the Lean package for Keel's formal skeleton.
+#
+# One library, one module: ExcellentCode.Framework (lean/ExcellentCode/Framework.lean) — the
+# REFERENCE definition of the three framework concepts + twenty atoms + the
+# excellent_not_hallucinated theorem that schema/concepts.json must match. Pure Lean 4 core,
+# NO Mathlib dependency on purpose: the proof must build from the pinned toolchain alone, so
+# `lake build` is a cheap, hermetic, reproducible machine-check (no network fetch of a 2GB cache).
+#
+# `lake build` here is what upgrades src/conformance.mjs from a TRANSCRIBED reference (a JS parser
+# reads the .lean text) to a COMPILED one (Lean's kernel certifies the .lean typechecks). The
+# binding is Keel issue ledger item 6 / #646. Toolchain absent => the gate reports `unknown`,
+# never a false pass (the no-silent-under-check discipline).
+name = "keel"
+defaultTargets = ["ExcellentCode"]
+
+[[lean_lib]]
+name = "ExcellentCode"
+globs = ["ExcellentCode.Framework"]

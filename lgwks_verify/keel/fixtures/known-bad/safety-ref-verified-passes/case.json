@@ -1,0 +1,8 @@
+{
+  "schema": "keel.known-bad-case/v0",
+  "front_end": "profile",
+  "entry": "profile.json",
+  "expect_verdict": "GO",
+  "expect_exit": 0,
+  "description": "Companion control to safety-ref-altered-blocks: SAME profile, but reference_integrity declares the CORRECT sha256 of report.json — the reference resolves and its content is intact, so the satisfied gate GOES. Proves Risk #1 is not overhot: it punishes a missing/altered reference, not a verified one."
+}

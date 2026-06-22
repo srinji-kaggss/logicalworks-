@@ -1,0 +1,8 @@
+{
+  "schema": "keel.known-bad-case/v0",
+  "front_end": "simulate",
+  "entry": "profile.json",
+  "expect_verdict": "NO-GO",
+  "expect_exit": 1,
+  "description": "Brittle system: the harness asserts 0<=x<=10 but Keel drives the off-nominal probes (-1, 11) Keel itself derived from the range. The invariant breaks at the boundary-exceeding input => referential_truth false => buildable NO-GO, with the breaking vector reported. This is the envelope fault §4.1 calls invisible without pushing toward the limit — now caught."
+}

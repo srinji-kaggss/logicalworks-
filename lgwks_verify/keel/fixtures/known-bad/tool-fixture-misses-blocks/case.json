@@ -1,0 +1,8 @@
+{
+  "schema": "keel.known-bad-case/v0",
+  "front_end": "profile",
+  "entry": "profile.json",
+  "expect_verdict": "NO-GO",
+  "expect_exit": 1,
+  "description": "Open Risk #2 (executable tool qualification): the gate (buildable) is satisfied and would GO, but the safety_case declares 'bash' self-qualified with a fixture whose 'detects' probe exits 0 — the tool FAILED to flag the planted defect. A tool that cannot demonstrate it catches defects must not produce gating evidence => NO-GO. Proves declarative qualification is now executable."
+}

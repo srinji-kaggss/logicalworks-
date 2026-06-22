@@ -21,10 +21,23 @@
 
 import { spawn, spawnSync } from 'node:child_process';
 import { join } from 'node:path';
-import { H, hashFile, hashPathMeta } from './anchor.mjs';
+import { H, hashFile, hashPathMeta, globFingerprint } from './anchor.mjs';
 
 const PATH_WITH_CARGO = `${process.env.PATH || ''}:${join(process.env.CARGO_HOME || join(process.env.HOME || '', '.cargo'), 'bin')}`;
 const RUN_ENV = { ...process.env, PATH: PATH_WITH_CARGO };
+
+/**
+ * R#3 hermetic env (docs/15 §15.4): when a profile declares an execution_policy, an evidence run
+ * inherits ONLY the explicitly passed-through ambient vars (plus a minimal PATH/LANG base) — host
+ * secrets, tokens, and credentials that were not allow-listed are absent inside the harness. With
+ * no policy the full RUN_ENV is used (back-compatible). The binding's own `env` always layers on top.
+ */
+export function policyEnv(policy) {
+  if (!policy) return RUN_ENV;
+  const base = { PATH: PATH_WITH_CARGO, LANG: process.env.LANG || 'C' };
+  for (const k of policy.env_passthrough || []) if (process.env[k] !== undefined) base[k] = process.env[k];
+  return base;
+}
 
 // Exit code a tool uses to self-report "namespace real, evidence harness not wired here"
 // (the automake skip convention). Distinct from a needed-binary being absent: the tool RAN
@@ -63,8 +76,20 @@ function spawnAsync(tool, argv, opts) {
   });
 }
 
-/** Hash a unit's content so a node id changes when the unit changes (staleness spine). */
-export function unitFingerprint(unit) {
+/**
+ * Hash the content a node's verdict depends on, so its id changes when (and only when) that
+ * content changes (staleness spine, docs/01 §1.3).
+ *
+ * `scope` (issue ledger item 2 / #647) NARROWS that dependency: when a binding declares the
+ * file globs its evidence actually reads, the fingerprint covers ONLY those files (relative to
+ * the unit root) — an edit elsewhere in the unit does not change the id, so the bound atom is
+ * NOT recomputed. This is the first step from unit-granular toward symbol-granular incremental
+ * (the seam; per-symbol sub-units extend it later, growing toward .braid). Verdict-invariant:
+ * a scope only changes WHICH inputs are watched, never how the tool runs. Absent scope ⇒ the
+ * coarse whole-unit fingerprint (back-compatible), preferring the front-end's precomputed one.
+ */
+export function unitFingerprint(unit, scope) {
+  if (Array.isArray(scope) && scope.length) return globFingerprint(unit.root || unit.path || unit.id || '.', scope);
   if (unit.fingerprint) return unit.fingerprint;
   return unit.manifest ? hashFile(unit.manifest) : hashPathMeta(unit.path || unit.id);
 }
@@ -79,12 +104,26 @@ function crossAnd(vs) {
   return vs.includes('false') ? 'false' : vs.includes('unknown') ? 'unknown' : 'true';
 }
 
+/** Extract a numeric score from a tool's stdout per an evidence `score` spec (graded atoms,
+ *  docs/02 §2.5). Returns a number (optionally normalised by `max` into [0,1]) or null when no
+ *  number is present — null => the atom is 'unknown' (no measurement), never a silent pass. */
+function extractScore(stdout, spec) {
+  const nums = (stdout || '').match(/-?\d+(?:\.\d+)?/g);
+  if (!nums || !nums.length) return null;
+  const s = parseFloat(spec.from === 'stdout-first-number' ? nums[0] : nums[nums.length - 1]);
+  if (!Number.isFinite(s)) return null;
+  return (typeof spec.max === 'number' && spec.max > 0) ? s / spec.max : s;
+}
+
 /**
  * Build the DAG node that instantiates one (atom, unit) pair. The verdict is
  * { value, reason, points:[…] }. compute() is ASYNC (await-able) so the engine pool can
  * run many atom nodes concurrently; the node id folds in the FULL evidence spec (tool, argv
  * structurally, cwd, env, every crossed point) so any change that affects compute() changes
  * the id (staleness spine, docs/01 §1.3).
+ *
+ * The unit-fingerprint input is NARROWED by `evidence.scope` when declared (#647): the node
+ * then depends only on the scoped files, so an edit outside the scope does not recompute it.
  *
  * `meta` carries { advisory, source }: the node id is NAMESPACED by them so an advisory /
  * proposer node can never share a content-addressed verdict with a gated atom node, and two
@@ -98,7 +137,7 @@ export function atomNode(atomDef, binding, unit, meta = {}) {
   // advisory node (or vice-versa) is impossible by construction, independent of command text.
   const channel = meta.advisory ? `advisory:${meta.source || ''}` : (meta.source ? `gated:${meta.source}` : 'gated');
   const inputs = [
-    unitFingerprint(unit),
+    unitFingerprint(unit, ev?.scope),
     binding ? evidenceFingerprint(ev, points) : 'nobind',
     channel,
   ];
@@ -121,9 +160,19 @@ export function atomNode(atomDef, binding, unit, meta = {}) {
         const argv = pt.argv || ev.argv;
         if (!Array.isArray(argv)) { results.push({ label: pt.label || 'base', value: 'unknown', reason: 'no argv (malformed binding/point — refusing to spawn a bare tool)' }); continue; }
         const cwd = (pt.cwd ?? ev.cwd) ? join(unit.root || '.', pt.cwd ?? ev.cwd) : (unit.root || '.');
-        const env = (pt.env || ev.env) ? { ...RUN_ENV, ...ev.env, ...pt.env } : RUN_ENV;
+        const baseEnv = policyEnv(meta.policy);
+        const env = (pt.env || ev.env) ? { ...baseEnv, ...ev.env, ...pt.env } : baseEnv;
         const r = await spawnAsync(ev.tool, argv, { cwd, env, encoding: 'utf8', timeout: pt.timeout_ms || ev.timeout_ms });
         results.push(readPoint(pt, ev, r));
+      }
+      // GRADED atom (docs/02 §2.5): each point yields a numeric score; the worst point dominates
+      // (the bridge fails where it is weakest). The raw score is returned and cached here; crossing
+      // to boolean against the profile threshold happens in the runner post-process (engine.mjs),
+      // so changing the bar never re-runs the tool. A point that couldn't measure => atom unknown.
+      if (ev.score) {
+        const bad = results.filter(p => p.value === 'unknown');
+        if (bad.length) return { value: 'unknown', points: results, reason: bad.map(p => `[${p.label}] ${p.reason}`).join(' · ') };
+        return { value: 'graded', score: Math.min(...results.map(p => p.score)), points: results };
       }
       const value = crossAnd(results.map(p => p.value));
       const failed = results.filter(p => p.value !== 'true');
@@ -146,6 +195,15 @@ function readPoint(pt, ev, r) {
   if (r.status === SKIP_EXIT) {
     const last = (r.stdout || '').trim().split('\n').filter(Boolean).pop() || 'self-reported skip';
     return { label, value: 'unknown', exit: 77, reason: last.replace(/^SKIP:\s*/, '') };
+  }
+  // GRADED measurement (docs/02 §2.5): the tool must exit 0 (it ran) and emit a number; the
+  // boolean crossing is deferred to the engine against profile.thresholds. exit!=0 or no number
+  // => 'unknown' (no measurement), never a silent pass.
+  if (ev.score) {
+    if (r.status !== 0) return { label, value: 'unknown', exit: r.status, reason: `${ev.tool} exited ${r.status} — no score measured`, log: (r.stderr || r.stdout || '').slice(-2000) };
+    const score = extractScore(r.stdout, ev.score);
+    if (score == null) return { label, value: 'unknown', exit: r.status, reason: `no number on stdout to score (from: ${ev.score.from})` };
+    return { label, value: 'graded', score, exit: r.status };
   }
   const ok = r.status === 0; // ok_when is enforced to exit==0 in compute() (H2)
   return {

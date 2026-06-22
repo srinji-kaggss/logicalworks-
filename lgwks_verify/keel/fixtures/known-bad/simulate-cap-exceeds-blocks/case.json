@@ -1,0 +1,8 @@
+{
+  "schema": "keel.known-bad-case/v0",
+  "front_end": "simulate",
+  "entry": "profile.json",
+  "expect_verdict": "BLOCKED",
+  "expect_exit": 1,
+  "description": "No-silent-sampling guarantee, end-to-end: the sensor model enumerates 3 vectors but the scenario caps the crossing at max_vectors=2. enumerateEnvelope returns an error rather than sampling a subset; run-simulate maps it to unknown, and unknown over the gated atom BLOCKS (exit 1). A verifier that bounds coverage must SAY so (block), never silently cover less than it claims. Distinct from simulate-boundary-breaks (that is a measured false; this is a refused-to-measure)."
+}

@@ -43,6 +43,15 @@
         "argv": ["lgwks_bot_code_hacker.py", "--scan", ".", "--baseline", "findings_new.json"],
         "ok_when": "exit==0"
       }
+    },
+    {
+      "atom": "specification_fidelity",
+      "unit": "core",
+      "evidence": {
+        "tool": "python3",
+        "argv": ["scripts/check_schema_registry.py"],
+        "ok_when": "exit==0"
+      }
     }
   ],
   "gate_concept": "lgwks_floor",

@@ -7,6 +7,7 @@
   "additionalProperties": false,
   "required": ["target", "units", "bindings", "gate_concept"],
   "properties": {
+    "_comment": { "type": "string", "description": "Optional human/AI annotation — the ONLY free-text field a RESTRICTIVE profile may carry. Documentation only; never read by the engine." },
     "target": {
       "type": "object",
       "additionalProperties": false,
@@ -14,7 +15,7 @@
       "properties": {
         "name": { "type": "string" },
         "root": { "type": "string", "description": "filesystem root of the target codebase" },
-        "ecosystem": { "type": "string", "enum": ["rust", "typescript", "python", "go", "mixed"] }
+        "ecosystem": { "type": "string", "enum": ["rust", "typescript", "python", "go", "shell", "mixed"] }
       }
     },
     "units": {
@@ -25,7 +26,7 @@
         "additionalProperties": false,
         "required": ["unit", "discover"],
         "properties": {
-          "unit": { "type": "string", "enum": ["crate", "module", "package", "service"] },
+          "unit": { "type": "string", "enum": ["core", "crate", "module", "package", "service"] },
           "discover": {
             "type": "object",
             "additionalProperties": false,
@@ -48,7 +49,7 @@
         "required": ["atom", "evidence"],
         "properties": {
           "atom": { "type": "string" },
-          "unit": { "type": "string", "enum": ["crate", "module", "package", "service"] },
+          "unit": { "type": "string", "enum": ["core", "crate", "module", "package", "service"] },
           "evidence": {
             "type": "object",
             "additionalProperties": false,
@@ -57,8 +58,37 @@
               "tool": { "type": "string" },
               "argv": { "type": "array", "items": { "type": "string" } },
               "cwd": { "type": "string" },
+              "env": { "type": "object", "additionalProperties": { "type": "string" }, "description": "extra environment for the tool process (merged over the inherited env)" },
               "needs": { "type": "array", "items": { "type": "string" }, "description": "binaries that must be present, else atom is 'unknown' (skip), never 'false'" },
-              "ok_when": { "type": "string", "enum": ["exit==0"] }
+              "scope": { "type": "array", "items": { "type": "string" }, "description": "file globs (relative to the unit root) this evidence depends on (#647). The bound atom's staleness fingerprint covers ONLY these files, so an edit outside the scope does not recompute it (symbol-granular incremental seam, docs/01 §1.3). Verdict-invariant: scope changes what is watched, not how the tool runs. Absent => whole-unit (coarse)." },
+              "ok_when": { "type": "string", "enum": ["exit==0"] },
+              "score": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": ["from"],
+                "description": "GRADED atoms only (docs/02 §2.5): how to read a numeric score from the tool. The tool RUN produces the score (content-addressed/cached); the score crosses to boolean against profile.thresholds[atom] in the runner post-process — so changing the bar never re-runs the tool. exit!=0 / no number / timeout => no score => 'unknown' (never a silent pass).",
+                "properties": {
+                  "from": { "type": "string", "enum": ["stdout-last-number", "stdout-first-number"], "description": "extract the last/first number printed on stdout" },
+                  "max": { "type": "number", "minimum": 0, "description": "if set, normalise score := raw/max into [0,1] (e.g. a 0-100 coverage percent with max:100)" }
+                }
+              },
+              "timeout_ms": { "type": "number", "minimum": 0, "description": "per-point wall-clock bound; a tool that exceeds it is 'unknown' (timed out), never a pass (docs/07; H1)" },
+              "cross": {
+                "type": "array",
+                "description": "Finite-outcome crossing matrix (docs/07 §7.2): the SAME obligation held across N declared points (platform/config/edge). The atom is true only if EVERY point is true (Kleene AND). Absent => a single 'base' point.",
+                "items": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "description": "One crossed point. Each field overrides the parent evidence for this point; argv/cwd/env/timeout_ms default to the evidence's.",
+                  "properties": {
+                    "label": { "type": "string" },
+                    "argv": { "type": "array", "items": { "type": "string" } },
+                    "cwd": { "type": "string" },
+                    "env": { "type": "object", "additionalProperties": { "type": "string" } },
+                    "timeout_ms": { "type": "number", "minimum": 0 }
+                  }
+                }
+              }
             }
           }
         }
@@ -67,6 +97,14 @@
     "gate_concept": {
       "type": "string",
       "description": "Concept id (from schema/concepts.json) the always-on gate enforces. Default 'sound'."
+    },
+    "assurance_claim": {
+      "type": "string",
+      "description": "Concept id this profile ASSERTS the codebase meets (docs/09). Its atoms are activated and evaluated alongside the gate; the CLAIM-COHERENCE gate BLOCKS if any claimed atom lacks evidence (unrun/unbound) — you may claim only what you demonstrate. Fires only when set; an honest unknown you never claimed does not block."
+    },
+    "trust_anchor": {
+      "type": "string",
+      "description": "A6 authenticity: path (relative to target.root) to an ed25519 PUBLIC KEY (PEM/SPKI). Reference files that ship a signature_file are verified against this key — a valid signature means the reference was attested by a holder of the private key OUTSIDE the AI authorship loop (the external trust root). Without it, signed references cannot be authenticated and unsigned references are recorded as self_asserted."
     },
     "envelope": {
       "type": "object",
@@ -82,6 +120,364 @@
       "type": "object",
       "description": "Where graded atoms cross to boolean. atom id -> minimum score [0,1].",
       "additionalProperties": { "type": "number", "minimum": 0, "maximum": 1 }
+    },
+    "execution_policy": {
+      "type": "object",
+      "additionalProperties": false,
+      "description": "Confinement for profile-provided evidence commands (Open Risk #3). `allow` is the allowlist of tool binaries Keel may spawn — a binding/harness/tool-qualification tool NOT in the list is refused at load (no run). `env_passthrough` is the ONLY ambient environment variables an evidence run inherits (plus a minimal PATH/LANG base); everything else (host secrets, tokens) is scrubbed.",
+      "properties": {
+        "allow": { "type": "array", "items": { "type": "string" }, "description": "Permitted evidence tool binaries (e.g. cargo, bash, python3). Empty/absent => no allowlist enforced." },
+        "env_passthrough": { "type": "array", "items": { "type": "string" }, "description": "Ambient env var names an evidence run may inherit; all others are absent inside the harness." }
+      }
+    },
+    "safety_case": {
+      "type": "object",
+      "additionalProperties": false,
+      "description": "Safety-critical CI assurance metadata. This is not a certification claim; it is a restrictive checklist that prevents an AI from asserting DO-178B/C, DO-331, or ISO 26262 style rigor without traceable process evidence.",
+      "required": ["standards", "certification_intent"],
+      "properties": {
+        "standards": {
+          "type": "array",
+	          "items": { "type": "string", "enum": ["DO-178B", "DO-178C", "DO-331", "ISO-26262", "IEC-61508", "ISO-21448"] },
+          "description": "Standards or supplements whose discipline this profile is intentionally mapping to. DO-331 is a supplement and requires DO-178C in this schema."
+        },
+        "certification_intent": {
+          "type": "string",
+          "enum": ["none", "inspired", "internal-assurance", "certification-support"],
+          "description": "The claim level. 'certification-support' means the profile is collecting evidence that could support a formal program, not that Keel certifies anything."
+        },
+	        "aviation_level": { "type": "string", "enum": ["A", "B", "C", "D", "E"], "description": "DO-178 software level/DAL when an aviation standard is selected." },
+	        "automotive_asil": { "type": "string", "enum": ["QM", "A", "B", "C", "D"], "description": "ISO 26262 ASIL when ISO-26262 is selected." },
+	        "iec_sil": { "type": "string", "enum": ["SIL1", "SIL2", "SIL3", "SIL4"], "description": "IEC 61508 safety integrity level when IEC-61508 is selected." },
+        "safety_plan_ref": { "type": "string", "description": "Plan for safety/software aspects: PSAC/SVP/SQA/SCM equivalent or ISO 26262 safety plan." },
+        "hazard_analysis_ref": { "type": "string", "description": "System hazard analysis / FHA / HARA source that assigns DAL or ASIL." },
+        "requirements_traceability_ref": { "type": "string", "description": "Bidirectional requirements-to-code-to-test/proof trace data source." },
+        "verification_plan_ref": { "type": "string", "description": "Verification plan defining reviews, analyses, tests, coverage, independence, and pass/fail criteria." },
+        "configuration_index_ref": { "type": "string", "description": "Configuration index or baselined artifact list that pins sources, tools, generated code, models, tests, and reference data." },
+        "independence": {
+          "type": "object",
+          "additionalProperties": false,
+          "description": "Independence evidence for verification, review, quality assurance, and approval. For AI work, this must identify the non-author authority or external oracle, not another untrusted authoring prompt.",
+          "properties": {
+            "verifier": { "type": "string" },
+            "reviewer": { "type": "string" },
+            "evidence_ref": { "type": "string" }
+          }
+        },
+        "structural_coverage": {
+          "type": "object",
+          "additionalProperties": false,
+          "description": "Declared structural coverage achieved by requirements-based tests. Keel's validator applies a strict DAL/ASIL floor over this declaration.",
+	          "properties": {
+	            "statement": { "type": "boolean" },
+	            "decision": { "type": "boolean" },
+	            "mcdc": { "type": "boolean" },
+	            "scope": {
+	              "type": "array",
+	              "items": { "type": "string", "enum": ["source_code", "generated_code", "model_training_code", "learned_model"] },
+	              "description": "What the structural coverage report covers. Learned models are not source control-flow; neural coverage cannot be counted as statement/decision/MC/DC coverage."
+	            },
+	            "source_ref": { "type": "string" }
+	          }
+	        },
+        "trust_anchor": {
+          "type": "object",
+          "additionalProperties": false,
+          "description": "External trust root for reference signatures (Open Risk #1): a PEM ed25519 public key file, held OUTSIDE the AI authoring loop, that signed safety-case references verify against. This is the externality that supplies the independence the verdict otherwise lacks.",
+          "properties": {
+            "public_key_file": { "type": "string" }
+          }
+        },
+        "reference_integrity": {
+          "type": "object",
+          "description": "Per-reference integrity (Open Risk #1): bind a safety-case reference to a content hash and/or detached signature, so a string ref cannot silently point at nothing or at altered content. Keys are reference field names: safety_plan_ref, hazard_analysis_ref, requirements_traceability_ref, verification_plan_ref, configuration_index_ref, independence_evidence_ref, structural_coverage_source_ref.",
+          "additionalProperties": {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+              "hash": { "type": "string", "description": "Expected sha256 (hex) of the referenced file." },
+              "signature_file": { "type": "string", "description": "Detached ed25519 signature over the referenced file, verified against trust_anchor.public_key_file." }
+            }
+          }
+        },
+        "tool_qualification": {
+          "type": "array",
+          "description": "Every CI evidence-producing tool used under a safety_case must be listed. This includes shells, compilers, test runners, coverage tools, model/code generators, Keel runners, and validators.",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["tool", "standard", "role", "qualification_ref"],
+            "properties": {
+              "tool": { "type": "string" },
+              "role": { "type": "string", "enum": ["compiler", "test-runner", "coverage", "static-analysis", "model-tool", "code-generator", "ci-runner", "verification", "shell", "other"] },
+              "standard": { "type": "string", "enum": ["DO-330", "ISO-26262-8", "self-qualified", "unqualified"] },
+              "tql": { "type": "string", "enum": ["TQL-1", "TQL-2", "TQL-3", "TQL-4", "TQL-5"] },
+              "tcl": { "type": "string", "enum": ["TCL1", "TCL2", "TCL3"] },
+              "qualification_ref": { "type": "string" },
+              "fixture": {
+                "type": "object",
+                "additionalProperties": false,
+                "description": "Executable qualification (Open Risk #2): Keel RUNS the named tool against a planted-defective input it MUST flag (detects, exit!=0) and a clean input it MUST pass (accepts, exit==0). A self-qualified tool that cannot pass its own fixture is not qualified — qualification is demonstrated, not declared.",
+                "required": ["detects", "accepts"],
+                "properties": {
+                  "detects": {
+                    "type": "object",
+                    "additionalProperties": false,
+                    "required": ["argv"],
+                    "properties": {
+                      "argv": { "type": "array", "items": { "type": "string" } },
+                      "needs": { "type": "array", "items": { "type": "string" } }
+                    }
+                  },
+                  "accepts": {
+                    "type": "object",
+                    "additionalProperties": false,
+                    "required": ["argv"],
+                    "properties": {
+                      "argv": { "type": "array", "items": { "type": "string" } },
+                      "needs": { "type": "array", "items": { "type": "string" } }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+	        "model_based": {
+	          "type": "object",
+	          "additionalProperties": false,
+	          "description": "Required when DO-331 is selected. Models are requirements/design artifacts and must be verified, traced, baselined, and correlated to generated or hand-written code.",
+          "properties": {
+            "model_ref": { "type": "string" },
+            "model_verification_ref": { "type": "string" },
+            "model_code_trace_ref": { "type": "string" },
+            "simulation_correlation_ref": { "type": "string" },
+	            "generated_code_ref": { "type": "string" }
+	          }
+	        },
+	        "learning_enabled": {
+	          "type": "object",
+	          "additionalProperties": false,
+	          "description": "Learning-enabled / ML assurance data. Traditional DO-178C, ISO 26262, and IEC 61508 structural coverage evidence does not automatically apply to learned model behavior; this block makes the gap explicit and blocks certification overclaim.",
+	          "properties": {
+	            "present": { "type": "boolean", "description": "True when any safety-relevant component contains learned logic, trained weights, data-driven classifiers, neural nets, reinforcement learning policies, or statistical models." },
+	            "certification_position": {
+	              "type": "string",
+	              "enum": ["not-in-scope", "research-only", "dal-d-ceiling", "safety-case-with-assumptions", "accepted-means-of-compliance"],
+	              "description": "The project's explicit position on ML certification. DAL C+ or equivalent claims require accepted-means-of-compliance plus cited authority evidence."
+	            },
+	            "accepted_means_of_compliance_ref": { "type": "string", "description": "Authority-accepted means of compliance, issue paper, certification basis, or equivalent formal approval for using learned logic in the declared safety role." },
+	            "components": {
+	              "type": "array",
+	              "items": {
+	                "type": "object",
+	                "additionalProperties": false,
+	                "required": ["id", "model_type", "safety_role"],
+	                "properties": {
+	                  "id": { "type": "string" },
+	                  "model_type": { "type": "string", "enum": ["neural-network", "tree-ensemble", "linear-model", "bayesian-model", "reinforcement-learning", "classifier", "regressor", "other"] },
+	                  "safety_role": { "type": "string", "enum": ["none", "training-only", "advisory", "guarded", "direct-control"] },
+	                  "requirements_ref": { "type": "string" },
+	                  "model_ref": { "type": "string" },
+	                  "weights_ref": { "type": "string" }
+	                }
+	              }
+	            },
+	            "ml_lifecycle_ref": { "type": "string", "description": "ML lifecycle plan covering data, training, validation, configuration, deployment, and monitoring." },
+	            "data_requirements_ref": { "type": "string" },
+	            "data_collection_ref": { "type": "string" },
+	            "data_preprocessing_ref": { "type": "string" },
+	            "training_process_ref": { "type": "string" },
+	            "validation_dataset_ref": { "type": "string" },
+	            "test_oracle_ref": { "type": "string", "description": "Oracle strategy for deciding correctness. Pseudo-oracles, consensus labels, or learned oracles must be explicitly justified." },
+	            "operational_design_domain_ref": { "type": "string", "description": "Declared operating domain/envelope for the ML component." },
+	            "ood_detection_ref": { "type": "string", "description": "Out-of-distribution detection or rejection evidence and limits." },
+	            "uncertainty_calibration_ref": { "type": "string" },
+	            "robustness_ref": { "type": "string", "description": "Adversarial, perturbation, environmental, and distribution-shift robustness evidence." },
+	            "runtime_monitor_ref": { "type": "string", "description": "Runtime monitor, guard, checker, or safety cage evidence." },
+	            "fallback_safe_state_ref": { "type": "string", "description": "Safe fallback/degradation behavior when the ML component is uncertain, OOD, unavailable, or contradicted." },
+	            "post_deployment_monitoring_ref": { "type": "string" },
+	            "formal_analysis_ref": { "type": "string", "description": "Formal analysis of bounded properties, including scope limits. Not a blanket proof of model correctness." },
+	            "neural_coverage_ref": { "type": "string", "description": "Neural coverage or DNN structural metric evidence. This is not MC/DC and cannot satisfy source structural coverage by itself." },
+	            "assumptions_ref": { "type": "string", "description": "Explicit assumptions used to bridge ML evidence into the safety argument." }
+	          }
+	        }
+	      }
+	    },
+    "soak": {
+      "type": "array",
+      "description": "Soak-tier bindings (docs/04 §4.3, issue #643): one per load dimension. Each binds a NATIVE harness that runs the escalate→bracket→revert→soak loop and emits a capacity-profile/v0 artifact on stdout. The dimension name must match an envelope.target key. Run by src/run-soak.mjs, never the commit gate (soak is its own tier).",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["dimension", "evidence"],
+        "properties": {
+          "dimension": { "type": "string", "description": "load dimension (must match an envelope.target key)" },
+          "evidence": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["tool", "argv"],
+            "properties": {
+              "tool": { "type": "string" },
+              "argv": { "type": "array", "items": { "type": "string" } },
+              "cwd": { "type": "string" },
+              "env": { "type": "object", "additionalProperties": { "type": "string" } },
+              "needs": { "type": "array", "items": { "type": "string" }, "description": "binaries that must be present, else the dimension is 'unknown' (BLOCKS), never a pass" },
+              "ok_when": { "type": "string", "enum": ["exit==0"] },
+              "timeout_ms": { "type": "number", "minimum": 0 }
+            }
+          }
+        }
+      }
+    },
+    "simulate": {
+      "type": "array",
+      "description": "Input-envelope simulation scenarios (docs/09, docs/04 §4.1 'envelope faults'): drive the system-under-test's SENSOR surface through its envelope (nominal→boundary→off-nominal) against an oracle. Keel enumerates the finite input crossing and crosses the oracle (∧) over every vector, reporting the breaking vector. Run by src/run-simulate.mjs.",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["name", "atom", "sensors", "harness"],
+        "properties": {
+          "name": { "type": "string" },
+          "atom": { "type": "string", "description": "the atom this scenario instantiates (e.g. specification_fidelity, boundary_completeness, precondition_correctness, security_by_construction). Must exist in schema/atoms.json." },
+          "max_vectors": { "type": "number", "minimum": 1, "description": "cap on the enumerated input crossing; exceeding it BLOCKS (no silent sampling)." },
+          "reference": {
+            "type": "object",
+            "additionalProperties": false,
+            "description": "A6 (validated_aircraft_correlation): the REFERENCE-DATA oracle. When present, the harness EMITS the system's output on stdout and Keel compares it to the matching reference datum within tolerance — the verdict's truth traces to reference data, NOT the harness author's intuition. This is what binds specification_fidelity (⟦P⟧(x)=S(x)) honestly. A vector with no reference datum is 'unknown' (un-validatable, blocks). PROVENANCE (A6): supply `from` (a content-hashed reference FILE, the trusted golden artifact) OR inline `data` WITH a `source_ref` — an untraceable inline table is refused by validation.",
+            "properties": {
+              "tolerance": { "type": "number", "minimum": 0, "description": "numeric |output-expect| ≤ tolerance; non-numeric outputs compare by strict equality" },
+              "source_ref": { "type": "string", "description": "provenance of the reference data (golden trace, real-system capture, approved spec) — A6: model truth is data, not intuition. REQUIRED for inline data." },
+              "from": { "type": "string", "description": "path (relative to target.root) to a reference-data file ([{when,expect}] or {tolerance,source_ref,data}); content-hashed into the verdict node id so an edited reference requalifies (A8)" },
+              "signature_file": { "type": "string", "description": "A6 authenticity: path to a base64 ed25519 detached signature over the reference file's bytes; verified against profile.trust_anchor. A valid signature => the reference is authenticated by an external key-holder (independence from the author). Requires trust_anchor; an invalid/unverifiable signature BLOCKS." },
+              "data": {
+                "type": "array",
+                "description": "the reference table: each row maps an input vector to its expected output",
+                "items": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": ["when", "expect"],
+                  "properties": {
+                    "when": { "type": "object", "description": "the sensor vector this datum applies to ({sensor: value, …})" },
+                    "expect": { "description": "the reference output for that vector" }
+                  }
+                }
+              }
+            }
+          },
+          "sensors": {
+            "type": "array",
+            "description": "the input surface to drive. Each sensor contributes a set of points; the scenario crosses their Cartesian product.",
+            "items": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": ["name"],
+              "properties": {
+                "name": { "type": "string" },
+                "values": { "type": "array", "description": "explicit equivalence-class / boundary representatives" },
+                "range": { "type": "array", "items": { "type": "number" }, "description": "[lo, hi]: Keel adds lo, hi, and (unless probe_outside:false) lo-step / hi+step as off-nominal — boundary-value analysis" },
+                "step": { "type": "number", "description": "off-nominal probe distance outside a numeric range (default 1)" },
+                "probe_outside": { "type": "boolean", "description": "default true: include just-outside-range points as off-nominal inputs the system must handle" },
+                "offNominal": { "type": "array", "description": "explicit invalid/off-nominal inputs the system must reject or handle (not crash)" }
+              }
+            }
+          },
+          "harness": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["tool", "argv"],
+            "description": "the system-under-test driver. Invoked once per input vector; Keel injects each sensor as env KEEL_SENSOR_<NAME> and the whole vector as KEEL_VECTOR (JSON). Oracle: exit 0 = invariant held · nonzero = violated · 77 = could not evaluate (unknown).",
+            "properties": {
+              "tool": { "type": "string" },
+              "argv": { "type": "array", "items": { "type": "string" } },
+              "cwd": { "type": "string" },
+              "env": { "type": "object", "additionalProperties": { "type": "string" } },
+              "needs": { "type": "array", "items": { "type": "string" } },
+              "timeout_ms": { "type": "number", "minimum": 0 }
+            }
+          }
+        }
+      }
+    },
+    "latency": {
+      "type": "array",
+      "description": "Latency/jitter scenarios (aircraft axiom A5: latency and jitter are first-order verdict variables). The harness runs the operation under test `samples` times and emits its measured latency (ms) on stdout each time; Keel aggregates (max/p99/jitter) and crosses against the declared budget. The measurement is an empirical sensor; the budget decision is deterministic. Run by src/run-latency.mjs. No budget ⇒ unknown (cannot gate).",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["name", "atom", "harness", "budget"],
+        "properties": {
+          "name": { "type": "string" },
+          "atom": { "type": "string", "description": "the atom this binds (e.g. algorithmic_efficiency). Must exist in schema/atoms.json." },
+          "samples": { "type": "number", "minimum": 1, "description": "repeat count for jitter measurement (default 5)" },
+          "budget": {
+            "type": "object",
+            "additionalProperties": false,
+            "description": "the auditor's CITED latency budget — at least one bound. An uncited threshold is not law (docs/10 §10.3).",
+            "properties": {
+              "max_ms": { "type": "number", "minimum": 0 },
+              "p99_ms": { "type": "number", "minimum": 0 },
+              "jitter_ms": { "type": "number", "minimum": 0 },
+              "source_ref": { "type": "string", "description": "provenance of the budget (SLO doc, contract, capacity plan)" }
+            }
+          },
+          "harness": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["tool", "argv"],
+            "description": "emits the operation's measured latency (ms) on stdout per invocation",
+            "properties": {
+              "tool": { "type": "string" },
+              "argv": { "type": "array", "items": { "type": "string" } },
+              "cwd": { "type": "string" },
+              "env": { "type": "object", "additionalProperties": { "type": "string" } },
+              "needs": { "type": "array", "items": { "type": "string" } },
+              "timeout_ms": { "type": "number", "minimum": 0 }
+            }
+          }
+        }
+      }
+    },
+    "sim": {
+      "type": "array",
+      "description": "Multi-actor simulation scenarios (docs/04 §4.5; axioms A1/A7; issue #644): concurrent actors with step sequences. Keel enumerates the order-preserving interleavings (the finite schedule space) and crosses the consistency oracle over every one, reporting the breaking interleaving (the race). Run by src/run-sim.mjs. The interaction surface where concurrency_correctness / idempotence live.",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["name", "atom", "actors", "harness"],
+        "properties": {
+          "name": { "type": "string" },
+          "atom": { "type": "string", "description": "the atom this binds (e.g. concurrency_correctness, idempotence). Must exist in schema/atoms.json." },
+          "max_interleavings": { "type": "number", "minimum": 1, "description": "cap on the enumerated schedule space; exceeding it BLOCKS (no silent sampling)." },
+          "actors": {
+            "type": "array",
+            "description": "the concurrent actors; each issues an ordered list of operations against the system",
+            "items": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": ["id", "steps"],
+              "properties": {
+                "id": { "type": "string" },
+                "steps": { "type": "array", "items": { "type": "string" }, "description": "this actor's operation sequence (internal order preserved across all interleavings)" }
+              }
+            }
+          },
+          "harness": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["tool", "argv"],
+            "description": "applies one interleaving to the system and exits 0 if the resulting history is consistent, nonzero if a race/inconsistency is observed, 77 if it cannot evaluate. Keel injects the schedule as env KEEL_SCHEDULE (JSON [{actor,op},…]).",
+            "properties": {
+              "tool": { "type": "string" },
+              "argv": { "type": "array", "items": { "type": "string" } },
+              "cwd": { "type": "string" },
+              "env": { "type": "object", "additionalProperties": { "type": "string" } },
+              "needs": { "type": "array", "items": { "type": "string" } },
+              "timeout_ms": { "type": "number", "minimum": 0 }
+            }
+          }
+        }
+      }
     }
   }
 }

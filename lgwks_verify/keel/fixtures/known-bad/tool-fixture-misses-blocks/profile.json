@@ -1,0 +1,18 @@
+{
+  "_comment": "Gate would GO, but 'bash' fails its own qualification fixture (detects exits 0 => missed the planted defect) => NO-GO. Risk #2 regression guard.",
+  "target": { "name": "tool-fixture-misses-blocks", "root": ".", "ecosystem": "shell" },
+  "units": [ { "unit": "crate", "discover": { "type": "literal", "values": ["."] } } ],
+  "bindings": [
+    { "atom": "referential_truth", "unit": "crate", "evidence": { "tool": "bash", "argv": ["-c", "true"], "needs": ["bash"], "ok_when": "exit==0" } },
+    { "atom": "testability_falsifiability", "unit": "crate", "evidence": { "tool": "bash", "argv": ["-c", "true"], "needs": ["bash"], "ok_when": "exit==0" } }
+  ],
+  "gate_concept": "buildable",
+  "safety_case": {
+    "standards": [],
+    "certification_intent": "inspired",
+    "tool_qualification": [
+      { "tool": "bash", "role": "shell", "standard": "self-qualified", "qualification_ref": "inline",
+        "fixture": { "detects": { "argv": ["-c", "exit 0"] }, "accepts": { "argv": ["-c", "exit 0"] } } }
+    ]
+  }
+}

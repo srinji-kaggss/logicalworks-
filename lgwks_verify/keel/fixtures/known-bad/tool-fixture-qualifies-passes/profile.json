@@ -1,0 +1,18 @@
+{
+  "_comment": "Honest fixture: detects (exit 1) flags the planted defect, accepts (exit 0) passes clean => bash qualified => satisfied gate GOES. Risk #2 not-overhot control.",
+  "target": { "name": "tool-fixture-qualifies-passes", "root": ".", "ecosystem": "shell" },
+  "units": [ { "unit": "crate", "discover": { "type": "literal", "values": ["."] } } ],
+  "bindings": [
+    { "atom": "referential_truth", "unit": "crate", "evidence": { "tool": "bash", "argv": ["-c", "true"], "needs": ["bash"], "ok_when": "exit==0" } },
+    { "atom": "testability_falsifiability", "unit": "crate", "evidence": { "tool": "bash", "argv": ["-c", "true"], "needs": ["bash"], "ok_when": "exit==0" } }
+  ],
+  "gate_concept": "buildable",
+  "safety_case": {
+    "standards": [],
+    "certification_intent": "inspired",
+    "tool_qualification": [
+      { "tool": "bash", "role": "shell", "standard": "self-qualified", "qualification_ref": "inline",
+        "fixture": { "detects": { "argv": ["-c", "exit 1"] }, "accepts": { "argv": ["-c", "exit 0"] } } }
+    ]
+  }
+}

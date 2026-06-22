@@ -1,0 +1,13 @@
+{
+  "_comment": "Narrow gate (buildable) is satisfied, but the broader claim (sound) is refuted by a measured-false type_soundness => NO-GO. Risk #4 regression guard.",
+  "target": { "name": "claim-refuted-blocks", "root": ".", "ecosystem": "shell" },
+  "units": [ { "unit": "crate", "discover": { "type": "literal", "values": ["."] } } ],
+  "bindings": [
+    { "atom": "referential_truth", "unit": "crate", "evidence": { "tool": "bash", "argv": ["-c", "true"], "needs": ["bash"], "ok_when": "exit==0" } },
+    { "atom": "testability_falsifiability", "unit": "crate", "evidence": { "tool": "bash", "argv": ["-c", "true"], "needs": ["bash"], "ok_when": "exit==0" } },
+    { "atom": "totality_or_controlled_partiality", "unit": "crate", "evidence": { "tool": "bash", "argv": ["-c", "true"], "needs": ["bash"], "ok_when": "exit==0" } },
+    { "atom": "type_soundness", "unit": "crate", "evidence": { "tool": "bash", "argv": ["-c", "false"], "needs": ["bash"], "ok_when": "exit==0" } }
+  ],
+  "gate_concept": "buildable",
+  "assurance_claim": "sound"
+}

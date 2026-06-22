@@ -1,0 +1,15 @@
+{
+  "_comment": "Robust system: oracle holds across the whole driven sensor envelope => GO.",
+  "target": { "name": "simulate-envelope-holds", "root": ".", "ecosystem": "shell" },
+  "units": [ { "unit": "crate", "discover": { "type": "literal", "values": ["."] } } ],
+  "bindings": [],
+  "gate_concept": "buildable",
+  "simulate": [
+    { "name": "input_x_robust", "atom": "referential_truth",
+      "sensors": [ { "name": "x", "range": [0, 10] } ],
+      "harness": { "tool": "bash", "argv": ["-c", "true"], "needs": ["bash"] } },
+    { "name": "mode_robust", "atom": "testability_falsifiability",
+      "sensors": [ { "name": "mode", "values": ["a", "b"] } ],
+      "harness": { "tool": "bash", "argv": ["-c", "true"], "needs": ["bash"] } }
+  ]
+}

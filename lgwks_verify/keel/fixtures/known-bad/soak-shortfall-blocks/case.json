@@ -1,0 +1,8 @@
+{
+  "schema": "keel.known-bad-case/v0",
+  "front_end": "soak",
+  "entry": "profile.json",
+  "expect_verdict": "NO-GO",
+  "expect_exit": 1,
+  "description": "Companion to soak-envelope-held-passes: SAME envelope, but the inferences harness reports V_NO=70 < required 75 (50×1.5). The inference path is the limiting spar, so the soak verdict is NO-GO with the shortfall. Proves the tropical limiting-dimension reduction (docs/04 §4.4, §1.6)."
+}

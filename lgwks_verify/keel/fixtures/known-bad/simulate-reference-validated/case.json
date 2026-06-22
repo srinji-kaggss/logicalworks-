@@ -1,0 +1,8 @@
+{
+  "schema": "keel.known-bad-case/v0",
+  "front_end": "simulate",
+  "entry": "profile.json",
+  "expect_verdict": "GO",
+  "expect_exit": 0,
+  "description": "A6 reference-data oracle (docs/10): the harness emits the system output (2*x) for each driven input; Keel compares to a REFERENCE table within tolerance. Truth traces to the reference data, not the harness's own pass/fail judgement — this is what binds specification_fidelity honestly. Outputs match reference => GO."
+}

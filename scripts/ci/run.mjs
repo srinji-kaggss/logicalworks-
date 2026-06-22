@@ -67,7 +67,10 @@ const COMMIT_LANES = [
   // by a lane below nor explicitly excluded. The structural guarantee against a future
   // silent gap (see coverage_guard.mjs).
   { id: 'coverage.completeness', gate: 'commit', cmd: [NODE, join(HERE, 'coverage_guard.mjs')] },
-  { id: 'schema.registry', gate: 'commit', cmd: ['python3', 'scripts/check_schema_registry.py'] },
+  // schema-registry conformance (#147) is NOT a standalone lane anymore — it is bound as the
+  // `specification_fidelity` atom in lgwks.profile.json and gated by lgwks_floor, so it runs through
+  // the single Keel authority (target.gate). Folding it here retired the parallel governance.yml
+  // job (#242) — one authority, no second copy to drift.
   // Python: the FULL suite (141 files), not a sliver. Hermetic deps via uv; conftest
   // supplies a git-identity floor (a missing one cost 19 silent failures before).
   // `-rs` surfaces every skip + reason into the sealed log — a skip is unmeasured,
@@ -83,13 +86,25 @@ const COMMIT_LANES = [
   { id: 'rust.tui', gate: 'commit', cmd: ['cargo', 'test', '--manifest-path', 'tui/Cargo.toml'] },
 ];
 
-// Tiers whose Keel runners are NOT vendored at the pinned SHA. Honest BLOCKED, never
-// a fake pass — this is exactly the defect (#235 shipped --tier as a silent no-op)
-// that this redesign refuses to reproduce.
-const UNVENDORED_TIERS = {
-  nightly: ['run-simulate.mjs', 'run-sim.mjs'],
-  release: ['run-simulate.mjs', 'run-sim.mjs', 'run-soak.mjs', 'run-latency.mjs'],
+// Tier-specific Keel runners (now VENDORED at the pinned SHA — #241). Each runs over
+// lgwks.profile.json and needs a corresponding profile `block`; the runner FAULTS/BLOCKS if the
+// block is absent (it has nothing to drive), so a tier whose evidence lgwks has not yet tailored is
+// honestly BLOCKED (unknown ≠ pass), NOT faked green and NOT a runner fault. release ⊇ nightly.
+// The runner FILES are required for a tier to be evaluable at all — a missing file => BLOCKED too
+// (defensive; #235's silent --tier no-op must never return).
+const TIER_RUNNERS = {
+  nightly: [
+    { id: 'simulate.envelope', file: 'run-simulate.mjs', block: 'simulate' },
+    { id: 'sim.interleave', file: 'run-sim.mjs', block: 'sim' },
+  ],
+  release: [
+    { id: 'simulate.envelope', file: 'run-simulate.mjs', block: 'simulate' },
+    { id: 'sim.interleave', file: 'run-sim.mjs', block: 'sim' },
+    { id: 'soak.capacity', file: 'run-soak.mjs', block: 'soak' },
+    { id: 'latency.budget', file: 'run-latency.mjs', block: 'latency' },
+  ],
 };
+const TARGET_PROFILE = 'lgwks.profile.json';
 
 function sh(cmd, args, opts = {}) {
   return spawnSync(cmd, args, { cwd: ROOT, encoding: 'utf8', maxBuffer: MAXBUF, env: process.env, ...opts });
@@ -159,20 +174,38 @@ async function main() {
   console.log(`lgwks CI — run=${id}  tier=${tier}  (Keel authority, vendored)`);
   console.log('============================================================');
 
-  // Honest BLOCKED: a tier whose runners are not vendored cannot be evaluated.
+  // Honest BLOCKED for nightly/release. Two distinct unknowns, neither a fake pass:
+  //   (1) a tier-runner file is missing (un-vendored) — defensive; #241 vendored them all.
+  //   (2) lgwks.profile.json declares NONE of the tier's evidence blocks — the runners are ready
+  //       but the evidence is not yet tailored, so the tier cannot return a real verdict.
+  const lanes = [...COMMIT_LANES];
   if (tier !== 'commit') {
-    const missing = (UNVENDORED_TIERS[tier] || []).filter((f) => !existsSync(keel(f)));
-    if (missing.length) {
-      const { manifestHash } = seal(runDir, id, tier, 'BLOCKED', [], {
-        blocked_reason: `tier '${tier}' requires Keel runners not vendored at the pinned SHA: ${missing.join(', ')}. Re-vendor (see lgwks_verify/keel/VENDORED.txt) before this tier can return a verdict.`,
-      });
-      console.log(`BLOCKED — tier '${tier}' not evaluable; missing vendored runners: ${missing.join(', ')}`);
+    const specs = TIER_RUNNERS[tier] || [];
+    const missing = specs.filter((s) => !existsSync(keel(s.file))).map((s) => s.file);
+    let declared = [];
+    try {
+      const profile = JSON.parse(readFileSync(join(ROOT, TARGET_PROFILE), 'utf8'));
+      declared = specs.filter((s) => Array.isArray(profile[s.block]) && profile[s.block].length);
+    } catch (e) {
+      const { manifestHash } = seal(runDir, id, tier, 'BLOCKED', [], { blocked_reason: `cannot read ${TARGET_PROFILE}: ${e.message}` });
+      console.log(`BLOCKED — tier '${tier}': cannot read ${TARGET_PROFILE}`);
       console.log(`  seal=${manifestHash.slice(0, 16)}...  record=${runDir.slice(ROOT.length + 1)}`);
       process.exit(3);
     }
+    if (missing.length || !declared.length) {
+      const reason = missing.length
+        ? `tier '${tier}' runner(s) not vendored: ${missing.join(', ')} (re-vendor — see lgwks_verify/keel/VENDORED.txt).`
+        : `tier '${tier}' is vendored and ready, but ${TARGET_PROFILE} declares no ${specs.map((s) => s.block).join('/')} evidence — the tier's evidence is not yet tailored, so it cannot return a verdict (unknown ≠ pass). Add a profile.${specs[0].block} block (or its siblings) with real harnesses.`;
+      const { manifestHash } = seal(runDir, id, tier, 'BLOCKED', [], { blocked_reason: reason });
+      console.log(`BLOCKED — ${reason}`);
+      console.log(`  seal=${manifestHash.slice(0, 16)}...  record=${runDir.slice(ROOT.length + 1)}`);
+      process.exit(3);
+    }
+    // Evidence IS declared → append the tier runner lanes over the target profile.
+    for (const s of declared)
+      lanes.push({ id: s.id, gate: tier, cmd: [NODE, keel(s.file), '--profile', join(ROOT, TARGET_PROFILE)] });
   }
 
-  const lanes = COMMIT_LANES; // nightly/release append tier lanes once their runners are vendored
   const reports = [];
   for (const lane of lanes) {
     const rep = runLane(lane, runDir);

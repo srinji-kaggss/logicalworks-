@@ -1,0 +1,21 @@
+{
+  "_comment": "Gate would GO, but verification_plan_ref's declared hash does not match report.json => reference altered => NO-GO. Risk #1 regression guard.",
+  "target": { "name": "safety-ref-altered-blocks", "root": ".", "ecosystem": "shell" },
+  "units": [ { "unit": "crate", "discover": { "type": "literal", "values": ["."] } } ],
+  "bindings": [
+    { "atom": "referential_truth", "unit": "crate", "evidence": { "tool": "bash", "argv": ["-c", "true"], "needs": ["bash"], "ok_when": "exit==0" } },
+    { "atom": "testability_falsifiability", "unit": "crate", "evidence": { "tool": "bash", "argv": ["-c", "true"], "needs": ["bash"], "ok_when": "exit==0" } }
+  ],
+  "gate_concept": "buildable",
+  "safety_case": {
+    "standards": [],
+    "certification_intent": "inspired",
+    "verification_plan_ref": "report.json",
+    "reference_integrity": {
+      "verification_plan_ref": { "hash": "0000000000000000000000000000000000000000000000000000000000000000" }
+    },
+    "tool_qualification": [
+      { "tool": "bash", "role": "shell", "standard": "self-qualified", "qualification_ref": "inline" }
+    ]
+  }
+}

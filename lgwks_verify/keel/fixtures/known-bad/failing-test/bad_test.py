@@ -1,1 +1,0 @@
-assert False, "Failing test"

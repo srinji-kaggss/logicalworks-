@@ -1,0 +1,16 @@
+{
+  "_comment": "Hallucinated = ¬CoreGroundedCorrect, computed: grounding fails (render_widget called, never defined) so the framework gate goes NO-GO. The three other core atoms pass to isolate the cause to referential_truth.",
+  "target": { "name": "planted-hallucination", "root": ".", "ecosystem": "shell" },
+  "units": [ { "unit": "crate", "discover": { "type": "literal", "values": ["."] } } ],
+  "bindings": [
+    { "atom": "referential_truth", "unit": "crate",
+      "evidence": { "tool": "bash", "argv": ["-c", "grep -q 'fn render_widget' code.rs"], "needs": ["bash"], "ok_when": "exit==0" } },
+    { "atom": "type_soundness", "unit": "crate",
+      "evidence": { "tool": "bash", "argv": ["-c", "true"], "needs": ["bash"], "ok_when": "exit==0" } },
+    { "atom": "totality_or_controlled_partiality", "unit": "crate",
+      "evidence": { "tool": "bash", "argv": ["-c", "true"], "needs": ["bash"], "ok_when": "exit==0" } },
+    { "atom": "specification_fidelity", "unit": "crate",
+      "evidence": { "tool": "bash", "argv": ["-c", "true"], "needs": ["bash"], "ok_when": "exit==0" } }
+  ],
+  "gate_concept": "CoreGroundedCorrect"
+}

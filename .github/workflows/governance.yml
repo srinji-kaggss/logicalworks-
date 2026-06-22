@@ -1,4 +1,12 @@
-name: Governance gates
+name: Keel CI (authority projection)
+
+# GitHub Actions is a THIN PROJECTION of the local Keel authority, not a second gate.
+# It runs the one real runner — `node scripts/ci/run.mjs` — which evaluates every commit-tier
+# lane (the Keel authority + target.gate over lgwks.profile.json + the full pytest suite + the
+# Rust crates + coverage completeness). The schema-registry check (#147) is no longer a separate
+# job here: it is the `specification_fidelity` atom in lgwks.profile.json, gated by lgwks_floor,
+# so it runs THROUGH the authority (#242 — one authority, no parallel copy to drift).
+# Authority + determinism live in `scripts/ci/run.mjs`; this file only supplies the toolchain.
 
 on:
   push:
@@ -7,33 +15,22 @@ on:
     branches: [main]
 
 jobs:
-  schema-registry:
-    name: schema registry conformance
+  keel-ci:
+    name: keel ci — commit tier (single authority)
     runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - name: every lgwks.*.vN literal has a registry row
-        run: python3 scripts/check_schema_registry.py
-
-  # NOTE: the authoritative, independently-auditable gate is the LOCAL Keel CI
-  # (`node scripts/ci/run.mjs`), where this suite is the `pytest.suite` lane. This
-  # GitHub job is a convenience mirror of that one lane so PRs get test signal — it
-  # is deliberately NOT the full authority (the full runner also enforces the
-  # security floor gate, currently a pre-existing NO-GO tracked separately). Keep
-  # the command below byte-identical to the `pytest.suite` lane to avoid drift.
-  tests:
-    name: test suite (mirrors local Keel pytest.suite lane)
-    runs-on: ubuntu-latest
-    timeout-minutes: 20
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@v4
       - uses: astral-sh/setup-uv@v5
-      # Deps are undeclared (no manifest by design — local-first uv-run repo).
-      # cryptography: vault/daemon; pyyaml: lgwks_config; networkx: graphify/cluster.
-      # git identity comes from tests/conftest.py (hermetic floor); browser paths
-      # report degraded and skip; eval-graph + leidenalg(<3.13) tests skip cleanly.
-      - name: full test suite (tests/ + axiom/tests/)
-        run: >
-          uv run --python 3.12
-          --with pytest --with cryptography --with pyyaml --with networkx
-          python -m pytest tests/ axiom/tests/ -q
+      # node is preinstalled on ubuntu-latest; rust/cargo is preinstalled for the Rust lanes.
+      # uv (above) backs the hermetic pytest.suite lane. A missing tool makes a lane fail-closed
+      # (NO-GO), never a silent pass — the runner's own contract.
+      - name: node scripts/ci/run.mjs --tier commit
+        run: node scripts/ci/run.mjs --tier commit
+      - name: upload sealed run record
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: ci-run-record
+          path: .ci-runs/
+          if-no-files-found: ignore

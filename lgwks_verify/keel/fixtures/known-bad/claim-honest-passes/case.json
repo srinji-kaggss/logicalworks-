@@ -1,0 +1,8 @@
+{
+  "schema": "keel.known-bad-case/v0",
+  "front_end": "profile",
+  "entry": "profile.json",
+  "expect_verdict": "GO",
+  "expect_exit": 0,
+  "description": "Companion control: SAME bindings but assurance_claim=buildable — a claim the evidence actually demonstrates. claim-coherence is satisfied => GO. Proves the gate is not overhot: it punishes overclaim, not honest scope."
+}

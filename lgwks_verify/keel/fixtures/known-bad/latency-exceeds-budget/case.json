@@ -1,0 +1,3 @@
+{ "schema": "keel.known-bad-case/v0", "front_end": "latency", "entry": "profile.json",
+  "expect_verdict": "NO-GO", "expect_exit": 1,
+  "description": "Companion: the harness reports 50ms but the cited budget is max_ms 20. Measured max=50 > 20 => algorithmic_efficiency false => latency_bounded NO-GO with the breach named. A5: latency is a first-order verdict variable, not a footnote." }

@@ -1,0 +1,8 @@
+{
+  "schema": "keel.known-bad-case/v0",
+  "front_end": "soak",
+  "entry": "profile.json",
+  "expect_verdict": "GO",
+  "expect_exit": 0,
+  "description": "Soak tier (#643, docs/04 §4.4): the bound harness reports V_NO=3000 calls/s and V_NO=80 inf/s; the envelope targets 2000 and 50 at margin 1.5 (required 3000 and 75). Both dimensions hold with margin so the soak verdict is GO. Proves envelope-relative acceptance + capacity-profile/v0 ingestion. The 'harness' is a bash echo standing in for the deferred native load loop."
+}

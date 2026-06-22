@@ -1,0 +1,13 @@
+{
+  "_comment": "A6: reference loaded from a content-hashed file (from), not inline => provenance + staleness.",
+  "target": { "name": "simulate-reference-from-file", "root": ".", "ecosystem": "shell" },
+  "units": [ { "unit": "crate", "discover": { "type": "literal", "values": ["."] } } ],
+  "bindings": [],
+  "gate_concept": "spec_validated",
+  "simulate": [
+    { "name": "spec_fidelity_from_file", "atom": "specification_fidelity",
+      "sensors": [ { "name": "x", "values": [1, 2, 3] } ],
+      "reference": { "from": "reference.json" },
+      "harness": { "tool": "bash", "argv": ["-c", "echo $(( KEEL_SENSOR_X * 2 ))"], "needs": ["bash"] } }
+  ]
+}

@@ -1,0 +1,7 @@
+{ "_comment": "use-before-init race: one interleaving violates the invariant => NO-GO, race reported.",
+  "target": { "name": "sim-race-found", "root": ".", "ecosystem": "shell" },
+  "units": [ { "unit": "service", "discover": { "type": "literal", "values": ["."] } } ],
+  "bindings": [], "gate_concept": "concurrent_safe",
+  "sim": [ { "name": "init_before_use", "atom": "concurrency_correctness",
+    "actors": [ { "id": "A", "steps": ["init"] }, { "id": "B", "steps": ["use"] } ],
+    "harness": { "tool": "bash", "argv": ["-c", "case \"${KEEL_SCHEDULE%%init*}\" in *use*) exit 1;; esac; exit 0"], "needs": ["bash"] } } ] }
