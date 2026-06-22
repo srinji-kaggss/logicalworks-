@@ -494,8 +494,15 @@ def _do_research_inline(args: argparse.Namespace) -> int:
 
 
 def slugify(text: str) -> str:
-    import re
-    return re.sub(r"[^\w-]+", "-", text.lower()).strip("-").replace("--", "-")[:64]
+    """Workflow project slug via canonical ``slug`` (#223 family 5).
+
+    Net change vs the prior copy: runs of separators fully collapse to one ``-``
+    (the prior ``.replace("--","-")`` left ``--`` for 3+ runs). Non-ascii folds to
+    ``-`` — moot in practice since this feeds ``project=`` which substrate_run
+    re-slugs through ``io._slug`` (also ascii-only) before it reaches any path.
+    """
+    import lgwks_substrate_io as _io
+    return _io.slug(text, limit=64, fallback="", allow="_")
 
 
 def _do_deep_research(args: argparse.Namespace) -> int:

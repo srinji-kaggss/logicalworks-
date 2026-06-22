@@ -39,6 +39,7 @@ from typing import Any, Optional
 
 import lgwks_clock
 import lgwks_cycle
+import lgwks_substrate_io as _io  # canonical filesystem slug (#223 family 5)
 
 ROOT = Path(__file__).resolve().parent
 PROJECT_ROOT = ROOT / "store" / "project-plans"
@@ -75,7 +76,8 @@ MAPPER_ROLE_COUNT = len(MAPPER_ROLES)
 
 
 def _slug(value: str) -> str:
-    safe = re.sub(r"[^a-z0-9._-]+", "-", value.lower()).strip(".-") or "project"
+    """Stable plan/artifact id: canonical fs-slug + content-id (#223 family 5)."""
+    safe = _io.slug(value, fallback="project", allow="._-")
     return f"{safe}-{content_id(value, 12)}"
 
 

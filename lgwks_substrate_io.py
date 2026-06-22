@@ -10,6 +10,7 @@ Defense-in-Depth:
 from __future__ import annotations
 
 import json
+import re as _re
 from pathlib import Path
 from typing import Any
 
@@ -17,10 +18,43 @@ from typing import Any
 from lgwks_hashing import digest as _sha  # canonical full digest (one source of truth)
 
 
+def slug(
+    text: str,
+    *,
+    limit: int | None = None,
+    fallback: str = "item",
+    allow: str = "._-",
+    strip_scheme: bool = False,
+    restrip_after_truncate: bool = False,
+) -> str:
+    """Canonical filesystem slug — one primitive, no per-module copies (#223 family 5).
+
+    Lowercases; optionally strips a leading URL scheme; replaces every run of
+    chars outside ``[a-z0-9]`` + ``allow`` with a single ``-``; trims leading/
+    trailing ``-`` (and ``.`` when ``.`` is in ``allow``); applies ``fallback``
+    for empties. ``limit`` / ``restrip_after_truncate`` reproduce each caller's
+    persisted-path contract byte-for-byte (run dirs, plan_ids, workspace dirs).
+
+    NOT for URL scope-ids that must keep ``/`` (``lgwks_urlrisk.slugify_target``)
+    nor the space-keeping dedup key in ``lgwks_concept`` — those are distinct
+    concepts, intentionally not merged here.
+    """
+    s = text.lower()
+    if strip_scheme:
+        s = _re.sub(r"https?://", "", s)
+    s = _re.sub(rf"[^a-z0-9{_re.escape(allow)}]+", "-", s)
+    strip_chars = "-." if "." in allow else "-"
+    s = s.strip(strip_chars) or fallback
+    if limit is not None:
+        s = s[:limit]
+        if restrip_after_truncate:
+            s = s.strip(strip_chars) or fallback
+    return s
+
+
 def _slug(text: str, limit: int = 64) -> str:
-    """Sanitize text into a filesystem-safe slug."""
-    import re
-    return (re.sub(r"[^a-z0-9._-]+", "-", text.lower()).strip(".-") or "substrate")[:limit]
+    """Filesystem-safe slug. Byte-exact wrapper over canonical ``slug`` (#223 fam 5)."""
+    return slug(text, limit=limit, fallback="substrate", allow="._-")
 
 
 def _read_jsonl(path: Path, limit: int | None = None) -> list[dict[str, Any]]:
