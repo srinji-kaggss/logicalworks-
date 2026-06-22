@@ -241,24 +241,69 @@ class HmacCapabilityPort:
 
 
 class TenantStore:
-    """The single authorization locus for tenant-scoped vector store access.
+    """The single authorization locus for tenant-scoped State Fabric reads.
 
     This is #99's access-router, built here to depend on CapabilityPort only
     (not the concrete token). The router feeds the existing checks — it's not
     a second authorizer.
 
+    #277: the door is projection-GENERIC. It holds the vector store connection
+    AND (optionally) the GraphFabric, so graph reads go through the SAME verified
+    capability + tier-scoping as vector reads. GraphFabric.scope_tier becomes an
+    internal detail behind this door: graph reads are scoped to the VERIFIED
+    principal (`v.principal`), never to a raw caller-supplied tier string. A future
+    projection (token-index, relational) joins by taking another handle here — the
+    authorization shape never changes.
+
     Depends on CapabilityPort only — never imports CapabilityToken or reads
     token fields. Construction takes a CapabilityPort + resolved opaque handle.
     """
 
-    def __init__(self, port: CapabilityPort, handle: Any, key: bytes, conn: Any) -> None:
+    def __init__(self, port: CapabilityPort, handle: Any, key: bytes, conn: Any, graph: Any = None) -> None:
         self._port = port
         self._handle = handle
         self._key = key
         self._conn = conn
+        self._graph = graph  # #277: a lgwks_storage.GraphFabric, or None (vector-only door)
+
+    @classmethod
+    def over_gate(cls, port: CapabilityPort, handle: Any, key: bytes, gate: Any) -> "TenantStore":
+        """#277: build the unified read door over a StorageGate — one capability
+        gating both the vector projection and the graph projection."""
+        return cls(port, handle, key, gate.vector_fabric._conn, graph=gate.graph_fabric)
 
     def _verified(self) -> VerifiedCap:
         return self._port.verify(self._handle, self._key)
+
+    def _require_read(self) -> VerifiedCap:
+        """Verify the capability and require read permission (TENANT_RW or WORLD_R).
+        The shared gate for every read path (vector + graph)."""
+        v = self._verified()
+        if capability.TENANT_RW not in v.scopes and capability.WORLD_R not in v.scopes:
+            raise capability.CapabilityError(
+                f"capability lacks read permission (granted: {sorted(v.scopes)})"
+            )
+        return v
+
+    # ---- graph reads (#277): capability-gated, scoped to the verified principal ----
+
+    def graph_neighbors(self, node_id: str, *, direction: str = "both", rel: str | None = None, limit: int = 100) -> list[dict]:
+        if self._graph is None:
+            raise RuntimeError("TenantStore has no graph projection (build it with over_gate)")
+        v = self._require_read()
+        return self._graph.neighbors(node_id, direction=direction, rel=rel, limit=limit, scope_tier=v.principal)
+
+    def graph_resolve(self, query: str) -> tuple[dict | None, str | None]:
+        if self._graph is None:
+            raise RuntimeError("TenantStore has no graph projection (build it with over_gate)")
+        v = self._require_read()
+        return self._graph.resolve_node(query, scope_tier=v.principal)
+
+    def graph_stats(self) -> dict:
+        if self._graph is None:
+            raise RuntimeError("TenantStore has no graph projection (build it with over_gate)")
+        v = self._require_read()
+        return self._graph.stats(scope_tier=v.principal)
 
     def read(self, cid: str) -> Any | None:
         """Read a record by cid, gated by capability.
@@ -266,12 +311,7 @@ class TenantStore:
         Own-tenant rows: require TENANT_RW.
         World rows: require WORLD_R.
         """
-        v = self._verified()
-        # Gate: own-tenant rw or world r
-        if capability.TENANT_RW not in v.scopes and capability.WORLD_R not in v.scopes:
-            raise capability.CapabilityError(
-                f"capability lacks read permission (granted: {sorted(v.scopes)})"
-            )
+        v = self._require_read()
         # Read through tenant-filtered query
         record = vector.get_record_for_tenant(self._conn, cid, v.principal)
         if record is not None:
