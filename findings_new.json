@@ -1,5 +1,5 @@
 {
-  "updated_at": "2026-06-22T15:05:53+00:00",
+  "updated_at": "2026-06-22T16:00:20+00:00",
   "findings": [
     {
       "fp": "a1b4ae3a9d25bed2",
@@ -278,6 +278,12 @@
       "dismiss_count": 0
     },
     {
+      "fp": "dee7ae01be78e3e5",
+      "kind": "secret_exposure_risk",
+      "file": "lgwks_cortex.py",
+      "dismiss_count": 0
+    },
+    {
       "fp": "4e61f52e602437f9",
       "kind": "secret_exposure_risk",
       "file": "lgwks_crawl.py",
@@ -296,25 +302,25 @@
       "dismiss_count": 0
     },
     {
-      "fp": "2081fec4aed8167e",
+      "fp": "167c46c7fb471f7b",
       "kind": "unsafe_file_mutation",
       "file": "lgwks_daemon.py",
       "dismiss_count": 0
     },
     {
-      "fp": "a50f15b0acc538ad",
+      "fp": "74684a02aea68ec6",
       "kind": "unsafe_file_mutation",
       "file": "lgwks_daemon.py",
       "dismiss_count": 0
     },
     {
-      "fp": "139853a8c5572187",
+      "fp": "b924eaf5866b9462",
       "kind": "dangerous_shell_exec",
       "file": "lgwks_daemon.py",
       "dismiss_count": 0
     },
     {
-      "fp": "6d147df53f5eb0f5",
+      "fp": "9fca1a855f001ae2",
       "kind": "unsafe_file_mutation",
       "file": "lgwks_daemon.py",
       "dismiss_count": 0

@@ -37,6 +37,10 @@ POLL_INTERVAL_S = 0.5
 # Cortex trajectory build cadence (heavier than the 0.5s queue poll — tokenizes
 # transcript turns). mtime-guarded so a quiet transcript costs nothing.
 CORTEX_INTERVAL_S = 5.0
+# #247: cap NEW turns tokenized per cortex tick so the first pass over a long
+# backlog (~900+ turns) cannot block the loop — and SIGTERM/stop — for >5s.
+# Idempotency (#239) drains the remainder across subsequent ticks.
+CORTEX_MAX_TURNS_PER_TICK = 200
 # A transcript not written within this window is a closed/idle session, not a
 # live one — discovery ignores it so the daemon never pins itself to a corpse.
 CAPTURE_MAX_AGE_S = 3600.0
@@ -641,6 +645,13 @@ class SessionDaemon:
         session, #227 F3), or the file is unchanged since last pass. Idempotent
         at the cortex layer, so a redundant pass is harmless. NEVER raises — a
         capture failure must not take down the daemon (PRD-08).
+
+        #247: work is bounded to CORTEX_MAX_TURNS_PER_TICK new turns per call.
+        When a pass hits that cap the backlog is not yet drained, so the
+        watermark is HELD below mtime (return last_mtime) — the next tick
+        continues from where idempotency left off instead of skipping the
+        unchanged file. The advance to mtime happens only once a pass clears
+        the whole backlog.
         """
         if not transcript or "/subagents/" in transcript:
             return last_mtime
@@ -654,7 +665,14 @@ class SessionDaemon:
             session_id = p.stem or f"claude:{self.paths.repo_root.name}"
             import lgwks_cortex
             cortex = lgwks_cortex.TranscriptCortex(self.paths.repo_root)
-            cortex.process_transcript(p, session_id, n=0)
+            processed = cortex.process_transcript(
+                p, session_id, n=0, limit=CORTEX_MAX_TURNS_PER_TICK
+            )
+            if len(processed) >= CORTEX_MAX_TURNS_PER_TICK:
+                # Cap hit → backlog likely remains. Hold the watermark so the
+                # next tick resumes draining rather than seeing an unchanged
+                # mtime and skipping.
+                return last_mtime
             return mtime
         except Exception:
             return last_mtime
