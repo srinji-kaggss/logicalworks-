@@ -1,5 +1,5 @@
 {
-  "updated_at": "2026-06-19T12:07:43+00:00",
+  "updated_at": "2026-06-22T15:05:53+00:00",
   "findings": [
     {
       "fp": "a1b4ae3a9d25bed2",
@@ -8,37 +8,13 @@
       "dismiss_count": 0
     },
     {
-      "fp": "d47db045acd38e36",
+      "fp": "b143dd0b8006857d",
       "kind": "secret_exposure_risk",
       "file": "lgwks_access.py",
       "dismiss_count": 0
     },
     {
-      "fp": "0028a38a42d700f7",
-      "kind": "secret_exposure_risk",
-      "file": "lgwks_access.py",
-      "dismiss_count": 0
-    },
-    {
-      "fp": "6a7331efbc43edbe",
-      "kind": "secret_exposure_risk",
-      "file": "lgwks_access.py",
-      "dismiss_count": 0
-    },
-    {
-      "fp": "ee8db3fb1c5ee3fc",
-      "kind": "secret_exposure_risk",
-      "file": "lgwks_access.py",
-      "dismiss_count": 0
-    },
-    {
-      "fp": "b4f68e0a3db9cb48",
-      "kind": "secret_exposure_risk",
-      "file": "lgwks_access.py",
-      "dismiss_count": 0
-    },
-    {
-      "fp": "6e5a50292725c858",
+      "fp": "272fe754c5baf991",
       "kind": "secret_exposure_risk",
       "file": "lgwks_access.py",
       "dismiss_count": 0
@@ -56,20 +32,8 @@
       "dismiss_count": 0
     },
     {
-      "fp": "fe1a624b5f6bab65",
+      "fp": "2a64b5398c573139",
       "kind": "secret_exposure_risk",
-      "file": "lgwks_access.py",
-      "dismiss_count": 0
-    },
-    {
-      "fp": "fc1bbb80e544fe6b",
-      "kind": "secret_exposure_risk",
-      "file": "lgwks_access.py",
-      "dismiss_count": 0
-    },
-    {
-      "fp": "dacd310be7f608c5",
-      "kind": "ssrf_risk",
       "file": "lgwks_access.py",
       "dismiss_count": 0
     },
@@ -80,25 +44,61 @@
       "dismiss_count": 0
     },
     {
-      "fp": "824fccf309ff4af0",
-      "kind": "ssrf_risk",
-      "file": "lgwks_access.py",
-      "dismiss_count": 0
-    },
-    {
       "fp": "99339a41ed208ab0",
       "kind": "secret_exposure_risk",
       "file": "lgwks_access.py",
       "dismiss_count": 0
     },
     {
-      "fp": "54398d97d4b752a2",
+      "fp": "e518ce02ef6d7577",
+      "kind": "secret_exposure_risk",
+      "file": "lgwks_access.py",
+      "dismiss_count": 0
+    },
+    {
+      "fp": "338424addfba3eda",
+      "kind": "secret_exposure_risk",
+      "file": "lgwks_access.py",
+      "dismiss_count": 0
+    },
+    {
+      "fp": "0996b0902a94559f",
+      "kind": "secret_exposure_risk",
+      "file": "lgwks_access.py",
+      "dismiss_count": 0
+    },
+    {
+      "fp": "4d770b0e3dbbb7f4",
       "kind": "ssrf_risk",
       "file": "lgwks_access.py",
       "dismiss_count": 0
     },
     {
-      "fp": "51b38597efd67319",
+      "fp": "a6e0052180a25fb8",
+      "kind": "secret_exposure_risk",
+      "file": "lgwks_access.py",
+      "dismiss_count": 0
+    },
+    {
+      "fp": "f1a3eb0026a668d9",
+      "kind": "ssrf_risk",
+      "file": "lgwks_access.py",
+      "dismiss_count": 0
+    },
+    {
+      "fp": "d48dcfa34d07a116",
+      "kind": "secret_exposure_risk",
+      "file": "lgwks_access.py",
+      "dismiss_count": 0
+    },
+    {
+      "fp": "d70dffda12b0ab6c",
+      "kind": "ssrf_risk",
+      "file": "lgwks_access.py",
+      "dismiss_count": 0
+    },
+    {
+      "fp": "70fe8ab48c315744",
       "kind": "unsafe_file_mutation",
       "file": "lgwks_agent_os.py",
       "dismiss_count": 0
@@ -200,7 +200,7 @@
       "dismiss_count": 0
     },
     {
-      "fp": "3b04ecef7fbc77e6",
+      "fp": "ee0d2bc1b403301f",
       "kind": "secret_exposure_risk",
       "file": "lgwks_browser.py",
       "dismiss_count": 0
@@ -278,31 +278,43 @@
       "dismiss_count": 0
     },
     {
+      "fp": "4e61f52e602437f9",
+      "kind": "secret_exposure_risk",
+      "file": "lgwks_crawl.py",
+      "dismiss_count": 0
+    },
+    {
       "fp": "1bf3928560ede03a",
       "kind": "secret_exposure_risk",
       "file": "lgwks_crdt.py",
       "dismiss_count": 0
     },
     {
-      "fp": "5bb67a9b32dcfc9e",
+      "fp": "792e5cbf3ec9aeac",
+      "kind": "ssrf_risk",
+      "file": "lgwks_cycle.py",
+      "dismiss_count": 0
+    },
+    {
+      "fp": "2081fec4aed8167e",
       "kind": "unsafe_file_mutation",
       "file": "lgwks_daemon.py",
       "dismiss_count": 0
     },
     {
-      "fp": "688af1abb1ce5d6d",
+      "fp": "a50f15b0acc538ad",
       "kind": "unsafe_file_mutation",
       "file": "lgwks_daemon.py",
       "dismiss_count": 0
     },
     {
-      "fp": "6ed798db9396e6c5",
+      "fp": "139853a8c5572187",
       "kind": "dangerous_shell_exec",
       "file": "lgwks_daemon.py",
       "dismiss_count": 0
     },
     {
-      "fp": "c15a5cf07cd3b9d8",
+      "fp": "6d147df53f5eb0f5",
       "kind": "unsafe_file_mutation",
       "file": "lgwks_daemon.py",
       "dismiss_count": 0
@@ -314,31 +326,31 @@
       "dismiss_count": 0
     },
     {
-      "fp": "31c7b86770634d48",
+      "fp": "e902f8a2619eeac9",
       "kind": "secret_exposure_risk",
       "file": "lgwks_embed.py",
       "dismiss_count": 0
     },
     {
-      "fp": "a8cc3b6c025f18f1",
+      "fp": "69d6a50be63cf879",
       "kind": "unsafe_file_mutation",
       "file": "lgwks_embed_port.py",
       "dismiss_count": 0
     },
     {
-      "fp": "29734a4c9e948cfc",
+      "fp": "1c1b0398d4472a29",
       "kind": "unsafe_file_mutation",
       "file": "lgwks_embed_port.py",
       "dismiss_count": 0
     },
     {
-      "fp": "b4b462189549d1d2",
+      "fp": "50a890f066301401",
       "kind": "unsafe_file_mutation",
       "file": "lgwks_embed_port.py",
       "dismiss_count": 0
     },
     {
-      "fp": "2e9e23b2da0e0e64",
+      "fp": "24840f2b76d65385",
       "kind": "unsafe_file_mutation",
       "file": "lgwks_entity_graph.py",
       "dismiss_count": 0
@@ -362,13 +374,13 @@
       "dismiss_count": 0
     },
     {
-      "fp": "8817d190824502fb",
+      "fp": "195910305f39a433",
       "kind": "unsafe_file_mutation",
       "file": "lgwks_extract.py",
       "dismiss_count": 0
     },
     {
-      "fp": "90386d0b0766079c",
+      "fp": "cd8426e036d91f89",
       "kind": "secret_exposure_risk",
       "file": "lgwks_gh.py",
       "dismiss_count": 0
@@ -428,18 +440,6 @@
       "dismiss_count": 0
     },
     {
-      "fp": "21e2e63a82aead50",
-      "kind": "unbounded_network_egress",
-      "file": "lgwks_ingest.py",
-      "dismiss_count": 0
-    },
-    {
-      "fp": "ba96555ff6f09dde",
-      "kind": "unbounded_network_egress",
-      "file": "lgwks_ingest.py",
-      "dismiss_count": 0
-    },
-    {
       "fp": "d3fa127985b122cb",
       "kind": "unsafe_file_mutation",
       "file": "lgwks_input.py",
@@ -458,163 +458,151 @@
       "dismiss_count": 0
     },
     {
-      "fp": "d6289b7aebd883be",
-      "kind": "ssrf_risk",
-      "file": "lgwks_intent_router.py",
-      "dismiss_count": 0
-    },
-    {
-      "fp": "2f60d1c093223cfc",
+      "fp": "15352d8a81dbac38",
       "kind": "unbounded_network_egress",
       "file": "lgwks_jarvis.py",
       "dismiss_count": 0
     },
     {
-      "fp": "351e4c907597fd6c",
+      "fp": "aef0c078c32c18a4",
       "kind": "unbounded_network_egress",
       "file": "lgwks_jarvis.py",
       "dismiss_count": 0
     },
     {
-      "fp": "0974ab50a6c35eaa",
-      "kind": "sql_injection_risk",
-      "file": "lgwks_jarvis.py",
-      "dismiss_count": 0
-    },
-    {
-      "fp": "b72f1b5e50eb6e41",
+      "fp": "890247dda0fc754a",
       "kind": "secret_exposure_risk",
       "file": "lgwks_jarvis.py",
       "dismiss_count": 0
     },
     {
-      "fp": "081d0559bf271882",
+      "fp": "2e561a794b22f0d8",
       "kind": "secret_exposure_risk",
       "file": "lgwks_jarvis.py",
       "dismiss_count": 0
     },
     {
-      "fp": "0086755586640f1b",
+      "fp": "226f0c851c5e215d",
       "kind": "path_traversal_risk",
       "file": "lgwks_jarvis.py",
       "dismiss_count": 0
     },
     {
-      "fp": "c4d086b1314ae4cb",
+      "fp": "3794f01ddf222fe4",
       "kind": "file_storage_risk",
       "file": "lgwks_jarvis.py",
       "dismiss_count": 0
     },
     {
-      "fp": "4ea1418f732c934b",
+      "fp": "d0aec2a07bf38de8",
       "kind": "ssrf_risk",
       "file": "lgwks_jarvis.py",
       "dismiss_count": 0
     },
     {
-      "fp": "1d9c4914ff64f8fd",
+      "fp": "2c016da34f887ab5",
       "kind": "path_traversal_risk",
       "file": "lgwks_jarvis.py",
       "dismiss_count": 0
     },
     {
-      "fp": "f1f5f22e5ccc1351",
+      "fp": "aa2364193022d10c",
       "kind": "file_storage_risk",
       "file": "lgwks_jarvis.py",
       "dismiss_count": 0
     },
     {
-      "fp": "8af422e69221fdcd",
+      "fp": "27dcf939d035a350",
       "kind": "secret_exposure_risk",
       "file": "lgwks_jarvis.py",
       "dismiss_count": 0
     },
     {
-      "fp": "138a74bb3d460ff9",
+      "fp": "62167e268ea5ec87",
       "kind": "secret_exposure_risk",
       "file": "lgwks_jarvis.py",
       "dismiss_count": 0
     },
     {
-      "fp": "d8178184a385c8f4",
+      "fp": "46ee7b72c7f9366b",
       "kind": "secret_exposure_risk",
       "file": "lgwks_jarvis.py",
       "dismiss_count": 0
     },
     {
-      "fp": "c719b5e432ad91cd",
+      "fp": "598623175be0051f",
       "kind": "path_traversal_risk",
       "file": "lgwks_jarvis.py",
       "dismiss_count": 0
     },
     {
-      "fp": "4bb84d454543391e",
+      "fp": "306c624a955e56b4",
       "kind": "path_traversal_risk",
       "file": "lgwks_jarvis.py",
       "dismiss_count": 0
     },
     {
-      "fp": "1300d0cdb74a0d1b",
+      "fp": "fe651d9381565594",
       "kind": "path_traversal_risk",
       "file": "lgwks_jarvis.py",
       "dismiss_count": 0
     },
     {
-      "fp": "2d70b21d93adc38b",
+      "fp": "8574b77d19853b5f",
       "kind": "file_storage_risk",
       "file": "lgwks_jarvis.py",
       "dismiss_count": 0
     },
     {
-      "fp": "0c05cc1995d3aeaf",
+      "fp": "27bba1e5a081e1c4",
       "kind": "path_traversal_risk",
       "file": "lgwks_jarvis.py",
       "dismiss_count": 0
     },
     {
-      "fp": "2e754892d89a02b9",
+      "fp": "f3dd1aa63ebee7d9",
       "kind": "file_storage_risk",
       "file": "lgwks_jarvis.py",
       "dismiss_count": 0
     },
     {
-      "fp": "50df8efe92c1e872",
+      "fp": "3181ef0bae984666",
       "kind": "path_traversal_risk",
       "file": "lgwks_jarvis.py",
       "dismiss_count": 0
     },
     {
-      "fp": "ca31f55c650fdb3d",
+      "fp": "e7397cf4a48a08ed",
       "kind": "file_storage_risk",
       "file": "lgwks_jarvis.py",
       "dismiss_count": 0
     },
     {
-      "fp": "cedc2a7e009e728a",
+      "fp": "82e4284659c0f612",
       "kind": "path_traversal_risk",
       "file": "lgwks_jarvis.py",
       "dismiss_count": 0
     },
     {
-      "fp": "f20b600e3bdc3fd1",
+      "fp": "254a2b082b3d25b5",
       "kind": "file_storage_risk",
       "file": "lgwks_jarvis.py",
       "dismiss_count": 0
     },
     {
-      "fp": "cbff35b6121d53bf",
+      "fp": "c6928a727b635e88",
       "kind": "path_traversal_risk",
       "file": "lgwks_jarvis.py",
       "dismiss_count": 0
     },
     {
-      "fp": "f3635252adc18200",
+      "fp": "da3f1bb78cb4a5c8",
       "kind": "file_storage_risk",
       "file": "lgwks_jarvis.py",
       "dismiss_count": 0
     },
     {
-      "fp": "a2f9ef94e46361d9",
+      "fp": "f3d6c55c38d9622d",
       "kind": "secret_exposure_risk",
       "file": "lgwks_jarvis.py",
       "dismiss_count": 0
@@ -662,7 +650,7 @@
       "dismiss_count": 0
     },
     {
-      "fp": "3868088df496fafa",
+      "fp": "f56e5ba2528eab30",
       "kind": "unbounded_network_egress",
       "file": "lgwks_memory.py",
       "dismiss_count": 0
@@ -782,55 +770,67 @@
       "dismiss_count": 0
     },
     {
-      "fp": "a13dfff8feb5c8fd",
+      "fp": "e2231829539c168c",
       "kind": "ssrf_risk",
       "file": "lgwks_project_artifacts.py",
       "dismiss_count": 0
     },
     {
-      "fp": "cf014a2bd4c720e0",
+      "fp": "95f8ef6d1a003cbf",
       "kind": "ssrf_risk",
       "file": "lgwks_project_artifacts.py",
       "dismiss_count": 0
     },
     {
-      "fp": "cf014a2bd4c720e0",
+      "fp": "95f8ef6d1a003cbf",
       "kind": "ssrf_risk",
       "file": "lgwks_project_artifacts.py",
       "dismiss_count": 0
     },
     {
-      "fp": "705ee5c3787724a1",
+      "fp": "97766ae9470d103a",
       "kind": "ssrf_risk",
       "file": "lgwks_project_artifacts.py",
       "dismiss_count": 0
     },
     {
-      "fp": "e93c3603bc80681b",
+      "fp": "33b686f357beb165",
       "kind": "ssrf_risk",
       "file": "lgwks_project_artifacts.py",
       "dismiss_count": 0
     },
     {
-      "fp": "61402d3d41983f65",
+      "fp": "964a07e2c11ec707",
       "kind": "ssrf_risk",
       "file": "lgwks_project_artifacts.py",
       "dismiss_count": 0
     },
     {
-      "fp": "0b040653f91d17eb",
+      "fp": "554299cc46c66362",
       "kind": "ssrf_risk",
       "file": "lgwks_project_artifacts.py",
       "dismiss_count": 0
     },
     {
-      "fp": "ca720297e1d99c4f",
+      "fp": "d53e8d55a0dc0f1a",
       "kind": "ssrf_risk",
       "file": "lgwks_project_artifacts.py",
       "dismiss_count": 0
     },
     {
-      "fp": "e0fb4fe860caab9e",
+      "fp": "3978a276ceddb389",
+      "kind": "ssrf_risk",
+      "file": "lgwks_project_artifacts.py",
+      "dismiss_count": 0
+    },
+    {
+      "fp": "f565220f353f7772",
+      "kind": "ssrf_risk",
+      "file": "lgwks_project_artifacts.py",
+      "dismiss_count": 0
+    },
+    {
+      "fp": "4a448bf4eb2c76b0",
       "kind": "ssrf_risk",
       "file": "lgwks_project_artifacts.py",
       "dismiss_count": 0
@@ -842,31 +842,19 @@
       "dismiss_count": 0
     },
     {
-      "fp": "e157e5f8decdf3fe",
+      "fp": "b368c97f5ea37a9c",
       "kind": "ssrf_risk",
       "file": "lgwks_project_artifacts.py",
       "dismiss_count": 0
     },
     {
-      "fp": "78a376fc4f03e30d",
+      "fp": "ac3d8221c2fbcfbe",
       "kind": "ssrf_risk",
       "file": "lgwks_project_artifacts.py",
       "dismiss_count": 0
     },
     {
-      "fp": "78a376fc4f03e30d",
-      "kind": "ssrf_risk",
-      "file": "lgwks_project_artifacts.py",
-      "dismiss_count": 0
-    },
-    {
-      "fp": "d73883d9bdaae685",
-      "kind": "ssrf_risk",
-      "file": "lgwks_project_artifacts.py",
-      "dismiss_count": 0
-    },
-    {
-      "fp": "f4ffc20b6bad516d",
+      "fp": "83d1604cab20c092",
       "kind": "ssrf_risk",
       "file": "lgwks_project_artifacts.py",
       "dismiss_count": 0
@@ -974,13 +962,13 @@
       "dismiss_count": 0
     },
     {
-      "fp": "9365c4e759a19199",
+      "fp": "d48e0bf7ed30e70e",
       "kind": "secret_exposure_risk",
       "file": "lgwks_tokenizer.py",
       "dismiss_count": 0
     },
     {
-      "fp": "ba75ff9390a7c1f4",
+      "fp": "52462290b4abd332",
       "kind": "secret_exposure_risk",
       "file": "lgwks_tokenizer.py",
       "dismiss_count": 0
@@ -992,43 +980,43 @@
       "dismiss_count": 0
     },
     {
-      "fp": "4e0f5b334c598b44",
+      "fp": "775ec3d801714a22",
       "kind": "path_traversal_risk",
       "file": "lgwks_vault.py",
       "dismiss_count": 0
     },
     {
-      "fp": "bcf55ab59ffe0651",
+      "fp": "8a91ebe9c66c6183",
       "kind": "file_storage_risk",
       "file": "lgwks_vault.py",
       "dismiss_count": 0
     },
     {
-      "fp": "c61921ab3d9e0794",
+      "fp": "cb3f36b2e757bd65",
       "kind": "unsafe_file_mutation",
       "file": "lgwks_vault.py",
       "dismiss_count": 0
     },
     {
-      "fp": "780d05bbe2bfdd32",
+      "fp": "7378f8ae371e53d0",
       "kind": "path_traversal_risk",
       "file": "lgwks_vault.py",
       "dismiss_count": 0
     },
     {
-      "fp": "d4d8d49640ff4097",
+      "fp": "0de02a37da9d4be3",
       "kind": "unsafe_file_mutation",
       "file": "lgwks_vault.py",
       "dismiss_count": 0
     },
     {
-      "fp": "4bd33f655a833b66",
+      "fp": "6ec82246d027b256",
       "kind": "path_traversal_risk",
       "file": "lgwks_vault.py",
       "dismiss_count": 0
     },
     {
-      "fp": "37701cebb73861a5",
+      "fp": "7deb2486dccc7acc",
       "kind": "file_storage_risk",
       "file": "lgwks_vault.py",
       "dismiss_count": 0
@@ -1055,12 +1043,6 @@
       "fp": "ec01b1fb4a89c80a",
       "kind": "secret_exposure_risk",
       "file": "lgwks_waste.py",
-      "dismiss_count": 0
-    },
-    {
-      "fp": "61be427b5cb01637",
-      "kind": "ssrf_risk",
-      "file": "lgwks_workflow_trigger.py",
       "dismiss_count": 0
     },
     {
@@ -1256,13 +1238,13 @@
       "dismiss_count": 0
     },
     {
-      "fp": "47ef2009f6a4cf33",
+      "fp": "7701ac5b8f4bead3",
       "kind": "unsafe_file_mutation",
       "file": "tests/test_graph_viz.py",
       "dismiss_count": 0
     },
     {
-      "fp": "d445ea5ea1095780",
+      "fp": "2a57941dfc8742ce",
       "kind": "unsafe_file_mutation",
       "file": "tests/test_graph_viz.py",
       "dismiss_count": 0
@@ -1388,7 +1370,7 @@
       "dismiss_count": 0
     },
     {
-      "fp": "2d401dc0d31547b5",
+      "fp": "e5bfad1b271e9f5d",
       "kind": "unsafe_file_mutation",
       "file": "tests/test_substrate.py",
       "dismiss_count": 0
@@ -1412,7 +1394,7 @@
       "dismiss_count": 0
     },
     {
-      "fp": "a8b6690e4bc0e00c",
+      "fp": "716760933afd7115",
       "kind": "ssrf_risk",
       "file": "vision/research/research-network/lgwks_research.py",
       "dismiss_count": 0

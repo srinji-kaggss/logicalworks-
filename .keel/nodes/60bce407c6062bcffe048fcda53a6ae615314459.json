@@ -1,1 +1,0 @@
-{"inputs":["0c7d210a891ca557f7d8890c427748e684c8d697","e6723c763103da7c62052d1d9faa771458061236","gated"],"kind":"atom:testability_falsifiability","params":{"atom":"testability_falsifiability","channel":"gated","unit":"."},"verdict":{"points":[{"exit":0,"label":"base","value":"true"}],"value":"true"}}
