@@ -1145,3 +1145,46 @@ Verification:
 - `tests/test_daemon_world_class.py` → **23 passed**; daemon suite (`-k daemon`) → **130 passed**
 - full repo suite (`tests/ axiom/tests/`) → **2020 passed / 3 skipped / 0 failed**
 - Commits `d4e36e1` (#227 + harness) + `61d25d2` (iter 2-3) on `harden/daemon-world-class`.
+
+---
+
+## 2026-06-21 · #165 State-Fabric convergence — jarvis island retired + graph world⊕tenant enforcement
+
+Goal: collapse the last writers that bypassed the tape into the one State Fabric, and
+close the graph's read-side tenant boundary that I8 (session 6) flagged as missing
+("**L2:** the world/tenant seam is not modeled in the [graph] access path — no
+tier-routing"). Two PRs, both on `main`.
+
+**#274 (step 3, `cffe690`) — `lgwks_jarvis` per-run island retired.** The legacy research
+crawler was the last store writing its own `research.sqlite` (per-run, `id+run_id`, no
+tier, re-embedding every run). `JarvisDB` is removed; a new `GateWriter` routes the crawler
+through `StorageGate.ingest_artifact` (tape SoR + cid-keyed embeddings, **store-once
+cross-run**) and the `graph_fabric`/`relational` projections. The gate is keyed on the run
+**name**, so successive runs of a topic accumulate + dedup into ONE store; `run_id` is
+provenance (artifact meta + a `discovered_in_run` edge), never a shard key. `remap_db_command`
+became a legacy→gate migration. Two tests that asserted the dropped island were **retargeted**
+(not weakened) to the gate's `relational`/`graph`/`vector_records` stores — the #261 dedup
+contract re-verified (docs=2, chunks=1, contains=2, one embed per chunk cid).
+
+**#276 (`81dba52`, closed #275) — graph read-side world⊕tenant ENFORCEMENT + per-row
+provenance.** Writes already stamped `tier` (#272); this adds the read side, the same
+basic-WHERE level as the vector `query_for_tenant`: `GraphDB` reads take `scope_tier` →
+`tier = :me OR 'world' OR NULL` (NULL = pre-enforcement legacy = shared, not hidden).
+`GraphFabric` holds the gate's tenant as `scope_tier`; `StorageGate(scope_tier=tenant_id)`;
+reads **and exports** scoped (a self-review caught `export_json`/`export_mermaid` leaking the
+full graph — closed). `WORLD_TENANT` imported from `lgwks_capability`, not re-derived. Part 2:
+each substrate `graph_input_row` now carries `artifact_cid = chunk_id` (its tape fact cid), so
+graph rows get per-row tape provenance instead of one last-writer cid.
+
+**Honest scope (do not overclaim):** like the vector WHERE-clause, this is the *basic* tier
+boundary, NOT cryptographic §1-INV. Converging graph reads onto the capability-gated
+`TenantStore` door (token-verified, not a raw tenant string) remains deferred → **#277**
+(CIAM #98/#99). And **#165 stays OPEN**: its explicit scope items 3–4 (`lgwks_run.py` /
+`lgwks_research.py` emitting their outputs as tape artifacts) and fuller `substrate_run`
+facts/media/vectors routing are not done; item 2 (`lgwks_ingest.py`) is stale (file removed).
+
+Verification:
+- `tests/test_entity_graph.py` +7 tests (tenant A reads A⊕world⊕NULL, never B; `scope_tier=None`
+  unrestricted; gate `GraphFabric` enforces; per-row `artifact_cid` distinct per chunk).
+- full repo suite (`tests/ axiom/tests/`) → **2134 passed / 3 skipped / 0 failed**.
+- PRs #274, #276, #278 (doc) merged to `main`; follow-ups #277 (door) + #165 (remaining scope) open.
