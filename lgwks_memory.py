@@ -16,7 +16,6 @@ from __future__ import annotations
 
 import argparse
 import fcntl
-import hashlib
 import lgwks_hashing
 import json
 import os
@@ -179,14 +178,10 @@ def themes(text: str, limit: int = 24) -> list[dict]:
 
 
 def embedding(text: str, dims: int = 128) -> list[float]:
-    vec = [0.0] * dims
     features = _tokens(text)
     features.extend(" ".join(features[i:i + 2]) for i in range(max(0, len(features) - 1)))
-    for feat in features:
-        digest = hashlib.blake2b(feat.encode("utf-8"), digest_size=8).digest()
-        vec[int.from_bytes(digest[:4], "big") % dims] += 1.0 if digest[4] % 2 == 0 else -1.0
-    norm = sum(v * v for v in vec) ** 0.5 or 1.0
-    return [round(v / norm, 6) for v in vec]
+    # Canonical feature-hash MECHANISM (#223 family 2); byte-exact with prior copy.
+    return _vm.hash_embed(features, dims)
 
 
 def remember(project: str, text: str, source: str = "conversation", verbose_embeddings: bool = False) -> dict:

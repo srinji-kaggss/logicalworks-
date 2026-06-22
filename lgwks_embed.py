@@ -9,10 +9,8 @@ keywords from discovered themes, and every record carries file/chunk provenance.
 from __future__ import annotations
 
 import argparse
-import hashlib
 import lgwks_hashing
 import json
-import math
 import re
 import time
 from collections import Counter
@@ -49,15 +47,11 @@ def _tokens(text: str) -> list[str]:
 
 
 def _embedding(text: str, dims: int = DIMS) -> list[float]:
-    vec = [0.0] * dims
     toks = _tokens(text)
     feats = toks[:]
     feats.extend(" ".join(toks[i:i + 2]) for i in range(max(0, len(toks) - 1)))
-    for feat in feats:
-        digest = hashlib.blake2b(feat.encode("utf-8"), digest_size=8).digest()
-        vec[int.from_bytes(digest[:4], "big") % dims] += 1.0 if digest[4] % 2 == 0 else -1.0
-    norm = math.sqrt(sum(v * v for v in vec)) or 1.0
-    return [round(v / norm, 6) for v in vec]
+    # Canonical feature-hash MECHANISM (#223 family 2); byte-exact with prior copy.
+    return _vm.hash_embed(feats, dims)
 
 
 def _files(root: Path, max_files: int) -> list[Path]:

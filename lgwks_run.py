@@ -23,7 +23,6 @@ Runnable offline today: `--dry` uses synthetic pages (no network) so the spine i
 from __future__ import annotations
 
 import argparse
-import hashlib
 import lgwks_hashing
 import ipaddress
 import json
@@ -545,10 +544,9 @@ def _deterministic_embed(text: str, dims: int = DIMS) -> list[float]:
     //why N-grams (H4): single words lose local context (e.g. 'not good' vs 'good').
     // Bigrams and trigrams capture simple composition without a model.
     """
-    vec = [0.0] * dims
     lowered = text.lower()
     toks = re.findall(r"[a-z0-9]+", lowered)
-    
+
     # 1-grams, 2-grams, 3-grams
     features = []
     features.extend(toks)
@@ -557,22 +555,10 @@ def _deterministic_embed(text: str, dims: int = DIMS) -> list[float]:
     if len(toks) >= 3:
         features.extend([" ".join(toks[i:i+3]) for i in range(len(toks)-2)])
 
-    for feat in features:
-        # //why blake2b: fast, cryptographic-grade distribution.
-        d = hashlib.blake2b(feat.encode(), digest_size=8).digest()
-        # use first 4 bytes for bucket, next 1 for sign
-        bucket = int.from_bytes(d[:4], "big") % dims
-        sign = 1.0 if d[4] % 2 == 0 else -1.0
-        # //why weighting: longer features (N-grams) carry more specific signal
-        weight = 1.0
-        if " " in feat:
-            weight = 1.5 if feat.count(" ") == 1 else 2.0
-            
-        vec[bucket] += sign * weight
-
+    # Canonical feature-hash MECHANISM (#223 family 2). weighted=True: longer N-grams
+    # carry more specific signal. Byte-exact with the prior inline copy.
     import lgwks_vecmath
-    norm = lgwks_vecmath.l2_norm(vec) or 1.0  # canonical L2 norm (one source of truth)
-    return [round(v / norm, 6) for v in vec]
+    return lgwks_vecmath.hash_embed(features, dims, weighted=True)
 
 
 def embed(

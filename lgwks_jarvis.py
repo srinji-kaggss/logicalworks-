@@ -20,10 +20,8 @@ from __future__ import annotations
 import argparse
 import concurrent.futures
 import csv
-import hashlib
 import html
 import json
-import math
 import os
 import re
 import shutil
@@ -43,6 +41,7 @@ from typing import Iterable, Any, Optional
 import lgwks_sqlite
 import lgwks_substrate_io as _io  # canonical filesystem slug (#223 family 5)
 import lgwks_lexicon as _lex  # canonical lexical analyzer (#223 family 3)
+import lgwks_vecmath as _vm  # canonical vector math + feature-hash mechanism (#223 family 2)
 import lgwks_hashing  # canonical content-id seam (#223 C-10): no local sha re-derivation
 import lgwks_storage  # #165 step 3: the one State Fabric gate (retires JarvisDB islands)
 import lgwks_vector as vec_mod  # embeddings → cid-keyed vector_records
@@ -121,18 +120,13 @@ def parse_keywords(raw: list[str], keyword_opt: str | None) -> list[str]:
 
 
 def deterministic_embedding(text: str, dims: int = DEFAULT_DIMS) -> list[float]:
-    vec = [0.0] * dims
     toks = tokens(text)
     features = toks[:]
     features.extend(" ".join(toks[i:i + 2]) for i in range(max(0, len(toks) - 1)))
     features.extend(" ".join(toks[i:i + 3]) for i in range(max(0, len(toks) - 2)))
-    for feat in features:
-        digest = hashlib.blake2b(feat.encode("utf-8", errors="ignore"), digest_size=8).digest()
-        bucket = int.from_bytes(digest[:4], "big") % dims
-        sign = 1.0 if digest[4] % 2 == 0 else -1.0
-        vec[bucket] += sign
-    norm = math.sqrt(sum(v * v for v in vec)) or 1.0
-    return [round(v / norm, 6) for v in vec]
+    # Canonical feature-hash MECHANISM (#223 family 2); sign-only, errors="ignore"
+    # mirrors the prior inline copy byte-for-byte.
+    return _vm.hash_embed(features, dims, encode_errors="ignore")
 
 
 def cosine(a: list[float], b: list[float]) -> float:

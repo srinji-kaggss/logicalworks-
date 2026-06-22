@@ -27,11 +27,11 @@ Deterministic extraction tiers:
 """
 from __future__ import annotations
 
-import hashlib
 import json
 import math
 import re
 from collections import Counter, defaultdict
+import lgwks_vecmath as _vm  # canonical feature-hash atom (#223 family 2)
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
@@ -431,9 +431,7 @@ def concept_vector(concept: Concept) -> list[float]:
         for i, tok in enumerate(tokens):
             # Front-loaded importance: first tokens matter more
             pos_weight = 1.0 / (1.0 + math.log1p(i))
-            h = hashlib.blake2b(f"{salt}{tok}".encode(), digest_size=8).digest()
-            idx = int.from_bytes(h[:4], "big") % CONCEPT_DIMS
-            sign = 1.0 if h[4] % 2 == 0 else -1.0
+            idx, sign = _vm.hash_bucket(f"{salt}{tok}", CONCEPT_DIMS)  # canonical atom (#223 fam 2)
             vec[idx] += sign * weight * pos_weight
 
     # 1. Label (highest weight — identity)
@@ -454,9 +452,7 @@ def concept_vector(concept: Concept) -> list[float]:
         _add_component(f"{key}={val}", weight=2.5, salt="attr:")
 
     # 6. Occurrence count (rare concepts get slightly different weighting)
-    h = hashlib.blake2b(f"occ:{concept.occurrences}".encode(), digest_size=8).digest()
-    idx = int.from_bytes(h[:4], "big") % CONCEPT_DIMS
-    sign = 1.0 if h[4] % 2 == 0 else -1.0
+    idx, sign = _vm.hash_bucket(f"occ:{concept.occurrences}", CONCEPT_DIMS)  # canonical atom (#223 fam 2)
     vec[idx] += sign * math.log1p(concept.occurrences)
 
     # L2 normalise

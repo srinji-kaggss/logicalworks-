@@ -28,7 +28,6 @@ Spec (round-1, lgwks_project.py split, refactor/project-split):
 
 from __future__ import annotations
 
-import hashlib
 import json
 import re
 import time
@@ -40,6 +39,7 @@ from typing import Any, Optional
 import lgwks_clock
 import lgwks_cycle
 import lgwks_substrate_io as _io  # canonical filesystem slug (#223 family 5)
+import lgwks_vecmath as _vm  # canonical feature-hash mechanism (#223 family 2)
 
 ROOT = Path(__file__).resolve().parent
 PROJECT_ROOT = ROOT / "store" / "project-plans"
@@ -94,15 +94,10 @@ def _terms(text: str) -> list[str]:
 
 
 def _embedding(text: str, dims: int = EMBED_DIMS) -> list[float]:
-    vec = [0.0] * dims
     features = _terms(text)
     features.extend(" ".join(features[i:i + 2]) for i in range(max(0, len(features) - 1)))
-    for feat in features:
-        digest = hashlib.blake2b(feat.encode("utf-8"), digest_size=8).digest()
-        bucket = int.from_bytes(digest[:4], "big") % dims
-        vec[bucket] += 1.0 if digest[4] % 2 == 0 else -1.0
-    norm = sum(v * v for v in vec) ** 0.5 or 1.0
-    return [round(v / norm, 6) for v in vec]
+    # Canonical feature-hash MECHANISM (#223 family 2); byte-exact with prior copy.
+    return _vm.hash_embed(features, dims)
 
 
 from lgwks_hashing import digest as _sha, content_id  # canonical text/id hashing (one source of truth)
