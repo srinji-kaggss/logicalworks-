@@ -31,6 +31,7 @@ from typing import Any
 
 import lgwks_crdt as crdt
 import lgwks_sqlite
+from lgwks_capability import WORLD_TENANT  # canonical world-tier sentinel ("world")
 
 # ── entity taxonomy ───────────────────────────────────────────────────────────
 
@@ -204,6 +205,24 @@ class GraphDB:
     def _edge_id(self, src: str, dst: str, rel: str) -> str:
         return lgwks_hashing.content_id(f"{src}|{dst}|{rel}")
 
+    @staticmethod
+    def _tier_scope(scope_tier: str | None) -> tuple[str, list[Any]]:
+        """#165 step 3 / #275: build a WHERE fragment limiting rows to the caller's
+        tier ⊕ the world tier. Returns (clause, params); empty clause when scoping
+        is off.
+
+        - scope_tier=None → no restriction (admin / git-sync / internal callers and
+          back-compat for direct GraphDB users).
+        - scope_tier=<tenant> → row visible iff tier ∈ {tenant, 'world'} OR tier IS
+          NULL. NULL rows are pre-enforcement legacy (written before #165 step 2
+          stamped tier); they predate any tenant boundary, so they are treated as
+          shared rather than silently hidden — strict separation applies only to
+          rows that actually carry a distinct non-null tier.
+        """
+        if scope_tier is None:
+            return "", []
+        return "(tier = ? OR tier = ? OR tier IS NULL)", [scope_tier, WORLD_TENANT]
+
     def _membership_sink(self) -> crdt.JsonFileSink:
         return crdt.JsonFileSink(self._crdt_path)
 
@@ -363,7 +382,7 @@ class GraphDB:
         self.commit()
         return count
 
-    def query_nodes(self, node_type: str | None = None, match: str | None = None, limit: int = 200) -> list[dict]:
+    def query_nodes(self, node_type: str | None = None, match: str | None = None, limit: int = 200, *, scope_tier: str | None = None) -> list[dict]:
         visible_nodes = self._visible_members("nodes")
         sql = "SELECT node_id, type, label, attrs FROM nodes"
         clauses: list[str] = []
@@ -374,6 +393,10 @@ class GraphDB:
                 return []
             clauses.append(f"node_id IN ({placeholders})")
             params.extend(sorted(visible_nodes))
+        tier_clause, tier_params = self._tier_scope(scope_tier)
+        if tier_clause:
+            clauses.append(tier_clause)
+            params.extend(tier_params)
         if node_type:
             clauses.append("type = ?")
             params.append(node_type)
@@ -391,7 +414,7 @@ class GraphDB:
             for r in rows
         ]
 
-    def query_edges(self, rel: str | None = None, match: str | None = None, limit: int = 200) -> list[dict]:
+    def query_edges(self, rel: str | None = None, match: str | None = None, limit: int = 200, *, scope_tier: str | None = None) -> list[dict]:
         visible_edges = self._visible_members("edges")
         sql = "SELECT edge_id, src, dst, rel, attrs FROM edges"
         clauses: list[str] = []
@@ -402,6 +425,10 @@ class GraphDB:
                 return []
             clauses.append(f"edge_id IN ({placeholders})")
             params.extend(sorted(visible_edges))
+        tier_clause, tier_params = self._tier_scope(scope_tier)
+        if tier_clause:
+            clauses.append(tier_clause)
+            params.extend(tier_params)
         if rel:
             clauses.append("rel = ?")
             params.append(rel)
@@ -419,21 +446,25 @@ class GraphDB:
             for r in rows
         ]
 
-    def resolve_nodes(self, query: str, limit: int = 20) -> list[dict]:
+    def resolve_nodes(self, query: str, limit: int = 20, *, scope_tier: str | None = None) -> list[dict]:
+        tier_clause, tier_params = self._tier_scope(scope_tier)
+        tier_and = f" AND {tier_clause}" if tier_clause else ""
         exact = self._conn.execute(
-            "SELECT node_id, type, label, attrs FROM nodes WHERE node_id = ? OR lower(label) = ? ORDER BY label LIMIT ?",
-            (query, query.lower(), limit),
+            "SELECT node_id, type, label, attrs FROM nodes WHERE (node_id = ? OR lower(label) = ?)"
+            + tier_and + " ORDER BY label LIMIT ?",
+            (query, query.lower(), *tier_params, limit),
         ).fetchall()
         rows = exact if exact else self._conn.execute(
-            "SELECT node_id, type, label, attrs FROM nodes WHERE lower(node_id) LIKE ? OR lower(label) LIKE ? ORDER BY label LIMIT ?",
-            (f"%{query.lower()}%", f"%{query.lower()}%", limit),
+            "SELECT node_id, type, label, attrs FROM nodes WHERE (lower(node_id) LIKE ? OR lower(label) LIKE ?)"
+            + tier_and + " ORDER BY label LIMIT ?",
+            (f"%{query.lower()}%", f"%{query.lower()}%", *tier_params, limit),
         ).fetchall()
         return [
             {"node_id": r[0], "type": r[1], "label": r[2], "attrs": json.loads(r[3])}
             for r in rows
         ]
 
-    def neighbors(self, node_id: str, direction: str = "both", rel: str | None = None, limit: int = 100) -> list[dict]:
+    def neighbors(self, node_id: str, direction: str = "both", rel: str | None = None, limit: int = 100, *, scope_tier: str | None = None) -> list[dict]:
         clauses: list[str] = []
         params: list[Any] = []
         if direction == "out":
@@ -448,6 +479,10 @@ class GraphDB:
         if rel:
             clauses.append("rel = ?")
             params.append(rel)
+        tier_clause, tier_params = self._tier_scope(scope_tier)
+        if tier_clause:
+            clauses.append(tier_clause)
+            params.extend(tier_params)
         sql = (
             "SELECT edge_id, src, dst, rel, attrs FROM edges WHERE "
             + " AND ".join(clauses)
@@ -469,7 +504,7 @@ class GraphDB:
             })
         return out
 
-    def shortest_path(self, src: str, dst: str, max_depth: int = 6) -> list[dict]:
+    def shortest_path(self, src: str, dst: str, max_depth: int = 6, *, scope_tier: str | None = None) -> list[dict]:
         if src == dst:
             return []
         queue: deque[tuple[str, list[dict]]] = deque([(src, [])])
@@ -478,7 +513,7 @@ class GraphDB:
             current, path = queue.popleft()
             if len(path) >= max_depth:
                 continue
-            for edge in self.neighbors(current, direction="out", limit=500):
+            for edge in self.neighbors(current, direction="out", limit=500, scope_tier=scope_tier):
                 nxt = edge["neighbor"]
                 step = {"src": current, "dst": nxt, "rel": edge["rel"], "edge_id": edge["edge_id"]}
                 next_path = path + [step]
@@ -489,27 +524,34 @@ class GraphDB:
                     queue.append((nxt, next_path))
         return []
 
-    def stats(self) -> dict[str, Any]:
-        n = self._conn.execute("SELECT COUNT(*) FROM nodes").fetchone()[0]
-        e = self._conn.execute("SELECT COUNT(*) FROM edges").fetchone()[0]
-        c = self._conn.execute("SELECT COUNT(*) FROM chunks").fetchone()[0]
-        u = self._conn.execute("SELECT COUNT(*) FROM chunks WHERE schema='UNKNOWN'").fetchone()[0]
+    def stats(self, *, scope_tier: str | None = None) -> dict[str, Any]:
+        tier_clause, tier_params = self._tier_scope(scope_tier)
+        where = f" WHERE {tier_clause}" if tier_clause else ""
+        and_ = f" AND {tier_clause}" if tier_clause else ""
+        tp = tuple(tier_params)
+        n = self._conn.execute(f"SELECT COUNT(*) FROM nodes{where}", tp).fetchone()[0]
+        e = self._conn.execute(f"SELECT COUNT(*) FROM edges{where}", tp).fetchone()[0]
+        c = self._conn.execute(f"SELECT COUNT(*) FROM chunks{where}", tp).fetchone()[0]
+        u = self._conn.execute(f"SELECT COUNT(*) FROM chunks WHERE schema='UNKNOWN'{and_}", tp).fetchone()[0]
         return {"nodes": n, "edges": e, "chunks": c, "unknown_chunks": u}
 
-    def export_json(self, out_path: Path) -> None:
-        """Dump full graph to JSON for git-sync."""
+    def export_json(self, out_path: Path, *, scope_tier: str | None = None) -> None:
+        """Dump the graph to JSON for git-sync. scope_tier=None (default) exports the
+        full cumulative graph (the sync artifact); pass a tier to export one tenant's
+        ⊕ world slice."""
         data = {
-            "nodes": self.query_nodes(),
-            "edges": self.query_edges(),
-            "stats": self.stats(),
+            "nodes": self.query_nodes(scope_tier=scope_tier),
+            "edges": self.query_edges(scope_tier=scope_tier),
+            "stats": self.stats(scope_tier=scope_tier),
         }
         tmp = out_path.with_suffix(".tmp")
         tmp.write_text(json.dumps(data, indent=2), encoding="utf-8")
         tmp.replace(out_path)
 
-    def export_mermaid(self, out_path: Path, max_edges: int = 80) -> None:
-        """Export a Mermaid flowchart of the top-N edges (human-readable)."""
-        edges = self.query_edges()[:max_edges]
+    def export_mermaid(self, out_path: Path, max_edges: int = 80, *, scope_tier: str | None = None) -> None:
+        """Export a Mermaid flowchart of the top-N edges (human-readable).
+        scope_tier=None exports the full graph; pass a tier for one tenant's slice."""
+        edges = self.query_edges(scope_tier=scope_tier)[:max_edges]
         lines = ["flowchart LR"]
         seen_nodes: set[str] = set()
         for e in edges:
@@ -706,8 +748,8 @@ def add_parser(subparsers: Any) -> None:
     p.set_defaults(func=_entity_graph_command)
 
 
-def _resolve_single_node(db: GraphDB, query: str) -> tuple[dict[str, Any] | None, str | None]:
-    matches = db.resolve_nodes(query)
+def _resolve_single_node(db: GraphDB, query: str, *, scope_tier: str | None = None) -> tuple[dict[str, Any] | None, str | None]:
+    matches = db.resolve_nodes(query, scope_tier=scope_tier)
     if not matches:
         return None, f"no node matches {query!r}"
     if len(matches) > 1:

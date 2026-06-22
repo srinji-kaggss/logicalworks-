@@ -424,11 +424,16 @@ class GraphFabric:
 
     name = "graph"
 
-    def __init__(self, db_path: Path):
+    def __init__(self, db_path: Path, *, scope_tier: str | None = None):
         import lgwks_entity_graph as graph_mod
 
         self.db_path = db_path
         self._db = graph_mod.GraphDB(db_path)
+        # #275: tenant-facing reads (neighbors/resolve_node/stats) are scoped to this
+        # tier ⊕ world. The gate passes its tenant_id; direct callers leave it None
+        # (unscoped) for back-compat. Writes already stamp tier (#165 step 2); this
+        # closes the read side so a tenant cannot read another tenant's graph rows.
+        self.scope_tier = scope_tier
 
     def apply(self, ctx: fp.IngestContext) -> fp.ProjectionResult:
         # #165 step 2: when the ingest carries graph structure on the sidecar
@@ -487,29 +492,33 @@ class GraphFabric:
         graph_mod.ingest_chunks(self._db, chunks, artifact_cid=artifact_cid, tier=tier)
 
     def neighbors(self, node_id: str, direction: str = "both", rel: str | None = None, limit: int = 100) -> list[dict]:
-        return self._db.neighbors(node_id, direction=direction, rel=rel, limit=limit)
+        return self._db.neighbors(node_id, direction=direction, rel=rel, limit=limit, scope_tier=self.scope_tier)
 
     def resolve_node(self, query: str) -> tuple[dict[str, Any] | None, str | None]:
         """Resolve a node label/id against the cumulative graph (returns (node, err)).
 
         Gate-owned wrapper over lgwks_entity_graph._resolve_single_node so callers
         (query --neighbors) target the gate graph, not a per-run graph.db (#169).
+        Scoped to this gate's tier ⊕ world (#275).
         """
         import lgwks_entity_graph as graph_mod
 
-        return graph_mod._resolve_single_node(self._db, query)
+        return graph_mod._resolve_single_node(self._db, query, scope_tier=self.scope_tier)
 
     def export_json(self, out_path: Path) -> None:
-        """Dump the cumulative graph to JSON (git-sync artifact). Replaces the
-        per-run graph.db export now that the gate graph is the single source (#169)."""
-        self._db.export_json(out_path)
+        """Dump the gate's graph slice to JSON (git-sync artifact). Replaces the
+        per-run graph.db export now that the gate graph is the single source (#169).
+        Scoped to this gate's tier ⊕ world (#275) so a tenant gate never exports
+        another tenant's rows; an admin full dump uses GraphDB.export_json directly."""
+        self._db.export_json(out_path, scope_tier=self.scope_tier)
 
     def export_mermaid(self, out_path: Path, max_edges: int = 80) -> None:
-        """Export the cumulative graph as a Mermaid flowchart (human-readable)."""
-        self._db.export_mermaid(out_path, max_edges=max_edges)
+        """Export the gate's graph slice as a Mermaid flowchart (human-readable),
+        scoped to this gate's tier ⊕ world (#275)."""
+        self._db.export_mermaid(out_path, max_edges=max_edges, scope_tier=self.scope_tier)
 
     def stats(self) -> dict[str, Any]:
-        return self._db.stats()
+        return self._db.stats(scope_tier=self.scope_tier)
 
     def commit(self) -> None:
         self._db.commit()
@@ -728,7 +737,7 @@ class StorageGate:
         # for now they are maintained eagerly on ingest.
         self.vector_fabric = VectorFabric(self.root / "vector_records.db")
         self.token_index = TokenIndex(self.root / "token_index.db")
-        self.graph_fabric = GraphFabric(self.root / "graph.db")
+        self.graph_fabric = GraphFabric(self.root / "graph.db", scope_tier=tenant_id)
         self.relational = RelationalProjection(self.root / "relational.db")
 
         # Unified projection registry. ingest_artifact fans every artifact out to
