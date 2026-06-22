@@ -24,9 +24,18 @@ from typing import Any
 import lgwks_hashing
 
 # Entity tokens live in a high, disjoint range (above bytes 0-255, core 256-511,
-# modal 512-1023, and BPE merges 1024+). The token value is the entity's full
-# 32-bit content hash offset by this base.
+# modal 512-1023, and BPE merges 1024+). The token value is the entity's content
+# hash offset by this base.
 ENTITY_TOKEN_BASE = 1_000_000
+
+# Width of the entity content hash, in bytes. 7 bytes = 56 bits: the largest hash
+# that, offset by ENTITY_TOKEN_BASE, stays well inside SQLite's signed-INTEGER
+# ceiling (2^63-1) where TokenIndex.token lives — 8 bytes would overflow it. At
+# 56 bits the birthday-collision point is ~2^28 (~268M) distinct entities, vs ~2^16
+# (~77k) at the old 4-byte width; injective for any realistic ANT corpus. This is
+# the future model's token-id substrate — fixed BEFORE a model trains on the ids,
+# never narrower than it can afford (#293, irreversible-substrate discipline).
+ENTITY_HASH_BYTES = 7
 
 # Content is bounded so a single turn can't produce an unbounded token stream.
 # Truncation is RECORDED in the trajectory metadata (never silent) — the causal
@@ -168,12 +177,14 @@ class AetheriusTokenizer:
         
         # 4. Encode Entities
         for entity in turn_data.get("entities", []):
-            h_hex = lgwks_hashing.blake_id(entity, size=4)
+            h_hex = lgwks_hashing.blake_id(entity, size=ENTITY_HASH_BYTES)
             h = bytes.fromhex(h_hex)
-            # Full 32-bit hash, not `% 10_000_000`. The modulo collapsed a 2^32
+            # Full 56-bit hash, not `% 10_000_000`. The modulo collapsed a wide
             # space into 10M, multiplying birthday collisions — and a collision
-            # here is a false posting in the token index. The entity range is
-            # disjoint from byte/core/modal/merge tokens.
+            # here is a false posting in the token index (a token query returns the
+            # wrong artifact). The entity range is disjoint from byte/core/modal/
+            # merge tokens, and 56 bits keeps it injective for the corpus while
+            # staying inside the INTEGER column (see ENTITY_HASH_BYTES).
             tok = ENTITY_TOKEN_BASE + int.from_bytes(h, "little")
             tokens.append(tok)
             hashes.append(h_hex)
