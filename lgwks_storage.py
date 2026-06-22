@@ -327,6 +327,21 @@ class VectorFabric:
     def query_by_source(self, source_cid: str, *, space_id: str | None = None) -> list[vec_mod.VectorRecord]:
         return vec_mod.query_by_source(self._conn, source_cid, space_id=space_id, admin=vec_mod.ADMIN)
 
+    def search_similar(self, query: vec_mod.VectorRecord, *, limit: int = 10) -> list[tuple[float, vec_mod.VectorRecord]]:
+        """#166: cosine-rank stored records against a query vector, within the
+        query's own space_id (so deterministic d256 and semantic d4096 vectors are
+        never cross-compared, §I1). Brute-force over the space — the local store is
+        single-operator scale; a future ANN backend slots in behind this method
+        without changing the unified query. Returns (score, record) sorted desc."""
+        rows = self._conn.execute(
+            "SELECT cid, modality, embedding, norm, dim, space_id, tenant, source_cid, "
+            "tokenization_id, artifact_cid FROM vector_records WHERE space_id = ?",
+            (query.space_id,),
+        ).fetchall()
+        scored = [(vec_mod.cosine(query, vec_mod.decode_record(r)), vec_mod.decode_record(r)) for r in rows]
+        scored.sort(key=lambda t: t[0], reverse=True)
+        return scored[:limit]
+
     def query_by_artifact(self, artifact_cid: str) -> list[vec_mod.VectorRecord]:
         rows = self._conn.execute(
             "SELECT cid, modality, embedding, norm, dim, space_id, tenant, source_cid, "
@@ -695,25 +710,33 @@ class RelationalProjection:
         conn.commit()
 
     def search_chunks(self, query: str, limit: int = 20) -> list[dict[str, Any]]:
-        """Lexical FTS5 search over indexed chunks. Returns chunk rows joined to text."""
+        """Lexical FTS5 search over indexed chunks. Returns chunk rows joined to text.
+
+        #166: every hit carries tokenization_id + artifact_cid so a consumer knows
+        which analyzer produced the row and which tape entry it traces back to.
+        """
         rows = self._conn.execute(
-            "SELECT c.chunk_id, c.document_id, c.source, c.url, c.text, c.fact_score, c.chunk_kind "
+            "SELECT c.chunk_id, c.document_id, c.source, c.url, c.text, c.fact_score, c.chunk_kind, "
+            "c.tokenization_id, c.artifact_cid "
             "FROM chunk_fts f JOIN chunks c ON c.chunk_id = f.chunk_id "
             "WHERE chunk_fts MATCH ? ORDER BY rank LIMIT ?",
             (query, limit),
         ).fetchall()
-        cols = ("chunk_id", "document_id", "source", "url", "text", "fact_score", "chunk_kind")
+        cols = ("chunk_id", "document_id", "source", "url", "text", "fact_score", "chunk_kind",
+                "tokenization_id", "artifact_cid")
         return [dict(zip(cols, r)) for r in rows]
 
     def search_facts(self, query: str, limit: int = 20) -> list[dict[str, Any]]:
-        """Lexical FTS5 search over indexed facts."""
+        """Lexical FTS5 search over indexed facts. #166: hits carry provenance."""
         rows = self._conn.execute(
-            "SELECT fa.fact_id, fa.chunk_id, fa.document_id, fa.fact_text, fa.fact_score, fa.chunk_kind "
+            "SELECT fa.fact_id, fa.chunk_id, fa.document_id, fa.fact_text, fa.fact_score, fa.chunk_kind, "
+            "fa.tokenization_id, fa.artifact_cid "
             "FROM fact_fts f JOIN facts fa ON fa.fact_id = f.fact_id "
             "WHERE fact_fts MATCH ? ORDER BY rank LIMIT ?",
             (query, limit),
         ).fetchall()
-        cols = ("fact_id", "chunk_id", "document_id", "fact_text", "fact_score", "chunk_kind")
+        cols = ("fact_id", "chunk_id", "document_id", "fact_text", "fact_score", "chunk_kind",
+                "tokenization_id", "artifact_cid")
         return [dict(zip(cols, r)) for r in rows]
 
     def close(self) -> None:
@@ -827,7 +850,7 @@ class StorageGate:
             ok=all(r.ok for r in results),
         )
 
-    def ingest_fact(self, fact_cid: str, text: str, modality: str, capability: str, meta: dict | None = None) -> fp.IngestReceipt:
+    def ingest_fact(self, fact_cid: str, text: str, modality: str, capability: str, meta: dict | None = None, *, run_id: str = "") -> fp.IngestReceipt:
         """Backward-compatible fact ingestion (wraps ingest_artifact).
 
         Uses the default word_regex tokenizer so existing callers participate in
@@ -835,6 +858,10 @@ class StorageGate:
         carried chunk_kind values (e.g. "rule"); when it is not a canonical
         artifact modality we store it as `chunk_kind` in payload_meta and use
         "text" as the storage modality.
+
+        run_id (#166) stamps the tape entry with the producing run so a projection
+        can be rebuilt for exactly that run via `replay_run` — without it the tape
+        would record what was ingested but not which run produced it.
         """
         tokenization_id = self.tokenizers.default_word_regex_id()
         token_stream: tuple[int, ...] = ()
@@ -851,6 +878,7 @@ class StorageGate:
         artifact = artifact_mod.build_artifact(
             tenant_id=self.tenant_id,
             source="substrate",
+            run_id=run_id,
             modality=canonical_modality,
             tokenization_id=tokenization_id,
             token_stream=token_stream,
@@ -861,6 +889,78 @@ class StorageGate:
             artifact_cid=fact_cid,
         )
         return self.ingest_artifact(artifact, index_tokens=False)
+
+    def status(self) -> dict[str, Any]:
+        """#166: a snapshot of the fabric — tape depth + per-projection counts +
+        active tokenizers. The read side of `lgwks state fabric status`."""
+        tape_row = self.tape._conn.execute(
+            "SELECT COUNT(*), COALESCE(MAX(sequence), 0) FROM tape WHERE tenant_id = ?",
+            (self.tenant_id,),
+        ).fetchone()
+        vec_n = self.vector_fabric._conn.execute("SELECT COUNT(*) FROM vector_records").fetchone()[0]
+        tok_n = self.token_index._conn.execute("SELECT COUNT(*) FROM token_postings").fetchone()[0]
+        rel = self.relational._conn
+        rel_counts = {t: rel.execute(f"SELECT COUNT(*) FROM {t}").fetchone()[0]
+                      for t in ("chunks", "facts", "vectors")}
+        return {
+            "tenant_id": self.tenant_id,
+            "root": str(self.root),
+            "tape": {"entries": int(tape_row[0]), "last_sequence": int(tape_row[1])},
+            "projections": {
+                "vector": int(vec_n),
+                "token_index": int(tok_n),
+                "graph": self.graph_fabric.stats(),
+                "relational": rel_counts,
+            },
+            "tokenizers": [t.tokenizer_id for t in self.tokenizers.list_tokenizers()],
+        }
+
+    def replay_run(self, run_id: str) -> dict[str, Any]:
+        """#166: rebuild the relational projection for one run by replaying the
+        Causal Tape — the demonstration that projections are DISPOSABLE and the
+        tape is the source of record.
+
+        Each text artifact's chunk/fact row is reconstructed from its payload_meta
+        (text + chunk_kind + doc/chunk linkage) plus the deterministic text
+        derivations (stem/fact_score are pure functions of the text), then re-applied
+        through the idempotent bulk projector. Fields the tape never recorded
+        (crawl chrome: source/url) come back empty — the tape records what was
+        ingested, not the page furniture around it. Idempotent: replaying a run that
+        is already projected is a no-op (INSERT OR IGNORE)."""
+        import lgwks_substrate_text as text
+
+        chunk_rows: list[dict[str, Any]] = []
+        fact_rows: list[dict[str, Any]] = []
+        for entry in self.tape.replay(tenant_id=self.tenant_id):
+            meta = entry.get("meta") or {}
+            if meta.get("run_id") != run_id:
+                continue
+            pm = meta.get("payload_meta") or {}
+            body = pm.get("text") or ""
+            if not body:
+                continue
+            cid = meta.get("artifact_cid") or entry["fact_cid"]
+            kind = pm.get("chunk_kind") or "text"
+            tok = meta.get("tokenization_id") or ""
+            if "chunk_id" in pm:  # a fact (sentence) artifact links back to its chunk
+                fact_rows.append({
+                    "fact_id": f"fact-{io._sha(pm['chunk_id'] + body)[:16]}",
+                    "chunk_id": pm["chunk_id"], "document_id": pm.get("doc_id"),
+                    "fact_text": body, "fact_score": text._fact_score(body),
+                    "chunk_kind": kind, "tokenization_id": tok, "artifact_cid": cid,
+                })
+            else:  # a chunk artifact
+                chunk_rows.append({
+                    "chunk_id": cid, "document_id": pm.get("doc_id"), "source": "", "url": "",
+                    "text": body, "stem_text": text._stem_text(body, 0.0), "hash": io._sha(body),
+                    "fact_score": text._fact_score(body), "chunk_kind": kind,
+                    "position": pm.get("pos"), "tokenization_id": tok, "artifact_cid": cid,
+                })
+        self.relational.project_run(
+            source_rows=[], doc_rows=[], chunk_rows=chunk_rows,
+            fact_rows=fact_rows, vector_rows=[], frontier=[],
+        )
+        return {"run_id": run_id, "chunks": len(chunk_rows), "facts": len(fact_rows)}
 
     def close(self) -> None:
         self.tape.close()

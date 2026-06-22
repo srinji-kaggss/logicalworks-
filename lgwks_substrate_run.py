@@ -264,7 +264,7 @@ def build_run(args: argparse.Namespace) -> dict[str, Any]:
             }
             chunk_rows.append(chunk_row)
             chunk_by_content[chunk_id] = {"row": chunk_row, "chunk_kind": chunk_kind}
-            gate.ingest_fact(chunk_id, piece, chunk_kind, capability="ingest_chunk", meta={"doc_id": doc_id, "pos": pos})
+            gate.ingest_fact(chunk_id, piece, chunk_kind, capability="ingest_chunk", meta={"doc_id": doc_id, "pos": pos}, run_id=run_id)
             graph_input_rows.append({
                 "chunk_id": chunk_id,
                 "artifact_cid": chunk_id,  # #275: per-row tape back-link (cid == chunk_id)
@@ -305,7 +305,7 @@ def build_run(args: argparse.Namespace) -> dict[str, Any]:
                         "chunk_kind": chunk_kind,
                         "tokenization_id": tok_id,   # #165: lineage tag (artifact_cid == fact_hash)
                     })
-                    gate.ingest_fact(io._sha(sentence), sentence, chunk_kind, capability="ingest_fact_sentence", meta={"chunk_id": chunk_id})
+                    gate.ingest_fact(io._sha(sentence), sentence, chunk_kind, capability="ingest_fact_sentence", meta={"chunk_id": chunk_id}, run_id=run_id)
 
                     # semantic fact vector (primary; feeds NeoBERT / downstream ML)
                     if dual["sem"]:

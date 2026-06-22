@@ -58,6 +58,7 @@ def build_parser() -> argparse.ArgumentParser:
     import lgwks_spawn; lgwks_spawn.add_parser(t6_sub)
     import lgwks_crdt; lgwks_crdt.add_parser(t6_sub)
     import lgwks_cortex; lgwks_cortex.add_parser(t6_sub)
+    import lgwks_fabric_reader; lgwks_fabric_reader.add_parser(t6_sub)
 
     # 9. ops — system operations and fleet management (daemon, batch, doctor)
     ops = sub.add_parser("ops", help="system operations and management")
