@@ -254,18 +254,11 @@ def fallback_search_url(query: str) -> str:
 
 
 def chunk_text(text: str, size: int = 450, overlap: int = 70) -> list[str]:
-    words = re.findall(r"\S+", text)
-    if not words:
-        return []
-    chunks: list[str] = []
-    step = max(1, size - overlap)
-    for start in range(0, len(words), step):
-        piece = " ".join(words[start:start + size])
-        if piece:
-            chunks.append(piece)
-        if start + size >= len(words):
-            break
-    return chunks
+    """Sliding-window chunking by word count. Delegates to the canonical chunker
+    (#265); byte-exact with the prior copy. overlap clamped to size-1 to preserve
+    the old step=max(1,size-overlap) tolerance instead of raising."""
+    from lgwks_chunking import SlidingWindowChunking
+    return SlidingWindowChunking(size, min(overlap, size - 1)).chunk(text)
 
 
 def concept_terms(texts: Iterable[str], max_terms: int = 80) -> Counter[str]:

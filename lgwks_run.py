@@ -766,8 +766,11 @@ class RunLog:
 
 
 def _chunk(text: str, size: int = 400) -> list[str]:
-    words = text.split()
-    return [" ".join(words[i:i + size]) for i in range(0, len(words), size)] or []
+    """Word-window chunking, no overlap. Delegates to the canonical chunker (#265);
+    byte-exact with the prior copy (str.split() ≡ \\S+ verified; overlap=0 means the
+    canonical's early-break is a no-op, matching the prior range-stops-naturally)."""
+    from lgwks_chunking import SlidingWindowChunking
+    return SlidingWindowChunking(size, 0).chunk(text)
 
 
 # ─────────────────────────────────────────────────────────────────────────────
