@@ -194,7 +194,7 @@ class TextHTMLParser(HTMLParser):
 
 
 @dataclass
-class FetchResult:
+class CrawlResult:
     url: str
     title: str
     text: str
@@ -204,7 +204,7 @@ class FetchResult:
     elapsed: float = 0.0
 
 
-def fetch_url(url: str, timeout: int = 20) -> FetchResult:
+def fetch_url(url: str, timeout: int = 20) -> CrawlResult:
     started = time.time()
     req = urllib.request.Request(
         url,
@@ -227,9 +227,9 @@ def fetch_url(url: str, timeout: int = 20) -> FetchResult:
             title = " ".join(parser.title).strip() or urllib.parse.urlparse(url).netloc
             text = "\n".join(parser.text)
             links = list(dict.fromkeys(parser.links))
-        return FetchResult(url=url, title=title[:180], text=text, links=links, status="ok", elapsed=time.time() - started)
+        return CrawlResult(url=url, title=title[:180], text=text, links=links, status="ok", elapsed=time.time() - started)
     except Exception as exc:
-        return FetchResult(url=url, title=url, text="", links=[], status="error", error=str(exc), elapsed=time.time() - started)
+        return CrawlResult(url=url, title=url, text="", links=[], status="error", error=str(exc), elapsed=time.time() - started)
 
 
 def run_googler(query: str, limit: int) -> list[str]:
@@ -430,7 +430,7 @@ def build_seed_urls(source: str | None, keywords: list[str], max_pages: int, sea
     return deduped, warnings
 
 
-def score_page(result: FetchResult, keywords: list[str]) -> float:
+def score_page(result: CrawlResult, keywords: list[str]) -> float:
     if not keywords:
         return 1.0
     haystack = (result.title + "\n" + result.text).lower()
@@ -580,7 +580,7 @@ def crawl_command(args: argparse.Namespace) -> int:
     before_id = make_snapshot(writer, "before-crawl", [u for u, _ in seeds], Counter(), {})
     queue: deque[tuple[str, int, str]] = deque((url, 0, origin) for url, origin in seeds)
     seen: set[str] = set()
-    fetched: list[FetchResult] = []
+    fetched: list[CrawlResult] = []
     source_rows: list[dict] = []
     doc_rows: list[dict] = []
     chunk_rows: list[dict] = []
