@@ -16,18 +16,23 @@
 %% single graph store, replacing per-run graph.db).
 %%
 %% REMAINING WORK (what's still NOT one model):
-%%   A) ONE store still BYPASSES the tape entirely (writes own SQLite): lgwks_jarvis.*
-%%      (per-run islands). [embed_port.system_graph converged on the tape — #165 step 1.]
+%%   A) [#165 step 3 LANDED] lgwks_jarvis.* no longer writes a per-run research.sqlite
+%%      island — the JarvisDB writer is retired. The legacy crawler now persists through
+%%      GateWriter → StorageGate.ingest_artifact (tape SoR + cid-keyed embeddings,
+%%      store-once across runs) and graph_fabric/relational projections. The gate is keyed
+%%      on the run NAME, so successive runs accumulate + cross-run-dedup into ONE store;
+%%      run_id is provenance (artifact meta + node/edge attrs), never a shard key.
+%%      [embed_port.system_graph converged on the tape — #165 step 1.]
 %%   B) [#165 step 2 LANDED] GraphFabric.apply() is live + entity_graph nodes/edges/
 %%      chunks carry artifact_cid (tape provenance) + tier (world ⊕ tenant). Still open:
 %%      per-row artifact_cid back-linking for the substrate producer + read-side world ⊕
-%%      tenant enforcement on the graph — both fold into step 3's coupled migration.
+%%      tenant enforcement on the graph.
 %% =====================================================================
 flowchart LR
 
-  subgraph BYPASS["A) STILL BYPASSES THE TAPE — the last dupe to retire"]
+  subgraph PRODUCERS["Producers (write THROUGH the gate — no islands)"]
     direction TB
-    JV["lgwks_jarvis.*  — per-run DB islands<br/>runs·sources·documents·chunks·embeddings·nodes·edges<br/>id+run_id · vector_json TEXT · NO tier · re-embeds per run<br/>(NOT a consumer of the gate graph) → #165 step 3"]
+    JV["lgwks_jarvis.* — legacy research crawler<br/>GateWriter → ingest_artifact (cid-keyed, store-once) + graph/relational<br/>gate keyed on run NAME · run_id = provenance, not a shard key<br/>per-run research.sqlite island RETIRED (#165 step 3)"]
   end
 
   subgraph FABRIC["THE 1 — the State Fabric (built; gaps marked)"]
@@ -63,7 +68,6 @@ flowchart LR
   classDef seed fill:#fffbe6,stroke:#c90,color:#640;
   classDef gap  fill:#fff3e0,stroke:#e80,color:#730;
   classDef one  fill:#eaffea,stroke:#0a0,color:#040;
-  class JV dupe;
   class TAPE,SEAM sor;
   class PV seed;
-  class PF,PP,PR,PG,ACCESS one;
+  class JV,PF,PP,PR,PG,ACCESS one;
