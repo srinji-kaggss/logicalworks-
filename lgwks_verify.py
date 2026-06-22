@@ -273,21 +273,14 @@ def verify_command(args: argparse.Namespace) -> int:
         qualify_run = root / "lgwks_verify" / "keel" / "src" / "qualify.mjs"
         return subprocess.run(["node", str(qualify_run)]).returncode
 
-    # Tier honesty: only the commit gate's keel runner (run.mjs) is vendored.
-    # nightly/release require runners not vendored at the pinned SHA — refuse to
-    # silently no-op (the #235 defect). Direct the caller to the CI runner, which
-    # returns an honest BLOCKED verdict + sealed record for those tiers.
+    # Tier authority: nightly/release compose the commit floor with the vendored Keel tier
+    # runners (#241) over the tailored evidence (#311). scripts/ci/run.mjs is the single tier
+    # authority — it seals a real verdict (GO / NO-GO / BLOCKED-on-missing-evidence). Delegate to
+    # it rather than asserting a verdict here, so the verb cannot drift from the runner's truth.
     tier = getattr(args, "tier", "commit")
     if tier != "commit":
-        print(json.dumps({
-            "schema": "lgwks.verify.blocked/v0",
-            "verdict": "BLOCKED",
-            "tier": tier,
-            "reason": f"tier '{tier}' is not evaluable here: its Keel runners are not "
-                      f"vendored at the pinned SHA. Run `node scripts/ci/run.mjs --tier {tier}` "
-                      f"for the sealed BLOCKED record, or re-vendor the runners.",
-        }))
-        return 3
+        ci_run = root / "scripts" / "ci" / "run.mjs"
+        return subprocess.run(["node", str(ci_run), "--tier", tier]).returncode
 
     cmd = ["node", str(keel_run), "--profile", args.profile]
     if getattr(args, "concurrency", 0) > 0:

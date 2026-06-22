@@ -20,7 +20,7 @@
 import { spawnSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
-import { dirname, join } from 'node:path';
+import { dirname, isAbsolute, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
@@ -92,19 +92,33 @@ const COMMIT_LANES = [
 // honestly BLOCKED (unknown ≠ pass), NOT faked green and NOT a runner fault. release ⊇ nightly.
 // The runner FILES are required for a tier to be evaluable at all — a missing file => BLOCKED too
 // (defensive; #235's silent --tier no-op must never return).
+// Each tier lane carries the DYNAMIC concept it actually proves, passed to the runner via
+// --concept. Without it the runner falls back to profile.gate_concept (lgwks_floor = the four
+// STATIC atoms), which a dynamic scenario never measures → an honest-but-permanent BLOCKED even
+// when every driven vector holds (verified 2026-06-22, #311). This is NOT gate-weakening: the
+// static floor still runs in full at every tier (lanes = [...COMMIT_LANES, ...tier lanes], and the
+// verdict requires EVERY lane to pass). The concept here ADDS a dynamic dimension on top of the
+// floor — the simulate lane proves `well_crossed` (the input-envelope concept), the sim lane proves
+// `concurrent_safe` (the interleaving concept), latency proves `latency_bounded`. soak takes NO
+// concept: it is envelope-relative (acceptEnvelope over envelope.target), not concept-gated.
 const TIER_RUNNERS = {
   nightly: [
-    { id: 'simulate.envelope', file: 'run-simulate.mjs', block: 'simulate' },
-    { id: 'sim.interleave', file: 'run-sim.mjs', block: 'sim' },
+    { id: 'simulate.envelope', file: 'run-simulate.mjs', block: 'simulate', concept: 'well_crossed' },
+    { id: 'sim.interleave', file: 'run-sim.mjs', block: 'sim', concept: 'concurrent_safe' },
   ],
   release: [
-    { id: 'simulate.envelope', file: 'run-simulate.mjs', block: 'simulate' },
-    { id: 'sim.interleave', file: 'run-sim.mjs', block: 'sim' },
+    { id: 'simulate.envelope', file: 'run-simulate.mjs', block: 'simulate', concept: 'well_crossed' },
+    { id: 'sim.interleave', file: 'run-sim.mjs', block: 'sim', concept: 'concurrent_safe' },
     { id: 'soak.capacity', file: 'run-soak.mjs', block: 'soak' },
-    { id: 'latency.budget', file: 'run-latency.mjs', block: 'latency' },
+    { id: 'latency.budget', file: 'run-latency.mjs', block: 'latency', concept: 'latency_bounded' },
   ],
 };
-const TARGET_PROFILE = 'lgwks.profile.json';
+// The target tailoring profile. Overridable via LGWKS_CI_TARGET_PROFILE so the tier-evaluability
+// guard (BLOCKED on missing/partial evidence) stays testable against a SYNTHETIC partial profile —
+// the guard's correctness must not depend on the real profile being perpetually incomplete. The
+// override is a test seam only; production always uses the default.
+const TARGET_PROFILE = process.env.LGWKS_CI_TARGET_PROFILE || 'lgwks.profile.json';
+const TARGET_PROFILE_PATH = isAbsolute(TARGET_PROFILE) ? TARGET_PROFILE : join(ROOT, TARGET_PROFILE);
 
 function sh(cmd, args, opts = {}) {
   return spawnSync(cmd, args, { cwd: ROOT, encoding: 'utf8', maxBuffer: MAXBUF, env: process.env, ...opts });
@@ -174,36 +188,48 @@ async function main() {
   console.log(`lgwks CI — run=${id}  tier=${tier}  (Keel authority, vendored)`);
   console.log('============================================================');
 
-  // Honest BLOCKED for nightly/release. Two distinct unknowns, neither a fake pass:
+  // Honest BLOCKED for nightly/release. Three distinct unknowns, none a fake pass:
   //   (1) a tier-runner file is missing (un-vendored) — defensive; #241 vendored them all.
-  //   (2) lgwks.profile.json declares NONE of the tier's evidence blocks — the runners are ready
-  //       but the evidence is not yet tailored, so the tier cannot return a real verdict.
+  //   (2) lgwks.profile.json declares NONE of the tier's evidence blocks — runners ready, evidence
+  //       not yet tailored.
+  //   (3) the profile declares SOME but not ALL of the tier's required blocks — a partial tailoring.
+  //       The undeclared blocks are unmeasured axes; running only the declared lanes would return a
+  //       verdict that SILENTLY OMITS them (release ⊇ {simulate,sim,soak,latency} — declaring only
+  //       simulate+sim must not let release GO without soak/latency). unknown ≠ pass, so a partial
+  //       tier BLOCKS too, naming exactly which blocks are still missing. (#311)
   const lanes = [...COMMIT_LANES];
   if (tier !== 'commit') {
     const specs = TIER_RUNNERS[tier] || [];
     const missing = specs.filter((s) => !existsSync(keel(s.file))).map((s) => s.file);
     let declared = [];
+    let undeclared = [];
     try {
-      const profile = JSON.parse(readFileSync(join(ROOT, TARGET_PROFILE), 'utf8'));
-      declared = specs.filter((s) => Array.isArray(profile[s.block]) && profile[s.block].length);
+      const profile = JSON.parse(readFileSync(TARGET_PROFILE_PATH, 'utf8'));
+      const isDeclared = (s) => Array.isArray(profile[s.block]) && profile[s.block].length;
+      declared = specs.filter(isDeclared);
+      undeclared = specs.filter((s) => !isDeclared(s)).map((s) => s.block);
     } catch (e) {
       const { manifestHash } = seal(runDir, id, tier, 'BLOCKED', [], { blocked_reason: `cannot read ${TARGET_PROFILE}: ${e.message}` });
       console.log(`BLOCKED — tier '${tier}': cannot read ${TARGET_PROFILE}`);
       console.log(`  seal=${manifestHash.slice(0, 16)}...  record=${runDir.slice(ROOT.length + 1)}`);
       process.exit(3);
     }
-    if (missing.length || !declared.length) {
+    if (missing.length || undeclared.length) {
       const reason = missing.length
         ? `tier '${tier}' runner(s) not vendored: ${missing.join(', ')} (re-vendor — see lgwks_verify/keel/VENDORED.txt).`
+        : declared.length
+        ? `tier '${tier}' is partially tailored: ${TARGET_PROFILE} declares ${declared.map((s) => s.block).join('/')} but NOT ${undeclared.join('/')} — the missing block(s) are unmeasured axes and running only the declared lanes would silently omit them (unknown ≠ pass). Add a profile.${undeclared[0]} block (and its siblings) with real harnesses.`
         : `tier '${tier}' is vendored and ready, but ${TARGET_PROFILE} declares no ${specs.map((s) => s.block).join('/')} evidence — the tier's evidence is not yet tailored, so it cannot return a verdict (unknown ≠ pass). Add a profile.${specs[0].block} block (or its siblings) with real harnesses.`;
       const { manifestHash } = seal(runDir, id, tier, 'BLOCKED', [], { blocked_reason: reason });
       console.log(`BLOCKED — ${reason}`);
       console.log(`  seal=${manifestHash.slice(0, 16)}...  record=${runDir.slice(ROOT.length + 1)}`);
       process.exit(3);
     }
-    // Evidence IS declared → append the tier runner lanes over the target profile.
+    // Evidence IS declared → append the tier runner lanes over the target profile, each gated on
+    // the dynamic concept it proves (soak is envelope-relative and takes no --concept).
     for (const s of declared)
-      lanes.push({ id: s.id, gate: tier, cmd: [NODE, keel(s.file), '--profile', join(ROOT, TARGET_PROFILE)] });
+      lanes.push({ id: s.id, gate: tier, cmd: [NODE, keel(s.file), '--profile', TARGET_PROFILE_PATH,
+        ...(s.concept ? ['--concept', s.concept] : [])] });
   }
 
   const reports = [];
