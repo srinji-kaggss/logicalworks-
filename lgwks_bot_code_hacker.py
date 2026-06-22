@@ -829,10 +829,12 @@ def run(
         findings.extend(_scan_file(p, rel, run_id, repo_str, baseline, 
                                    created_at=created_at, graph=graph))
 
-    # Persist the baseline whenever a baseline path is supplied. Suppression reads
-    # this file on the next run; callers use update_baseline for explicit CLI
-    # intent, but the library API must not leave a requested baseline path empty.
-    if baseline_path:
+    # Persist the baseline ONLY on explicit --update-baseline intent. Writing it on
+    # every run is self-certification: the scan absorbs its own new findings into the
+    # baseline it gates against, so the next run sees 0-new and passes — a gate that
+    # can never block twice (#304). Read-only by default makes the verdict
+    # deterministic; baseline curation (FP suppression) is a reviewed, opt-in action.
+    if baseline_path and update_baseline:
         baseline.record(findings)
 
     # Optional SARIF export

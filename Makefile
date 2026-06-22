@@ -33,15 +33,20 @@ doctor:
 models:
 	@./.venv/bin/python scripts/setup_models.py all tiny-bert
 
-# Full first-party surface — kept in lockstep with the lanes in scripts/ci/run.mjs
-# (the authoritative gate). A sliver here = fake acceptance of everything it omits.
+# IMPORTANT: `make test` is the command the Keel `testability_falsifiability` atom
+# runs (lgwks.profile.json), and that atom is evaluated by maturity.mjs, which is
+# itself exercised by tests/test_verify.py::TestMaturityScream — which runs inside
+# the full pytest suite. So `make test` MUST stay light and MUST NOT run the whole
+# `tests/` tree, or it recurses (test → maturity → make test → test …) and the
+# heavy ×2 cross blows the maturity test's timeout. This is exactly what broke main
+# after #305. The COMPREHENSIVE first-party gate is the lanes in scripts/ci/run.mjs
+# (`make verify`): pytest.suite (full tests/), rust.crawler/axiom/tui, schema,
+# coverage.completeness. Comprehensiveness lives THERE, not here.
 test-python:
-	uv run --with pytest --with cryptography --with pyyaml --with networkx python -m pytest tests/ axiom/tests/ -rs
+	uv run --with pytest python -m pytest axiom/tests/ tests/test_axiom_cli.py tests/test_research_stack.py::TestManifest -q
 
 test-rust:
-	cargo test --manifest-path crawler/Cargo.toml
-	cargo test --manifest-path axiom/rust/Cargo.toml
-	cargo test --manifest-path tui/Cargo.toml
+	cargo test --manifest-path axiom/rust/Cargo.toml -q
 
 clean:
 	rm -rf .venv bin __pycache__ .pytest_cache axiom/rust/target

@@ -221,8 +221,9 @@ class TestBaselineSuppression(unittest.TestCase):
             _write(tmp, "secret.py", "token = 'x'\nprint(token)\n")
             baseline = tmp / "baseline.json"
 
-            # First run: finding appears
-            f1 = hacker.run(tmp, baseline_path=baseline)
+            # First run: finding appears. update_baseline=True to RECORD it — the
+            # suppression learning store is now an explicit, opt-in write (#304).
+            f1 = hacker.run(tmp, baseline_path=baseline, update_baseline=True)
             self.assertTrue(any(f["kind"] == "secret_exposure_risk" for f in f1))
 
             # Manually mark as dismissed twice (simulate user feedback)
@@ -244,29 +245,39 @@ class TestBaselineSuppression(unittest.TestCase):
             f1 = hacker.run(tmp, baseline_path=baseline)
             self.assertTrue(any(f["kind"] == "secret_exposure_risk" for f in f1))
 
-    def test_cli_baseline_blocks_only_new_high_findings(self):
+    def test_cli_gate_is_deterministic_and_baseline_update_is_explicit(self):
+        """#304: a read-only gate run must NOT absorb its own findings into the
+        baseline. The verdict is stable across runs; only --update-baseline curates."""
         with TemporaryDirectory() as d:
             tmp = Path(d)
             _write(tmp, "secret.py", "token = 'x'\nprint(token)\n")
             baseline = tmp / "baseline.json"
             script = Path(hacker.__file__).resolve()
 
-            first = subprocess.run(
-                [sys.executable, str(script), "--scan", str(tmp), "--baseline", str(baseline)],
-                text=True,
-                capture_output=True,
-                timeout=20,
-            )
+            def scan(*extra):
+                return subprocess.run(
+                    [sys.executable, str(script), "--scan", str(tmp), "--baseline", str(baseline), *extra],
+                    text=True, capture_output=True, timeout=20,
+                )
+
+            # Read-only run blocks a new high finding and DOES NOT write the baseline.
+            first = scan()
             self.assertEqual(first.returncode, 1, first.stdout + first.stderr)
             self.assertIn("new high-severity findings", first.stdout)
+            self.assertFalse(baseline.exists(), "read-only scan must not self-certify by writing the baseline")
 
-            second = subprocess.run(
-                [sys.executable, str(script), "--scan", str(tmp), "--baseline", str(baseline)],
-                text=True,
-                capture_output=True,
-                timeout=20,
-            )
-            self.assertEqual(second.returncode, 0, second.stdout + second.stderr)
+            # Same verdict every time — no fail-once-then-absorb.
+            second = scan()
+            self.assertEqual(second.returncode, 1, "gate verdict must be stable across runs")
+            self.assertFalse(baseline.exists())
+
+            # Curating the baseline is an explicit, reviewed action.
+            scan("--update-baseline")
+            self.assertTrue(baseline.exists(), "--update-baseline records the curated baseline")
+
+            # With the findings now an accepted, committed baseline, a read-only run passes.
+            third = scan()
+            self.assertEqual(third.returncode, 0, third.stdout + third.stderr)
 
             _write(tmp, "other.py", "token = 'y'\nprint(token)\n")
             third = subprocess.run(
