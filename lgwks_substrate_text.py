@@ -9,7 +9,6 @@ Defense-in-Depth:
 
 from __future__ import annotations
 
-import re
 from collections import Counter
 from datetime import date
 from typing import Any
@@ -69,17 +68,11 @@ def _stem_text(text: str, threshold: float) -> str:
 
 
 def _chunk_text(text: str, size: int = 320, overlap: int = 48) -> list[str]:
-    """Sliding-window chunking by word count."""
-    words = re.findall(r"\S+", text)
-    if not words:
-        return []
-    step = max(1, size - overlap)
-    out = []
-    for start in range(0, len(words), step):
-        out.append(" ".join(words[start:start + size]))
-        if start + size >= len(words):
-            break
-    return out
+    """Sliding-window chunking by word count. Delegates to the canonical chunker
+    (#265); byte-exact with the prior copy. overlap is clamped to size-1 so the old
+    step=max(1,size-overlap) tolerance is preserved instead of raising."""
+    from lgwks_chunking import SlidingWindowChunking
+    return SlidingWindowChunking(size, min(overlap, size - 1)).chunk(text)
 
 
 def _fact_sentences(text: str, threshold: float) -> list[str]:
