@@ -20,6 +20,8 @@ from pathlib import Path
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 import lgwks_chain
+import lgwks_cognition as cognition
+import lgwks_hashing
 import lgwks_memory as memory
 import lgwks_sign
 
@@ -34,6 +36,20 @@ def _memory_oracle_line(seq, project, kind, data, prev, key):
     h = lgwks_sign.mac(core_str + prev, key)
     rec = {**core, "hash": h}
     return json.dumps(rec, sort_keys=True, ensure_ascii=False)
+
+
+def _cognition_oracle_line(seq, kind, data, prev, key):
+    """Independent reconstruction of a pre-#298 lgwks_cognition record + its bytes.
+
+    Differs from memory: 0-based seq, hash = digest(core) (not a MAC), a separate
+    `sig` = mac(hash, key) field, and ensure_ascii defaults True.
+    """
+    body = {"seq": seq, "ts": _FIXED_TS, "kind": kind, "data": data, "prev": prev}
+    core = json.dumps(body, sort_keys=True, separators=(",", ":"))
+    h = lgwks_hashing.digest(core)
+    sig = lgwks_sign.mac(h, key) if key else ""
+    rec = {**body, "hash": h, "sig": sig}
+    return json.dumps(rec, sort_keys=True)
 
 
 class TestMemoryByteExact(unittest.TestCase):
@@ -98,6 +114,69 @@ class TestLegacyChainCompat(unittest.TestCase):
         self.assertEqual(rec["seq"], 3)
         self.assertEqual(rec["prev"], prev)
         self.assertTrue(memory.verify(project, key))
+
+
+class TestCognitionByteExact(unittest.TestCase):
+    def setUp(self):
+        self._orig_dir = cognition._DIR
+        self._orig_time = cognition.time.time
+        self._td = tempfile.TemporaryDirectory()
+        cognition._DIR = Path(self._td.name) / "cognition"
+        cognition.time.time = lambda: _FIXED_TS  # deterministic ts for byte comparison
+
+    def tearDown(self):
+        cognition._DIR = self._orig_dir
+        cognition.time.time = self._orig_time
+        self._td.cleanup()
+
+    def test_appended_bytes_match_oracle(self):
+        key = b"k"
+        log = cognition.CognitionLog("byte-exact", key=key)
+        # unicode + nested payload exercises ensure_ascii (default True) + sort_keys
+        payloads = [
+            ("intent_commit", {"prompt": "exämple", "why": "café ☕", "nested": {"b": 2, "a": 1}}),
+            ("thought", {"note": "naïve", "z": [3, 2, 1]}),
+            ("note", {"text": "plain"}),
+        ]
+        prev = lgwks_chain.GENESIS
+        lines_oracle = []
+        for seq, (kind, data) in enumerate(payloads):  # 0-based seq
+            rec = log.append(kind, data)
+            lines_oracle.append(_cognition_oracle_line(seq, kind, data, prev, key))
+            prev = rec["hash"]
+
+        on_disk = cognition._log_path("byte-exact").read_text(encoding="utf-8").splitlines()
+        self.assertEqual(on_disk, lines_oracle, "cognition bytes diverged from the pre-#298 oracle")
+        self.assertTrue(cognition.CognitionLog("byte-exact", key=key).verify())
+
+
+class TestCognitionLegacyCompat(unittest.TestCase):
+    def setUp(self):
+        self._orig_dir = cognition._DIR
+        self._td = tempfile.TemporaryDirectory()
+        cognition._DIR = Path(self._td.name) / "cognition"
+
+    def tearDown(self):
+        cognition._DIR = self._orig_dir
+        self._td.cleanup()
+
+    def test_legacy_jsonl_verifies_and_extends(self):
+        key = b"k"
+        p = cognition._log_path("legacy")
+        p.parent.mkdir(parents=True, exist_ok=True)
+        prev = lgwks_chain.GENESIS
+        out = []
+        for seq, (kind, data) in enumerate([("note", {"a": 1}), ("thought", {"b": 2})]):
+            out.append(_cognition_oracle_line(seq, "note" if seq == 0 else "thought", data, prev, key))
+            prev = json.loads(out[-1])["hash"]
+        p.write_text("\n".join(out) + "\n", encoding="utf-8")
+
+        log = cognition.CognitionLog("legacy", key=key)
+        self.assertTrue(log.verify(), "legacy-format cognition chain must still verify")
+        rec = log.append("note", {"c": 3})  # extends without migration
+        self.assertEqual(rec["seq"], 2)  # 0-based: third record
+        self.assertEqual(rec["prev"], prev)
+        self.assertTrue(cognition.CognitionLog("legacy", key=key).verify())
 
 
 class TestPrimitiveDiscipline(unittest.TestCase):
