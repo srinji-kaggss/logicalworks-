@@ -42,6 +42,7 @@ from typing import Iterable, Any, Optional
 
 import lgwks_sqlite
 import lgwks_substrate_io as _io  # canonical filesystem slug (#223 family 5)
+import lgwks_lexicon as _lex  # canonical lexical analyzer (#223 family 3)
 import lgwks_hashing  # canonical content-id seam (#223 C-10): no local sha re-derivation
 import lgwks_storage  # #165 step 3: the one State Fabric gate (retires JarvisDB islands)
 import lgwks_vector as vec_mod  # embeddings → cid-keyed vector_records
@@ -86,7 +87,9 @@ def sha(value: str, n: int = 16) -> str:
 
 
 def tokens(text: str) -> list[str]:
-    return [t for t in re.findall(r"[a-zA-Z][a-zA-Z0-9_+\-.]{1,}", text.lower()) if t not in STOPWORDS]
+    """Keyword tokens. Byte-exact via canonical lexical analyzer (#223 family 3);
+    the local STOPWORDS stays as domain config (the crawl vocabulary)."""
+    return _lex.tokens(text, profile=_lex.TERM, min_len=2, stop=frozenset(STOPWORDS))
 
 
 def word_count(text: str) -> int:

@@ -17,6 +17,7 @@ The word regex itself is already the single source of truth in lgwks_substrate_c
 from __future__ import annotations
 
 import re
+from typing import Literal, overload
 
 from lgwks_substrate_config import WORD_RE
 
@@ -42,6 +43,24 @@ STOP_EN = frozenset(
 )
 
 
+@overload
+def tokens(
+    text: object,
+    *,
+    profile: re.Pattern[str] = ...,
+    min_len: int = ...,
+    stop: frozenset[str] = ...,
+    unique: Literal[False] = ...,
+) -> list[str]: ...
+@overload
+def tokens(
+    text: object,
+    *,
+    profile: re.Pattern[str] = ...,
+    min_len: int = ...,
+    stop: frozenset[str] = ...,
+    unique: Literal[True],
+) -> set[str]: ...
 def tokens(
     text: object,
     *,
