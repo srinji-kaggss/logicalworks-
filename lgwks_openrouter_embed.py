@@ -11,9 +11,13 @@ import json
 import os
 import urllib.error
 import urllib.request
+from typing import TYPE_CHECKING
 
 import lgwks_keyvault
 import lgwks_openrouter
+
+if TYPE_CHECKING:
+    from lgwks_model_port import Embedder  # contract only (#152)
 
 ENDPOINT = "https://openrouter.ai/api/v1/embeddings"
 DEFAULT_MODEL = os.environ.get("LGWKS_EYE_REMOTE_MODEL", "nvidia/llama-nemotron-embed-vl-1b-v2:free")
@@ -63,3 +67,7 @@ def embed_one(
         return [float(x) for x in vec]
     except (KeyError, IndexError, TypeError, ValueError):
         return None
+
+
+if TYPE_CHECKING:
+    _conforms_embedder: Embedder = embed_one  # static conformance to the shared contract (#152)
