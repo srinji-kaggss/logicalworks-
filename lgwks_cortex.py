@@ -10,6 +10,7 @@ Contract: emits `lgwks.cortex.v1`
 from __future__ import annotations
 
 import json
+import sys
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
@@ -47,6 +48,30 @@ class TranscriptCortex:
         self.repo_root = repo_root
         self.cortex_dir = repo_root / "store" / "cortex"
         self.cortex_dir.mkdir(parents=True, exist_ok=True)
+        # Observability counters (defect: a pipeline whose PRODUCT is the data
+        # must never drop a trajectory silently). Reset per process_transcript
+        # call so a caller/daemon tick can read the loss for the work it did.
+        self.emit_ok = 0
+        self.emit_failures = 0
+        self.tokenize_failures = 0
+
+    def _drop_log(self, event: str, ct: "CortexTurn", err: Exception) -> None:
+        """Emit a structured loss record to stderr. Capture stays best-effort
+        (never raises into the daemon loop), but a drop is now COUNTED + VISIBLE
+        instead of swallowed — silent training-data loss was the defect."""
+        try:
+            print(
+                json.dumps({
+                    "schema": "lgwks.cortex.drop.v1",
+                    "event": event,
+                    "session_id": ct.session_id,
+                    "turn_id": ct.turn_id,
+                    "error": f"{type(err).__name__}: {err}",
+                }),
+                file=sys.stderr,
+            )
+        except Exception:
+            pass  # logging the drop must itself never break capture
 
     def process_transcript(
         self,
@@ -54,6 +79,7 @@ class TranscriptCortex:
         session_id: str,
         n: int = 0,
         gate: Any = None,
+        limit: int = 0,
     ) -> list[CortexTurn]:
         """Convert a raw JSONL transcript into a sequence of CortexTurns.
 
@@ -61,8 +87,14 @@ class TranscriptCortex:
         State Fabric (Causal Tape + TokenIndex) — the durable, replayable training
         trajectory. n=0 processes the whole file. A caller may pass its own `gate`
         (it owns the lifecycle); otherwise a per-session gate is opened/closed here.
+
+        `limit > 0` bounds the number of NEW (not-yet-persisted) turns processed
+        in one call so the daemon loop stays responsive on a long backlog (#247);
+        idempotency (#239) makes the remainder drain safely across later calls.
+        `len(returned) == limit` signals the backlog may not be fully drained.
         """
         # Layer 1: Entry Point Validation
+        self.emit_ok = self.emit_failures = self.tokenize_failures = 0
         if not transcript_path.exists():
             return []
 
@@ -119,8 +151,13 @@ class TranscriptCortex:
                     })
                     tokens = tuple(traj.tokens)
                     ct.attention.extend([f"atok:{t}" for t in tokens[:5]])
-                except Exception:
+                except Exception as err:
+                    # Empty token stream = a degraded trajectory; the artifact is
+                    # still emitted (its metadata/text survive) but the token
+                    # payload is lost. Count + log it rather than degrade silently.
                     tokens = ()
+                    self.tokenize_failures += 1
+                    self._drop_log("tokenize_failed", ct, err)
 
                 # Layer 4: persist. The durable, replayable training trajectory
                 # goes on the Causal Tape (+ TokenIndex); the JSONL is a mirror.
@@ -128,6 +165,12 @@ class TranscriptCortex:
                 self._persist_turn(ct)
                 seen.add(ct.turn_id)
                 processed.append(ct)
+
+                # #247: bound NEW turns per call so a long backlog drains across
+                # several daemon ticks instead of blocking the loop (and SIGTERM)
+                # in one synchronous pass. Idempotency carries the remainder.
+                if limit > 0 and len(processed) >= limit:
+                    break
         finally:
             if own_gate:
                 gate.close()
@@ -139,6 +182,8 @@ class TranscriptCortex:
 
         Best-effort: trajectory capture must never break transcript processing
         (the gate isolates projection failures; we only guard the tape append).
+        A failure is COUNTED + logged (self.emit_failures / stderr), never
+        swallowed — silent drop = invisible training-data loss.
         """
         import time
 
@@ -166,8 +211,10 @@ class TranscriptCortex:
                 timestamp=time.time(),
             )
             gate.ingest_artifact(artifact)
-        except Exception:
-            pass
+            self.emit_ok += 1
+        except Exception as err:
+            self.emit_failures += 1
+            self._drop_log("trajectory_emit_failed", ct, err)
 
     def _persisted_turn_ids(self, session_id: str) -> set[str]:
         """turn_ids already written to this session's cortex trajectory file.
@@ -228,9 +275,14 @@ def index_command(args) -> int:
         import json as _json
         print(_json.dumps({"schema": "lgwks.cortex.index.v1", "ok": True,
                            "session_id": args.session_id, "turns": count,
+                           "emit_ok": cortex.emit_ok,
+                           "emit_failures": cortex.emit_failures,
+                           "tokenize_failures": cortex.tokenize_failures,
                            "transcript": str(args.path)}))
     else:
-        print(f"cortex: indexed {count} turn(s) from {args.path} -> {args.session_id}.cortex.jsonl")
+        drops = cortex.emit_failures + cortex.tokenize_failures
+        note = f" ({drops} dropped — see stderr)" if drops else ""
+        print(f"cortex: indexed {count} turn(s) from {args.path} -> {args.session_id}.cortex.jsonl{note}")
     return 0
 
 

@@ -313,5 +313,115 @@ class TestTranscriptSelfDiscovery(unittest.TestCase):
             self.assertEqual(target, str(pinned))
 
 
+class TestCortexBoundedDrain(unittest.TestCase):
+    """#247: a long backlog must not be tokenized in one synchronous pass that
+    blocks the daemon loop (and SIGTERM). `limit` bounds new turns per call and
+    idempotency drains the rest across calls."""
+
+    def _write(self, path: Path, n: int) -> None:
+        import json
+        path.write_text(
+            "\n".join(json.dumps({"turn_id": f"t{i}", "role": "user", "content": f"turn {i}"})
+                      for i in range(n)) + "\n",
+            encoding="utf-8",
+        )
+
+    def test_limit_bounds_new_turns_and_idempotency_drains_remainder(self):
+        import lgwks_cortex
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            transcript = root / "s.jsonl"
+            self._write(transcript, 5)
+            cortex = lgwks_cortex.TranscriptCortex(root)
+            out = root / "store" / "cortex" / "sess.cortex.jsonl"
+
+            first = cortex.process_transcript(transcript, "sess", n=0, limit=2)
+            self.assertEqual([t.turn_id for t in first], ["t0", "t1"])
+            self.assertEqual(sum(1 for _ in out.open()), 2)
+
+            second = cortex.process_transcript(transcript, "sess", n=0, limit=2)
+            self.assertEqual([t.turn_id for t in second], ["t2", "t3"])
+
+            third = cortex.process_transcript(transcript, "sess", n=0, limit=2)
+            self.assertEqual([t.turn_id for t in third], ["t4"])  # < cap -> drained
+            self.assertEqual(sum(1 for _ in out.open()), 5)  # all 5, no dupes
+
+    def test_daemon_holds_watermark_until_backlog_drained(self):
+        import lgwks_daemon
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            transcript = root / "live.jsonl"
+            self._write(transcript, 5)
+            d = lgwks_daemon.SessionDaemon(root)
+            out = root / "store" / "cortex" / "live.cortex.jsonl"
+
+            orig = lgwks_daemon.CORTEX_MAX_TURNS_PER_TICK
+            lgwks_daemon.CORTEX_MAX_TURNS_PER_TICK = 2
+            try:
+                # Tick 1: cap hit -> watermark HELD at 0.0 so next tick resumes.
+                wm = d._maybe_process_cortex(str(transcript), 0.0)
+                self.assertEqual(wm, 0.0)
+                self.assertEqual(sum(1 for _ in out.open()), 2)
+                # Tick 2: still capped, still held.
+                wm = d._maybe_process_cortex(str(transcript), wm)
+                self.assertEqual(wm, 0.0)
+                self.assertEqual(sum(1 for _ in out.open()), 4)
+                # Tick 3: backlog drained (< cap) -> watermark ADVANCES to mtime.
+                wm = d._maybe_process_cortex(str(transcript), wm)
+                self.assertGreater(wm, 0.0)
+                self.assertEqual(sum(1 for _ in out.open()), 5)
+                # Tick 4: unchanged file -> skipped (steady state).
+                self.assertEqual(d._maybe_process_cortex(str(transcript), wm), wm)
+            finally:
+                lgwks_daemon.CORTEX_MAX_TURNS_PER_TICK = orig
+
+
+class TestCortexDropObservability(unittest.TestCase):
+    """A pipeline whose PRODUCT is the data must never drop a trajectory
+    silently. Emit failures are COUNTED (and logged), not swallowed."""
+
+    class _FailGate:
+        class _Tok:
+            def default_aetherius_id(self):
+                return "aet:test"
+        tokenizers = _Tok()
+
+        def ingest_artifact(self, _artifact):
+            raise RuntimeError("simulated tape append failure")
+
+        def close(self):
+            pass
+
+    def test_emit_failures_are_counted_not_swallowed(self):
+        import io
+        import json
+        from contextlib import redirect_stderr
+
+        import lgwks_cortex
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            transcript = root / "s.jsonl"
+            transcript.write_text(
+                "\n".join(json.dumps(t) for t in [
+                    {"turn_id": "t1", "role": "user", "content": "a"},
+                    {"turn_id": "t2", "role": "assistant", "content": "b"},
+                ]) + "\n",
+                encoding="utf-8",
+            )
+            cortex = lgwks_cortex.TranscriptCortex(root)
+            buf = io.StringIO()
+            with redirect_stderr(buf):
+                turns = cortex.process_transcript(
+                    transcript, "sess", gate=self._FailGate()
+                )
+            # Processing still completes (best-effort), but every drop is visible.
+            self.assertEqual(len(turns), 2)
+            self.assertEqual(cortex.emit_failures, 2)
+            self.assertEqual(cortex.emit_ok, 0)
+            err = buf.getvalue()
+            self.assertIn("trajectory_emit_failed", err)
+            self.assertIn("lgwks.cortex.drop.v1", err)
+
+
 if __name__ == "__main__":
     unittest.main()
