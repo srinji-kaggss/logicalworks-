@@ -33,11 +33,15 @@ doctor:
 models:
 	@./.venv/bin/python scripts/setup_models.py all tiny-bert
 
+# Full first-party surface — kept in lockstep with the lanes in scripts/ci/run.mjs
+# (the authoritative gate). A sliver here = fake acceptance of everything it omits.
 test-python:
-	uv run --with pytest python -m pytest axiom/tests/ tests/test_axiom_cli.py tests/test_research_stack.py::TestManifest -q
+	uv run --with pytest --with cryptography --with pyyaml --with networkx python -m pytest tests/ axiom/tests/ -rs
 
 test-rust:
-	cd axiom/rust && cargo test -q
+	cargo test --manifest-path crawler/Cargo.toml
+	cargo test --manifest-path axiom/rust/Cargo.toml
+	cargo test --manifest-path tui/Cargo.toml
 
 clean:
 	rm -rf .venv bin __pycache__ .pytest_cache axiom/rust/target
