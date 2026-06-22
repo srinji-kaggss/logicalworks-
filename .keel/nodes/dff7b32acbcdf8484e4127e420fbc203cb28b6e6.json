@@ -1,1 +1,0 @@
-{"inputs":["e74ec62f3a4786e91b772625aae8e708ad27f659","add330ed419833863a48dae91bc186d47d5ce35e","gated"],"kind":"atom:security_by_construction","params":{"atom":"security_by_construction","channel":"gated","unit":"."},"verdict":{"points":[{"exit":0,"label":"base","value":"true"}],"value":"true"}}
