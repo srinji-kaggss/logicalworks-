@@ -7,11 +7,18 @@ from unittest.mock import MagicMock, patch
 import lgwks_graph_viz as viz
 
 
+# The repo under test = this checkout's root (tests/..), NOT a hardcoded absolute
+# path. The old hardcoded-home-dir literal passed only on that one machine; on any
+# other checkout / CI runner the adapter's `.git` check failed, load() returned
+# False, and the graph came back empty.
+_REPO = Path(__file__).resolve().parents[1]
+
+
 # ── data adapter ──────────────────────────────────────────────────────────────
 
 def test_adapter_loads_graph():
     """L0: GraphDataAdapter loads the graph from a real repo."""
-    repo = Path("/Users/srinji/logicalworks-")
+    repo = _REPO
     adapter = viz.GraphDataAdapter(repo)
     assert adapter.load() is True
     assert adapter.graph is not None
@@ -20,7 +27,7 @@ def test_adapter_loads_graph():
 
 def test_adapter_to_frontend_structure():
     """L0: to_frontend returns nodes and edges arrays."""
-    repo = Path("/Users/srinji/logicalworks-")
+    repo = _REPO
     adapter = viz.GraphDataAdapter(repo)
     adapter.load()
     data = adapter.to_frontend()
@@ -37,7 +44,7 @@ def test_adapter_to_frontend_structure():
 
 def test_adapter_node_detail_found():
     """L0: node_detail returns metadata for an existing node."""
-    repo = Path("/Users/srinji/logicalworks-")
+    repo = _REPO
     adapter = viz.GraphDataAdapter(repo)
     adapter.load()
     nid = list(adapter.graph.nodes.keys())[0]
@@ -50,7 +57,7 @@ def test_adapter_node_detail_found():
 
 def test_adapter_node_detail_missing():
     """L0: node_detail returns None for unknown node."""
-    repo = Path("/Users/srinji/logicalworks-")
+    repo = _REPO
     adapter = viz.GraphDataAdapter(repo)
     adapter.load()
     assert adapter.node_detail("nonexistent.py") is None
@@ -58,7 +65,7 @@ def test_adapter_node_detail_missing():
 
 def test_adapter_query_runs_cypher():
     """L0: adapter.query runs Cypher-like queries against the graph."""
-    repo = Path("/Users/srinji/logicalworks-")
+    repo = _REPO
     adapter = viz.GraphDataAdapter(repo)
     adapter.load()
     result = adapter.query('MATCH (n) WHERE n.kind = "file" RETURN n.id LIMIT 5')
@@ -71,7 +78,7 @@ def test_adapter_query_runs_cypher():
 
 def test_handler_to_dot_valid_syntax():
     """L0: _to_dot produces valid DOT syntax."""
-    repo = Path("/Users/srinji/logicalworks-")
+    repo = _REPO
     adapter = viz.GraphDataAdapter(repo)
     adapter.load()
     dot = viz.VizHandler._to_dot(adapter.graph)
@@ -92,7 +99,7 @@ def test_viz_command_export_html():
         out = f.name
     try:
         args = MagicMock()
-        args.repo = "/Users/srinji/logicalworks-"
+        args.repo = str(_REPO)
         args.serve = False
         args.export_html = out
         args.export_dot = None
@@ -110,7 +117,7 @@ def test_viz_command_export_html():
 def test_viz_command_default_runs_tui():
     """L0: without --serve or --export, runs interactive TUI (returns 0 on non-tty)."""
     args = MagicMock()
-    args.repo = "/Users/srinji/logicalworks-"
+    args.repo = str(_REPO)
     args.serve = False
     args.export_html = None
     args.export_dot = None
@@ -123,7 +130,7 @@ def test_viz_command_default_runs_tui():
 
 def test_renderer_tree_non_empty():
     """L0: render_tree produces non-empty output."""
-    repo = Path("/Users/srinji/logicalworks-")
+    repo = _REPO
     adapter = viz.GraphDataAdapter(repo)
     adapter.load()
     renderer = viz.GraphRenderer()
@@ -135,7 +142,7 @@ def test_renderer_tree_non_empty():
 
 def test_renderer_tree_respects_depth():
     """L0: render_tree respects the depth limit."""
-    repo = Path("/Users/srinji/logicalworks-")
+    repo = _REPO
     adapter = viz.GraphDataAdapter(repo)
     adapter.load()
     renderer = viz.GraphRenderer()
@@ -148,7 +155,7 @@ def test_renderer_tree_respects_depth():
 def test_dot_exporter_creates_file():
     """L0: DotExporter writes a dot file and handles highlight set."""
     import tempfile
-    repo = Path("/Users/srinji/logicalworks-")
+    repo = _REPO
     adapter = viz.GraphDataAdapter(repo)
     adapter.load()
     exporter = viz.DotExporter()
@@ -166,7 +173,7 @@ def test_dot_exporter_creates_file():
 
 def test_browser_interactive_states():
     """L0: GraphBrowser traverses neighbors, impact, path, and search screens."""
-    repo = Path("/Users/srinji/logicalworks-")
+    repo = _REPO
     adapter = viz.GraphDataAdapter(repo)
     adapter.load()
     
@@ -220,7 +227,7 @@ def test_repl_dotviz_launches_browser():
     from unittest.mock import MagicMock
     
     ctx = repl.GraphContext()
-    ctx.repo = Path("/Users/srinji/logicalworks-")
+    ctx.repo = _REPO
     ctx.graph = MagicMock()
     
     repl_inputs = [".viz", ".quit"]
@@ -239,7 +246,7 @@ def test_repl_dotviz_launches_browser():
         mock_browser = MagicMock()
         mock_browser_cls.return_value = mock_browser
         
-        rc = repl.run_repl(repo_path="/Users/srinji/logicalworks-")
+        rc = repl.run_repl(repo_path=str(_REPO))
         assert rc == 0
         assert mock_browser_cls.called
         assert mock_browser.run.called
