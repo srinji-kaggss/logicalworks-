@@ -9,7 +9,6 @@ import os
 from pathlib import Path
 import re
 import shutil
-import sqlite3
 import subprocess
 import sys
 import time
@@ -22,6 +21,7 @@ if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
 import lgwks_openrouter
+import lgwks_sqlite  # #223 family-4: route this harness's SQLite through the canonical hardened connect
 
 NETWORK_ROOT = ROOT / "vision" / "research" / "research-network"
 DEFAULT_SEED = NETWORK_ROOT / "seeds" / "gnn-compiler-expedition.json"
@@ -393,7 +393,7 @@ def normalize_markdown(text):
 
 def init_db(db_path):
     db_path.parent.mkdir(parents=True, exist_ok=True)
-    conn = sqlite3.connect(db_path)
+    conn = lgwks_sqlite.connect(db_path)
     conn.executescript(
         """
         create table if not exists runs (
@@ -632,7 +632,7 @@ def read_db_nodes_edges(run_dir):
     db_path = Path(run_dir) / "db" / "research.sqlite"
     if not db_path.exists():
         raise SystemExit(f"Missing research database: {db_path}")
-    conn = sqlite3.connect(db_path)
+    conn = lgwks_sqlite.connect(db_path)
     nodes = {}
     edges = {}
     for row in conn.execute("select id, kind, label, weight, metadata_json from nodes"):
