@@ -47,9 +47,18 @@ DOC_EXTS = {".md", ".rst", ".txt"}
 CONFIG_EXTS = {".json", ".yaml", ".yml", ".toml", ".ini", ".cfg", ".xml", ".dockerfile"}
 ALL_INDEX_EXTS = CODE_EXTS | DOC_EXTS | CONFIG_EXTS
 
-SKIP_DIRS = {".git", "node_modules", "__pycache__", ".venv", ".venv-models", "venv", "target",
-               ".next", "dist", "build", "store", "docs", ".claude", ".config",
-               ".build/checkouts", ".build/artifacts"}
+# Scan-exclusion policy via the canonical composition seam (#150 C-13): the shared
+# BASE is the one source of truth and the code scanner DECLARES its extras — so the
+# base can never silently drift and this delta is reviewable. The union equals the
+# prior local set exactly — behaviour-preserving.
+# //note: ".build/checkouts"/".build/artifacts" are inert here (the membership test
+# is `part in SKIP_DIRS` over single path components, which never contain "/");
+# kept to preserve the set exactly — flagged for a separate dead-entry cleanup.
+from lgwks_substrate_config import SKIP_DIRS as _BASE_SKIP_DIRS, with_extras  # one source of truth
+SKIP_DIRS = with_extras(
+    _BASE_SKIP_DIRS,
+    ".venv-models", "docs", ".claude", ".config", ".build/checkouts", ".build/artifacts",
+)
 SKIP_FILES = {"*.pyc", "*.so", "*.dylib", "*.egg-info", "*.bin", "*.lock"}
 
 # ---------------------------------------------------------------------------

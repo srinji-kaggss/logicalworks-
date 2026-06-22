@@ -11,7 +11,7 @@ from __future__ import annotations
 import re
 from datetime import date
 from pathlib import Path
-from typing import Any
+from typing import AbstractSet, Any
 
 ROOT = Path(__file__).resolve().parent
 RUN_ROOT = ROOT / "store" / "substrate"
@@ -46,6 +46,37 @@ TEXT_EXT = {
 }
 SKIP_DIRS = {".git", "node_modules", "__pycache__", ".venv", "venv", "target", ".next", "dist", "build", "store"}
 IMAGE_EXTS = frozenset({".png", ".jpg", ".jpeg", ".webp", ".gif", ".bmp", ".tiff", ".tif"})
+
+
+# ── Policy composition — the blast-radius-containment seam (#150 C-13) ─────────
+#
+# DOCTRINE (why this exists, applied not aspirational): a module that needs a
+# *scoped variant* of a shared policy set (SKIP_DIRS, TEXT_EXT, …) must DERIVE it
+# from the canonical base above via `with_extras`, never copy-paste a fresh literal
+# that re-states the base. Two consequences the Director asked us to design for:
+#
+#   1. Drift becomes impossible-by-construction: the base lives in exactly one place,
+#      so it cannot silently diverge across scanners. The local delta is named and
+#      reviewable — you can SEE what a module adds, not diff two near-identical blobs.
+#   2. Future changes stay one-line + low blast radius: add/remove a shared exclusion
+#      → edit the base, everyone moves together. Add a module-local one → edit that
+#      module's extras tuple, only it moves. The reversible decision is confined to
+#      exactly its own seam.
+#
+# Trust = easy, safe fixes — not the pretense that mistakes can't happen. The match-
+# ing machine gate (tests/test_scan_policy.py) fails the build if a core module
+# re-states a canonical set instead of composing, so the easy path is the only path.
+
+def with_extras(base: AbstractSet[str], *extra: str) -> frozenset[str]:
+    """Compose a scoped policy set = canonical ``base`` ⊕ DECLARED local ``extra``.
+
+    The one sanctioned way to specialise a shared exclusion/inclusion set. Returns an
+    immutable frozenset (the canonical base is never mutated). See doctrine above.
+
+    >>> sorted(with_extras({"a", "b"}, "c"))
+    ['a', 'b', 'c']
+    """
+    return frozenset(base).union(extra)
 
 # ── Regex constants ──────────────────────────────────────────────────────────
 
