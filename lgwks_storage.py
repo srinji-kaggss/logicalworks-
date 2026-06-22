@@ -222,6 +222,41 @@ class CausalTape:
                 "timestamp": row[7],
             }
 
+    def verify_chain(self, tenant_id: str | None = None) -> tuple[bool, str | None]:
+        """#167: walk the tape in causal order and prove integrity. Returns
+        (ok, error). Three independent checks per tenant, from genesis:
+
+          1. sequence is contiguous (1,2,3…) — a gap means a missing/torn entry.
+          2. prev_hash links to the prior entry's entry_hash — broken linkage means
+             an entry was removed, reordered, or inserted.
+          3. entry_hash recomputes from (tenant|seq|prev_hash|fact_cid) — a mismatch
+             means the row's content was tampered.
+
+        This is what makes the tape a SOURCE OF RECORD rather than just a log: a
+        replay that would rebuild projections from a corrupt tape is refused."""
+        if tenant_id is not None:
+            tenants = [tenant_id]
+        else:
+            tenants = [r[0] for r in self._conn.execute("SELECT DISTINCT tenant_id FROM tape").fetchall()]
+        for t in tenants:
+            prev_hash = "genesis"
+            expected_seq = 1
+            for seq, entry_hash, row_prev, fact_cid in self._conn.execute(
+                "SELECT sequence, entry_hash, prev_hash, fact_cid FROM tape "
+                "WHERE tenant_id = ? ORDER BY sequence ASC",
+                (t,),
+            ):
+                if seq != expected_seq:
+                    return False, f"sequence gap for tenant {t!r}: expected {expected_seq}, got {seq}"
+                if row_prev != prev_hash:
+                    return False, f"broken linkage for tenant {t!r} at seq {seq}: prev_hash {row_prev!r} != {prev_hash!r}"
+                recomputed = io._sha(f"{t}|{seq}|{prev_hash}|{fact_cid}")
+                if recomputed != entry_hash:
+                    return False, f"tampered entry for tenant {t!r} at seq {seq}: entry_hash mismatch"
+                prev_hash = entry_hash
+                expected_seq += 1
+        return True, None
+
     def close(self) -> None:
         self._conn.close()
 
@@ -512,19 +547,27 @@ class GraphFabric:
 
         graph_mod.ingest_chunks(self._db, chunks, artifact_cid=artifact_cid, tier=tier)
 
-    def neighbors(self, node_id: str, direction: str = "both", rel: str | None = None, limit: int = 100) -> list[dict]:
-        return self._db.neighbors(node_id, direction=direction, rel=rel, limit=limit, scope_tier=self.scope_tier)
+    def neighbors(self, node_id: str, direction: str = "both", rel: str | None = None, limit: int = 100, *, scope_tier: str | None = None) -> list[dict]:
+        # #277: an explicit scope_tier override lets the capability-gated TenantStore
+        # door pin reads to the VERIFIED principal's tier (not this object's
+        # construction-time tier). None → fall back to self.scope_tier (direct
+        # callers / gate default). The door never trusts a caller-supplied string;
+        # it derives the tier from a verified capability.
+        tier = scope_tier if scope_tier is not None else self.scope_tier
+        return self._db.neighbors(node_id, direction=direction, rel=rel, limit=limit, scope_tier=tier)
 
-    def resolve_node(self, query: str) -> tuple[dict[str, Any] | None, str | None]:
+    def resolve_node(self, query: str, *, scope_tier: str | None = None) -> tuple[dict[str, Any] | None, str | None]:
         """Resolve a node label/id against the cumulative graph (returns (node, err)).
 
         Gate-owned wrapper over lgwks_entity_graph._resolve_single_node so callers
         (query --neighbors) target the gate graph, not a per-run graph.db (#169).
-        Scoped to this gate's tier ⊕ world (#275).
+        Scoped to this gate's tier ⊕ world (#275); the #277 door overrides the tier
+        with the verified principal.
         """
         import lgwks_entity_graph as graph_mod
 
-        return graph_mod._resolve_single_node(self._db, query, scope_tier=self.scope_tier)
+        tier = scope_tier if scope_tier is not None else self.scope_tier
+        return graph_mod._resolve_single_node(self._db, query, scope_tier=tier)
 
     def export_json(self, out_path: Path) -> None:
         """Dump the gate's graph slice to JSON (git-sync artifact). Replaces the
@@ -538,8 +581,9 @@ class GraphFabric:
         scoped to this gate's tier ⊕ world (#275)."""
         self._db.export_mermaid(out_path, max_edges=max_edges, scope_tier=self.scope_tier)
 
-    def stats(self) -> dict[str, Any]:
-        return self._db.stats(scope_tier=self.scope_tier)
+    def stats(self, *, scope_tier: str | None = None) -> dict[str, Any]:
+        tier = scope_tier if scope_tier is not None else self.scope_tier
+        return self._db.stats(scope_tier=tier)
 
     def commit(self) -> None:
         self._db.commit()
@@ -897,6 +941,7 @@ class StorageGate:
             "SELECT COUNT(*), COALESCE(MAX(sequence), 0) FROM tape WHERE tenant_id = ?",
             (self.tenant_id,),
         ).fetchone()
+        chain_ok, chain_err = self.tape.verify_chain(self.tenant_id)
         vec_n = self.vector_fabric._conn.execute("SELECT COUNT(*) FROM vector_records").fetchone()[0]
         tok_n = self.token_index._conn.execute("SELECT COUNT(*) FROM token_postings").fetchone()[0]
         rel = self.relational._conn
@@ -905,7 +950,8 @@ class StorageGate:
         return {
             "tenant_id": self.tenant_id,
             "root": str(self.root),
-            "tape": {"entries": int(tape_row[0]), "last_sequence": int(tape_row[1])},
+            "tape": {"entries": int(tape_row[0]), "last_sequence": int(tape_row[1]),
+                     "chain_ok": chain_ok, "chain_error": chain_err},
             "projections": {
                 "vector": int(vec_n),
                 "token_index": int(tok_n),
@@ -926,7 +972,13 @@ class StorageGate:
         through the idempotent bulk projector. Fields the tape never recorded
         (crawl chrome: source/url) come back empty — the tape records what was
         ingested, not the page furniture around it. Idempotent: replaying a run that
-        is already projected is a no-op (INSERT OR IGNORE)."""
+        is already projected is a no-op (INSERT OR IGNORE).
+
+        #167: the tape chain is verified FIRST — a replay that would rebuild
+        projections from a corrupt source of record is refused, not silently run."""
+        ok, err = self.tape.verify_chain(self.tenant_id)
+        if not ok:
+            raise ValueError(f"refusing replay: tape integrity check failed — {err}")
         import lgwks_substrate_text as text
 
         chunk_rows: list[dict[str, Any]] = []
