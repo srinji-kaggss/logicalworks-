@@ -225,6 +225,11 @@ def build_run(args: argparse.Namespace) -> dict[str, Any]:
                 seen["row"]["provenance"].append(occurrence)
                 graph_input_rows.append({
                     "chunk_id": chunk_id,
+                    # #275: per-row tape back-link. The chunk's tape fact cid IS its
+                    # chunk_id (gate.ingest_fact(chunk_id, …)), so graph rows derived
+                    # from it carry that cid as provenance rather than a single
+                    # last-writer cid for the whole batch.
+                    "artifact_cid": chunk_id,
                     "document_id": doc_id,
                     "url": chunk_url,
                     "text": piece,
@@ -253,6 +258,7 @@ def build_run(args: argparse.Namespace) -> dict[str, Any]:
             gate.ingest_fact(chunk_id, piece, chunk_kind, capability="ingest_chunk", meta={"doc_id": doc_id, "pos": pos})
             graph_input_rows.append({
                 "chunk_id": chunk_id,
+                "artifact_cid": chunk_id,  # #275: per-row tape back-link (cid == chunk_id)
                 "document_id": doc_id,
                 "url": chunk_url,
                 "text": piece,
@@ -410,6 +416,10 @@ def build_run(args: argparse.Namespace) -> dict[str, Any]:
                         "dims": isem["dims"], "vector_text": m_label[:2000],
                         "vector": isem["vector"], "fact_score": 0.0, "chunk_kind": m_modality,
                     })
+                    # #275: no artifact_cid back-link here — unlike the text path,
+                    # the media chunk has no gate.ingest_fact tape entry yet (this
+                    # branch is dormant: `continue` above until the media harvester
+                    # is wired). Stamp the media's tape cid here once it lands.
                     graph_input_rows.append({
                         "chunk_id": m_chunk_id, "document_id": doc_id,
                         "url": m_url, "text": m_label,
@@ -461,8 +471,11 @@ def build_run(args: argparse.Namespace) -> dict[str, Any]:
     # projection (the per-run graph.db was removed in #169). Exports + stats are
     # sourced from the cumulative graph; `query --neighbors` reads it via the gate.
     # #165 step 2: tag the cumulative graph with this gate's tier (world ⊕ tenant
-    # ownership). Per-row artifact_cid back-linking to the tape lands in step 3's
-    # coupled migration, where each chunk's tape entry is threaded explicitly.
+    # ownership). #275: each graph_input_row now carries its own artifact_cid (= its
+    # chunk_id, which is the chunk's tape fact cid), so ingest_chunk stamps per-row
+    # tape provenance rather than one last-writer cid for the whole batch. The
+    # batch-level tier is the gate's tenant; per-row artifact_cid wins via
+    # ingest_chunk's `artifact_cid or chunk.get("artifact_cid")`.
     gate.graph_fabric.ingest_chunks(graph_input_rows, tier=gate.tenant_id)
     graph_json = run_dir / "graph.json"
     graph_mmd = run_dir / "graph.mmd"
