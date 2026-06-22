@@ -48,14 +48,39 @@ const COMMIT_LANES = [
   { id: 'authority.qualify', gate: 'qualification', cmd: [NODE, keel('qualify.mjs')] },
   { id: 'authority.qualify.selftest', gate: 'qualification', cmd: [NODE, keel('qualify.mjs'), '--self-test'] },
   { id: 'target.gate', gate: 'commit', cmd: [NODE, keel('run.mjs'), '--profile', PROFILE] },
-  // The Python test suite is part of the always-on floor: the Keel lanes above prove
-  // the verification ALGEBRA, but said nothing about the unit/integration behaviour.
-  // That blind spot let a git-identity hermeticity bug (19 tests doing `git commit`
-  // with no configured identity → exit 128 on a clean runner) ship green. Hermetic by
-  // construction: deps pinned via uv; conftest provides a git identity floor.
+
+  // ── Product-behaviour floor ──────────────────────────────────────────────────
+  // The Keel lanes above prove the verification ALGEBRA; they say NOTHING about the
+  // product's own code. A CI that stands in for GitHub must run EVERY first-party
+  // test surface or it is fake-accepting whatever it skips. These lanes are that
+  // floor — keep them in lockstep with the Makefile `test` target.
+  //
+  // Fail-closed notes: a lane is `pass` ONLY on exit 0; a missing tool (uv/cargo/
+  // python3) spawns with status null → `fail` (never a silent pass). `cargo test`
+  // and `pytest` run WITHOUT -q hiding the counts, and the full output is sealed
+  // per-lane under .ci-runs/<id>/ so "0 tests ran" can never masquerade as green.
+  //
+  // NOT covered, by deliberate decision (stated, not silent): archive/tests/ —
+  // archived/orphaned modules (archive/README.md), no active callers; revived code
+  // must move out of archive/ to earn coverage.
+  // Enforces "fully comprehensive": fails if any tracked test surface is neither run
+  // by a lane below nor explicitly excluded. The structural guarantee against a future
+  // silent gap (see coverage_guard.mjs).
+  { id: 'coverage.completeness', gate: 'commit', cmd: [NODE, join(HERE, 'coverage_guard.mjs')] },
+  { id: 'schema.registry', gate: 'commit', cmd: ['python3', 'scripts/check_schema_registry.py'] },
+  // Python: the FULL suite (141 files), not a sliver. Hermetic deps via uv; conftest
+  // supplies a git-identity floor (a missing one cost 19 silent failures before).
+  // `-rs` surfaces every skip + reason into the sealed log — a skip is unmeasured,
+  // never a pass, so it must be auditable, not hidden behind a green dot.
   { id: 'pytest.suite', gate: 'commit', cmd: ['uv', 'run', '--python', '3.12',
       '--with', 'pytest', '--with', 'cryptography', '--with', 'pyyaml', '--with', 'networkx',
-      'python', '-m', 'pytest', 'tests/', 'axiom/tests/', '-q'] },
+      'python', '-m', 'pytest', 'tests/', 'axiom/tests/', '-rs'] },
+  // Rust: all three first-party crates. crawler/ (core pillar, 34 tests) and tui/
+  // were covered by NOTHING before this; the Makefile test-rust ran axiom/rust only.
+  // tui currently has 0 tests, so its lane verifies the crate still COMPILES.
+  { id: 'rust.crawler', gate: 'commit', cmd: ['cargo', 'test', '--manifest-path', 'crawler/Cargo.toml'] },
+  { id: 'rust.axiom', gate: 'commit', cmd: ['cargo', 'test', '--manifest-path', 'axiom/rust/Cargo.toml'] },
+  { id: 'rust.tui', gate: 'commit', cmd: ['cargo', 'test', '--manifest-path', 'tui/Cargo.toml'] },
 ];
 
 // Tiers whose Keel runners are NOT vendored at the pinned SHA. Honest BLOCKED, never
@@ -86,8 +111,13 @@ function runLane(lane, runDir) {
   const r = sh(lane.cmd[0], lane.cmd.slice(1));
   const ms = Number((process.hrtime.bigint() - started) / 1000000n);
   const log = join(runDir, `${lane.id}.log`);
-  writeFileSync(log, `$ ${lane.cmd.join(' ')}\n\n=== STDOUT ===\n${r.stdout || ''}\n=== STDERR ===\n${r.stderr || ''}\n=== EXIT ${r.status} ===\n`);
-  return { id: lane.id, gate: lane.gate, status: r.status === 0 ? 'pass' : 'fail', exit: r.status, ms, log: log.slice(ROOT.length + 1) };
+  // A spawn failure (e.g. tool not installed) sets r.error and leaves r.status null.
+  // Record it explicitly and treat it as a FAIL — an unrunnable check is never a pass.
+  const spawnErr = r.error ? `\n=== SPAWN ERROR ===\n${r.error.stack || r.error.message || String(r.error)}\n` : '';
+  writeFileSync(log, `$ ${lane.cmd.join(' ')}\n\n=== STDOUT ===\n${r.stdout || ''}\n=== STDERR ===\n${r.stderr || ''}${spawnErr}\n=== EXIT ${r.status} ===\n`);
+  // pass ONLY on a clean exit 0; null (spawn error) / non-zero → fail (fail-closed).
+  const ok = r.status === 0 && !r.error;
+  return { id: lane.id, gate: lane.gate, status: ok ? 'pass' : 'fail', exit: r.status, ms, log: log.slice(ROOT.length + 1) };
 }
 
 function seal(runDir, id, tier, verdict, reports, extra = {}) {
