@@ -41,12 +41,12 @@ ROUND_CAP = 100        # hard upper bound on --rounds (hacker F8 — unbounded-s
 BUDGET_CAP = 5_000_000 # hard upper bound on --budget tokens (hacker F8)
 FANOUT_CAP = 4         # bounded preview fan-out for cheap frontier scans
 ALLOWED_FUNCTIONS = ("generate", "falsify", "expand", "contrarian")
-# Provenance tier of run output = the model-port escalation harness (Math→ML→Model). Every tier
-# emits the SAME OKF artifact shape; this tags WHO produced the reasoning, not a different format.
-# Positive framing: `deterministic` is the trustworthy reconstructable core, not a degraded state.
-PROVENANCE_DETERMINISTIC = "deterministic"   # math/spine tier — no ML, no model (calculator-test)
-PROVENANCE_ML_ATTENTION  = "ml-attention"    # ML tier — embedding/attention sensor only, no generation
-PROVENANCE_CO_SCIENTIST  = "co-scientist"    # full generative model tier (Tongue as research co-scientist)
+# Provenance tier of run output = WHO produced the reasoning; all tiers emit the SAME OKF artifact
+# shape (tier is a field, not a format). ml-attention is the ENTRYPOINT — the embedding/attention
+# sensor that selects + ranks the relevant subset (no decisions, a compressor). co-scientist is the
+# ONLY tier where an LLM may decide/synthesize (consent-gated).
+PROVENANCE_ML_ATTENTION = "ml-attention"     # entrypoint — embedding sensor: select + rank, no decisions
+PROVENANCE_CO_SCIENTIST = "co-scientist"     # gated — the only place an LLM decides/synthesizes
 # untrusted-content guard (hacker F1/F2): a frontier node is a short, plain label — never prose,
 # never newlines, never prompt/role/JSON structure. Anything else is rejected, not fed back.
 _NODE_OK = re.compile(r"^[A-Za-z0-9 ._:/&(),'\-]{1,120}$")
@@ -651,7 +651,7 @@ def run_auto(cfg: AutoConfig, emit=print) -> AutoResult:
             if _spent_break():
                 emit("    budget hit after generate — stopping."); break
             hyps = compiled["hypotheses"]
-            provenance = PROVENANCE_CO_SCIENTIST if ai_enhanced else PROVENANCE_DETERMINISTIC
+            provenance = PROVENANCE_CO_SCIENTIST if ai_enhanced else PROVENANCE_ML_ATTENTION
             emit(f"    generate: {len(hyps)} hypotheses (H0 null + {len(hyps)-1} mechanism)"
                  f" · {provenance}")
 
