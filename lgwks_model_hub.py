@@ -27,10 +27,18 @@ logger = logging.getLogger(__name__)
 # Runtime models live in the repo, not in ~/.config
 _REPO_MODELS_DIR = Path(__file__).resolve().parent / "models"
 
+# THE single model-loader catalog (download coordinates: repo + pinned revision +
+# license + loader metadata). scripts/setup_models.py imports THIS — it does not keep
+# its own copy (the two had drifted: one carried revision SHAs, the other size/arch).
+# Model IDENTITY + role/strategy is governed separately by lgwks_model_mesh (the law);
+# any name divergence between this catalog and MESH_LAW is a tracked conflict, not two
+# independent truths. Every entry MUST carry a `revision` (commit SHA) — setup fails
+# closed without it (supply-chain pin).
 _MODEL_CATALOG: dict[str, dict[str, Any]] = {
     "ModernBERT-base-mlx-4bit": {
         "repo": "mlx-community/answerdotai-ModernBERT-base-4bit",
         "license": "Apache-2.0",
+        "revision": "85a8e6f00e7040ef98f692269ca2fcd39b8835e7",
         "size_mb": 110,
         "arch": "bert",
         "desc": "ModernBERT 8k context — task salience membrane.",
@@ -38,6 +46,7 @@ _MODEL_CATALOG: dict[str, dict[str, Any]] = {
     "liquid-lfm-2.5-1.2b-mlx-4bit": {
         "repo": "mlx-community/LFM2.5-1.2B-Thinking-4bit",
         "license": "LFM-Open-1.0",
+        "revision": "bb77f34e4bef39931a2e2ff2f6def20c9aea1531",
         "size_mb": 1200,
         "arch": "lfm",
         "desc": "Liquid AI LFM 2.5 — recurrent trajectory heart.",
@@ -45,6 +54,7 @@ _MODEL_CATALOG: dict[str, dict[str, Any]] = {
     "Qwen2.5-Omni-3B-Instruct-4bit-mlx": {
         "repo": "giangndm/qwen2.5-omni-3b-mlx-4bit",
         "license": "Apache-2.0",
+        "revision": "d0aa433ec448c8510f065fc6bbe951822c70d5e8",
         "size_mb": 3000,
         "arch": "qwen2_5_omni",
         "desc": "Qwen 3.5 Omni — native voice (Wisprflow feel).",
@@ -52,6 +62,7 @@ _MODEL_CATALOG: dict[str, dict[str, Any]] = {
     "Qwen3-VL-8B-Instruct-4bit": {
         "repo": "mlx-community/Qwen3-VL-8B-Instruct-4bit",
         "license": "Apache-2.0",
+        "revision": "defcdea7cc7a4b0858fea563cbbce171d328e457",
         "size_mb": 8000,
         "arch": "qwen3_vl",
         "desc": "Qwen 3 VL — visual agent and GUI operator.",
@@ -59,6 +70,7 @@ _MODEL_CATALOG: dict[str, dict[str, Any]] = {
     "OLMo-2-0325-32B-Instruct-4bit": {
         "repo": "mlx-community/OLMo-2-0325-32B-Instruct-4bit",
         "license": "Apache-2.0",
+        "revision": "bcf85817c3502e1f974b5abc586f1fc3f81b1632",
         "size_mb": 18000,
         "arch": "olmo2",
         "desc": "OLMo-2 32B — deep architectural resolve (The Stay Model).",
@@ -66,9 +78,18 @@ _MODEL_CATALOG: dict[str, dict[str, Any]] = {
     "Llama-Prompt-Guard-2-86M": {
         "repo": "meta-llama/Llama-Prompt-Guard-2-86M",
         "license": "Llama-3.1",
+        "revision": "a8ded8e697ce7c355e395a0df51f94adb4a2fd27",
         "size_mb": 170,
         "arch": "deberta",
         "desc": "Prompt Guard 2 — injection blocking.",
+    },
+    "Qwen3-VL-Embedding-8B": {
+        "repo": "nkamiy/Qwen3-VL-Embedding-8B-8bit-mlx",
+        "license": "Apache-2.0",
+        "revision": "979992893da6080a0eb8e8c72af6efe124e582fb",
+        "size_mb": 8000,
+        "arch": "qwen3_vl",
+        "desc": "Qwen3-VL embedding Eye — shared text/image/video vector space.",
     },
 }
 

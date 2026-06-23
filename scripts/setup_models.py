@@ -14,8 +14,6 @@ is committed to git (git-lfs for files >100MB) and runtime code loads offline.
 from __future__ import annotations
 
 import json
-import shutil
-import subprocess
 import sys
 from pathlib import Path
 from typing import Any
@@ -29,65 +27,18 @@ MODELS_DIR = REPO_ROOT / "models"
 # fail-closed: a model with no `revision` will not be fetched unless the operator
 # explicitly opts in. To refresh a pin, re-resolve the SHA from the HF API
 # (`GET https://huggingface.co/api/models/<repo>` → `.sha`) and update it here.
-_MODEL_CATALOG: dict[str, dict[str, Any]] = {
-    "ModernBERT-base-mlx-4bit": {
-        "repo": "mlx-community/answerdotai-ModernBERT-base-4bit",
-        "license": "Apache-2.0",
-        "revision": "85a8e6f00e7040ef98f692269ca2fcd39b8835e7",
-    },
-    "liquid-lfm-2.5-1.2b-mlx-4bit": {
-        "repo": "mlx-community/LFM2.5-1.2B-Thinking-4bit",
-        "license": "LFM-Open-1.0",
-        "revision": "bb77f34e4bef39931a2e2ff2f6def20c9aea1531",
-    },
-    "Qwen2.5-Omni-3B-Instruct-4bit-mlx": {
-        "repo": "giangndm/qwen2.5-omni-3b-mlx-4bit",
-        "license": "Apache-2.0",
-        "revision": "d0aa433ec448c8510f065fc6bbe951822c70d5e8",
-    },
-    "Qwen3-VL-8B-Instruct-4bit": {
-        "repo": "mlx-community/Qwen3-VL-8B-Instruct-4bit",
-        "license": "Apache-2.0",
-        "revision": "defcdea7cc7a4b0858fea563cbbce171d328e457",
-    },
-    "OLMo-2-0325-32B-Instruct-4bit": {
-        "repo": "mlx-community/OLMo-2-0325-32B-Instruct-4bit",
-        "license": "Apache-2.0",
-        "revision": "bcf85817c3502e1f974b5abc586f1fc3f81b1632",
-    },
-    "Llama-Prompt-Guard-2-86M": {
-        "repo": "meta-llama/Llama-Prompt-Guard-2-86M",
-        "license": "Llama-3.1",
-        "revision": "a8ded8e697ce7c355e395a0df51f94adb4a2fd27",
-    },
-    "Qwen3-VL-Embedding-8B": {
-        "repo": "nkamiy/Qwen3-VL-Embedding-8B-8bit-mlx",
-        "license": "Apache-2.0",
-        "revision": "979992893da6080a0eb8e8c72af6efe124e582fb",
-    },
-}
+# ONE catalog — imported from the canonical loader registry (lgwks_model_hub), not a
+# second copy. The two had drifted (this file carried the revision SHAs; the hub copy
+# carried size/arch). They are now merged in lgwks_model_hub._MODEL_CATALOG.
+if str(REPO_ROOT) not in sys.path:
+    sys.path.insert(0, str(REPO_ROOT))
+from lgwks_model_hub import _MODEL_CATALOG  # noqa: E402  (single source of truth)
 
 
-def _run(cmd: list[str], cwd: Path | None = None) -> subprocess.CompletedProcess:
-    return subprocess.run(cmd, capture_output=True, text=True, check=False, cwd=cwd)
-
-
-def _safe_name(name: str) -> str:
-    """Sanitize a user-supplied model name for filesystem use."""
-    import os as _os
-    if not name:
-        raise ValueError("name must be non-empty")
-    if _os.path.isabs(name) or "/" in name or "\\" in name or name.startswith("."):
-        raise ValueError(f"invalid model name: {name!r}")
-    return name
-
-
-def _assert_under(parent: Path, child: Path) -> Path:
-    """Verify child resolves inside parent. Raises ValueError if not."""
-    resolved = child.resolve()
-    if not str(resolved).startswith(str(parent.resolve())):
-        raise ValueError(f"path {child} escapes allowed directory {parent}")
-    return resolved
+# Path-traversal guards + the subprocess wrapper are imported from the canonical
+# loader module (lgwks_model_hub) — they were exact-copy duplicates here, and a
+# security guard must not exist in two places where a fix to one could miss the other.
+from lgwks_model_hub import _run, _safe_name, _assert_under  # noqa: E402
 
 
 def download(name: str) -> dict[str, Any]:

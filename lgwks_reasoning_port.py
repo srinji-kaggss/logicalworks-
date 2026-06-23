@@ -3,8 +3,8 @@
 The parallel of `lgwks_embed_port`: callers ask for the *role* `reasoning`, never
 a specific model. The port resolves a backend by device tier and what's present:
 
-  1. olmo_mlx     — store/models/Olmo-3-1125-32B-4bit + mlx_lm importable
-                    (owned, re-engineerable, ~18GB → ~32GB+ Mac only)
+  1. olmo_mlx     — the mesh-law deep-reasoning model under store/models/ (id from
+                    lgwks_model_mesh, never hardcoded) + mlx_lm importable (owned, Mac only)
   2. agent_handoff — hand the request to the WORKING AGENT (Claude / Codex /
                     Gemini — operator's pick), which is already a daemon client.
                     This REPLACES the old "rented brain": the frontier layer IS
@@ -31,12 +31,25 @@ SCHEMA = "lgwks.reasoning.result.v0"  # research-grade (breakable); daemon-dispa
 
 _REPO_ROOT = Path(__file__).resolve().parent
 _MODEL_STORE = _REPO_ROOT / "store" / "models"
-# Pinned owned deep-reasoning model (MODEL-RUNTIME-FINALIZATION §8). Override for
-# non-default layouts; weights live in gitignored store/models/ (setup step).
-_OLMO_MODEL_DIR = os.environ.get(
-    "LGWKS_REASONING_MODEL",
-    str(_MODEL_STORE / "Olmo-3-1125-32B-4bit"),
-)
+
+
+def _law_model_dir() -> str:
+    """Resolve the deep-reasoning weights dir FROM THE LAW (lgwks_model_mesh), never a
+    hardcoded id — the model name lives in exactly one place (the mesh law) so runtime
+    cannot drift from it (same rule lgwks_model_port states). The store layout keeps
+    weights under store/models/<basename of the law id>."""
+    try:
+        import lgwks_model_mesh as mesh
+        name = mesh.model_name_for_role("proposal", trust_class="generative") or ""
+    except Exception:
+        name = ""
+    basename = name.split("/")[-1] if name else "OLMo-2-0325-32B-Instruct-4bit"
+    return str(_MODEL_STORE / basename)
+
+
+# Owned deep-reasoning model dir, pinned FROM the law (single source of truth).
+# Override for non-default layouts; weights live in gitignored store/models/.
+_OLMO_MODEL_DIR = os.environ.get("LGWKS_REASONING_MODEL", _law_model_dir())
 
 # Personas are HARNESS framing, not models. Specializing a role = editing these
 # (or adding one), never swapping weights. Framing is prepended for the local
@@ -128,7 +141,8 @@ def reason(
     if backend == "olmo_mlx":
         text = _run_olmo_mlx(prompt, framing, context)
         if text is not None:
-            return {**base, "ok": True, "mode": "local", "model": "Olmo-3-1125-32B-4bit",
+            return {**base, "ok": True, "mode": "local",
+                    "model": Path(_OLMO_MODEL_DIR).name,  # law-derived id, never hardcoded
                     "text": text}
         backend = base["backend"] = "agent_handoff"  # OLMo failed → hand off
 
