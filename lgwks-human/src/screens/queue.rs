@@ -39,19 +39,36 @@ impl Screen for QueueScreen {
     fn on_daemon_tick(&mut self, _state: &DaemonState) {}
 
     fn handle_event(&mut self, event: &Event, state: &DaemonState) -> ScreenCmd {
-        if let Event::Key(key) = event {
-            match key.code {
-                KeyCode::Char('j') | KeyCode::Down => {
-                    let max = state.queue.len().saturating_sub(1);
-                    let n = self.list_state.selected().map(|i| (i+1).min(max)).unwrap_or(0);
-                    self.list_state.select(Some(n));
+        match event {
+            Event::Key(key) => {
+                match key.code {
+                    KeyCode::Char('j') | KeyCode::Down => {
+                        let max = state.queue.len().saturating_sub(1);
+                        let n = self.list_state.selected().map(|i| (i+1).min(max)).unwrap_or(0);
+                        self.list_state.select(Some(n));
+                    }
+                    KeyCode::Char('k') | KeyCode::Up => {
+                        let p = self.list_state.selected().map(|i| i.saturating_sub(1)).unwrap_or(0);
+                        self.list_state.select(Some(p));
+                    }
+                    _ => {}
                 }
-                KeyCode::Char('k') | KeyCode::Up => {
-                    let p = self.list_state.selected().map(|i| i.saturating_sub(1)).unwrap_or(0);
-                    self.list_state.select(Some(p));
-                }
-                _ => {}
             }
+            Event::Mouse(m) => {
+                match m.kind {
+                    crossterm::event::MouseEventKind::ScrollDown => {
+                        let max = state.queue.len().saturating_sub(1);
+                        let n = self.list_state.selected().map(|i| (i+1).min(max)).unwrap_or(0);
+                        self.list_state.select(Some(n));
+                    }
+                    crossterm::event::MouseEventKind::ScrollUp => {
+                        let p = self.list_state.selected().map(|i| i.saturating_sub(1)).unwrap_or(0);
+                        self.list_state.select(Some(p));
+                    }
+                    _ => {}
+                }
+            }
+            _ => {}
         }
         ScreenCmd::None
     }

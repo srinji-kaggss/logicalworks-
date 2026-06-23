@@ -75,18 +75,50 @@ impl Screen for WireScreen {
         frame.render_widget(harvest_gauge, chunks[1]);
 
         // ── Active sessions / worktrees ───────────────────────────────────────
-        let session_lines: Vec<Line> = vec![
-            Line::from(vec![
-                Span::styled(
-                    "  (session/worktree data from daemon events not yet indexed)",
-                    Style::default().fg(MUTED),
-                ),
-            ]),
-        ];
+        let mut session_stats: std::collections::HashMap<String, (usize, String, String)> = std::collections::HashMap::new();
+        
+        for e in &state.events {
+            if let Some(session_id) = &e.session_id {
+                let entry = session_stats.entry(session_id.clone()).or_insert((0, String::new(), String::new()));
+                entry.0 += 1;
+                // Capture the latest event time and kind (assuming events are newest last, or vice versa; we'll just take the most recent we see)
+                if entry.1.is_empty() {
+                    entry.1 = e.ts.clone().unwrap_or_else(|| "unknown time".to_string());
+                    entry.2 = e.kind.clone().unwrap_or_else(|| "unknown".to_string());
+                }
+            }
+        }
+
+        let mut session_lines: Vec<Line> = vec![];
+        if session_stats.is_empty() {
+            session_lines.push(Line::from(vec![
+                Span::styled("  No active sessions found in recent events.", Style::default().fg(MUTED)),
+            ]));
+        } else {
+            session_lines.push(Line::from(vec![
+                Span::styled(format!("  {:<15} │ {:<6} │ {:<20} │ {}", "SESSION ID", "EVENTS", "LAST ACTIVITY", "LATEST KIND"), Style::default().fg(AMBER).add_modifier(Modifier::BOLD)),
+            ]));
+            session_lines.push(Line::from(vec![Span::styled("  ────────────────┼────────┼──────────────────────┼───────────────────────", Style::default().fg(SLATE_DIM))]));
+            
+            let mut stats_vec: Vec<_> = session_stats.into_iter().collect();
+            stats_vec.sort_by(|a, b| b.1.0.cmp(&a.1.0)); // Sort by event count descending
+            
+            for (sess, (count, last_ts, last_kind)) in stats_vec.into_iter().take(15) {
+                let short_sess = if sess.len() > 15 { sess[..15].to_string() } else { sess };
+                let short_ts = if last_ts.len() > 19 { last_ts[11..19].to_string() } else { last_ts };
+                session_lines.push(Line::from(vec![
+                    Span::styled(format!("  {:<15} │ ", short_sess), Style::default().fg(CREAM)),
+                    Span::styled(format!("{:<6} │ ", count), Style::default().fg(EMERALD_DIM)),
+                    Span::styled(format!("{:<20} │ ", short_ts), Style::default().fg(SLATE)),
+                    Span::styled(last_kind, Style::default().fg(CREAM_DIM)),
+                ]));
+            }
+        }
+
         let sessions_para = Paragraph::new(session_lines)
             .block(Block::default().borders(Borders::ALL)
                 .border_style(Style::default().fg(SLATE_DIM))
-                .title(Span::styled(" SESSIONS · WORKTREES ", Style::default().fg(SLATE))));
+                .title(Span::styled(" ACTIVE SESSIONS ANALYSIS ", Style::default().fg(SLATE))));
         frame.render_widget(sessions_para, chunks[2]);
     }
 }

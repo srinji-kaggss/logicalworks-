@@ -75,7 +75,42 @@ impl App {
                     KeyCode::Char('f') if key.modifiers.contains(crossterm::event::KeyModifiers::CONTROL) => { self.active_screen = ScreenId::Flight; return; }
                     KeyCode::Char('r') if key.modifiers.contains(crossterm::event::KeyModifiers::CONTROL) => { self.active_screen = ScreenId::Runs;   return; }
                     KeyCode::Char('w') if key.modifiers.contains(crossterm::event::KeyModifiers::CONTROL) => { self.active_screen = ScreenId::Wire;   return; }
+                    KeyCode::Tab | KeyCode::Right => {
+                        let all = ScreenId::all();
+                        if let Some(pos) = all.iter().position(|id| *id == self.active_screen) {
+                            self.active_screen = all[(pos + 1) % all.len()];
+                        }
+                        return;
+                    }
+                    KeyCode::BackTab | KeyCode::Left => {
+                        let all = ScreenId::all();
+                        if let Some(pos) = all.iter().position(|id| *id == self.active_screen) {
+                            self.active_screen = all[(pos + all.len() - 1) % all.len()];
+                        }
+                        return;
+                    }
+                    KeyCode::Char('1') => { self.active_screen = ScreenId::Flight; return; }
+                    KeyCode::Char('2') => { self.active_screen = ScreenId::Runs; return; }
+                    KeyCode::Char('3') => { self.active_screen = ScreenId::Queue; return; }
+                    KeyCode::Char('4') => { self.active_screen = ScreenId::Wire; return; }
                     _ => {}
+                }
+            }
+            // ── Global mouse bindings ────────────────────────────────────────
+            Event::Mouse(m) => {
+                if m.kind == crossterm::event::MouseEventKind::Down(crossterm::event::MouseButton::Left) {
+                    // Check if clicked in the tab bar area (row 0)
+                    if m.row == 0 {
+                        let mut current_x = 0;
+                        for id in ScreenId::all() {
+                            let label_len = id.label().len() as u16 + 2; // " {label} "
+                            if m.column >= current_x && m.column < current_x + label_len {
+                                self.active_screen = *id;
+                                return;
+                            }
+                            current_x += label_len + 3; // +3 for the " │ " divider
+                        }
+                    }
                 }
             }
             // ── Daemon tick: propagate to active screen ──────────────────────

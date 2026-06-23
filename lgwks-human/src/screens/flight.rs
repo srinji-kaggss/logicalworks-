@@ -17,11 +17,13 @@ use crate::{
 use super::{Screen, ScreenCmd, ScreenId};
 
 pub struct FlightScreen {
-    scroll_offset: usize,   // lines scrolled from bottom
+    scroll_offset: usize,
     input: Input,
     input_active: bool,
+    voice_active: bool,
     status_msg: Option<String>,
     last_event_count: usize,
+    last_area: std::cell::Cell<Rect>,
 }
 
 impl FlightScreen {
@@ -30,8 +32,10 @@ impl FlightScreen {
             scroll_offset: 0,
             input: Input::default(),
             input_active: true,
+            voice_active: false,
             status_msg: None,
             last_event_count: 0,
+            last_area: std::cell::Cell::new(Rect::default()),
         }
     }
 
@@ -137,10 +141,14 @@ impl FlightScreen {
         );
         frame.render_widget(affordance_list, chunks[0]);
 
-        // Input box
+        // Input box (Smart Search & Tool Chainer)
         let input_val = self.input.value();
         let hint = if input_val.is_empty() {
-            self.status_msg.as_deref().unwrap_or("type intent or [1-9] affordance · enter to send · ↑↓ scroll stream")
+            if self.voice_active {
+                "🔴 Listening... (wispr active) · press [Ctrl+V] to stop"
+            } else {
+                "search context · chain tools · type intent · [Ctrl+V] voice (wispr)"
+            }
         } else {
             ""
         };
@@ -152,19 +160,30 @@ impl FlightScreen {
         };
         
         let hint_style = if input_val.is_empty() {
-            Style::default().fg(MUTED)
+            if self.voice_active { Style::default().fg(ratatui::style::Color::Red) } else { Style::default().fg(MUTED) }
         } else {
             Style::default()
         };
 
-        let input_border_style = if self.input_active { Style::default().fg(EMERALD) } else { Style::default().fg(SLATE_DIM) };
+        let input_border_style = if self.voice_active {
+            Style::default().fg(ratatui::style::Color::Red)
+        } else if self.input_active { 
+            Style::default().fg(EMERALD) 
+        } else { 
+            Style::default().fg(SLATE_DIM) 
+        };
+
+        let icon = if self.voice_active { " 🎙  " } else { " 🔍 " };
+        let icon_style = if self.voice_active { Style::default().fg(ratatui::style::Color::Red) } else { Style::default().fg(if self.input_active { EMERALD } else { MUTED }) };
+
         let input_widget = Paragraph::new(Line::from(vec![
-            Span::styled("❯ ", Style::default().fg(EMERALD)),
+            Span::styled(icon, icon_style),
             input_span,
             Span::styled(hint, hint_style),
         ]))
         .block(
             Block::default()
+                .title(Span::styled(" OMNI-INPUT (SEARCH / TOOLS / INTENT) ", Style::default().fg(MUTED)))
                 .borders(Borders::ALL)
                 .border_type(BorderType::Rounded)
                 .border_style(input_border_style)
@@ -270,35 +289,46 @@ impl Screen for FlightScreen {
                         self.scroll_offset = (self.scroll_offset + 10).min(max);
                         return ScreenCmd::None;
                     }
-                    // Tab toggles focus between stream-scroll and input
-                    KeyCode::Tab => {
-                        self.input_active = !self.input_active;
+                    // Enter input mode
+                    KeyCode::Char('i') | KeyCode::Char('/') if !self.input_active => {
+                        self.input_active = true;
                         return ScreenCmd::None;
                     }
-                    // Number keys 1-9 activate affordances
-                    KeyCode::Char(c @ '1'..='9') if self.input_active => {
-                        let idx = (c as usize) - ('1' as usize);
-                        if let Some(step) = state.packet.next_steps.get(idx) {
-                            let payload = step.args.clone().unwrap_or(serde_json::Value::Null);
-                            
-                            let is_high_risk = step.risk.as_deref() == Some("high");
-                            let inject_cmd = ScreenCmd::InjectIntent {
-                                kind:    step.kind.clone(),
-                                scope:   "human_affordance".to_string(),
-                                payload,
-                            };
-
-                            if is_high_risk {
-                                return ScreenCmd::Confirm {
-                                    prompt: format!("Execute high-risk affordance: {}?", step.kind),
-                                    on_confirm: Box::new(inject_cmd),
-                                };
-                            } else {
-                                self.status_msg = Some(format!("→ {}", step.kind));
-                                return inject_cmd;
-                            }
+                    // Voice activation toggle (Ctrl+V)
+                    KeyCode::Char('v') if key.modifiers.contains(KeyModifiers::CONTROL) => {
+                        self.voice_active = !self.voice_active;
+                        if self.voice_active {
+                            self.input_active = true;
                         }
                         return ScreenCmd::None;
+                    }
+                    // Alt+1-9 or 1-9 in normal mode activates affordances
+                    KeyCode::Char(c @ '1'..='9') => {
+                        let is_alt = key.modifiers.contains(crossterm::event::KeyModifiers::ALT);
+                        if !self.input_active || is_alt {
+                            let idx = (c as usize) - ('1' as usize);
+                            if let Some(step) = state.packet.next_steps.get(idx) {
+                                let payload = step.args.clone().unwrap_or(serde_json::Value::Null);
+                                
+                                let is_high_risk = step.risk.as_deref() == Some("high");
+                                let inject_cmd = ScreenCmd::InjectIntent {
+                                    kind:    step.kind.clone(),
+                                    scope:   "human_affordance".to_string(),
+                                    payload,
+                                };
+
+                                if is_high_risk {
+                                    return ScreenCmd::Confirm {
+                                        prompt: format!("Execute high-risk affordance: {}?", step.kind),
+                                        on_confirm: Box::new(inject_cmd),
+                                    };
+                                } else {
+                                    self.status_msg = Some(format!("→ {}", step.kind));
+                                    return inject_cmd;
+                                }
+                            }
+                            return ScreenCmd::None;
+                        }
                     }
                     // Enter submits free-text intent
                     KeyCode::Enter if self.input_active => {
@@ -312,10 +342,14 @@ impl Screen for FlightScreen {
                             payload: serde_json::json!({ "message": text }),
                         };
                     }
-                    // Esc clears input
+                    // Esc clears input or exits input mode
                     KeyCode::Esc => {
-                        self.input = Input::default();
-                        self.status_msg = None;
+                        if self.input_active {
+                            self.input_active = false;
+                        } else {
+                            self.input = tui_input::Input::default();
+                            self.status_msg = None;
+                        }
                         return ScreenCmd::None;
                     }
                     _ => {
@@ -325,12 +359,63 @@ impl Screen for FlightScreen {
                     }
                 }
             }
+            Event::Mouse(m) => {
+                match m.kind {
+                    crossterm::event::MouseEventKind::ScrollDown if !self.input_active => {
+                        self.scroll_offset = self.scroll_offset.saturating_sub(1);
+                    }
+                    crossterm::event::MouseEventKind::ScrollUp if !self.input_active => {
+                        let max = state.events.len().saturating_sub(1);
+                        self.scroll_offset = (self.scroll_offset + 1).min(max);
+                    }
+                    crossterm::event::MouseEventKind::Down(crossterm::event::MouseButton::Left) => {
+                        let area = self.last_area.get();
+                        let bottom_panel_y = area.height.saturating_sub(15);
+                        let is_in_affordances = m.column < area.width * 60 / 100 
+                                             && m.row >= bottom_panel_y;
+                        if is_in_affordances {
+                            // Border + Y padding is 2
+                            let list_start_y = bottom_panel_y + 2;
+                            if m.row >= list_start_y {
+                                let idx = (m.row - list_start_y) as usize;
+                                if let Some(step) = state.packet.next_steps.get(idx) {
+                                    let payload = step.args.clone().unwrap_or(serde_json::Value::Null);
+                                    let is_high_risk = step.risk.as_deref() == Some("high");
+                                    let inject_cmd = ScreenCmd::InjectIntent {
+                                        kind:    step.kind.clone(),
+                                        scope:   "human_affordance".to_string(),
+                                        payload,
+                                    };
+                                    if is_high_risk {
+                                        return ScreenCmd::Confirm {
+                                            prompt: format!("Execute high-risk affordance: {}?", step.kind),
+                                            on_confirm: Box::new(inject_cmd),
+                                        };
+                                    } else {
+                                        self.status_msg = Some(format!("→ {}", step.kind));
+                                        return inject_cmd;
+                                    }
+                                }
+                            }
+                        } else {
+                            // Clicked somewhere else (like stream or input bar), focus input if bottom right
+                            if m.row >= area.height.saturating_sub(3) && m.column >= area.width * 60 / 100 {
+                                self.input_active = true;
+                            } else {
+                                self.input_active = false;
+                            }
+                        }
+                    }
+                    _ => {}
+                }
+            }
             _ => {}
         }
         ScreenCmd::None
     }
 
     fn render(&self, frame: &mut Frame, area: Rect, state: &DaemonState) {
+        self.last_area.set(area);
         let chunks = Layout::default()
             .direction(Direction::Vertical)
             .constraints([

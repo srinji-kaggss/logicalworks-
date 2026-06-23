@@ -34,21 +34,38 @@ impl Screen for RunsScreen {
     fn on_daemon_tick(&mut self, _state: &DaemonState) {}
 
     fn handle_event(&mut self, event: &Event, state: &DaemonState) -> ScreenCmd {
-        if let Event::Key(key) = event {
-            match key.code {
-                KeyCode::Char('j') | KeyCode::Down => {
-                    let max = state.runs.len().saturating_sub(1);
-                    let next = self.list_state.selected().map(|i| (i + 1).min(max)).unwrap_or(0);
-                    self.list_state.select(Some(next));
+        match event {
+            Event::Key(key) => {
+                match key.code {
+                    KeyCode::Char('j') | KeyCode::Down => {
+                        let max = state.runs.len().saturating_sub(1);
+                        let next = self.list_state.selected().map(|i| (i + 1).min(max)).unwrap_or(0);
+                        self.list_state.select(Some(next));
+                    }
+                    KeyCode::Char('k') | KeyCode::Up => {
+                        let prev = self.list_state.selected().map(|i| i.saturating_sub(1)).unwrap_or(0);
+                        self.list_state.select(Some(prev));
+                    }
+                    KeyCode::Enter => { self.detail_mode = !self.detail_mode; }
+                    KeyCode::Esc   => { self.detail_mode = false; }
+                    _ => {}
                 }
-                KeyCode::Char('k') | KeyCode::Up => {
-                    let prev = self.list_state.selected().map(|i| i.saturating_sub(1)).unwrap_or(0);
-                    self.list_state.select(Some(prev));
-                }
-                KeyCode::Enter => { self.detail_mode = !self.detail_mode; }
-                KeyCode::Esc   => { self.detail_mode = false; }
-                _ => {}
             }
+            Event::Mouse(m) => {
+                match m.kind {
+                    crossterm::event::MouseEventKind::ScrollDown => {
+                        let max = state.runs.len().saturating_sub(1);
+                        let next = self.list_state.selected().map(|i| (i + 1).min(max)).unwrap_or(0);
+                        self.list_state.select(Some(next));
+                    }
+                    crossterm::event::MouseEventKind::ScrollUp => {
+                        let prev = self.list_state.selected().map(|i| i.saturating_sub(1)).unwrap_or(0);
+                        self.list_state.select(Some(prev));
+                    }
+                    _ => {}
+                }
+            }
+            _ => {}
         }
         ScreenCmd::None
     }
