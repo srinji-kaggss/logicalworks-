@@ -64,12 +64,8 @@ USE_SESSION_DEFAULT = True       # always try saved sessions
 # ---------------------------------------------------------------------------
 
 _WORKFLOWS: dict[str, dict] = {
-    "aetherius": {
-        "description": "autonomous intelligence kernel (The Forge): Synthesis -> Dialectic -> Valuation -> Refinement -> Ingestion",
-        "args": {"goal": "str", "--json": "bool"},
-        "verbs": ["ops workflow aetherius"],
-        "tokens": "~5",
-    },
+    # NOTE: "aetherius" retired — folded into the Membrane Engine as a synthesis
+    # work-item plan (see engine/DEPRECATIONS.md, docs/membrane-engine-thesis.md §6).
     "research": {
         "description": "AUP gate → browser crawl (session-aware) → embed → synthesize",
         "args": {"query": "str", "--depth": "int", "--plan": "str", "--yes": "bool"},
@@ -967,10 +963,7 @@ def workflow_command(args: argparse.Namespace) -> int:
         run = None
 
     # Dispatch
-    if wf == "aetherius":
-        import lgwks_workflow_aetherius
-        ret = lgwks_workflow_aetherius.workflow_command(args)
-    elif wf == "research":
+    if wf == "research":
         ret = _do_research_inline(args)
     elif wf == "deep-research":
         ret = _do_deep_research(args)
@@ -1076,11 +1069,7 @@ def add_parser(sub) -> None:
         parser.add_argument("--engine", choices=["chromium", "webkit"], default=DEFAULT_ENGINE,
                             help=f"browser engine (default: {DEFAULT_ENGINE})")
 
-    # aetherius
-    aeth = wf_sub.add_parser("aetherius", help="autonomous intelligence kernel (The Forge)")
-    aeth.add_argument("goal", help="the research objective or hypothesis to forge")
-    _common_flags(aeth)
-    aeth.set_defaults(func=workflow_command)
+    # aetherius retired (folded into the Membrane Engine synthesis plan)
 
     # research
     research = wf_sub.add_parser("research", help="AUP gate → crawl → embed → synthesize")
