@@ -25,7 +25,7 @@ from typing import Any
 
 
 _SCHEMA = "lgwks.graph.v2"
-_CACHE_SCHEMA = "lgwks.graph.cache.v1"
+_CACHE_SCHEMA = "lgwks.graph.cache.v2"
 
 
 @dataclass(frozen=True)
@@ -393,8 +393,10 @@ class Graph:
 
         patterns: dict[str, Any] = {}
 
-        # 1. Circular dependencies (SCC > 1 via Tarjan)
-        sccs = self._tarjan_scc()
+        # 1. Circular dependencies (SCC > 1 via Tarjan over the dependency graph).
+        #    Only import edges count — call edges form benign cycles and would
+        #    otherwise report the entire codebase as one false circular dep.
+        sccs = self._tarjan_scc(kinds={"import"})
         cycles = [scc for scc in sccs if len(scc) > 1]
         patterns["circular_dependencies"] = {
             "count": len(cycles),
@@ -452,8 +454,15 @@ class Graph:
 
         return patterns
 
-    def _tarjan_scc(self) -> list[list[str]]:
-        """Tarjan's strongly connected components algorithm."""
+    def _tarjan_scc(self, kinds: set[str] | None = None) -> list[list[str]]:
+        """Tarjan's strongly connected components algorithm.
+
+        When ``kinds`` is given, only edges of those kinds are traversed. This
+        matters for "circular dependencies": a dependency cycle is an *import*
+        cycle. Call edges form large benign SCCs (utility functions are called
+        everywhere), so mixing them in reports the whole codebase as one fake
+        cycle. Pass ``kinds={"import"}`` for the dependency graph.
+        """
         index_counter = [0]
         stack: list[str] = []
         lowlinks: dict[str, int] = {}
@@ -468,6 +477,8 @@ class Graph:
             stack.append(v)
             on_stack.add(v)
             for e in self._adj_out.get(v, []):
+                if kinds is not None and e.kind not in kinds:
+                    continue
                 w = e.target
                 if w not in self.nodes:
                     continue
@@ -826,6 +837,19 @@ def _config_keys(path: Path) -> list[str]:
     return []
 
 
+def _lang_of(path: str) -> str:
+    """Coarse language bucket for a node id, used to forbid cross-language
+    call edges (a Python `def` and a Rust `fn` of the same bare name share no
+    call relationship — resolving across them fabricates edges)."""
+    if path.endswith(".rs"):
+        return "rs"
+    if path.endswith((".py", ".pyi")):
+        return "py"
+    if path.endswith((".c", ".cc", ".cpp", ".cxx", ".h", ".hpp")):
+        return "cpp"
+    return "other"
+
+
 def extract_from_repo(repo: Path, previous: Graph | None = None) -> Graph:
     """Build a Graph from a git repository using AST parsing.
 
@@ -995,38 +1019,60 @@ def extract_from_repo(repo: Path, previous: Graph | None = None) -> Graph:
             g.edges.append(Edge(source=rel_path, target=imp, kind="import", weight=1.0))
 
     # Third pass: call-graph edges (cross-file)
-    # Build full def map from both fresh and cached nodes
-    full_def_map = dict(all_defs)
+    # Build a name -> {defining files} map (not last-writer-wins). A bare call
+    # name only yields an edge when it resolves UNAMBIGUOUSLY to a single
+    # defining file in the SAME language. Resolving ubiquitous names
+    # (`run`, `to_dict`, `main`, `fetch`, …) to one arbitrary file fabricated a
+    # dense web of false edges that fused unrelated modules — and crossed the
+    # Python/Rust boundary — into one degenerate SCC. Honest-or-nothing.
+    def_files: dict[str, set[str]] = {}
     for nid, n in g.nodes.items():
         if n.kind != "file":
             continue
         for d in n.defines:
             if d.startswith("def:") or d.startswith("fn:"):
-                full_def_map[d.split(":", 1)[1]] = nid
-    for nid, n in (previous.nodes if previous else {}).items():
-        if nid not in g.nodes or g.nodes[nid].kind != "file":
-            continue
-        for d in n.defines:
-            if (d.startswith("def:") or d.startswith("fn:")) and d.split(":", 1)[1] not in full_def_map:
-                full_def_map[d.split(":", 1)[1]] = nid
+                def_files.setdefault(d.split(":", 1)[1], set()).add(nid)
 
     for rel_path, _, _, _, _, _, _, calls, _ in file_data:
+        src_lang = _lang_of(rel_path)
         for call_name in calls:
-            target_file = full_def_map.get(call_name)
-            if target_file and target_file != rel_path:
-                g.edges.append(Edge(source=rel_path, target=target_file, kind="call", weight=1.0))
+            candidates = {f for f in def_files.get(call_name, ()) if f != rel_path}
+            # same-language candidates only — a Python call cannot reach a Rust fn
+            candidates = {f for f in candidates if _lang_of(f) == src_lang}
+            if len(candidates) == 1:
+                g.edges.append(Edge(source=rel_path, target=next(iter(candidates)), kind="call", weight=1.0))
 
-    # Copy cached call edges from unchanged files (they still hold)
+    # Copy cached edges from unchanged files (they still hold). Without this,
+    # incremental (non-refresh) runs DROP every edge belonging to an unchanged
+    # file — and since most files are unchanged in steady state, the cached
+    # graph degenerates (e.g. zero import edges → broken circular-dep analysis,
+    # instability metrics, and import queries). Import edges depend only on the
+    # source file's content; call edges require both endpoints unchanged.
     if previous:
+        def _src_unchanged(e: Edge) -> bool:
+            return (e.source in prev_nodes and e.source in g.nodes
+                    and g.nodes[e.source].sha256 == prev_nodes[e.source].sha256)
         for e in previous.edges:
-            if e.kind == "call":
-                # If both source and target are unchanged, preserve the edge
-                src_unchanged = e.source in prev_nodes and e.source in g.nodes and g.nodes[e.source].sha256 == prev_nodes[e.source].sha256
-                dst_unchanged = e.target in prev_nodes and e.target in g.nodes and g.nodes[e.target].sha256 == prev_nodes[e.target].sha256
-                if src_unchanged and dst_unchanged:
-                    # avoid duplicates
-                    if not any(x.source == e.source and x.target == e.target and x.kind == "call" for x in g.edges):
-                        g.edges.append(e)
+            if e.source not in g.nodes or e.target not in g.nodes:
+                continue
+            if e.kind == "import":
+                # an import edge is a property of the (unchanged) source file
+                if _src_unchanged(e) and not any(
+                    x.source == e.source and x.target == e.target and x.kind == "import"
+                    for x in g.edges
+                ):
+                    g.edges.append(e)
+            elif e.kind == "call":
+                # defensive: never resurrect a cross-language call edge from cache
+                if _lang_of(e.source) != _lang_of(e.target):
+                    continue
+                dst_unchanged = (e.target in prev_nodes
+                                 and g.nodes[e.target].sha256 == prev_nodes[e.target].sha256)
+                if _src_unchanged(e) and dst_unchanged and not any(
+                    x.source == e.source and x.target == e.target and x.kind == "call"
+                    for x in g.edges
+                ):
+                    g.edges.append(e)
 
     return g
 
@@ -1230,7 +1276,9 @@ import re as _re
 
 _QUERY_TOKENS = _re.compile(
     r"MATCH\s*\((\w+)\)"
-    r"(?:\s*-\[:?(\w+)?\]->\s*\((\w+)\))?"
+    # relationship: optional binding var and optional :type, in either order —
+    # -[r]->  /  -[:import]->  /  -[r:import]->  /  -[]->
+    r"(?:\s*-\[\s*(\w+)?\s*(?::\s*(\w+))?\s*\]->\s*\((\w+)\))?"
     r"(?:\s*WHERE\s+(.+?)(?=\s+RETURN|\s+LIMIT|$))?"
     r"(?:\s*RETURN\s+(.+?)(?=\s+LIMIT|$))?"
     r"(?:\s*LIMIT\s+(\d+))?",
@@ -1326,11 +1374,12 @@ def execute_query(graph: Graph, query: str) -> QueryResult:
     if not m:
         raise ValueError(f"query syntax not recognized: {query!r}")
     node_var = m.group(1)
-    edge_kind = m.group(2)
-    node_b = m.group(3)
-    where_clause = m.group(4)
-    return_clause = m.group(5)
-    limit_str = m.group(6)
+    rel_var = m.group(2)      # binding variable in -[r]-> (any type)
+    edge_kind = m.group(3)    # typed relationship in -[:import]-> / -[r:import]->
+    node_b = m.group(4)
+    where_clause = m.group(5)
+    return_clause = m.group(6)
+    limit_str = m.group(7)
 
     limit = int(limit_str) if limit_str else 1000
 
@@ -1338,8 +1387,15 @@ def execute_query(graph: Graph, query: str) -> QueryResult:
     results: list[dict[str, Any]] = []
     conditions = _parse_where(where_clause) if where_clause else []
 
-    if edge_kind:
-        # Edge query: iterate edges of the given kind
+    def _node_view(node: Node) -> dict[str, Any]:
+        return {"id": node.id, "kind": node.kind, "defines": list(node.defines),
+                "variables": list(node.variables), "calls": list(node.calls),
+                "config_keys": list(node.config_keys)}
+
+    if node_b:
+        # Relationship query: iterate edges. A bare -[r]-> matches ANY kind;
+        # -[:import]-> filters by kind. The relationship variable (if any) is
+        # bound so RETURN can project r.kind / r.source / r.target / r.weight.
         graph._ensure_index()
         for e in graph.edges:
             if edge_kind and e.kind.lower() != edge_kind.lower():
@@ -1348,10 +1404,11 @@ def execute_query(graph: Graph, query: str) -> QueryResult:
             dst = graph.nodes.get(e.target)
             if not src or not dst:
                 continue
-            row: dict[str, Any] = {node_var: src.to_dict() if hasattr(src, "to_dict") else {"id": src.id}}
-            if node_b:
-                row[node_b] = dst.to_dict() if hasattr(dst, "to_dict") else {"id": dst.id}
-            # WHERE applies to source node by default
+            row: dict[str, Any] = {node_var: _node_view(src), node_b: _node_view(dst)}
+            if rel_var:
+                row[rel_var] = {"kind": e.kind, "source": e.source,
+                                "target": e.target, "weight": e.weight}
+            # WHERE applies to the source node by default
             ok = all(_eval_condition(src, f.replace(node_var + ".", ""), op, val) for f, op, val in conditions)
             if ok:
                 results.append(row)
@@ -1416,6 +1473,7 @@ def _build_meta(rows: list[Any], query_validated: bool = True, warnings: list[st
 def graph_command(args) -> int:
     """CLI entry point for `lgwks graph …` queries."""
     import argparse
+    import subprocess
     repo = Path(getattr(args, "repo", ".")).resolve()
     if not (repo / ".git").exists():
         print(f"[graph] not a git repo: {repo}", file=sys.stderr)
