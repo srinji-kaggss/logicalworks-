@@ -1,8 +1,8 @@
 """
 lgwks_html — robust, deterministic HTML-to-Markdown and semantic link/table parser.
 
-Designed to serve as a global, schema-free page content extractor (inspired by Crawl4AI
-and Firecrawl).
+Designed to serve as a global, schema-free page content extractor (own implementation;
+no external extraction dependency).
 - Ignores layout, navigation, script, style, and other non-content tags.
 - Strips cookie banners, headers, footers, and generic page chrome.
 - Formats headings, paragraphs, lists, bold/italic, and links.
@@ -69,9 +69,20 @@ class HTMLToMarkdownParser(HTMLParser):
         classes = attrs_dict.get("class", "")
         element_id = attrs_dict.get("id", "")
         
+        # MathML renders to unreadable unicode soup (e.g. "s⁢c⁢[e]←1"); arxiv/MathJax
+        # carry the LaTeX source in @alttext. Emit that (capped) and skip the rendered
+        # children — preserves the equation as readable text, kills the soup at the source.
+        if tag == "math":
+            alt = (attrs_dict.get("alttext") or "").strip()
+            if self.ignore_depth == 0 and alt:
+                self.markdown_parts.append(f" ${alt[:200]}$ ")
+            self.ignore_depth += 1
+            self.tag_stack.append((tag, True))
+            return
+
         is_chrome = bool(self.chrome_class_re.search(classes) or self.chrome_class_re.search(element_id)) if self.chrome_class_re else False
         is_ignored_boundary = False
-        
+
         if tag in self.chrome_tags or is_chrome:
             self.ignore_depth += 1
             is_ignored_boundary = True
