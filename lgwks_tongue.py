@@ -16,18 +16,33 @@ truth over interestingness. Anti-slop: forced format=json + strict schema; non-J
 
 from __future__ import annotations
 
-import lgwks_openrouter
-
 
 def _generate(prompt: str, schema: str) -> dict | None:
-    """Provider seam for generation. OpenRouter is optional and user-selectable through
-    LGWKS_TONGUE_MODEL. If no key/model is configured or the model fails, callers use the
-    deterministic skeleton."""
-    if lgwks_openrouter.is_configured():
-        out = lgwks_openrouter.generate_json(prompt, schema)
-        if out is not None:
-            return out
-    return None
+    """Provider seam for generation — routes through the ONE model gateway
+    (`lgwks_model_port`), never a network provider directly. The canonical reasoning
+    tier is LOCAL (the mesh-law model) or an agent handoff; there is no rented-cloud
+    tier (MESH_LAW is local-only and `lgwks_reasoning_port` replaces the rented brain).
+    A local proposal is parsed as JSON; a handoff / deferral / non-JSON answer returns
+    None, and callers fall back to the deterministic skeleton (fail-closed, INV-3)."""
+    import json as _json
+    import re as _re
+    import lgwks_model_port
+    env = lgwks_model_port.reason(f"{prompt}\n\nReturn ONLY one JSON object matching this shape: {schema}")
+    if not env.get("ok"):
+        return None
+    val = env.get("value")
+    text = val.get("text") if isinstance(val, dict) else None
+    if not text:
+        return None  # agent_handoff / deferred → no synchronous JSON to parse
+    s = text.strip()
+    fence = _re.search(r"```(?:json)?\s*(\{.*\})\s*```", s, _re.S)
+    if fence:
+        s = fence.group(1)
+    try:
+        out = _json.loads(s)
+        return out if isinstance(out, dict) else None
+    except Exception:
+        return None
 
 SYSTEM = (
     "You are the Tongue of a research instrument, NOT a chatbot. You compile a bounded intent into "

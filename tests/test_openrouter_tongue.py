@@ -26,15 +26,23 @@ class TestOpenRouterModelSelection(unittest.TestCase):
 
 
 class TestTongueProviderSeam(unittest.TestCase):
-    def test_tongue_fails_closed_without_openrouter(self):
-        with mock.patch.object(lgwks_tongue.lgwks_openrouter, "is_configured", return_value=False):
+    """The Tongue routes through the ONE model gateway (lgwks_model_port), not a
+    network provider. Invariants preserved from the old openrouter-seam tests:
+    (1) fail-closed when the model can't answer; (2) use the model when it does."""
+
+    def test_tongue_fails_closed_when_model_defers(self):
+        # no local model / agent handoff / deferral → no synchronous JSON → skeleton
+        import lgwks_model_port
+        with mock.patch.object(lgwks_model_port, "reason",
+                               return_value={"ok": False, "mode": "deferred", "value": None}):
             self.assertIsNone(lgwks_tongue._generate("prompt", "{}"))
 
-    def test_tongue_uses_openrouter_when_configured(self):
-        with mock.patch.object(lgwks_tongue.lgwks_openrouter, "is_configured", return_value=True), \
-             mock.patch.object(lgwks_tongue.lgwks_openrouter, "generate_json", return_value={"ok": True}) as gen:
+    def test_tongue_parses_local_proposal_json(self):
+        # a local generative proposal (mesh-law model) is parsed as JSON
+        import lgwks_model_port
+        env = {"ok": True, "mode": "generative", "value": {"text": '{"ok": true}'}}
+        with mock.patch.object(lgwks_model_port, "reason", return_value=env):
             self.assertEqual(lgwks_tongue._generate("prompt", "{}"), {"ok": True})
-        gen.assert_called_once_with("prompt", "{}")
 
 
 if __name__ == "__main__":

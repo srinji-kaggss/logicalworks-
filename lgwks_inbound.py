@@ -36,6 +36,7 @@ import math
 from typing import Any, Optional
 
 import lgwks_access
+import lgwks_hashing
 import lgwks_rank
 import lgwks_vector
 from lgwks_rank import RankRecord
@@ -71,8 +72,9 @@ def est_tokens(text: str) -> int:
 
 
 def _serialize(pack: dict[str, Any]) -> str:
-    """Canonical serialization the cap is measured against. sort_keys → replayable."""
-    return json.dumps(pack, sort_keys=True, separators=(",", ":"))
+    """Canonical serialization the cap is measured against — one source of truth
+    (lgwks_hashing.canonical_json); ascii=True == prior default; sort_keys → replayable."""
+    return lgwks_hashing.canonical_json(pack, ascii=True)
 
 
 # ---------------------------------------------------------------------------
