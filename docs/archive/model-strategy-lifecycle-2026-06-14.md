@@ -10,11 +10,11 @@
 > peripheral tongue while we get there. Language is a **lossy ingress**, not the ontology.
 
 Cross-references (existing canonical surfaces this brief extends, do not supersede):
-- `docs/jepa-program-map-2026-06-06.md` — program build-down map
+- `docs/archive/jepa-program-map-2026-06-06.md` — program build-down map
 - `docs/jepa-scientific-approach-2026-06-06.md` — research doctrine / falsifiable theses
 - `docs/jepa-logic-os-alignment-2026-06-06.md` — kernel governance ↔ world-model layer mapping
 - `docs/plan-jepa-deployment-path-2026-06-06.md` — deployment path
-- `docs/SPEC-tier-e-machine-model-v1.md` — historical Tier-E draft (superseded where it disagrees)
+- `docs/archive/SPEC-tier-e-machine-model-v1.md` — historical Tier-E draft (superseded where it disagrees)
 - Source spec for the custom model: `personal_digital_overseer_condensed.json`
 
 ---

@@ -18,7 +18,7 @@ see `lgwks` ~lines 1834–1901). Moving them into a package breaks the CLI and t
 ## Authority ladder (who wins on conflict)
 1. **Data/ingestion layer** → `spec/second-harness/INGESTION-LAYER.md` +
    `INGESTION-PLAN.md` (v1.0, final). Supersedes anything older that disagrees,
-   including `docs/SPEC-tier-e-machine-model-v1.md` (historical draft).
+   including `docs/archive/SPEC-tier-e-machine-model-v1.md` (historical draft).
 2. **Runtime lanes / nervous system** → `docs/machine-nervous-system.md`.
 3. **Byte framework** → `axiom/` module docs + `docs/axiom-end-to-end-framework-2026-06-06.md`.
 4. **Governance & refusal policy** → `governance/` (see `governance/README.md`).

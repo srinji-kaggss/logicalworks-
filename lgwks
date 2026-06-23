@@ -44,9 +44,9 @@ def build_parser() -> argparse.ArgumentParser:
     # 5. graph — mathematical/structural graph queries (rank, score, viz, codebase)
     import lgwks_graph; lgwks_graph.add_graph_parser(sub)
     
-    # 6. route — intent routing and refinement (map, engine, route)
-    import lgwks_route; lgwks_route.add_parser(sub)
-    
+    # 6. route — RETIRED: folded into the single `agent` front door (map/engine/refine
+    #    are agent internals; `route act` → `agent`). Module kept as substrate.
+
     # 7. gate — safety and governance (aup, cohere, admission, access)
     import lgwks_gate; lgwks_gate.add_parser(sub)
     
@@ -119,20 +119,18 @@ def build_parser() -> argparse.ArgumentParser:
     # research). Use `research <prompt>` / `research <prompt> --json`, or the
     # single agentic front door `route act <intent>`.
 
+    # agent — the single agent front door (world view → trigger workflow).
+    # Replaces route/do/wf-run/x; see spec/second-harness/SPEC-front-door-factory-v1.md.
+    import lgwks_agent; lgwks_agent.add_parser(sub)
+
     # solve — deterministic git-worry prover (diagnose → relate → narrate)
     import lgwks_solve; lgwks_solve.add_parser(sub)
 
-    # do — conversational orchestrator
-    import lgwks_do; lgwks_do.add_parser(sub)
-
-    # wf-run — workflow DSL
-    import lgwks_dsl; lgwks_dsl.add_parser(sub)
-
-    # x — multiply intent
-    mult = sub.add_parser("x", help="shortcut: multiply intent command chain")
-    mult.add_argument("expr")
-    mult.add_argument("--yes", action="store_true")
-    mult.set_defaults(func=_multiply_dispatch)
+    # do / wf-run / x — RETIRED: the four overlapping doors collapsed into one.
+    #   do composites → `agent` workflow plans (lgwks_do helpers = the composer library);
+    #   wf-run → agent workflow trigger (lgwks_workflows substrate, import-based not shell-out);
+    #   x brace-multiply → agent `batch` plan (lgwks_multiply expand/classify = substrate).
+    # See spec/second-harness/SPEC-front-door-factory-v1.md §7.
 
     return parser
 

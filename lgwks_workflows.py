@@ -91,25 +91,25 @@ _WORKFLOWS: dict[str, dict] = {
     "code": {
         "description": "run code review (code_hacker bot) on changed files",
         "args": {"--repo": "str", "--changed": "str", "--ref": "str", "--l-budget": "float"},
-        "verbs": ["do code"],
+        "verbs": ["review"],
         "tokens": "~1",
     },
     "govern": {
         "description": "AUP check + slop review before merge",
         "args": {"--repo": "str", "--text": "str", "--changed": "str", "--ref": "str"},
-        "verbs": ["do govern"],
+        "verbs": ["gate aup"],
         "tokens": "~1",
     },
     "cleanup": {
         "description": "slop + optimizer review; optional auto-fix",
         "args": {"--repo": "str", "--changed": "str", "--ref": "str", "--auto-fix": "bool"},
-        "verbs": ["do cleanup"],
+        "verbs": ["review"],
         "tokens": "~1",
     },
     "ship": {
         "description": "full pre-ship: all bots + AUP audit",
         "args": {"--repo": "str", "--changed": "str", "--ref": "str", "--l-budget": "float"},
-        "verbs": ["do ship"],
+        "verbs": ["review", "gate aup"],
         "tokens": "~2",
     },
     "prove": {
@@ -125,9 +125,9 @@ _WORKFLOWS: dict[str, dict] = {
         "tokens": "~0",
     },
     "compare": {
-        "description": "multiply intent: brace expression → cartesian command chain",
-        "args": {"expr": "str", "--yes": "bool", "--dry-run": "bool"},
-        "verbs": ["x"],
+        "description": "multiply intent: brace expression → cartesian command chain (agent batch plan)",
+        "args": {"intent": "str", "--act": "bool", "--yes": "bool"},
+        "verbs": ["agent"],
         "tokens": "~0",
     },
     "audit-trail": {

@@ -112,9 +112,7 @@ def test_workflow_registry_verbs_resolve_to_live_manifest_verbs():
     assert missing == []
 
 
-def test_wf_run_accepts_json_output():
-    proc = _run("wf-run", 'workflow "noop" { doctor }', "--json")
-    assert proc.returncode == 0, proc.stderr
-    payload = json.loads(proc.stdout)
-    assert payload["schema"] == "lgwks.workflow_dsl.run.v1"
-    assert payload["ok"] is True
+# test_wf_run_accepts_json_output removed: the `wf-run` top-level verb is retired
+# (#255 phase 2). Named workflows now trigger through the single `agent` door; the
+# Ruby-DSL string input is intentionally dropped. test_cli_contract.REMOVED_VERBS
+# asserts `wf-run` hard-errors.

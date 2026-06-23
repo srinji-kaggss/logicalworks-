@@ -24,7 +24,7 @@ claim conflicts across files, `principles.md` dictates precedence.
 - Decisions are append-only: supersede with a new record, never rewrite history.
 - A spec without a status header (`draft | final | superseded-by:<path>`) is
   unratified — treat as opinion.
-- `docs/SPEC-tier-e-machine-model-v1.md` is a historical draft (2026-06-02);
+- `docs/archive/SPEC-tier-e-machine-model-v1.md` is a historical draft (2026-06-02);
   verify against `spec/second-harness/` before building from it.
 - Load-bearing doc nouns are reserved. `navmap` names the repo-wide module atlas only;
   `README` is a directory entrypoint; `HANDOFF` is for active transfer/state only;

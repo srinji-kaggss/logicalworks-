@@ -53,17 +53,16 @@ _VERB_META: dict[str, dict] = {
         "args": {"source": "url or file", "--to": "txt|md|json", "--out": "file (default stdout)", "--max-chars": "int"},
         "output": "converted artifact (stdout or file)", "tokens": "none",
     },
-    "x": {
-        "intent": "multiply intent: a brace expression → a command chain → run them all",
-        "args": {"expr": "product expression with {a,b,c} axes (cartesian across braces)",
-                 "--yes": "non-interactive approve (read-only chains)",
-                 "--force": "allow destructive commands non-interactively",
-                 "--allow-unknown": "allow unknown commands non-interactively after --yes",
-                 "--dry-run": "show the expanded chain, run nothing",
-                 "--keep-going": "continue after a failure",
-                 "--json": "structured plan/results", "--plan-only": "with --json: emit plan, don't run"},
-        "output": "expanded chain + per-command exit codes (or JSON plan when --json)",
-        "tokens": "none (deterministic shell-out via argv list, no shell)",
+    "agent": {
+        "intent": "the single agent front door: world view (perceive), then --act to trigger the workflow",
+        "args": {"intent": "natural-language intent",
+                 "--act": "execute the compiled ActionPlan (omit = world view only, no side effects)",
+                 "--yes": "approve a write/mutation plan (approval:once)",
+                 "--force": "approve a destructive plan",
+                 "--top": "max capability selections/results",
+                 "--repo": "repo path for state/index context"},
+        "output": "lgwks.agent.v1: worldview (C/G/P scores, selections, pathways, risk) + ActionPlan + result",
+        "tokens": "none (non-generative; deterministic engine + direct capability dispatch)",
     },
     "refine": {
         "intent": "machine intent refinement (class·gaps·specificity·abstain)",
@@ -115,47 +114,8 @@ _VERB_META: dict[str, dict] = {
         "args": {"--json": "structured output"},
         "output": "audit summary JSON", "tokens": "none",
     },
-    "do code": {
-        "intent": "run code review (code_hacker bot) on changed files",
-        "args": {"--repo": "path to repo", "--changed": "comma-separated relative file paths",
-                 "--ref": "diff against this ref", "--json": "structured DoRun JSON output",
-                 "--l-budget": "max allowed L budget coefficient"},
-        "output": "DoRun JSON or human band/spine UI",
-        "tokens": "none",
-    },
-    "do research": {
-        "intent": "run research query with AUP gate",
-        "args": {"query": "research query string", "--depth": "research depth", "--model": "model override",
-                 "--json": "structured DoRun JSON output"},
-        "output": "DoRun JSON or human band/spine UI",
-        "tokens": "bounded by --budget in auto mode",
-    },
-    "do govern": {
-        "intent": "AUP check + slop review before merge",
-        "args": {"--repo": "path to repo", "--text": "text to AUP-check",
-                 "--request-file": "JSON request file to AUP-check",
-                 "--changed": "comma-separated relative file paths",
-                 "--ref": "diff against this ref", "--json": "structured DoRun JSON output",
-                 "--l-budget": "max allowed L budget coefficient"},
-        "output": "DoRun JSON or human band/spine UI",
-        "tokens": "none",
-    },
-    "do cleanup": {
-        "intent": "slop + optimizer review; optional auto-fix",
-        "args": {"--repo": "path to repo", "--changed": "comma-separated relative file paths",
-                 "--ref": "diff against this ref", "--json": "structured DoRun JSON output",
-                 "--l-budget": "max allowed L budget coefficient", "--auto-fix": "run safe refactor fixes"},
-        "output": "DoRun JSON or human band/spine UI",
-        "tokens": "none",
-    },
-    "do ship": {
-        "intent": "full pre-ship: all bots + AUP audit",
-        "args": {"--repo": "path to repo", "--changed": "comma-separated relative file paths",
-                 "--ref": "diff against this ref", "--json": "structured DoRun JSON output",
-                 "--l-budget": "max allowed L budget coefficient"},
-        "output": "DoRun JSON or human band/spine UI",
-        "tokens": "none",
-    },
+    # do {code,research,govern,cleanup,ship} RETIRED → `agent` workflow plans
+    # (review govern|cleanup|ship); the composer reuses lgwks_do's leaf helpers.
 
     "workflow": {
         "intent": "unified AI workflow harness — maps natural intents to composed verb chains",
@@ -335,30 +295,9 @@ _VERB_META: dict[str, dict] = {
         "output": "schema detail JSON",
         "tokens": "none",
     },
-    "route": {
-        "intent": "deterministic intent router — classify text into verb category (tiny-bert + heuristic fallback)",
-        "args": {"text": "intent text to classify", "--json": "structured output", "--model": "auto | heuristic | tiny-bert"},
-        "output": "routing JSON with category, confidence, method, latency_ms, verb, args, note",
-        "tokens": "none (heuristic) / tiny-bert local inference",
-    },
-    "route map": {
-        "intent": "rank live lgwks verbs for a natural-language intent using the manifest capability contract",
-        "args": {"intent": "natural-language intent", "--top": "number of results", "--json": "structured output"},
-        "output": "lgwks.map.v1 with ranked verb matches and scores",
-        "tokens": "none",
-    },
-    "route engine": {
-        "intent": "produce the subconscious routing schema for an intent: capability selections, confidence, risk, and pathways",
-        "args": {"prompt": "natural-language intent", "--top": "max selections", "--repo": "repo for last-state lookup"},
-        "output": "lgwks.engine.schema.v1 with selections, flags, retrieval, scores, and pathways",
-        "tokens": "none",
-    },
-    "route refine": {
-        "intent": "refine machine intent before execution: class, gaps, specificity, and abstain/proceed verdict",
-        "args": {"intent": "raw intent", "--agent": "agent caller mode", "--depth": "specificity demand"},
-        "output": "intent refinement JSON",
-        "tokens": "none",
-    },
+    # route {.,map,engine,refine} RETIRED → folded into the `agent` door internals
+    # (map ranking = worldview.pathways; engine schema = worldview; refine = pre-plan check).
+
     "ops daemon research": {
         "intent": "crawl a website, file, folder, or repo into the durable substrate: documents, chunks, STEM facts, vectors, graph artifacts, and daemon run index",
         "args": {"target": "URL, search query, file, folder, or repo", "--project": "run label",
