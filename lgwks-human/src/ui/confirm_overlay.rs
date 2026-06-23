@@ -3,7 +3,7 @@ use ratatui::{
     layout::{Constraint, Direction, Layout, Rect, Alignment},
     style::{Modifier, Style, Color},
     text::{Line, Span},
-    widgets::{Block, Borders, Clear, Paragraph, Wrap},
+    widgets::{Block, Borders, BorderType, Padding, Clear, Paragraph, Wrap},
 };
 use crossterm::event::KeyCode;
 use crate::tui::Event;
@@ -72,7 +72,9 @@ impl ConfirmOverlay {
 
         let block = Block::default()
             .borders(Borders::ALL)
+            .border_type(BorderType::Rounded)
             .border_style(Style::default().fg(RED_ERR))
+            .padding(Padding::symmetric(2, 1))
             .style(Style::default().bg(ratatui::style::Color::Indexed(235)));
             
         let paragraph = Paragraph::new(text)

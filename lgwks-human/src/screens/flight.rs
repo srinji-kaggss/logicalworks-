@@ -6,7 +6,7 @@ use ratatui::{
     layout::{Constraint, Direction, Layout, Rect},
     style::{Modifier, Style},
     text::{Line, Span},
-    widgets::{Block, Borders, List, ListItem, Paragraph, Wrap},
+    widgets::{Block, Borders, BorderType, Padding, List, ListItem, Paragraph, Wrap},
 };
 use tui_input::{Input, backend::crossterm::EventHandler};
 
@@ -59,7 +59,9 @@ impl FlightScreen {
             .block(
                 Block::default()
                     .borders(Borders::ALL)
+                    .border_type(BorderType::Rounded)
                     .border_style(Style::default().fg(SLATE_DIM))
+                    .padding(Padding::symmetric(2, 1))
                     .title(Span::styled(
                         format!(" COGNITION STREAM ({} events) ", total),
                         Style::default().fg(EMERALD).add_modifier(Modifier::BOLD),
@@ -118,7 +120,9 @@ impl FlightScreen {
         let affordance_list = List::new(affordance_items).block(
             Block::default()
                 .borders(Borders::ALL)
+                .border_type(BorderType::Rounded)
                 .border_style(Style::default().fg(SLATE_DIM))
+                .padding(Padding::symmetric(2, 1))
                 .title(Span::styled(task_title, Style::default().fg(AMBER))),
         );
         frame.render_widget(affordance_list, chunks[0]);
@@ -143,7 +147,9 @@ impl FlightScreen {
         .block(
             Block::default()
                 .borders(Borders::ALL)
-                .border_style(Style::default().fg(border_color)),
+                .border_type(BorderType::Rounded)
+                .border_style(Style::default().fg(border_color))
+                .padding(Padding::horizontal(1)),
         )
         .wrap(Wrap { trim: false });
         frame.render_widget(input_widget, chunks[1]);
