@@ -187,12 +187,10 @@ def run(
     if graph is None:
         return [_failure_record(run_id, repo_str, "graph_cache", "missing graph cache")]
 
-    # Find py files in the repo
-    py_files = sorted(repo.glob("**/*.py"))
-    py_files = [p for p in py_files if not any(
-        part in {".git", "__pycache__", ".venv", "venv", "node_modules"}
-        for part in p.parts
-    )]
+    # Find py files in the repo (canonical enumerator — excludes vendored venvs
+    # like .venv-models that previously hung review by ast-parsing all of torch)
+    import lgwks_repo_scan
+    py_files = lgwks_repo_scan.py_files(repo)
 
     # Analyze all Python files in the repo to get baseline/graph statistics
     file_info = {}

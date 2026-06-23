@@ -116,11 +116,11 @@ def test_browser_entryway_dispatches_doctor():
 def test_build_command_tree_non_empty():
     """L0: parser introspection must discover at least the commands we know exist.
 
-    #218 consolidated the surface: the orchestrator is `do` (was `gh`), `jarvis`
-    folded into `crawl`, and `crawl` is now a first-class verb with help text.
+    #255 phase 2 collapsed the four orchestrators (route/do/wf-run/x) into the
+    single `agent` front door; `crawl` is a first-class verb; `solve` a capability.
     """
     tree = home._build_command_tree()
-    assert "do" in tree
+    assert "agent" in tree
     assert "crawl" in tree
     assert "solve" in tree
 
@@ -134,15 +134,15 @@ def test_domain_for_coverage():
 
 
 def test_render_command_detail_with_subcommands():
-    """L0: do (orchestrator) must show its subcommands in the detail view."""
+    """L0: a grouped verb (state) must show its subcommands in the detail view."""
     tree = home._build_command_tree()
-    node = tree.get("do", {})
+    node = tree.get("state", {})
     assert "subcommands" in node
     with patch("lgwks_home.print") as mock_print:
-        home._render_command_detail("do", node, on=False)
+        home._render_command_detail("state", node, on=False)
     texts = [str(c) for c in mock_print.call_args_list]
-    assert any("code" in t for t in texts)
-    assert any("research" in t for t in texts)
+    assert any("run" in t for t in texts)
+    assert any("context" in t for t in texts)
 
 
 def test_render_command_detail_leaf():

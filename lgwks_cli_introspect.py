@@ -25,17 +25,17 @@ ROOT = Path(__file__).resolve().parent
 # truth for both the home browser and the REPL palette.
 DOMAINS: dict[str, list[str]] = {
     # Primary product — the subconscious loop and operator surface
-    "Subconscious": ["map", "engine", "session", "solve", "debug", "intent", "doctor",
-                     "spawn", "portal", "do", "agent-os", "begin", "tui"],
+    "Subconscious": ["agent", "map", "engine", "session", "solve", "debug", "intent", "doctor",
+                     "spawn", "portal", "agent-os", "tui"],
     # Research and knowledge work — the conscious-layer tools
     "Research":  ["fetch", "refine", "preview", "extract", "convert",
-                  "x", "manifest", "login", "cohere", "comprehend", "geo", "public",
+                  "manifest", "login", "cohere", "comprehend", "geo", "public",
                   "akinator", "run", "context", "model-hub", "capture", "jepa",
-                  "workflow", "probe", "research", "crawl", "wf-run"],
+                  "workflow", "research", "crawl"],
     "GitHub":    ["gh"],
     "DevOps":    ["repo", "review", "project", "batch", "refactor", "hooks"],
     "System":    ["repl", "initialize", "auth", "keyvault", "foundation",
-                  "aup", "schema", "route", "codebase", "access", "daemon", "bulk-harvest",
+                  "aup", "schema", "codebase", "access", "daemon", "bulk-harvest",
                   "gate", "ops", "human", "verify"],
     # L0 substrate — ingestion, vector store, contracts (foundational, not the product)
     "Substrate": ["store", "memory", "embed", "axiom", "pipeline", "waste",

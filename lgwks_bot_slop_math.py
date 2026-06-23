@@ -71,11 +71,10 @@ def _make(
     )
 
 
-def _py_files(repo: Path) -> list[Path]:
-    return sorted(
-        p for p in repo.glob("**/*.py")
-        if not any(part in {".git", "__pycache__", ".venv", "venv"} for part in p.parts)
-    )
+def _py_files(repo: Path, changed_files: Optional[list[str]] = None) -> list[Path]:
+    # canonical enumerator (vendored/cache/state excluded once, in one place)
+    import lgwks_repo_scan
+    return lgwks_repo_scan.py_files(repo, changed_files)
 
 
 def _rel(path: Path, repo: Path) -> str:
@@ -175,7 +174,8 @@ def run_s1_graph_anomaly(graph: Any, repo: str = "", run_id: Optional[str] = Non
 
 # ── S2 — Naming / binning bot ─────────────────────────────────────────────────
 
-def run_s2_naming_bot(repo: Path | str, run_id: Optional[str] = None) -> list[dict]:
+def run_s2_naming_bot(repo: Path | str, run_id: Optional[str] = None,
+                      changed_files: Optional[list[str]] = None) -> list[dict]:
     """Flag generic names, synonym drift, and overloaded terms."""
     repo = Path(repo).resolve()
     repo_str = str(repo)
@@ -188,7 +188,7 @@ def run_s2_naming_bot(repo: Path | str, run_id: Optional[str] = None) -> list[di
     # concept_map: lowercase concept -> set of distinct identifiers used
     concept_map: dict[str, set[str]] = defaultdict(set)
 
-    for path in _py_files(repo):
+    for path in _py_files(repo, changed_files):
         rel = _rel(path, repo)
         try:
             tree = ast.parse(path.read_text(encoding="utf-8", errors="replace"))
@@ -234,7 +234,8 @@ def run_s2_naming_bot(repo: Path | str, run_id: Optional[str] = None) -> list[di
 
 # ── S3 — Spec drift bot ───────────────────────────────────────────────────────
 
-def run_s3_spec_drift(repo: Path | str, run_id: Optional[str] = None) -> list[dict]:
+def run_s3_spec_drift(repo: Path | str, run_id: Optional[str] = None,
+                      changed_files: Optional[list[str]] = None) -> list[dict]:
     """Detect schema/manifest claims that diverge from code constants."""
     import json as _json
     repo = Path(repo).resolve()
@@ -246,7 +247,7 @@ def run_s3_spec_drift(repo: Path | str, run_id: Optional[str] = None) -> list[di
 
     # collect code-level schema string constants
     code_schemas: dict[str, str] = {}  # constant_name -> value
-    for path in _py_files(repo):
+    for path in _py_files(repo, changed_files):
         rel = _rel(path, repo)
         try:
             tree = ast.parse(path.read_text(encoding="utf-8", errors="replace"))
@@ -291,7 +292,7 @@ def run_s3_spec_drift(repo: Path | str, run_id: Optional[str] = None) -> list[di
 
     # find Python functions documented in spec .md files but absent in code
     defined_functions: set[str] = set()
-    for path in _py_files(repo):
+    for path in _py_files(repo, changed_files):
         try:
             tree = ast.parse(path.read_text(encoding="utf-8", errors="replace"))
         except Exception:
@@ -327,7 +328,8 @@ def run_s3_spec_drift(repo: Path | str, run_id: Optional[str] = None) -> list[di
 
 # ── S4 — Proof gap bot ────────────────────────────────────────────────────────
 
-def run_s4_proof_gap(repo: Path | str, run_id: Optional[str] = None) -> list[dict]:
+def run_s4_proof_gap(repo: Path | str, run_id: Optional[str] = None,
+                     changed_files: Optional[list[str]] = None) -> list[dict]:
     """Find claims (TODO/FIXME/assertions) without linked tests or evidence."""
     repo = Path(repo).resolve()
     repo_str = str(repo)
@@ -347,7 +349,7 @@ def run_s4_proof_gap(repo: Path | str, run_id: Optional[str] = None) -> list[dic
             if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)) and node.name.startswith("test_"):
                 test_names.add(node.name)
 
-    for path in _py_files(repo):
+    for path in _py_files(repo, changed_files):
         rel = _rel(path, repo)
         if "test_" in rel:
             continue
@@ -373,7 +375,7 @@ def run_s4_proof_gap(repo: Path | str, run_id: Optional[str] = None) -> list[dic
                     ))
 
     # functions with no corresponding test_<name> coverage
-    for path in _py_files(repo):
+    for path in _py_files(repo, changed_files):
         rel = _rel(path, repo)
         if "test_" in rel:
             continue
@@ -577,9 +579,9 @@ def run_all(
     findings: list[dict] = []
     if graph is not None:
         findings.extend(run_s1_graph_anomaly(graph, repo=repo_str, run_id=run_id))
-    findings.extend(run_s2_naming_bot(repo, run_id=run_id))
-    findings.extend(run_s3_spec_drift(repo, run_id=run_id))
-    findings.extend(run_s4_proof_gap(repo, run_id=run_id))
+    findings.extend(run_s2_naming_bot(repo, run_id=run_id, changed_files=changed_files))
+    findings.extend(run_s3_spec_drift(repo, run_id=run_id, changed_files=changed_files))
+    findings.extend(run_s4_proof_gap(repo, run_id=run_id, changed_files=changed_files))
     findings.extend(run_s5_dead_abstraction(repo, run_id=run_id, changed_files=changed_files))
     findings.extend(run_s6_contradiction(repo, run_id=run_id, changed_files=changed_files))
     return findings

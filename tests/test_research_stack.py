@@ -255,10 +255,9 @@ class TestManifest(unittest.TestCase):
         live = man._collect_verbs()
         # #218 consolidated the flat 70-verb surface into nested canonical verbs.
         # These are the live leaf verbs the consolidated CLI must still expose.
-        for expected in ("crawl", "solve", "research", "review", "x",
-                         "route refine", "ops workflow extract", "ops agent-os bootstrap",
-                         "state run crawl", "state context", "repo audit", "graph viz",
-                         "do code"):
+        for expected in ("crawl", "solve", "research", "review", "agent",
+                         "ops workflow extract", "ops agent-os bootstrap",
+                         "state run crawl", "state context", "repo audit", "graph viz"):
             self.assertIn(expected, live, f"{expected!r} must appear in the live verb surface")
         m = man.build_manifest()
         manifest_names = {v["verb"] for v in m["verbs"]}

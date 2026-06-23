@@ -37,6 +37,7 @@ ledger) can read exactly how an answer was reached.
 from __future__ import annotations
 
 import os
+import threading
 from dataclasses import dataclass
 from typing import Any, Callable, Protocol, runtime_checkable
 
@@ -78,6 +79,45 @@ def models_suppressed() -> bool:
     port before). Any truthy value engages it; unset/empty disengages.
     """
     return bool(os.environ.get("LGWKS_NO_MODELS"))
+
+
+def _model_timeout() -> float:
+    """Wall-clock cap (seconds) for a single weight-tier rung. A model load or
+    download that exceeds this is treated as a failed rung — the harness escalates
+    or defers instead of hanging the whole CLI. 0/negative disables the cap.
+
+    Default 25s: a cold model load that hasn't produced an answer by then is, for
+    an interactive `lgwks review`, indistinguishable from a hang. Override with
+    LGWKS_MODEL_TIMEOUT for batch contexts that can afford a long cold start.
+    """
+    try:
+        return float(os.environ.get("LGWKS_MODEL_TIMEOUT", "25"))
+    except ValueError:
+        return 25.0
+
+
+def _run_bounded(run: Callable[[], Any], timeout: float) -> Any:
+    """Run `run()` on a daemon thread, raising TimeoutError if it outlives
+    `timeout`. The abandoned thread is a daemon so it cannot keep the process
+    alive after the CLI returns. timeout<=0 runs inline (no cap)."""
+    if timeout <= 0:
+        return run()
+    box: dict[str, Any] = {}
+
+    def worker() -> None:
+        try:
+            box["result"] = run()
+        except BaseException as exc:  # propagate the real rung failure to the caller
+            box["error"] = exc
+
+    t = threading.Thread(target=worker, daemon=True, name="lgwks-model-rung")
+    t.start()
+    t.join(timeout)
+    if t.is_alive():
+        raise TimeoutError(f"model rung exceeded {timeout:g}s wall-clock")
+    if "error" in box:
+        raise box["error"]
+    return box.get("result")
 
 
 @dataclass
@@ -146,7 +186,12 @@ def escalate(
                           "why": "LGWKS_NO_MODELS"})
             continue
         try:
-            result = att.run()
+            if att.trust_class in _WEIGHT_TIERS:
+                # weight tiers load/run a model — bound them so a stuck load or
+                # download degrades to a defer instead of hanging the CLI
+                result = _run_bounded(att.run, _model_timeout())
+            else:
+                result = att.run()  # deterministic tier is pure code; never capped
         except Exception as exc:  # a rung failing is an escalation, never a crash
             trace.append({"tier": att.trust_class, "model": att.model,
                           "label": att.label, "outcome": "error",

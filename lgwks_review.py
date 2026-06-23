@@ -359,11 +359,8 @@ def run_watch_mode(args: argparse.Namespace) -> int:
     mtimes = {}
     
     def _find_py_files() -> list[Path]:
-        py_files = sorted(repo.glob("**/*.py"))
-        return [p for p in py_files if not any(
-            part in {".git", "__pycache__", ".venv", "venv", "node_modules", "findings"}
-            for part in p.parts
-        )]
+        import lgwks_repo_scan
+        return lgwks_repo_scan.py_files(repo)
         
     for p in _find_py_files():
         try:

@@ -1032,16 +1032,10 @@ def run(
         targets = [repo / f for f in changed_files if f.endswith(".py")]
         rels = [f for f in changed_files if f.endswith(".py")]
     else:
-        py_files = sorted(repo.glob("**/*.py"))
-        # Defense-in-depth: ignore 3rd-party libs, caches, AND in-repo copies of
-        # source (agent worktrees + archived modules). Scanning .worktrees/.claude
-        # re-reports every finding once per checkout — the bulk of the noise.
-        py_files = [p for p in py_files if not any(
-            (part.startswith(".venv")
-             or part in {".git", "__pycache__", "venv", "node_modules",
-                         ".worktrees", ".claude", "archive"})
-            for part in p.parts
-        )]
+        # canonical enumerator: excludes 3rd-party libs/caches AND in-repo copies
+        # (worktrees/.claude/archive) — the dirs whose duplicates were review noise
+        import lgwks_repo_scan
+        py_files = lgwks_repo_scan.py_files(repo)
         targets = py_files
         rels = [str(p.relative_to(repo)) for p in py_files]
 

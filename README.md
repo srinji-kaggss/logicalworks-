@@ -130,8 +130,8 @@ High-level planning work that is intentionally structured for cheaper follow-on 
 Current planning entrypoints:
 
 - [docs/bot-fabric/README.md](/Users/srinji/logicalworks-/docs/bot-fabric/README.md) — non-AI bot fabric + JEPA + synthesis plan
-- [docs/jepa-program-map-2026-06-06.md](/Users/srinji/logicalworks-/docs/jepa-program-map-2026-06-06.md) — JEPA product/program map
-- [docs/spec-jepa-visual-workbench-2026-06-06.md](/Users/srinji/logicalworks-/docs/spec-jepa-visual-workbench-2026-06-06.md) — human visual workbench direction
+- [docs/archive/jepa-program-map-2026-06-06.md](/Users/srinji/logicalworks-/docs/archive/jepa-program-map-2026-06-06.md) — JEPA product/program map
+- [docs/archive/spec-jepa-visual-workbench-2026-06-06.md](/Users/srinji/logicalworks-/docs/archive/spec-jepa-visual-workbench-2026-06-06.md) — human visual workbench direction
 
 Local ML direction in this repo is Apple-native first:
 

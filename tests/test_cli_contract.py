@@ -29,9 +29,9 @@ def _run(*args: str, timeout: int = 30) -> subprocess.CompletedProcess:
 # not an accident. Removing a verb here must be matched by a deprecation shim
 # (see _DEPRECATED_VERBS in `lgwks`) or a hard-removal record below.
 CANONICAL_VERBS = {
-    "research", "crawl", "review", "repo", "graph", "route", "gate", "state",
+    "research", "crawl", "review", "repo", "graph", "agent", "gate", "state",
     "ops", "doctor", "model-hub", "manifest", "extract", "convert",
-    "auth", "fetch", "verify", "human", "solve", "do", "wf-run", "x",
+    "auth", "fetch", "verify", "human", "solve",
 }
 # Collapsed into canonical grouped forms; served by deprecation shim (warn+rewrite).
 SHIMMED_VERBS = {"run": "state run", "context": "state context", "agent-os": "ops agent-os"}
@@ -42,7 +42,10 @@ SHIMMED_VERBS = {"run": "state run", "context": "state context", "agent-os": "op
 SHIMMED_SUBVERBS = {("jarvis", "crawl"): "crawl", ("jarvis", "remap-db"): "crawl --remap-db"}
 _SUBSHIM_PARENTS = {parent for parent, _ in SHIMMED_SUBVERBS}
 # Hard-removed: were thin aliases of `research` (probe's help was even false).
-REMOVED_VERBS = {"begin", "probe"}
+# route/do/wf-run/x = the four overlapping front doors collapsed into one `agent`
+# door (#255 phase 2). No faithful argv shim (subcommand semantics differ); they
+# hard-error with argparse, pointing callers at `agent`.
+REMOVED_VERBS = {"begin", "probe", "route", "do", "wf-run", "x"}
 
 
 def _top_level_verbs() -> set[str]:
@@ -90,15 +93,15 @@ def test_deprecation_shim_warns_and_delegates():
     assert "run demo-crm" in proc.stdout  # delegated payload is unchanged
 
 
-def test_route_act_is_the_front_door():
-    """The single agentic entrypoint maps NL intent -> typed action and refuses
-    to auto-execute mutations (safety membrane)."""
-    proc = _run("route", "act", "delete all the logs", "--dry-run")
-    assert proc.returncode != 0, "mutation intent must not report ok"
+def test_agent_is_the_front_door():
+    """The single agentic entrypoint maps NL intent -> typed plan and refuses
+    to auto-execute mutations (safety membrane S1)."""
+    proc = _run("agent", "delete all the logs", "--act")
+    assert proc.returncode != 0, "mutation intent must not auto-execute / report ok"
     payload = json.loads(proc.stdout)
-    assert payload["schema"] == "lgwks.route.act.v1"
+    assert payload["schema"] == "lgwks.agent.v1"
     assert payload["blocked"] is True
-    assert payload["action"]["effect_class"] == "write"
+    assert payload["plan"]["effect_class"] == "write"
 
 
 def test_run_demo_shortcut_still_works():
@@ -168,22 +171,25 @@ def test_manifest_shortcut_is_parseable_json():
     assert payload["verbs"]
 
 
-def test_route_map_uses_live_manifest_contract():
-    proc = _run("route", "map", "research a website and build graph", "--top", "3")
+def test_agent_worldview_ranks_pathways():
+    """`route map` ranking folded into the agent worldview (perceive): the
+    top pathway for a research intent is the daemon research path."""
+    proc = _run("agent", "research a website and build graph", "--top", "3")
     assert proc.returncode == 0, proc.stderr
     payload = json.loads(proc.stdout)
-    assert payload["schema"] == "lgwks.map.v1"
-    assert payload["verb_count"] > 0
-    assert payload["matches"][0]["verb"] == "ops daemon research"
-    assert payload["matches"][0]["intent"] != "(no metadata)"
+    assert payload["schema"] == "lgwks.agent.v1"
+    assert payload["worldview"]["pathways"][0] == "ops daemon research"
 
 
-def test_route_engine_dispatches_to_subconscious_engine():
-    proc = _run("route", "engine", "research a website and build graph", "--top", "3")
+def test_agent_worldview_carries_subconscious_schema():
+    """`route engine` (subconscious schema) folded into the agent worldview:
+    C/G/P scores + pathways are present in the perceive payload."""
+    proc = _run("agent", "research a website and build graph", "--top", "3")
     assert proc.returncode == 0, proc.stderr
     payload = json.loads(proc.stdout)
-    assert payload["schema"] == "lgwks.engine.schema.v1"
-    assert payload["pathways"][0] == "ops daemon research"
+    wv = payload["worldview"]
+    assert "scores" in wv["insights"]
+    assert wv["pathways"][0] == "ops daemon research"
 
 
 def test_state_cortex_index_builds_trajectory(tmp_path: Path):
