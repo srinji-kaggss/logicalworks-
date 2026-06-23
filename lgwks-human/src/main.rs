@@ -34,6 +34,10 @@ struct Cli {
     /// Enable debug logging to /tmp/lgwks-human.log
     #[arg(short, long)]
     debug: bool,
+
+    /// Run in standalone mode without a daemon (connects to local LLMs or models.dev API)
+    #[arg(long)]
+    standalone: bool,
 }
 
 #[tokio::main]
@@ -52,7 +56,9 @@ async fn main() -> Result<()> {
     }
 
     // ── Repo root resolution ────────────────────────────────────────────────
-    let repo_root = if let Some(r) = cli.repo {
+    let repo_root = if cli.standalone {
+        std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."))
+    } else if let Some(r) = cli.repo {
         r
     } else {
         find_repo_root().context(
@@ -71,11 +77,52 @@ async fn main() -> Result<()> {
         .tick_rate(Some(4.0))
         .title(Some("lgwks-human".to_string()));
 
-    // ── Spawn background poll task (U-08) ───────────────────────────────────
-    // Uses the event_tx clone from the Tui to send DaemonTick events
-    // We need the Tui's sender — clone it before moving Tui into run()
     let event_tx = tui.event_tx.clone();
-    let _poll_task = spawn_poll_task(Arc::clone(&bridge), Arc::clone(&state), event_tx);
+
+    // ── Spawn background poll task (U-08) ───────────────────────────────────
+    if cli.standalone {
+        tracing::info!("Running in STANDALONE mode");
+        let state_clone = Arc::clone(&state);
+        tokio::spawn(async move {
+            // Seed the state with a standalone stub
+            {
+                let mut st = state_clone.write().unwrap();
+                st.status.alive = true;
+                st.status.status = "standalone".to_string();
+                st.packet = bridge::ContextPacket {
+                    active_task: Some("Standalone Mode".to_string()),
+                    next_steps: vec![
+                        bridge::NextStep {
+                            kind: "connect_models_dev".to_string(),
+                            summary: "Configure models.dev API token".to_string(),
+                            risk: Some("low".to_string()),
+                            args: None,
+                            provenance: Some(serde_json::json!({
+                                "reason": "Standalone mode initialized without provider keys."
+                            })),
+                        },
+                        bridge::NextStep {
+                            kind: "init_local_llm".to_string(),
+                            summary: "Start a local model (Ollama/Llama.cpp)".to_string(),
+                            risk: Some("low".to_string()),
+                            args: None,
+                            provenance: Some(serde_json::json!({
+                                "reason": "Optionally use local resources."
+                            })),
+                        }
+                    ],
+                    ..Default::default()
+                };
+            }
+            // Just periodically send ticks to refresh UI
+            loop {
+                tokio::time::sleep(tokio::time::Duration::from_millis(500)).await;
+                let _ = event_tx.send(tui::Event::DaemonTick);
+            }
+        });
+    } else {
+        let _poll_task = spawn_poll_task(Arc::clone(&bridge), Arc::clone(&state), event_tx);
+    }
 
     // ── App + run loop ──────────────────────────────────────────────────────
     let app = App::new(bridge, state);
