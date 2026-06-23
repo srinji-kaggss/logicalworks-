@@ -89,7 +89,8 @@ def _require_choice(name: str, value: str, allowed: frozenset[str]) -> str:
 
 
 def _canonical_body(record: dict[str, Any]) -> str:
-    return json.dumps(record, sort_keys=True, separators=(",", ":"), ensure_ascii=True)
+    # one source of truth (lgwks_hashing.canonical_json); ascii=True preserves event ids
+    return lgwks_hashing.canonical_json(record, ascii=True)
 
 
 def _event_id_for(record: dict[str, Any]) -> str:

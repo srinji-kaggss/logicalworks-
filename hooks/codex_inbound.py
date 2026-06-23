@@ -13,31 +13,9 @@ from pathlib import Path
 
 
 def _emit_daemon_event(repo_root: Path, prompt: str, session_id: str) -> None:
-    try:
-        import lgwks_daemon_event
-        from lgwks_daemon_store import DaemonEventStore
-        db = repo_root / "store" / "daemon" / "daemon-events.db"
-        tenant_id = f"repo:{repo_root.name}"
-        event = lgwks_daemon_event.build_event(
-            tenant_id=tenant_id,
-            agent_id="codex",
-            session_id=session_id or f"codex:{repo_root.name}",
-            actor="human",
-            client="codex",
-            lane="ingress",
-            kind="human_message",
-            scope="agent_local",
-            payload={"prompt_len": len(prompt), "prompt_head": prompt[:120]},
-            source="text",
-            trust="human_confirmed",
-        )
-        store = DaemonEventStore(db)
-        try:
-            store.append(event)
-        finally:
-            store.close()
-    except Exception:
-        pass
+    # one source of truth (lgwks_daemon_store.emit_inbound_message) — was a per-agent copy.
+    import lgwks_daemon_store
+    lgwks_daemon_store.emit_inbound_message(repo_root, prompt, session_id, agent_id="codex")
 
 
 def main() -> int:

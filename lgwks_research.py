@@ -30,7 +30,6 @@ from dataclasses import dataclass, replace
 from datetime import date
 from pathlib import Path
 
-import lgwks_openrouter
 import lgwks_sign
 import lgwks_tongue
 
@@ -42,6 +41,12 @@ ROUND_CAP = 100        # hard upper bound on --rounds (hacker F8 — unbounded-s
 BUDGET_CAP = 5_000_000 # hard upper bound on --budget tokens (hacker F8)
 FANOUT_CAP = 4         # bounded preview fan-out for cheap frontier scans
 ALLOWED_FUNCTIONS = ("generate", "falsify", "expand", "contrarian")
+# Provenance tier of run output = WHO produced the reasoning; all tiers emit the SAME OKF artifact
+# shape (tier is a field, not a format). ml-attention is the ENTRYPOINT — the embedding/attention
+# sensor that selects + ranks the relevant subset (no decisions, a compressor). co-scientist is the
+# ONLY tier where an LLM may decide/synthesize (consent-gated).
+PROVENANCE_ML_ATTENTION = "ml-attention"     # entrypoint — embedding sensor: select + rank, no decisions
+PROVENANCE_CO_SCIENTIST = "co-scientist"     # gated — the only place an LLM decides/synthesizes
 # untrusted-content guard (hacker F1/F2): a frontier node is a short, plain label — never prose,
 # never newlines, never prompt/role/JSON structure. Anything else is rejected, not fed back.
 _NODE_OK = re.compile(r"^[A-Za-z0-9 ._:/&(),'\-]{1,120}$")
@@ -182,6 +187,10 @@ class AutoConfig:
     fanout: int = 1                              # cheap bounded preview of next frontier nodes
     project: str = "research"                    # #165: gate key for the reasoning corpus (stable,
                                                  # not per-run — keeps research off the island path)
+    degrade_consent: bool = False                # consent (human flag or AI approval) to degrade to the
+                                                 # deterministic-skeleton path when the Tongue is offline.
+                                                 # DEFAULT fail-closed (constitution: never silently
+                                                 # degrade/fabricate without consent).
 
     def __post_init__(self):
         # clamp adversary-supplied bounds (hacker F8) and drop unknown functions (no silent calls).
@@ -202,12 +211,11 @@ class Budget:
     def exhausted(self) -> bool: return self.spent >= self.cap
 
     def charge(self) -> None:
-        # fail CLOSED on a metering fault (hacker F6): if we cannot account for spend, treat the
-        # budget as exhausted and let the loop stop — never keep spending against an unknown total.
-        try:
-            self.spent += lgwks_openrouter.take_usage()
-        except Exception:
-            self.spent = self.cap
+        # The reasoning strategy is the local model gateway (lgwks_model_port), which has no
+        # billed-token meter (unlike the old rented-cloud path). Charge a fixed nominal estimate
+        # per reasoning step so the budget guard still advances; the loop is also hard-bounded by
+        # max_rounds. (Was: lgwks_openrouter.take_usage() — removed with the cloud dependency.)
+        self.spent += 2000
 
 
 @dataclass
@@ -258,8 +266,67 @@ def _crawl(cfg: AutoConfig, frontier: str) -> tuple[str, bool, list[str]]:
              f"You have NO findings, so you cannot confirm or falsify anything this round."), False, [])
 
 
+_SKELETON_STOP = {"and", "the", "for", "with", "that", "this", "from", "into", "beyond",
+                  "what", "research", "analysis", "full", "strategies", "innovated", "than"}
+
+
+def _skeleton_keywords(text: str) -> list[str]:
+    import re as _re
+    return [w for w in _re.findall(r"[a-z][a-z0-9-]{3,}", (text or "").lower())
+            if w not in _SKELETON_STOP][:6]
+
+
+def _skeleton_hypotheses(objective: str) -> dict:
+    """Deterministic hypothesis shell for when the Tongue is in agent_handoff (no local
+    model). The automation spine MUST still run — research is automation, the model only
+    ENHANCES (it does not gate the crawl). These are generic, evidence-driven shells the
+    crawl fills; no fabricated claims. Honors the contract documented in lgwks_tongue."""
+    kws = _skeleton_keywords(objective)
+    return {
+        "meant": objective[:120],
+        "hypotheses": [
+            {"id": "H0", "role": "null",
+             "claim": f"The gathered evidence does not substantively address: {objective[:120]}",
+             "falsifier": "Sources contain concrete, on-topic claims", "builds_on": [], "keywords": kws},
+            {"id": "H1", "role": "mechanism",
+             "claim": f"The sources describe concrete mechanisms relevant to: {objective[:90]}",
+             "falsifier": "Sources are off-topic or contentless", "builds_on": [], "keywords": kws},
+        ],
+        "question": objective[:200],
+        "_skeleton": True,
+    }
+
+
+def _skeleton_reason(hyps: list[dict], findings: str, has_evidence: bool) -> dict:
+    """Deterministic reason envelope when the Tongue hands off. Learnings are extracted
+    by the canonical fact extractor (lgwks_substrate_text) — automation, not the model.
+    No falsifier/convergence claims (epistemics: a non-adjudicated round concludes nothing)."""
+    learnings: list[str] = []
+    if has_evidence and findings:
+        try:
+            import lgwks_substrate_text as _st
+            sents = _st._fact_sentences(findings, 0.6)
+            scored = sorted(((_st._fact_score(s), s) for s in sents), key=lambda x: x[0], reverse=True)
+            learnings = [s[:300] for _, s in scored[:12]]
+        except Exception:
+            learnings = []
+    return {
+        "think": "deterministic skeleton (Tongue in agent_handoff — no local model). "
+                 "Automation-extracted learnings; no hypothesis adjudication this round.",
+        "falsifiers_hit": [],
+        "surviving": [h["id"] for h in hyps],
+        "learnings": learnings,
+        "guide_verdict": {"claim": "", "verdict": "unverified", "evidence": ""},
+        "frontier": [],
+        "digest": " ".join(learnings)[:600],
+        "converged": False,
+        "_skeleton": True,
+    }
+
+
 def _canon(obj) -> str:
-    return json.dumps(obj, sort_keys=True, separators=(",", ":"))
+    # one source of truth (lgwks_hashing.canonical_json); ascii=True == prior default
+    return lgwks_hashing.canonical_json(obj, ascii=True)
 
 
 def _verify_ledger(ledger: Path, key: bytes) -> bool:
@@ -569,15 +636,24 @@ def run_auto(cfg: AutoConfig, emit=print) -> AutoResult:
             round_ctx = (digest + focus)[-6000:]
 
             # 1. GENERATE — autonomous Hn, building on the (sanitized) rolling digest + agenda focus.
+            #    Research is AUTOMATION; the Tongue only ENHANCES. When the model is in agent_handoff
+            #    (no local model), the loop MAY fall to a deterministic skeleton so the crawl/extract
+            #    spine still runs — but ONLY with explicit consent (cfg.degrade_consent, set by a human
+            #    flag or an AI approval). Without consent the run FAILS CLOSED (constitution: never
+            #    silently degrade or fabricate when the generative model is offline).
             compiled = lgwks_tongue.compile_hypotheses(cfg.objective, cfg.purpose, context=round_ctx)
-            budget.charge()
+            ai_enhanced = bool(compiled)
             if not compiled:
-                stop = "tongue_offline"; emit("    Tongue offline — stopping (fail closed)."); break
+                if not cfg.degrade_consent:
+                    stop = "tongue_offline"; emit("    Tongue offline — stopping (fail closed; no degrade consent)."); break
+                compiled = _skeleton_hypotheses(cfg.objective)
+            budget.charge()
             if _spent_break():
                 emit("    budget hit after generate — stopping."); break
             hyps = compiled["hypotheses"]
-            emit(f"    generate: {len(hyps)} hypotheses (H0 null + {len(hyps)-1} mechanism) "
-                 f"· citations UNVERIFIED")
+            provenance = PROVENANCE_CO_SCIENTIST if ai_enhanced else PROVENANCE_ML_ATTENTION
+            emit(f"    generate: {len(hyps)} hypotheses (H0 null + {len(hyps)-1} mechanism)"
+                 f" · {provenance}")
 
             # 2. CRAWL — frontier → (findings, has_evidence, sources). No evidence ⇒ PLANNING round.
             findings, has_evidence, sources = _crawl(cfg, frontier)
@@ -588,8 +664,10 @@ def run_auto(cfg: AutoConfig, emit=print) -> AutoResult:
             #    (epistemics CRITICAL): a planning round plans, it does not conclude.
             reason = lgwks_tongue.reason_over_findings(cfg.objective, hyps, findings, context=round_ctx)
             budget.charge()
-            if not reason:
-                stop = "tongue_offline"; emit("    reason step offline — stopping."); break
+            if not reason:   # Tongue handoff → deterministic skeleton ONLY with consent; else fail closed
+                if not cfg.degrade_consent:
+                    stop = "tongue_offline"; emit("    reason step offline — stopping (fail closed; no degrade consent)."); break
+                reason = _skeleton_reason(hyps, findings, has_evidence)
             if not has_evidence:                       # strip evidence-bearing claims from a planning round
                 reason["falsifiers_hit"] = []
                 reason["learnings"] = []
@@ -810,6 +888,21 @@ def _save_round(out_dir: Path, n: int, frontier: str, compiled: dict, reason: di
     (rdir / "sources.json").write_text(_canon(sources or []), encoding="utf-8")
 
 
+_LIBRARY_QUERY_TERMS = (
+    "api", "sdk", "hook", "class", "function", "method", "endpoint", "import",
+    "install", "config", "library", "package", "module", "cli", "syntax",
+    "parameter", "argument", "decorator", "framework", "compile", "error code",
+)
+
+
+def _looks_like_library_query(query: str) -> bool:
+    """Heuristic: is this a code/library/API question (ctx7 docs help) vs a
+    factual/entity/event question (web only)? Conservative — defaults to web-only
+    so entity queries are not polluted by name-collision SDK docs."""
+    q = query.lower()
+    return any(t in q for t in _LIBRARY_QUERY_TERMS)
+
+
 def research_command(args: argparse.Namespace) -> int:
     """Unified research command: merges begin, probe, and orchestrators."""
     objective = args.prompt
@@ -830,19 +923,50 @@ def research_command(args: argparse.Namespace) -> int:
         res = run_auto(cfg)
         return 0 if res.ledger_intact else 1
     
-    # Otherwise, run the "begin" style engine probe
+    import lgwks_ui as ui
+
+    # --live (without --deep): single-shot grounding. The flag is documented as
+    # "fetch real evidence from web" — honor that directly instead of silently
+    # falling through to the repo world-view (which fetches nothing).
+    if getattr(args, "live", False):
+        import sys
+        import lgwks_ground
+        # Route by query shape: library/API/code questions benefit from ctx7 docs;
+        # factual/entity/event questions ("who is the CEO of X") do NOT — pulling docs
+        # there drowns the answer in an unrelated SDK whose name merely matches a token.
+        want_docs = _looks_like_library_query(objective)
+        g = lgwks_ground.ground(objective, want_docs=want_docs)
+        findings = lgwks_ground.as_findings(g)
+        if getattr(args, "json", False):
+            print(json.dumps({
+                "schema": "lgwks.research.live.v0",
+                "query": objective,
+                "has_evidence": g.get("has_evidence", False),
+                "sources": g.get("doc_sources", []),
+                "findings": findings,
+            }, indent=2))
+            return 0 if g.get("has_evidence") else 2
+        on = ui.color_on()
+        print("\n".join(ui.band("lgwks · research (live)", f"Grounding: {objective}", on=on)))
+        print(findings)
+        if not g.get("has_evidence"):
+            print("\n[research] no evidence retrieved — check capability auth (lgwks doctor) or try --deep",
+                  file=sys.stderr)
+            return 2
+        return 0
+
+    # Otherwise, run the "begin" style engine probe (repo world-view).
     import lgwks_session
     import lgwks_engine
-    import lgwks_ui as ui
     repo = Path(getattr(args, "repo", ".")).resolve()
-    
+
     session_summary = lgwks_session.session_begin(repo)
     engine_result = lgwks_engine.run_engine(objective, repo=repo)
-    
+
     if getattr(args, "json", False):
         print(json.dumps({"session": session_summary, "subconscious": engine_result}, indent=2))
         return 0
-        
+
     on = ui.color_on()
     print("\n".join(ui.band("lgwks · research", f"Starting: {objective}", on=on)))
     return 0

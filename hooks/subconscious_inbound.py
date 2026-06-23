@@ -60,32 +60,10 @@ def _format_context(schema: dict) -> str:
 
 
 def _emit_daemon_event(repo_root: Path, prompt: str, session_id: str) -> None:
-    """Best-effort: index this prompt as a human_message into the daemon store."""
-    try:
-        import lgwks_daemon_event
-        from lgwks_daemon_store import DaemonEventStore
-        db = repo_root / "store" / "daemon" / "daemon-events.db"
-        tenant_id = f"repo:{repo_root.name}"
-        event = lgwks_daemon_event.build_event(
-            tenant_id=tenant_id,
-            agent_id="claude",
-            session_id=session_id or f"claude:{repo_root.name}",
-            actor="human",
-            client="claude",
-            lane="ingress",
-            kind="human_message",
-            scope="agent_local",
-            payload={"prompt_len": len(prompt), "prompt_head": prompt[:120]},
-            source="text",
-            trust="human_confirmed",
-        )
-        store = DaemonEventStore(db)
-        try:
-            store.append(event)
-        finally:
-            store.close()
-    except Exception:
-        pass  # fail-silent — adapter must never block
+    """Best-effort: index this prompt as a human_message into the daemon store.
+    One source of truth (lgwks_daemon_store.emit_inbound_message) — was a per-agent copy."""
+    import lgwks_daemon_store
+    lgwks_daemon_store.emit_inbound_message(repo_root, prompt, session_id, agent_id="claude")
 
 
 def main() -> int:

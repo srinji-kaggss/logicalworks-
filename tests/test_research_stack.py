@@ -103,25 +103,33 @@ class TestSearchHygiene(unittest.TestCase):
 
     def test_open_rotates_endpoints_on_empty(self):
         # the live failure: one endpoint 429s → empty. _open must back off and rotate to the next host.
+        # Inject a 2-endpoint roster so the rotation MECHANISM is exercised deterministically,
+        # independent of which production endpoints happen to be live (dead endpoints are retired
+        # from the real roster, so we don't depend on a specific one being present).
+        E1, E2 = "https://e1.example/s", "https://e2.example/s"
+        roster = [
+            ("e1", E1, "get", search._parse_links),
+            ("e2", E2, "get", search._parse_links),
+        ]
         calls = []
         def fake_curl(url, data=None, timeout=20, ua=""):
             calls.append(url)
-            if "html.duckduckgo" in url:
+            if url.startswith(E1):
                 return ""                                   # first endpoint blocked/empty
             # second endpoint answers — body must be > _MIN_BODY (200) to avoid short-body rejection
             return ('<a href="https://cl.com/acq">Canada Life acquisition</a>'
                     + "\n" + "x" * 300)
         slept = []
-        orig = search._curl
+        orig_curl, orig_eps = search._curl, search._FLOOR_ENDPOINTS
         search._curl = fake_curl
+        search._FLOOR_ENDPOINTS = roster
         try:
             rows = search._open("Canada Life acquisition", k=3, sleep=lambda s: slept.append(s))
         finally:
-            search._curl = orig
+            search._curl, search._FLOOR_ENDPOINTS = orig_curl, orig_eps
         self.assertTrue(rows, "rotation must recover when the first endpoint is dry")
         self.assertEqual(rows[0]["url"], "https://cl.com/acq")
-        # 3 endpoints × 2 retries each = up to 6 calls; first endpoint is empty so at least 2+ calls
-        self.assertGreaterEqual(len(calls), 2, "must have tried more than one endpoint")
+        self.assertTrue(any(u.startswith(E2) for u in calls), "must have rotated to the next endpoint")
         self.assertTrue(slept, "must have backed off before rotating")
 
     def test_mojeek_parser_skips_promo_and_nav(self):
@@ -1006,12 +1014,15 @@ class TestMultiply(unittest.TestCase):
 
 class TestGroundDegradation(unittest.TestCase):
     def test_web_empty_search_returns_no_evidence(self):
-        orig = search.sweep
-        search.sweep = lambda q, **k: {"results": [], "arms_empty": ["all"], "has_evidence": False}
+        # _web now grounds through the canonical kernel: lgwks_search.search →
+        # render → substrate fact-extraction (the SAME extractor the crawl uses),
+        # retiring the divergent resolve_fact. Empty search ⇒ no fetch, no evidence.
+        orig = search.search
+        search.search = lambda q, k=6: []
         try:
             text, cites = ground._web("anything")
         finally:
-            search.sweep = orig
+            search.search = orig
         self.assertEqual((text, cites), ("", []))
 
     def test_ground_has_evidence_false_when_all_empty(self):

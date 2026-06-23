@@ -57,8 +57,10 @@ class TestOpenRetry(unittest.TestCase):
         mock_time.sleep = lambda x: None
         results = search._open("test query", 4, sleep=mock_time.sleep)
         assert results == []
-        # 3 endpoints × 2 retries = up to 6 curl calls
-        assert mock_curl.call_count == 6
+        # invariant: each LIVE floor endpoint is retried up to 2× before giving up.
+        # Track the actual roster, not a hardcoded count — dead endpoints are retired
+        # from rotation rather than kept as pure latency.
+        assert mock_curl.call_count == 2 * len(search._FLOOR_ENDPOINTS)
 
     @patch.object(search, "_curl", side_effect=["short", "", "", "", "", ""])
     @patch.object(search, "time")

@@ -584,3 +584,94 @@ landing). **Build-state truth = BUILDLOG.md.** Net new/changed surface:
   reranker (after #124), local Tongue/proposal/code helpers (#119 mesh `status:open_slot`).
 - Tracked debt: **#139** flaky `test_concurrent_appends_across_agents` (pre-existing
   `lgwks_sqlite` migration-init race under parallel load — fix = idempotent migration apply).
+
+---
+
+### Session 20 (2026-06-23) — Orchestrator collapse onto the daemon + PULSE-hardened affordance API
+
+**Director's thesis this session:** the **daemon is the SUPREME entrypoint + the one
+harness/orchestrator — the main runtime (the proverbial backend).** Everything
+(`agent`, `research`, `state run`) routes through it. Diagnosis: there were **four
+competing orchestrators with no shared control architecture** — the orchestration-layer
+version of the duplicate-concept bug: `lgwks_agent.act()` (single-shot keyword
+classifier), `lgwks_research.run_auto()` (the only real multi-round loop), `lgwks_daemon`
+(always-on core), `lgwks_run.py` (post-gate spine). Every "categorical failure" from the
+research-dogfood (automation gated behind AI, search fallback gated off, dual evidence
+path, abort-on-first-failure) was an **orchestration** bug, not a core-logic bug.
+
+**Anchor reframe:** the daemon context packet (`lgwks.context.packet.v1`, `get_packet` in
+`lgwks_daemon_store.py`) **IS** the Director's "smart form / API contract" — "the one
+canonical daemon briefing read by every agent." It was DESCRIPTIVE only; this session made
+it PRESCRIPTIVE. Formalized by the Director's **PULSE** research (`~/Downloads/pulse_okf_package`):
+a next-step = PULSE **affordance** (valid state-dependent move); `next_steps` = affordance
+set `A(s,c)`; `WorkCapability` = PULSE **operation schema**; daemon `WORK_KIND` = PULSE op.
+
+**LANDED — tested (194 affected-suite + 15 packet tests green, 0 regressions). Receipts:**
+1. **Typed capability registry** — `WorkCapability` + `WORK_REGISTRY` in `lgwks_daemon_store.py`,
+   replacing the bare `WORK_KINDS` string-set (`WORK_KINDS = frozenset(WORK_REGISTRY)` so every
+   validator still works).
+2. **Prescriptive packet** — `next_steps()` added as a LOCKED packet section
+   (`CONTEXT_PACKET_SECTIONS`); computed from registry × derived state (`_derive_packet_state`,
+   `_CAP_PREDICATES`). Surfaced in the agent door (`lgwks_agent.act()` now carries `next_steps`).
+3. **Research dual-evidence-path COLLAPSED** — `lgwks_ground._web` composes the canonical kernel
+   (`lgwks_search.search` → `lgwks_browser.render` → `lgwks_html.html_to_markdown` →
+   `lgwks_substrate_text._fact_sentences`), retiring the divergent `lgwks_search_engine.resolve_fact`.
+   Re-wired the dropped **G3 URL-risk gate** (`_curate_results`) + fixed its latent `None.decision`
+   crash. `lgwks_ground` has exactly one importer (`lgwks_research`).
+4. **Pre-compaction dogfood fixes (in the same uncommitted set):** `lgwks_html.py` MathML→LaTeX
+   strip; `lgwks_substrate_text._fact_score` noise gates (math/markup/table/chrome + alpha-ratio);
+   `lgwks_search.py` rendered-browser fallback default-on; `lgwks_research.py` deterministic skeleton
+   fallbacks (decoupled the loop from required AI).
+5. **PULSE hardening** — enriched `WorkCapability` to a full op-schema: `modes` (ask/do), `risk`,
+   `requires_confirmation`, `semantics{side_effect,reversible,idempotent,retry_safe}`, `repair`.
+   `approval()` now derives from PULSE policy+semantics (high-risk/irreversible-send→force,
+   confirm/medium/write→once, else none). **PULSE P5 wired**: a blocked affordance emits the NEXT
+   LEGAL MOVE via `repair` (index_run-blocked→"do research_run"; worktree_open-blocked→"do
+   worktree_close"). Locked by `tests/test_context_packet.py::TestPulseAffordanceHardening` (5 tests).
+
+**Commit scope (CORRECTED 2026-06-23 post-outage):** the earlier note here split this into
+"9 session-20 files + 21 prior-session do-not-sweep" — that framing was over-cautious and
+WRONG. Director confirmed all 32 dirty files are ONE continuous body of work from this day
+(mtimes 05:49–09:54, one daemon/research-collapse thrust). All 32 + `.gitignore` (now ignoring
+`scratch_research/` session scratch) committed together on branch
+`feat/daemon-research-collapse-s20` → single PR. The core-9 receipts above
+(`lgwks_daemon_store.py`, `lgwks_agent.py`, `lgwks_ground.py`, `lgwks_html.py`,
+`lgwks_substrate_text.py`, `lgwks_search.py`, `lgwks_research.py`,
+`tests/test_context_packet.py`, `tests/test_research_stack.py` — one stub retargeted to the
+canonical `search.search` seam, invariant preserved) are the documented subset; the rest
+(graph, tongue/inbound dedup, model hub/setup, hashing/capabilities, crawler, registry) are
+the same session's adjacent dedup/hardening work.
+
+**NEXT — the deep collapse the Director authorized (interrupted mid-grounding here):**
+make the daemon the supreme entrypoint/orchestrator; **delete the competing orchestrator loops.**
+Grounding already done — start here, don't re-discover:
+- **Daemon API surface (`lgwks_daemon.py`):** `SessionDaemon` @462 (`status`/`start`@561/`stop`@589);
+  commands `_enqueue_command`@936, `_research_command`@842, `_packet_command`@1027, `_queue_command`@957,
+  `_runs_command`@906, `_emit_command`@970, `_stream_command`@1260; **dispatcher `_dispatch_item`@434**
+  handles `research_run`(→`lgwks_substrate_run.build_run`+`register_run`) and `worktree_open/close`;
+  ALL other kinds → `complete_item({"dispatched":True})` (stub). `add_parser`@1179; there is a SECOND
+  parser block @1301+ — verify whether it's a dup/alt surface and collapse if so.
+- **Target shape:** `lgwks agent` / `lgwks research` / `state run` become THIN ADAPTERS that
+  (a) ensure a daemon session, (b) read the affordance form from the packet, (c) enqueue the chosen
+  affordance, (d) return the daemon's result/packet. DELETE `lgwks_agent.act/compile_plan/compose`
+  (the keyword classifier) and route `agent_command` through the daemon.
+- **BLOCKERS to resolve BEFORE deleting (else the runtime breaks):** (1) daemon dispatch knows only
+  ~3 work-kinds, but the agent door dispatches ~90 CLI verbs in-process (`lgwks_agent._cap_dispatch`)
+  — the daemon must absorb generic verb dispatch OR those verbs become work-kinds; (2) `_dispatch_item`
+  is ASYNC (queue/worker) while `agent`/`research` are SYNC CLI — add a synchronous "dispatch one
+  affordance now" path on `SessionDaemon` that reuses `_dispatch_item`; (3) `run_auto`'s multi-round
+  frontier loop: decide move-into-dispatch (as a work-kind) vs retire-for-substrate-build_run — the
+  daemon already crawls via substrate, so the loop's unique value is iterate/converge/ledger;
+  (4) test contracts pinning old loops: `tests/test_agent_door.py`, `tests/test_research_stack.py`,
+  `tests/test_run_spine.py`, `tests/test_cli_contract.py` (verb-budget) — retarget only where the
+  invariant holds (no gate-weakening).
+- **Remaining PULSE roadmap** (memory `project_lgwks_daemon_smart_form`): (a) full runtime-pipeline
+  hardening of `_dispatch_item` (canon→verify→schema→capability→state.pre→risk→replay/idem→execute→
+  audit→emit typed fail/deny+repair); (b) typed wire grammar (ask/do/say/need/ok/fail/deny) across
+  agent door + daemon response + research loop (only `modes` vocab present); (c) idempotency ledger
+  keyed by canonical_hash + replay nonce/ttl (daemon has partial idem-by-run_id — verify before duping).
+  OUT of scope (PULSE phases 3–6, need deps/large): binary CBOR, compression lanes, transports.
+- **END-STATE RESEARCH BAR** (Director, "depth of this research, better than firecrawl, end state"):
+  the `pulse_okf_package` shape IS the bar for lgwks research OUTPUT — a synthesized FORMAL artifact
+  (thesis + state-transition math + EBNF grammar + threat model + op schemas + phased roadmap +
+  condensed agent-seed), not a list of cited facts. `lgwks research` must synthesize INTO this shape.

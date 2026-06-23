@@ -41,3 +41,6 @@ graphify-out/
 findings/
 .ci-runs/
 .keel/
+
+# session scratch — research spine experiments, not source of truth
+scratch_research/

@@ -12,6 +12,7 @@ import argparse
 import json
 import sqlite3
 import sys
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
@@ -29,14 +30,158 @@ PACKET_SCHEMA = "lgwks.context.packet.v1"  # #122: promoted from lgwks.daemon.pa
 CONTEXT_PACKET_SECTIONS = (
     "session_head", "queue", "recent_events", "event_count",
     "active_task", "retrieval", "known_failures", "commitments",
-    "constraints", "allowed_capabilities", "provenance",
+    "constraints", "allowed_capabilities", "next_steps", "provenance",
 )
 WORKTREE_SCHEMA = "lgwks.daemon.worktree.v0"
 
-WORK_KINDS = frozenset({
-    "research_run", "ingest_file", "workflow", "index_run", "custom",
-    "worktree_open", "worktree_close",
-})
+@dataclass(frozen=True)
+class WorkCapability:
+    """The typed contract behind one daemon WORK_KIND — the single source of truth
+    for 'what work the daemon can do'. This is a PULSE *operation schema*: the
+    daemon WORK_KIND is a PULSE op, a context-packet next-step is a PULSE
+    *affordance* (a valid state-dependent move), and the affordance set is the
+    packet's next_steps. Hardened against the PULSE research package (#pulse-okf,
+    2026-06-23): an affordance carries not just its form fields but its speech-act
+    modes, policy (risk/confirmation), execution semantics (side-effect/
+    reversibility/idempotency/retry-safety), declared pre/post state, and — the
+    key one — a machine-readable REPAIR map so a blocked or failed move emits the
+    NEXT LEGAL MOVE, never a dead error (PULSE P5).
+
+    Fields:
+      summary       one-line 'what this does', shown verbatim in the form.
+      args_schema   {arg: {"type","required","help"}} — PULSE slots; the form fields.
+      effect_class  read | network | write — coarse lane (mirrors the agent door).
+      modes         PULSE speech-acts this op accepts: ask (query) / do (mutate).
+      preconditions predicate names (= PULSE state.pre); ALL must hold to be ready.
+      produces      state tokens this adds (= PULSE state.post; affordance chaining).
+      fallbacks     ORDERED alt kinds (declared seam; real chains live in-capability).
+      risk          low | medium | high — PULSE policy.
+      requires_confirmation  PULSE policy: a human/explicit confirm gate.
+      side_effect   none | reads | writes_state | external_message — PULSE semantics.
+      reversible / idempotent / retry_safe  PULSE execution semantics; drive the
+                    approval gate and the retry hint in a repair frame.
+      repair        PULSE P5: {unmet_precondition -> next-legal-move frame string}.
+                    Encodes the affordance-graph edge to traverse when blocked.
+    """
+    kind: str
+    summary: str
+    args_schema: dict[str, dict[str, Any]]
+    effect_class: str
+    modes: tuple[str, ...] = ("do",)
+    preconditions: tuple[str, ...] = ()
+    produces: tuple[str, ...] = ()
+    fallbacks: tuple[str, ...] = ()
+    risk: str = "low"
+    requires_confirmation: bool = False
+    side_effect: str = "none"
+    reversible: bool = True
+    idempotent: bool = True
+    retry_safe: bool = True
+    repair: dict[str, str] = field(default_factory=dict)
+
+    def approval(self) -> str:
+        """Approval class the form advertises, derived from PULSE policy+semantics —
+        not effect_class alone. high-risk OR irreversible external side-effect ⇒
+        'force'; any confirmation/medium-risk/write ⇒ 'once'; otherwise 'none'.
+        This tightens the gate: an op classed 'network' but irreversible (e.g. an
+        external send) now demands confirmation instead of slipping through."""
+        irreversible_send = (not self.reversible) and self.side_effect == "external_message"
+        if self.risk == "high" or irreversible_send:
+            return "force"
+        if self.requires_confirmation or self.risk == "medium" or self.effect_class == "write":
+            return "once"
+        return "none"
+
+
+# The canonical work-capability registry — PULSE operation schemas. Adding a kind
+# here makes it appear in the smart form automatically (no keyword classifier).
+WORK_REGISTRY: dict[str, WorkCapability] = {
+    cap.kind: cap for cap in (
+        WorkCapability(
+            kind="research_run",
+            summary="crawl a target into a complete research substrate (chunks + STEM facts + vectors + graph)",
+            args_schema={
+                "target": {"type": "string", "required": True, "help": "URL or path to research"},
+                "project": {"type": "string", "required": False, "help": "slug (default: derived from target)"},
+                "max_pages": {"type": "int", "required": False, "help": "crawl budget (default 12)"},
+            },
+            effect_class="network", modes=("do",),
+            produces=("substrate_run",),
+            risk="low", side_effect="writes_state",
+            reversible=True, idempotent=True, retry_safe=True,
+            repair={"network": "need human.login (auth wall) or retry with smaller max_pages"},
+        ),
+        WorkCapability(
+            kind="ingest_file",
+            summary="ingest one local file/dir into the substrate (no network fetch)",
+            args_schema={
+                "target": {"type": "string", "required": True, "help": "file or directory path"},
+            },
+            effect_class="network", modes=("do",),
+            produces=("substrate_run",),
+            risk="low", side_effect="writes_state",
+            reversible=True, idempotent=True, retry_safe=True,
+        ),
+        WorkCapability(
+            kind="index_run",
+            summary="register a completed substrate run into long-lived shared daemon state",
+            args_schema={
+                "run_id": {"type": "string", "required": True, "help": "run to index"},
+            },
+            effect_class="read", modes=("do",),
+            preconditions=("has_unindexed_run",),
+            produces=("indexed_run",),
+            risk="low", side_effect="writes_state",
+            reversible=True, idempotent=True, retry_safe=True,
+            repair={"has_unindexed_run": "do research_run (no unindexed run exists — produce one first)"},
+        ),
+        WorkCapability(
+            kind="worktree_open",
+            summary="create a daemon-refereed git worktree for this session",
+            args_schema={},
+            effect_class="write", modes=("do",),
+            preconditions=("no_active_worktree",),
+            produces=("worktree",),
+            risk="medium", side_effect="writes_state",
+            reversible=True, idempotent=False, retry_safe=False,
+            repair={"no_active_worktree": "do worktree_close (a worktree is already active — close it first)"},
+        ),
+        WorkCapability(
+            kind="worktree_close",
+            summary="close this session's active worktree and reconverge its CRDT sidecar",
+            args_schema={
+                "worktree_id": {"type": "string", "required": True, "help": "worktree to close"},
+            },
+            effect_class="write", modes=("do",),
+            preconditions=("has_active_worktree",),
+            risk="medium", side_effect="writes_state",
+            reversible=False, idempotent=True, retry_safe=True,
+        ),
+        WorkCapability(
+            kind="workflow",
+            summary="run a typed multi-phase workflow plan",
+            args_schema={
+                "plan": {"type": "object", "required": True, "help": "workflow plan"},
+            },
+            effect_class="write", modes=("do",),
+            risk="medium", requires_confirmation=True, side_effect="writes_state",
+            reversible=False, idempotent=False, retry_safe=False,
+        ),
+        WorkCapability(
+            kind="custom",
+            summary="generic escape-hatch work item (fail-closed: treated as high-risk write)",
+            args_schema={
+                "payload": {"type": "object", "required": False, "help": "free-form payload"},
+            },
+            effect_class="write", modes=("do",),
+            risk="high", requires_confirmation=True, side_effect="writes_state",
+            reversible=False, idempotent=False, retry_safe=False,
+        ),
+    )
+}
+
+# Derived: every consumer that validated against the string-set keeps working.
+WORK_KINDS = frozenset(WORK_REGISTRY)
 ITEM_STATUSES = frozenset({"queued", "running", "done", "failed"})
 STATS_SCHEMA = "lgwks.daemon.stats.v0"
 
@@ -228,6 +373,99 @@ def _known_failures(events: list[dict[str, Any]]) -> list[dict[str, Any]]:
                 "ts": ev.get("ts"),
             })
     return out
+
+
+def _derive_packet_state(events: list[dict[str, Any]]) -> dict[str, bool]:
+    """Deterministic boolean state read off the scoped event slice — the inputs to
+    capability preconditions. Best-effort and degrade-honest: a condition is only
+    True when positively observed in the recent events, never assumed."""
+    opens = closes = 0
+    for ev in events:
+        kind = ev.get("kind") or ""
+        payload = ev.get("payload") or {}
+        dk = payload.get("kind") or ""
+        evt = payload.get("event") or ""
+        if kind == "worktree_open" or dk == "worktree_open" or evt == "worktree_opened":
+            opens += 1
+        elif kind == "worktree_close" or dk == "worktree_close" or evt == "worktree_closed":
+            closes += 1
+    return {
+        "has_active_worktree": opens > closes,
+        # Runs are auto-indexed at dispatch (register_run follows build_run), so a
+        # manual index step is offered only when an unindexed run is positively seen.
+        "has_unindexed_run": False,
+    }
+
+
+# Precondition predicates over the derived state. A capability is "ready" only when
+# ALL its predicates hold. Adding a precondition name here makes it available to the
+# registry — one source of truth for what gates a next-step.
+_CAP_PREDICATES = {
+    "has_active_worktree": lambda s: s.get("has_active_worktree", False),
+    "no_active_worktree": lambda s: not s.get("has_active_worktree", False),
+    "has_unindexed_run": lambda s: s.get("has_unindexed_run", False),
+}
+
+
+def _eval_preconditions(cap: "WorkCapability", state: dict[str, bool]) -> tuple[bool, list[str]]:
+    """Return (ready, unmet_predicate_names). Ready ⇔ every precondition holds."""
+    unmet = [p for p in cap.preconditions if not _CAP_PREDICATES.get(p, lambda _s: True)(state)]
+    return (not unmet), unmet
+
+
+def next_steps(events: list[dict[str, Any]],
+               allowed_capabilities: list[str] | None = None) -> list[dict[str, Any]]:
+    """The smart form: the valid next actions, COMPUTED from the work registry ×
+    current state — not a keyword guess.
+
+    The full capability menu is returned (transparency for the reasoning tier), each
+    annotated with its arg-schema (the form fields), whether its preconditions are
+    met right now, why, and the effect/approval class so the consumer knows the gate.
+    Ready steps sort first; ties break by kind, so the projection is deterministic.
+    When ``allowed_capabilities`` is supplied (the #120 authorization seam) the menu
+    is intersected with it; empty ⇒ no filter (advisory — execution still gates)."""
+    state = _derive_packet_state(events)
+    allow = set(allowed_capabilities or ())
+    # Declaration order = curated priority (research_run first, the generic custom/
+    # workflow escape-hatches last). Used as the deterministic secondary sort key so
+    # the most useful step surfaces first instead of an alphabetical accident.
+    order = {kind: i for i, kind in enumerate(WORK_REGISTRY)}
+    steps: list[dict[str, Any]] = []
+    for kind in WORK_REGISTRY:
+        if allow and kind not in allow:
+            continue
+        cap = WORK_REGISTRY[kind]
+        ready, unmet = _eval_preconditions(cap, state)
+        # PULSE P5: a blocked affordance emits the NEXT LEGAL MOVE(s), never a dead
+        # end. repair is keyed by the unmet precondition — the affordance-graph edge
+        # to traverse (e.g. index_run blocked ⇒ "do research_run first").
+        repair = [cap.repair[p] for p in unmet if p in cap.repair]
+        steps.append({
+            "kind": cap.kind,
+            "mode": cap.modes[0],            # primary speech-act (PULSE: ask/do)
+            "modes": list(cap.modes),
+            "summary": cap.summary,
+            "args_schema": cap.args_schema,
+            "effect_class": cap.effect_class,
+            "approval": cap.approval(),
+            "risk": cap.risk,
+            "requires_confirmation": cap.requires_confirmation,
+            "semantics": {
+                "side_effect": cap.side_effect,
+                "reversible": cap.reversible,
+                "idempotent": cap.idempotent,
+                "retry_safe": cap.retry_safe,
+            },
+            "produces": list(cap.produces),
+            "fallbacks": list(cap.fallbacks),
+            "preconditions": list(cap.preconditions),
+            "preconditions_met": ready,
+            "blocked_by": unmet,
+            "repair": repair,
+            "why": ("ready: " + cap.summary) if ready else ("blocked: needs " + ", ".join(unmet)),
+        })
+    steps.sort(key=lambda s: (not s["preconditions_met"], order[s["kind"]]))
+    return steps
 
 
 def validate_context_packet(packet: dict[str, Any]) -> dict[str, Any]:
@@ -715,6 +953,10 @@ class DaemonEventStore:
             "commitments": [],   # transcript-cortex sourced; stubbed-but-shaped (#122 seam)
             "constraints": [],   # active governance/AUP constraints; stubbed-but-shaped (#122 seam)
             "allowed_capabilities": allowed_capabilities,
+            # The smart form: valid next actions computed from the work registry ×
+            # state. This is what guides the agent through the workflow — replaces
+            # the keyword classifier in the agent front door (#research-dogfood).
+            "next_steps": next_steps(events, allowed_capabilities),
             "provenance": {
                 "watermark_event_id": events[0]["event_id"] if events else None,
                 "store_versions": {},
@@ -915,6 +1157,45 @@ class DaemonEventStore:
             }
             for r in rows
         ]
+
+
+def emit_inbound_message(
+    repo_root: Path,
+    prompt: str,
+    session_id: str = "",
+    *,
+    agent_id: str,
+    client: str | None = None,
+) -> None:
+    """Canonical ingress adapter: record a human prompt as a `human_message` event.
+
+    ONE implementation for every ingress hook (codex / gemini / claude / …). The
+    per-agent copies had drifted — some omitted `source`/`trust` — so this is the
+    single source of truth, parameterised only by `agent_id`/`client`. Fail-silent
+    by law (INV-6): any error → no-op, never blocks the hook.
+    """
+    try:
+        db = repo_root / "store" / "daemon" / "daemon-events.db"
+        event = lgwks_daemon_event.build_event(
+            tenant_id=f"repo:{repo_root.name}",
+            agent_id=agent_id,
+            session_id=session_id or f"{agent_id}:{repo_root.name}",
+            actor="human",
+            client=client or agent_id,
+            lane="ingress",
+            kind="human_message",
+            scope="agent_local",
+            payload={"prompt_len": len(prompt), "prompt_head": prompt[:120]},
+            source="text",
+            trust="human_confirmed",
+        )
+        store = DaemonEventStore(db)
+        try:
+            store.append(event)
+        finally:
+            store.close()
+    except Exception:
+        pass
 
 
 def _append_command(args: argparse.Namespace) -> int:

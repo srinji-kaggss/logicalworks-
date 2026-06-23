@@ -50,7 +50,8 @@
       "evidence": {
         "tool": "python3",
         "argv": ["scripts/check_schema_registry.py"],
-        "ok_when": "exit==0"
+        "ok_when": "exit==0",
+        "scope": ["**/*.py", "docs/schemas/REGISTRY.md", "scripts/check_schema_registry.py"]
       }
     }
   ],

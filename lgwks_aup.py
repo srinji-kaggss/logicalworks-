@@ -399,8 +399,8 @@ class AUPGate:
         return inst
 
     def _canonical_request(self, request: dict) -> str:
-        """Stable JSON for request hashing."""
-        return json.dumps(request, sort_keys=True, separators=(",", ":"))
+        """Stable JSON for request hashing — one source of truth (lgwks_hashing)."""
+        return lgwks_hashing.canonical_json(request, ascii=True)
 
     def _validate_request(self, request: dict) -> tuple[bool, str]:
         # Layer 1: required fields

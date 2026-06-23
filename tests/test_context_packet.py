@@ -140,5 +140,48 @@ class TestAdapterConsumes(unittest.TestCase):
         self.assertIsNotNone(briefing["watermark"])
 
 
+class TestPulseAffordanceHardening(unittest.TestCase):
+    """The packet next_steps is a PULSE affordance set: each step carries speech-act
+    modes, policy-derived approval, execution semantics, and — PULSE P5 — a
+    machine-readable repair (next legal move) when blocked. Locks the #pulse-okf
+    hardening so it cannot silently regress to a bare 'preconditions_met' bool."""
+
+    def test_next_steps_is_a_locked_packet_section(self):
+        self.assertIn("next_steps", CONTEXT_PACKET_SECTIONS)
+
+    def test_approval_derives_from_policy_not_effect_class_alone(self):
+        from lgwks_daemon_store import next_steps
+        by = {s["kind"]: s for s in next_steps([])}
+        # high-risk escape hatch force-gates; low-risk reversible network op is open;
+        # medium-risk write needs one approval — proves approval reads policy+semantics.
+        self.assertEqual(by["custom"]["approval"], "force")
+        self.assertEqual(by["research_run"]["approval"], "none")
+        self.assertEqual(by["workflow"]["approval"], "once")
+
+    def test_p5_blocked_affordance_emits_next_legal_move(self):
+        from lgwks_daemon_store import next_steps
+        # index_run is blocked with no run to index — it must point to research_run,
+        # not dead-end. (PULSE P5: every failure yields the next legal move.)
+        by = {s["kind"]: s for s in next_steps([])}
+        self.assertFalse(by["index_run"]["preconditions_met"])
+        self.assertIn("has_unindexed_run", by["index_run"]["blocked_by"])
+        self.assertTrue(any("research_run" in r for r in by["index_run"]["repair"]))
+
+    def test_p5_repair_follows_state_affordance_graph(self):
+        from lgwks_daemon_store import next_steps
+        # With a worktree open, worktree_open blocks and its repair is worktree_close.
+        ev = [{"kind": "worktree_open", "payload": {"kind": "worktree_open"}}]
+        by = {s["kind"]: s for s in next_steps(ev)}
+        self.assertFalse(by["worktree_open"]["preconditions_met"])
+        self.assertTrue(any("worktree_close" in r for r in by["worktree_open"]["repair"]))
+
+    def test_affordance_carries_speech_act_and_semantics(self):
+        from lgwks_daemon_store import next_steps
+        step = next(s for s in next_steps([]) if s["kind"] == "research_run")
+        self.assertIn(step["mode"], ("ask", "do"))
+        for key in ("side_effect", "reversible", "idempotent", "retry_safe"):
+            self.assertIn(key, step["semantics"])
+
+
 if __name__ == "__main__":
     unittest.main()

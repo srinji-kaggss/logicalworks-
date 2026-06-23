@@ -14,7 +14,6 @@ import time
 from pathlib import Path
 from typing import Optional, Any
 
-import lgwks_openrouter
 import lgwks_project_artifacts as artifacts
 
 
@@ -63,29 +62,11 @@ def run_synthesis(
             "checks": strength_gate.get("checks", {}),
         }
 
-    # 2. Check provider availability & test mock modes
+    # 2. Test mock mode. Real reasoning availability is decided by the ONE model
+    # gateway downstream (it defers/hands-off cleanly when no synchronous provider is
+    # reachable → the cloud branch's None-handler writes the failure meter). No
+    # separate network-provider gate (no rented cloud; MESH_LAW is local-only).
     is_mock = os.environ.get("LGWKS_TEST_SYNTH_MOCK") == "1"
-    is_configured = lgwks_openrouter.is_configured() or is_mock
-
-    if not is_configured:
-        # Write unsuccessful metering attempt
-        meter_record = {
-            "schema": "lgwks.synth.meter.v1",
-            "package_id": package_id,
-            "provider": "none",
-            "model": "none",
-            "input_tokens": 0,
-            "output_tokens": 0,
-            "l_score": 0.0,
-            "wall_time": 0.0,
-            "status": "failed_no_provider",
-            "timestamp": _ts(),
-        }
-        _write_meter(repo_path, meter_record)
-        return {
-            "synth_status": "unavailable",
-            "reason": "no_provider_reachable",
-        }
 
     start_time = time.time()
     
@@ -119,7 +100,8 @@ def run_synthesis(
         input_tokens = 120
         output_tokens = 80
     else:
-        # Call cloud OpenRouter tongue
+        # Reasoning via the ONE model gateway (lgwks_tongue._generate → lgwks_model_port):
+        # local mesh-law model or agent handoff, NOT a rented-cloud tongue.
         prompt = (
             f"Analyze the following code review findings and clusters for repo {input_data.get('repo')}.\n"
             f"Package ID: {package_id}\n"
@@ -130,22 +112,21 @@ def run_synthesis(
         schema_hint = (
             "{ reasoning: [string], next_actions: [string], claims: [ { text: string, origin_type: 'grounded'|'inferred'|'invented', basis: [string] } ] }"
         )
-        model = os.environ.get("LGWKS_TONGUE_MODEL")
-        
-        response_json, tokens_used = lgwks_openrouter.generate_json_metered(prompt, schema_hint, model=model)
-        
+        import lgwks_tongue
+        response_json = lgwks_tongue._generate(prompt, schema_hint)
+
         if response_json is None:
-            # Write unsuccessful metering attempt
+            # no synchronous reasoning provider produced output → meter + unavailable
             meter_record = {
                 "schema": "lgwks.synth.meter.v1",
                 "package_id": package_id,
-                "provider": "openrouter",
-                "model": model or "default",
+                "provider": "none",
+                "model": "none",
                 "input_tokens": len(prompt) // 4,
                 "output_tokens": 0,
                 "l_score": 0.0,
                 "wall_time": time.time() - start_time,
-                "status": "failed_empty_response",
+                "status": "failed_no_provider",
                 "timestamp": _ts(),
             }
             _write_meter(repo_path, meter_record)
@@ -153,12 +134,12 @@ def run_synthesis(
                 "synth_status": "unavailable",
                 "reason": "no_provider_reachable",
             }
-            
+
         llm_response = response_json
-        provider = "openrouter"
-        model = model or "default"
+        provider = "model_port"
+        model = "mesh-law"
         input_tokens = len(prompt) // 4
-        output_tokens = tokens_used
+        output_tokens = len(json.dumps(response_json)) // 4
 
     wall_time = time.time() - start_time
 

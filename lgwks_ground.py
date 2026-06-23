@@ -11,8 +11,8 @@ in <UNTRUSTED_FINDINGS> before it reaches a Tongue prompt; ground() itself never
 Providers (each fail-soft → returns ""):
   docs = ctx7 CLI (`npx ctx7@latest library "<q>"`) — real, works today; perfect for implementation
          guides, which reference libraries/APIs.
-  web  = firecrawl (MCP) when credits exist, else degraded. We do NOT silently fake web evidence —
-         a degraded web source contributes no evidence and says so.
+  web  = free HTTP search floor (lgwks_search) → fetch the top hits with the crawler. We do NOT
+         silently fake web evidence — a degraded web source contributes no evidence and says so.
 
 has_evidence is True iff at least one source returned real content — the loop keys PLANNING vs
 EVIDENCE off this, never off a model claim.
@@ -88,32 +88,53 @@ def _curate_results(results: list[dict]) -> tuple[list[dict], list[dict]]:
         history_path=history_path,
     )
     by_url = {item.url: item for item in scored.scored}
-    kept = [r for r in results if by_url.get(r.get("url", "")).decision == "allow"]
+    kept = [r for r in results
+            if (it := by_url.get(r.get("url", ""))) is not None and it.decision == "allow"]
     denied = [{"url": item.url, "decision": item.decision, "reasons": item.reasons}
               for item in scored.scored if item.decision != "allow"]
     return kept, denied
 
 
 def _web(query: str, read_top: int = 3) -> tuple[str, list[str]]:
-    """Web grounding via the AI-First Browser Engine.
-    
-    //why: bypasses 'DOM bs' by using vision/symbolic protocol instead of brittle parsing.
-    """
-    import lgwks_search_engine
-    res = lgwks_search_engine.resolve_fact(query)
-    if not res.get("ok"):
-        return "", []
-    
-    fact = res["fact"]
-    content = fact["content"]
-    url = res.get("url", "")
-    
-    # Store in content-addressed cache for audit/cortex
-    ch = _quarantine(url, "vision-grounded-fact", content)
-    tag = f" · cache:{ch[:12]}" if ch else ""
-    
-    findings = f"[{fact['via']}{tag}] Grounded fact for: {query}\n{content}\n{url}"
-    return findings, [url] if url else []
+    """Web grounding through the ONE canonical evidence kernel:
+    fixed search (lgwks_search, rendered fallback) → canonical browser fetch
+    (lgwks_browser.render) → canonical HTML→markdown (lgwks_html) → canonical
+    noise-gated fact extraction (lgwks_substrate_text) — the SAME extractor the
+    substrate crawl uses.
+
+    This retires the divergent single-fact resolver (lgwks_search_engine.resolve_fact)
+    so the research loop and the substrate crawl share ONE evidence path instead of
+    two slightly-different ones (#research-dogfood: kill the dual path). Returns the
+    top noise-gated facts across multiple primary sources + their citation URLs."""
+    import lgwks_browser
+    import lgwks_search
+    import lgwks_substrate_text as st
+    from lgwks_html import html_to_markdown
+
+    # G3 URL-risk gate BEFORE any fetch — never render an un-curated URL (preserves
+    # the private/metadata-host + scheme blocks; the gate is shared, not re-derived).
+    kept, _denied = _curate_results(lgwks_search.search(query, k=read_top * 2))
+    blocks: list[str] = []
+    sources: list[str] = []
+    for r in kept:
+        if len(sources) >= read_top:
+            break
+        url = (r.get("url") or "").strip()
+        if not url:
+            continue
+        page = lgwks_browser.render(url, max_chars=40_000, with_html=True)
+        if not page.get("ok"):
+            continue
+        html = page.get("html") or ""
+        markdown = html_to_markdown(html, url)[0] if html else (page.get("text") or "")
+        facts = st._fact_sentences(markdown, 0.6)[:6]
+        if not facts:
+            continue
+        ch = _quarantine(url, "web-grounded-facts", "\n".join(facts))
+        tag = f" · cache:{ch[:12]}" if ch else ""
+        blocks.append(f"[{r.get('via', 'web')}{tag}] {url}\n" + "\n".join(f"- {f}" for f in facts))
+        sources.append(url)
+    return "\n\n".join(blocks), sources
 
 
 def ground(query: str, want_docs: bool = True, want_web: bool = True) -> dict:

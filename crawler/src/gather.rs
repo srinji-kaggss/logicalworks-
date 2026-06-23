@@ -1,5 +1,6 @@
-//! The ONE upstream entry the AI calls. Firecrawl exposes map/crawl/scrape/search
-//! as separate endpoints; here they are MODES of a single `gather()` call — the
+//! The ONE upstream entry the AI calls. Where other crawlers expose
+//! map/crawl/scrape/search as separate endpoints, here they are MODES of a single
+//! `gather()` call — the
 //! caller (you, or a research/ctx7-style request) says what it wants, the backend
 //! picks the crawl shape. //why one entry: the AI should not orchestrate
 //! map-vs-crawl-vs-scrape; it asks once and the backend decides.
@@ -11,11 +12,11 @@ use serde::{Deserialize, Serialize};
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum Mode {
-    /// One page, full extract + chunks. (firecrawl `scrape`)
+    /// One page, full extract + chunks. (a.k.a. `scrape`)
     Scrape,
-    /// Discover the URL graph of a site fast, no heavy extraction. (firecrawl `map`)
+    /// Discover the URL graph of a site fast, no heavy extraction. (a.k.a. `map`)
     Map,
-    /// Recursive multi-page crawl with full extract + chunks. (firecrawl `crawl`)
+    /// Recursive multi-page crawl with full extract + chunks. (a.k.a. `crawl`)
     Crawl,
 }
 

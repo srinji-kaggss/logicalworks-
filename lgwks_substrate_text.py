@@ -9,6 +9,7 @@ Defense-in-Depth:
 
 from __future__ import annotations
 
+import re
 from collections import Counter
 from datetime import date
 from typing import Any
@@ -24,6 +25,29 @@ from lgwks_substrate_config import (
     UPCOMING_EFFECTIVE_DATE,
     VERSION_BUCKETS,
 )
+
+# Noise detectors (#research-dogfood): a "fact" must be readable prose, not rendered
+# markup. These fire on math/markup soup that survives extraction — never on clean
+# compliance/academic prose (which is high-alphabetic, markup-free), so they demote
+# garbage without touching legitimate facts.
+_MATH_UNICODE_RE = re.compile(r"[\U0001D400-\U0001D7FF←-⇿⁡-⁤]")  # math alphanum, arrows, invisible-ops
+_MARKUP_TOKEN_RE = re.compile(
+    r"\\[a-zA-Z]+|italic_|delimited|operatorname|POSTSUBSCRIPT|POSTSUPERSCRIPT|leftarrow|rightarrow|mathcal|\\mathrm"
+)
+# Web-app template/UI chrome: placeholder syntax and JS-state leakage are objectively
+# never facts (e.g. github's "Dismiss alert {{ message }}"). Deterministic, not a blocklist.
+_TEMPLATE_CHROME_RE = re.compile(r"\{\{|\}\}|\{%|%\}|\$\{|<%")
+_TABLE_PIPE_RE = re.compile(r"(?:\|\s*){4,}")  # markdown table rows rendered as fact-junk
+
+
+def _alpha_ratio(text: str) -> float:
+    """Fraction of NON-WHITESPACE chars that are letters. Prose ~0.8+; data tables and
+    symbol soup <0.5. Whitespace is excluded from the denominator so a space-padded table
+    row (e.g. '| 42.93 | 66.31 |') can't inflate its way past the gate."""
+    nonspace = [ch for ch in text if not ch.isspace()]
+    if not nonspace:
+        return 0.0
+    return sum(1 for ch in nonspace if ch.isalpha()) / len(nonspace)
 
 
 def _split_sentences(text: str) -> list[str]:
@@ -44,7 +68,20 @@ def _fact_score(text: str) -> float:
     numeric = 1.0 if NUMERIC_RE.search(text) else 0.0
     code = 1.0 if CODE_RE.search(text) else 0.0
     ref = 1.0 if REF_RE.search(text) else 0.0
-    return (proc / len(words) * 2.0) - (narr / len(words) * 1.5) + numeric + code + ref
+    score = (proc / len(words) * 2.0) - (narr / len(words) * 1.5) + numeric + code + ref
+
+    # Noise demotion: rendered markup/math soup and table-junk are not facts. These
+    # never fire on clean prose, so legitimate compliance/academic facts keep their
+    # score; only garbage that survived extraction is pushed below the fact threshold.
+    markup = len(_MARKUP_TOKEN_RE.findall(text)) + len(_MATH_UNICODE_RE.findall(text))
+    if _TABLE_PIPE_RE.search(text) or text.count("|") >= 4:   # markdown table (incl. content-separated)
+        markup += 4
+    if _TEMPLATE_CHROME_RE.search(text):   # web-app template/UI chrome — never a fact
+        markup += 6
+    score -= min(markup, 8) * 0.5
+    if _alpha_ratio(text) < 0.55:   # symbol soup / dense markup — hard demote
+        score -= 3.0
+    return score
 
 
 def _chunk_kind(text: str, fact_score: float) -> str:

@@ -333,8 +333,15 @@ def act(intent: str, *, repo: Path | None = None, top: int = 5,
         execute: bool = False, approve: bool = False, force: bool = False) -> dict[str, Any]:
     wv = worldview(intent, repo, top)
     plan = compile_plan(intent, wv)
+    # The smart form: surface the daemon's canonical next-steps (computed from the
+    # ONE work-capability registry × state) so the entrypoint GUIDES the agent —
+    # rather than only emitting a single keyword-classified plan. Pure + sessionless
+    # here (base menu); the daemon packet fills state when a session is live.
+    import lgwks_daemon_store
+    next_steps = lgwks_daemon_store.next_steps([])
     out: dict[str, Any] = {
         "schema": SCHEMA, "intent": intent, "worldview": wv, "plan": plan,
+        "next_steps": next_steps,
         "executed": False, "blocked": False, "block_reason": "", "result": None,
     }
 

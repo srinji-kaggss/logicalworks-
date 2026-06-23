@@ -2,8 +2,8 @@
 lgwks_search — the missing primitive: a zero-key, free web + news search provider.
 
 Three runs proved the instrument could reason and refuse-to-fabricate but could NOT find live-world
-events (a recent acquisition) — because `lgwks_ground._web` was a stub returning "" (firecrawl 402)
-and ctx7 only serves library docs, not news/entities. This wires the eyes:
+events (a recent acquisition) — because the web arm was a stub returning "" and ctx7 only serves
+library docs, not news/entities. This wires the eyes:
 
   search(query)        → ranked [{title,url,snippet}] via DuckDuckGo HTML (no API key, free).
   sweep(query)         → MULTI-MODAL: blind parallel arms (general · news · filings) merged + deduped,
@@ -11,17 +11,20 @@ and ctx7 only serves library docs, not news/entities. This wires the eyes:
   fetch(url)           → page → markdown via the crwl crawler (the acquisition page itself).
   source_validity      → reject CAPTCHA / bot-challenge / login-wall before ingest (gate #29 fix).
 
-Degrade chain is honest: DuckDuckGo HTML (curl) is primary; if curl/crwl are absent or blocked we
-return [] and say so — never fabricate a result. Provider seam: a real key'd backend (firecrawl when
-funded) plugs in behind the same contract without changing callers (the engine model, SPEC §2).
+Degrade chain is honest: a free HTTP search floor (curl) is primary; if curl/crwl are absent or
+blocked we return [] and say so — never fabricate a result. Provider seam: any keyed backend plugs
+in behind the same contract without changing callers (the engine model, SPEC §2). This codebase
+ships no external/metered search dependency.
 """
 
 from __future__ import annotations
 
 import concurrent.futures
 import html
+import os
 import re
 import subprocess
+import threading
 import time
 import urllib.parse
 
@@ -57,9 +60,32 @@ _YEAR = re.compile(r"\b(20\d{2})\b")
 _YEAR_SPAN = re.compile(r"\b(20\d{2})\s*[-–]\s*(20\d{2})\b")
 
 
+# Per-host politeness: the multi-arm sweep fires several requests concurrently. Without
+# spacing they burst the SAME host (e.g. the one live search endpoint), which rate-limits
+# the burst and returns empty for every arm — a self-inflicted denial of service that read
+# as "no evidence". We reserve staggered per-host slots so same-host requests space out by
+# _HOST_MIN_INTERVAL while different hosts still proceed in parallel.
+_HOST_LOCK = threading.Lock()
+_HOST_NEXT: dict[str, float] = {}
+_HOST_MIN_INTERVAL = 1.2
+
+
+def _polite_wait(url: str) -> None:
+    host = urllib.parse.urlsplit(url).netloc
+    if not host:
+        return
+    with _HOST_LOCK:
+        slot = max(time.monotonic(), _HOST_NEXT.get(host, 0.0))
+        _HOST_NEXT[host] = slot + _HOST_MIN_INTERVAL
+    delay = slot - time.monotonic()
+    if delay > 0:
+        time.sleep(delay)
+
+
 def _curl(url: str, data: str | None = None, timeout: int = 20, ua: str = "") -> str:
     """One read-only HTTP GET/POST via curl. Returns body or '' (honest empty, never raises upward).
     Accepts an optional UA override; defaults to the first pool entry."""
+    _polite_wait(url)
     cmd = ["curl", "-s", "-L", "--max-time", str(timeout), "-A", ua or _UA_POOL[0]]
     if data is not None:
         cmd += ["--data", data]
@@ -152,10 +178,21 @@ def _backoff(attempt: int) -> float:
 
 # Floor endpoints, rotated in order: independent hosts → an independent rate-limit each. One 429 no
 # longer blinds the instrument (the live failure: a single DDG limit zeroed every arm).
+# Order = liveness, not preference. The DDG HTML/lite endpoints currently bot-wall
+# scrapers: they accept the connection then return an empty body, burning the FULL
+# socket timeout (~20s) on every try. Tried first (as they were), they buried the one
+# live endpoint behind ~80s of dead waits — and under the concurrent sweep that read as
+# "no evidence". Live endpoint first + a tight per-endpoint floor timeout so a dead
+# endpoint fast-fails (~_FLOOR_TIMEOUT s) instead of stalling the whole floor.
+_FLOOR_TIMEOUT = 8
 _FLOOR_ENDPOINTS = [
-    ("ddg-html", _DDG_HTML, "post", _parse_ddg),
-    ("ddg-lite", _DDG_LITE, "post", _parse_links),
     ("mojeek", _MOJEEK, "get", _parse_mojeek),
+    # ddg-html / ddg-lite are RETIRED from the rotation: both currently accept the
+    # connection then return an empty body, burning the full socket timeout on every
+    # try and never yielding a result. A dead endpoint in the floor is pure latency
+    # (and, under the concurrent sweep, a self-DoS). Restore here behind a working
+    # access path (the AI-First browser engine handles the around-the-block case via
+    # the `rendered` provider). Parsers (_parse_ddg/_parse_links) kept for that revival.
 ]
 
 
@@ -172,7 +209,8 @@ def _open(query: str, k: int, *, sleep=time.sleep) -> list[dict]:
         for retry in range(2):
             attempt = ep_idx * 2 + retry
             ua = _pick_ua(attempt)
-            body = _curl(base, data=qs, ua=ua) if method == "post" else _curl(base + "?" + qs, ua=ua)
+            body = (_curl(base, data=qs, ua=ua, timeout=_FLOOR_TIMEOUT) if method == "post"
+                    else _curl(base + "?" + qs, ua=ua, timeout=_FLOOR_TIMEOUT))
             if body and len(body) > _MIN_BODY:
                 rows = parser(body, k, via="open")
                 if rows:
@@ -216,13 +254,21 @@ def _cli(query: str, k: int) -> list[dict]:
 
 # Provider chain, best-first, vendor-agnostic ids. Each returns [] on absence/empty → fall through
 # (liveness, not mere presence). 'open' is the floor; 'rendered' is the around-the-block via browser.
-_PROVIDERS = [("cli", _cli), ("open", _open), ("rendered", _rendered)]
+# `rendered` is the LAST arm: it only runs when cli+open return empty (the fallthrough in search()),
+# which is exactly the case now that the HTTP floor (mojeek/ddg) reliably 403s a scraper. With the
+# floor blocked, gating rendered OFF made search() always return [] — the "categorical failure" that
+# made research look broken. render() is bounded (goto timeout=30s + raw fallback) so a single-query
+# fallthrough cannot stall indefinitely. Set LGWKS_SEARCH_NO_RENDERED=1 to disable it under the
+# concurrent multi-arm sweep, where many slow renders could otherwise compound.
+_PROVIDERS = [("cli", _cli), ("open", _open)]
+if os.environ.get("LGWKS_SEARCH_NO_RENDERED") != "1":
+    _PROVIDERS.append(("rendered", _rendered))
 
 
 def active_provider() -> str:
     """The provider tried FIRST given what's present — the HONEST label (liveness still decided at call
     time: an empty result falls through open→rendered). Not the capability resolver's presence guess,
-    which names 'keyed'/firecrawl though it is unfunded and not wired into this module."""
+    which may name a keyed provider that is not wired into this module."""
     if _cap and (_cap.find_binary("ddgr") or _cap.find_binary("googler")):
         return "cli"
     return "open"

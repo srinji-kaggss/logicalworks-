@@ -159,7 +159,9 @@ def _context_command(args: argparse.Namespace) -> int:
     import json as _json
     run_arg = getattr(args, "run_dir", None) or getattr(args, "run_dir_pos", None)
     if not run_arg:
-        msg = "run directory required"
+        msg = ("run directory required — pass a path to a run dir containing "
+               "rounds.ledger.jsonl (run dirs are produced by `lgwks research --deep` "
+               "and `lgwks state run`, typically under ./runs/)")
         if getattr(args, "json", False):
             print(_json.dumps({"ok": False, "error": msg}, indent=2))
         else:
