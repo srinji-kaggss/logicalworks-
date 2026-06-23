@@ -41,6 +41,12 @@ ROUND_CAP = 100        # hard upper bound on --rounds (hacker F8 — unbounded-s
 BUDGET_CAP = 5_000_000 # hard upper bound on --budget tokens (hacker F8)
 FANOUT_CAP = 4         # bounded preview fan-out for cheap frontier scans
 ALLOWED_FUNCTIONS = ("generate", "falsify", "expand", "contrarian")
+# Provenance tier of run output = the model-port escalation harness (Math→ML→Model). Every tier
+# emits the SAME OKF artifact shape; this tags WHO produced the reasoning, not a different format.
+# Positive framing: `deterministic` is the trustworthy reconstructable core, not a degraded state.
+PROVENANCE_DETERMINISTIC = "deterministic"   # math/spine tier — no ML, no model (calculator-test)
+PROVENANCE_ML_ATTENTION  = "ml-attention"    # ML tier — embedding/attention sensor only, no generation
+PROVENANCE_CO_SCIENTIST  = "co-scientist"    # full generative model tier (Tongue as research co-scientist)
 # untrusted-content guard (hacker F1/F2): a frontier node is a short, plain label — never prose,
 # never newlines, never prompt/role/JSON structure. Anything else is rejected, not fed back.
 _NODE_OK = re.compile(r"^[A-Za-z0-9 ._:/&(),'\-]{1,120}$")
@@ -181,6 +187,10 @@ class AutoConfig:
     fanout: int = 1                              # cheap bounded preview of next frontier nodes
     project: str = "research"                    # #165: gate key for the reasoning corpus (stable,
                                                  # not per-run — keeps research off the island path)
+    degrade_consent: bool = False                # consent (human flag or AI approval) to degrade to the
+                                                 # deterministic-skeleton path when the Tongue is offline.
+                                                 # DEFAULT fail-closed (constitution: never silently
+                                                 # degrade/fabricate without consent).
 
     def __post_init__(self):
         # clamp adversary-supplied bounds (hacker F8) and drop unknown functions (no silent calls).
@@ -627,19 +637,23 @@ def run_auto(cfg: AutoConfig, emit=print) -> AutoResult:
 
             # 1. GENERATE — autonomous Hn, building on the (sanitized) rolling digest + agenda focus.
             #    Research is AUTOMATION; the Tongue only ENHANCES. When the model is in agent_handoff
-            #    (no local model), fall to a deterministic skeleton so the crawl/extract spine still
-            #    runs — never abort the run for lack of a generative model (the old "fail closed" was
-            #    the bug: it gated the working automation behind an optional enhancer).
+            #    (no local model), the loop MAY fall to a deterministic skeleton so the crawl/extract
+            #    spine still runs — but ONLY with explicit consent (cfg.degrade_consent, set by a human
+            #    flag or an AI approval). Without consent the run FAILS CLOSED (constitution: never
+            #    silently degrade or fabricate when the generative model is offline).
             compiled = lgwks_tongue.compile_hypotheses(cfg.objective, cfg.purpose, context=round_ctx)
             ai_enhanced = bool(compiled)
             if not compiled:
+                if not cfg.degrade_consent:
+                    stop = "tongue_offline"; emit("    Tongue offline — stopping (fail closed; no degrade consent)."); break
                 compiled = _skeleton_hypotheses(cfg.objective)
             budget.charge()
             if _spent_break():
                 emit("    budget hit after generate — stopping."); break
             hyps = compiled["hypotheses"]
+            provenance = PROVENANCE_CO_SCIENTIST if ai_enhanced else PROVENANCE_DETERMINISTIC
             emit(f"    generate: {len(hyps)} hypotheses (H0 null + {len(hyps)-1} mechanism)"
-                 + ("" if ai_enhanced else " [skeleton · Tongue handoff]") + " · citations UNVERIFIED")
+                 f" · {provenance}")
 
             # 2. CRAWL — frontier → (findings, has_evidence, sources). No evidence ⇒ PLANNING round.
             findings, has_evidence, sources = _crawl(cfg, frontier)
@@ -650,7 +664,9 @@ def run_auto(cfg: AutoConfig, emit=print) -> AutoResult:
             #    (epistemics CRITICAL): a planning round plans, it does not conclude.
             reason = lgwks_tongue.reason_over_findings(cfg.objective, hyps, findings, context=round_ctx)
             budget.charge()
-            if not reason:   # Tongue handoff → deterministic, automation-extracted learnings (no abort)
+            if not reason:   # Tongue handoff → deterministic skeleton ONLY with consent; else fail closed
+                if not cfg.degrade_consent:
+                    stop = "tongue_offline"; emit("    reason step offline — stopping (fail closed; no degrade consent)."); break
                 reason = _skeleton_reason(hyps, findings, has_evidence)
             if not has_evidence:                       # strip evidence-bearing claims from a planning round
                 reason["falsifiers_hit"] = []
