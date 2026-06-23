@@ -17,6 +17,9 @@
 3. One capability registry drives both the smart form and dispatch (G5 closed).
 4. CLI verb surface preserved via deprecation shims (no user-facing break).
 
+## Strategy: decapitate + flag + log (not delete-first)
+Deleting the composers outright would strand 14 live `ops workflow` CLI capabilities (the daemon loop can't execute them yet — G10) and cascade into the manifest/verb-budget gates. So the heads are **killed by flag** now (`_DEPRECATED_HEAD = True` + banner), the leaf logic stays as **frozen boilerplate**, and the daemon-absorption path is **logged** as the single source of truth. Canonical registry: `engine/deprecated_heads.py`; absorption plan: `engine/DAEMON-ABSORPTION-LOG.md`; enforced by `tests/test_deprecated_heads.py`. Physical deletion happens after the daemon can execute the work (see the absorption log's executor-first sequence).
+
 ## Progress (2026-06-23, branch `investigate/orchestration-gaps`)
 - **Landed:** `engine/engine.py` (the one loop facade) + `engine/membrane_sanitize.py` (membrane primitive).
 - **Deleted:** `lgwks_workflow_aetherius` (3 wirings removed from `lgwks_workflows`). Full suite **2210 passed**; the 2 failures are pre-existing/flaky, not this change (proven by stashing the work and re-running on clean `main` — `test_graph_viz::test_home_quick_v_launches_viz` fails there too).
