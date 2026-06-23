@@ -100,7 +100,7 @@ def _embedding(text: str, dims: int = EMBED_DIMS) -> list[float]:
     return _vm.hash_embed(features, dims)
 
 
-from lgwks_hashing import digest as _sha, content_id  # canonical text/id hashing (one source of truth)
+from lgwks_hashing import digest as _sha, content_id, canonical_json  # canonical text/id hashing (one source of truth)
 
 
 def _clamp(value: Optional[int], default: int, low: int, high: int) -> int:
@@ -720,7 +720,8 @@ _SEVERITY_RANK = {"info": 0, "low": 1, "medium": 2, "high": 3, "critical": 4}
 
 
 def _stable_json(value: Any) -> str:
-    return json.dumps(value, sort_keys=True, separators=(",", ":"), ensure_ascii=False)
+    # one source of truth (lgwks_hashing.canonical_json); ascii=False preserves artifact ids
+    return canonical_json(value, ascii=False)
 
 
 def _canonical_relpath(value: str | None) -> str:

@@ -53,14 +53,17 @@ _CAPABILITIES: dict[str, dict] = {
     "search": {
         "why": "find live-world facts (news, acquisitions, entities) — the eyes",
         "risk": "read",
+        # Order mirrors what the search runtime actually uses (lgwks_search._PROVIDERS):
+        # a present search CLI, else the zero-dep HTTP floor. No external/metered SaaS
+        # provider — this codebase carries no such dependency. The browser ('rendered',
+        # around-the-block) is gated at runtime while the engine is stabilised.
         "providers": [
-            {"id": "keyed", "kind": "bin", "bin": "firecrawl", "note": "keyed API; richest, metered"},
-            {"id": "rendered", "kind": "pymod", "mod": "playwright",
-             "note": "results via real browser — survives blocks (the around-the-block path)"},
             {"id": "cli", "kind": "any-bin", "bins": ["ddgr", "googler"], "note": "search CLI if present"},
             {"id": "open", "kind": "builtin", "note": "open HTML endpoint via http — zero-dep floor"},
+            {"id": "rendered", "kind": "pymod", "mod": "playwright",
+             "note": "results via real browser — survives blocks (the around-the-block path)"},
         ],
-        "install": "(none needed — 'open' floor always works; 'rendered' uses the browser capability)",
+        "install": "(none needed — the 'open' floor is always present)",
     },
     "fetch": {
         "why": "turn a URL into clean text",

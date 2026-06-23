@@ -735,6 +735,9 @@ def add_parser(sub) -> None:
 
     handoff = ps.add_parser("handoff", help="machine-readable handoff report")
     handoff.add_argument("--repo", default=".", help="path to repo")
+    # output is always JSON; accept --json for flag-parity with the sibling verbs
+    # (audit/recover/cleanup/merge/graph) so `repo handoff --json` isn't rejected.
+    handoff.add_argument("--json", action="store_true", help="structured output (default)")
     handoff.set_defaults(func=handoff_command)
 
     merge = ps.add_parser("merge", help="rebase PR, resolve auto-patterns, squash-merge")

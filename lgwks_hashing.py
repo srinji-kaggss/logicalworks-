@@ -77,9 +77,19 @@ def digest_file(path: Path | str) -> str:
     return h.hexdigest()
 
 
+def canonical_json(obj: Any, *, ascii: bool = True) -> str:
+    """THE canonical serialization: sorted keys + compact separators → byte-stable,
+    replayable JSON. One source of truth for the `json.dumps(..., sort_keys=True,
+    separators=(",", ":"))` spec that was re-derived (and silently drifting on
+    `ensure_ascii`) in daemon_event/project_artifacts/research/aup/inbound. Callers
+    that already hash with `ensure_ascii=False` MUST pass ascii=False to preserve
+    their existing content-ids (changing it would re-hash stored records)."""
+    return json.dumps(obj, sort_keys=True, separators=(",", ":"), ensure_ascii=ascii)
+
+
 def canonical_id(obj: Any) -> str:
     """Full SHA-256 hex over canonical JSON (sorted keys, compact) — order-stable id."""
-    return digest(json.dumps(obj, sort_keys=True, separators=(",", ":")))
+    return digest(canonical_json(obj))
 
 
 def blake_id(text: str, size: int = 16) -> str:

@@ -157,6 +157,8 @@ side-database (the external `~/ingestion_results/*.db` stores are exactly the lo
 | `lgwks.spawn.v1` | 1 | live | `lgwks_spawn.py:~70` |
 | `lgwks.pipeline.manifest.v1` | 1 | live | `lgwks_pipeline.py:52` |
 | `lgwks.manifest.v0` / `lgwks.intent.v0` / `lgwks.hooks.v0` / `lgwks.audit.v0` / `lgwks.gh.v0` / `lgwks.session.summary.v0` | 0 | live, research-grade | `lgwks_schema.py:66-133`, `lgwks_gh.py:82` |
+| `lgwks.agent.v1` | 1 | **live** — single-agent front-door envelope (world-view + compiled-workflow trigger): intent → capability selections + workflow plan | `lgwks_agent.py`, `lgwks_manifest.py` |
+| `lgwks.research.live.v0` | 0 | **live (2026-06-23), research-grade** — `research --live` single-shot grounding result: `{schema, query, has_evidence, sources[], findings}`; sources are verifiable citation URLs from the grounding pass (web floor + crawl), never model-claimed | `lgwks_research.py` (`research_command` --live path) |
 | `lgwks.intent.centroids.v1` | 1 | live (cache) | `lgwks_intent_classifier.py:68` |
 | `lgwks.config.v1` | 1 | **live** (Issue 158) — validated YAML config | `lgwks_config.py` | jsonschema |
 | `lgwks.inbound.v1` | 1 | live (**I7**) — reflex pack: `handles[]`, `scores{}`, `budget{limit_tokens,used_tokens,truncated_count,truncated[]}` (count exact, cid list bounded ≤64), `depth_handles[{id,est_tokens,kind}]` | `lgwks_inbound.py` |
@@ -211,7 +213,7 @@ emit `bot.record.v1` with a new `kind` rather than minting a new findings schema
 ### 6. scoring / graph family
 `lgwks.graph.v2` (live; `lgwks.graph.v1` deprecated) + `lgwks.repo.graph.v0` (graph-over-repo bridge,
 `lgwks_graph.py`/`lgwks_repo.py`) + `lgwks.graph.{query,impact,complexity,path,neighbors,patterns}.v0`
-(`lgwks_schema.py:102-109`) · `lgwks.graph.cache.v1` (`.lgwks/graph.cache.json`).
+(`lgwks_schema.py:102-109`) · `lgwks.graph.cache.v2` (`.lgwks/graph.cache.json`; bumped from v1 2026-06-23 — the cache now preserves import edges on incremental rebuilds + drops cross-language call edges, so v1 caches are invalidated).
 **Repurpose when:** any code-structure question — query `graph.v2`; do not parse source ad-hoc.
 
 #### I6 cubic node centrality — landed (2026-06-10)
