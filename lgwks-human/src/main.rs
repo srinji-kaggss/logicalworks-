@@ -115,8 +115,20 @@ async fn main() -> Result<()> {
                 };
             }
             // Just periodically send ticks to refresh UI
+            let mut tick_count = 0;
             loop {
-                tokio::time::sleep(tokio::time::Duration::from_millis(500)).await;
+                tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
+                tick_count += 1;
+                {
+                    let mut st = state_clone.write().unwrap();
+                    // Generate a noisy sine wave for entropy
+                    let v = ((tick_count as f64 * 0.1).sin() * 50.0 + 50.0 + (rand::random::<f64>() * 20.0)) as u64;
+                    st.packet.entropy_history.push(v);
+                    if st.packet.entropy_history.len() > 100 {
+                        st.packet.entropy_history.remove(0);
+                    }
+                    st.packet.tps = 45.0 + (rand::random::<f32>() * 10.0);
+                }
                 let _ = event_tx.send(tui::Event::DaemonTick);
             }
         });

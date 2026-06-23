@@ -75,6 +75,7 @@ impl FlightScreen {
             .direction(Direction::Vertical)
             .constraints([
                 Constraint::Min(3),    // affordances list
+                Constraint::Length(3), // telemetry sparkline
                 Constraint::Length(3), // input box
             ])
             .split(area);
@@ -139,29 +140,52 @@ impl FlightScreen {
         // Input box
         let input_val = self.input.value();
         let hint = if input_val.is_empty() {
-            if self.status_msg.is_some() {
-                self.status_msg.as_deref().unwrap_or("")
-            } else {
-                "type intent or [1-9] affordance · enter to send · ↑↓ scroll stream"
-            }
+            self.status_msg.as_deref().unwrap_or("type intent or [1-9] affordance · enter to send · ↑↓ scroll stream")
         } else {
-            input_val
+            ""
+        };
+        
+        let input_span = if input_val.is_empty() {
+            Span::styled("", Style::default())
+        } else {
+            Span::styled(input_val, Style::default().fg(CREAM))
+        };
+        
+        let hint_style = if input_val.is_empty() {
+            Style::default().fg(MUTED)
+        } else {
+            Style::default()
         };
 
-        let border_color = if self.input_active { EMERALD } else { SLATE_DIM };
+        let input_border_style = if self.input_active { Style::default().fg(EMERALD) } else { Style::default().fg(SLATE_DIM) };
         let input_widget = Paragraph::new(Line::from(vec![
-            Span::styled(" ❯ ", Style::default().fg(EMERALD)),
-            Span::styled(hint, Style::default().fg(CREAM)),
+            Span::styled("❯ ", Style::default().fg(EMERALD)),
+            input_span,
+            Span::styled(hint, hint_style),
         ]))
         .block(
             Block::default()
                 .borders(Borders::ALL)
                 .border_type(BorderType::Rounded)
-                .border_style(Style::default().fg(border_color))
-                .padding(Padding::horizontal(1)),
-        )
-        .wrap(Wrap { trim: false });
-        frame.render_widget(input_widget, chunks[1]);
+                .border_style(input_border_style)
+                .padding(Padding::symmetric(1, 0)),
+        );
+        frame.render_widget(input_widget, chunks[2]);
+
+        // Telemetry Sparkline
+        let entropy_data = &state.packet.entropy_history;
+        let title = format!(" TELEMETRY · TPS: {:.1} · ENTROPY ", state.packet.tps);
+        let sparkline = ratatui::widgets::Sparkline::default()
+            .block(
+                Block::default()
+                    .title(Span::styled(title, Style::default().fg(MUTED)))
+                    .borders(Borders::ALL)
+                    .border_type(BorderType::Rounded)
+                    .border_style(Style::default().fg(SLATE_DIM)),
+            )
+            .data(entropy_data)
+            .style(Style::default().fg(EMERALD));
+        frame.render_widget(sparkline, chunks[1]);
     }
 }
 
@@ -273,7 +297,7 @@ impl Screen for FlightScreen {
             .direction(Direction::Vertical)
             .constraints([
                 Constraint::Min(0),    // cognition stream — takes remaining space
-                Constraint::Length(12), // affordance panel + input
+                Constraint::Length(15), // affordance panel + sparkline + input
             ])
             .split(area);
 

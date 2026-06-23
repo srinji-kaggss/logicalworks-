@@ -87,6 +87,8 @@ pub struct ContextPacket {
     pub recent_event_count: usize,
     pub telemetry:          Option<Vec<serde_json::Value>>,
     pub provenance:         Option<serde_json::Value>,
+    pub entropy_history:    Vec<u64>,
+    pub tps:                f32,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]

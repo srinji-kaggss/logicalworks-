@@ -38,3 +38,4 @@ tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 # Utilities
 itertools        = "0.14"
 strum            = { version = "0.26", features = ["derive"] }
+rand = "0.10.1"
