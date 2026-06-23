@@ -67,17 +67,14 @@ impl App {
             // ── Global key bindings ──────────────────────────────────────────
             Event::Key(key) => {
                 match key.code {
-                    KeyCode::Char('q') if matches!(self.active_screen, _) => {
-                        // Only quit from non-flight screens or when flight input is empty
+                    KeyCode::Char('q') if key.modifiers.contains(crossterm::event::KeyModifiers::CONTROL) => {
                         self.should_quit = true;
                         return;
                     }
                     // Tab switching
-                    KeyCode::Char('f') => { self.active_screen = ScreenId::Flight; return; }
-                    KeyCode::Char('r') => { self.active_screen = ScreenId::Runs;   return; }
-                    // 'q' handled above for quit — use Shift+Q for queue?
-                    // Actually q is reserved for quit. Use ctrl+q for queue tab.
-                    KeyCode::Char('w') => { self.active_screen = ScreenId::Wire;   return; }
+                    KeyCode::Char('f') if key.modifiers.contains(crossterm::event::KeyModifiers::CONTROL) => { self.active_screen = ScreenId::Flight; return; }
+                    KeyCode::Char('r') if key.modifiers.contains(crossterm::event::KeyModifiers::CONTROL) => { self.active_screen = ScreenId::Runs;   return; }
+                    KeyCode::Char('w') if key.modifiers.contains(crossterm::event::KeyModifiers::CONTROL) => { self.active_screen = ScreenId::Wire;   return; }
                     _ => {}
                 }
             }
@@ -209,7 +206,7 @@ impl App {
             Span::styled(format!("  {}", msg), Style::default().fg(AMBER))
         } else {
             Span::styled(
-                format!("  {} events · q quit · f/r/q/w switch", state_guard.events.len()),
+                format!("  {} events · ^Q quit · ^F/^R/^W switch", state_guard.events.len()),
                 Style::default().fg(MUTED),
             )
         };

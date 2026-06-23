@@ -96,7 +96,7 @@ impl FlightScreen {
                         Some("medium") => AMBER,
                         _              => EMERALD_DIM,
                     };
-                    ListItem::new(Line::from(vec![
+                    let mut spans = vec![
                         Span::styled(format!(" [{}] ", i + 1), Style::default().fg(SLATE)),
                         Span::styled(step.kind.clone(), Style::default().fg(CREAM).add_modifier(Modifier::BOLD)),
                         Span::styled("  ", Style::default()),
@@ -105,7 +105,16 @@ impl FlightScreen {
                             step.risk.as_deref().map(|r| format!("  ·{}", r)).unwrap_or_default(),
                             Style::default().fg(risk_color),
                         ),
-                    ]))
+                    ];
+
+                    if let Some(prov) = &step.provenance {
+                        if let Some(reason) = prov.get("reason").and_then(|v| v.as_str()) {
+                            spans.push(Span::styled("  └─ ", Style::default().fg(MUTED)));
+                            spans.push(Span::styled(reason.to_string(), Style::default().fg(SLATE).add_modifier(Modifier::ITALIC)));
+                        }
+                    }
+
+                    ListItem::new(Line::from(spans))
                 })
                 .collect()
         };

@@ -85,14 +85,17 @@ pub struct ContextPacket {
     pub next_steps:         Vec<NextStep>,
     pub active_task:        Option<String>,
     pub recent_event_count: usize,
+    pub telemetry:          Option<Vec<serde_json::Value>>,
+    pub provenance:         Option<serde_json::Value>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct NextStep {
-    pub kind:    String,
-    pub summary: String,
-    pub risk:    Option<String>,
-    pub args:    Option<serde_json::Value>,
+    pub kind:       String,
+    pub summary:    String,
+    pub risk:       Option<String>,
+    pub args:       Option<serde_json::Value>,
+    pub provenance: Option<serde_json::Value>,
 }
 
 /// Shared daemon state — kept in an Arc<RwLock<>> so the poll task and render thread
