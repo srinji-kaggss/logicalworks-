@@ -440,15 +440,52 @@ def _dispatch_item(store: "DaemonEventStore", item: dict[str, Any], repo_root: P
             lane="workflow", kind="workflow_event", scope="shared_referee",
             payload={"event": "item_dispatched", "item_id": item["item_id"], "kind": item["kind"]},
         ))
-        if item["kind"] == "research_run":
+        kind = item["kind"]
+        # research_run (network crawl) and ingest_file (local-only) share the ONE
+        # canonical substrate primitive: build_run auto-detects url vs path, so a
+        # local target simply never crawls. (G10: ingest_file was a no-op orphan.)
+        if kind in ("research_run", "ingest_file"):
             import lgwks_substrate_run as _substrate
             manifest = _substrate.build_run(_make_substrate_args(item["payload"]))
             store.register_run(item["tenant_id"], manifest)
-            store.complete_item(item["item_id"], result={"run_dir": manifest["artifacts"]["root"]})
-        elif item["kind"] in ("worktree_open", "worktree_close"):
+            store.complete_item(item["item_id"], result={
+                "run_id": manifest.get("run_id", ""),
+                "run_dir": manifest["artifacts"]["root"],
+                "counts": manifest.get("counts", {}),
+            })
+        elif kind == "index_run":
+            # Register a substrate run that exists on disk but isn't in shared
+            # state yet (e.g. produced by `lgwks research` outside the daemon).
+            # Canonical resolver + idempotent register_run — no reinvention.
+            import lgwks_substrate_io as _sio
+            run_id = str(item["payload"].get("run_id", "")).strip()
+            if not run_id:
+                raise ValueError("index_run requires payload.run_id")
+            run_dir = _sio._resolve_run_dir(run_id)
+            manifest_path = run_dir / "manifest.json"
+            if not manifest_path.exists():
+                raise FileNotFoundError(f"no manifest.json for run {run_id!r} at {run_dir}")
+            manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+            newly = store.register_run(item["tenant_id"], manifest)
+            store.complete_item(item["item_id"], result={
+                "run_id": manifest.get("run_id", run_id),
+                "run_dir": str(run_dir), "newly_indexed": newly,
+            })
+        elif kind == "workflow":
+            # A typed multi-phase plan runs through the ONE composer
+            # (lgwks_agent.compose) — the same phase runner the request-lane front
+            # door uses, so there is a single execution implementation, not two.
+            import lgwks_agent
+            plan = item["payload"].get("plan") or {}
+            wf_repo = Path(item["payload"].get("repo") or (repo_root or "."))
+            rc, phases = lgwks_agent.compose(plan, wf_repo)
+            store.complete_item(item["item_id"], result={
+                "rc": rc, "ok": rc == 0, "phases": phases,
+            })
+        elif kind in ("worktree_open", "worktree_close"):
             root = repo_root or Path(".")
             mgr = WorktreeManager(store, root)
-            if item["kind"] == "worktree_open":
+            if kind == "worktree_open":
                 result = mgr.create(item["tenant_id"], item["session_id"], item["agent_id"])
             else:
                 result = mgr.close(item["payload"].get("worktree_id", ""))
