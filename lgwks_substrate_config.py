@@ -44,7 +44,13 @@ TEXT_EXT = {
     ".py", ".js", ".ts", ".tsx", ".jsx", ".rs", ".go", ".java", ".kt", ".swift", ".rb", ".php",
     ".c", ".h", ".cpp", ".hpp", ".cc", ".cs", ".sh", ".bash", ".zsh", ".sql", ".lua", ".r",
 }
-SKIP_DIRS = {".git", "node_modules", "__pycache__", ".venv", "venv", "target", ".next", "dist", "build", "store"}
+# `site-packages` is the robust catch-all for ANY vendored virtualenv (.venv,
+# .venv-models, env, …): the heavy generated .py (torch/playwright) live under
+# it, and every consumer matches on path parts. Its absence let a `.venv-models/`
+# tree slip past pipeline/substrate_io/embed scanners — the same vector that hung
+# `lgwks review` (2026-06-23). One base, fixed once, inherited by all consumers.
+SKIP_DIRS = {".git", "node_modules", "__pycache__", ".venv", "venv", "site-packages",
+             "target", ".next", "dist", "build", "store"}
 IMAGE_EXTS = frozenset({".png", ".jpg", ".jpeg", ".webp", ".gif", ".bmp", ".tiff", ".tif"})
 
 

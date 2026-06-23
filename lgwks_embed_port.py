@@ -28,6 +28,7 @@ from __future__ import annotations
 import json
 import os
 import re
+import threading
 import subprocess
 import sys
 import tempfile
@@ -375,6 +376,38 @@ class EmbedPort:
         self._state.proc = proc
         self._state.tier = self._tier
 
+    def _readline_bounded(self, proc) -> str:
+        """proc.stdout.readline() with a wall-clock deadline. On timeout, kill the
+        worker and raise EmbedUnavailableError so the caller fails closed (degrades)
+        rather than blocking indefinitely on a stuck model worker."""
+        try:
+            timeout = float(os.environ.get("LGWKS_EMBED_TIMEOUT", "180"))
+        except ValueError:
+            timeout = 180.0
+        if timeout <= 0:
+            return proc.stdout.readline()
+        box: dict = {}
+
+        def _rd() -> None:
+            try:
+                box["line"] = proc.stdout.readline()
+            except BaseException as exc:  # noqa: BLE001 — surfaced to caller below
+                box["err"] = exc
+
+        t = threading.Thread(target=_rd, daemon=True, name="lgwks-embed-rpc")
+        t.start()
+        t.join(timeout)
+        if t.is_alive():
+            try:
+                proc.kill()
+            except Exception:
+                pass
+            self._state.proc = None
+            raise EmbedUnavailableError(f"embed worker exceeded {timeout:g}s — killed; degrading")
+        if "err" in box:
+            raise box["err"]
+        return box.get("line", "")
+
     def _rpc(self, payload: dict) -> list[float]:
         proc = self._state.proc
         if proc is None or proc.poll() is not None:
@@ -382,7 +415,12 @@ class EmbedPort:
         assert proc.stdin is not None and proc.stdout is not None
         proc.stdin.write(json.dumps(payload) + "\n")
         proc.stdin.flush()
-        line = proc.stdout.readline()
+        # Bound the blocking read: a wedged worker (or a cold 8B-model load that
+        # never returns) must NOT hang the caller forever. The first RPC pays the
+        # cold-load, so the deadline is generous (LGWKS_EMBED_TIMEOUT, default
+        # 180s) — finite, not infinite. On timeout the worker is killed and the
+        # caller degrades via EmbedUnavailableError. (review-hang class fix.)
+        line = self._readline_bounded(proc)
         if not line:
             raise EmbedUnavailableError("worker returned empty response (may have crashed)")
         result = json.loads(line)

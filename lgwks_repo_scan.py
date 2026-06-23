@@ -13,18 +13,18 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Optional
 
-# Directory names that must never be walked: VCS, caches, vendored installs, and
-# local state. ``site-packages`` is the robust catch-all for ANY virtualenv name
-# (.venv, .venv-models, env, …) — match on it, not on a hardcoded venv dir name.
-# ``store`` is local runtime data, not source.
-SKIP_DIRS = frozenset({
-    ".git", "__pycache__", "node_modules", "site-packages", "store",
-    ".mypy_cache", ".pytest_cache", ".ruff_cache",
-    # not "the code under review": agent worktrees, tool state, archived copies,
-    # and emitted findings. Scanning .worktrees/.claude re-reports every finding
-    # once per checkout (the bulk of review noise); archive/ is dead source.
+from lgwks_substrate_config import SKIP_DIRS as _BASE_SKIP_DIRS, with_extras  # one source of truth
+
+# Derive from the canonical base (which already excludes VCS/caches/vendored via
+# ``site-packages``) and add the review-scope delta: things that are NOT "code
+# under review" — agent worktrees, tool state, archived copies, emitted findings.
+# Scanning .worktrees/.claude re-reports every finding once per checkout (review
+# noise); archive/ is dead source. caches are belt-and-suspenders.
+SKIP_DIRS = with_extras(
+    _BASE_SKIP_DIRS,
     ".worktrees", ".claude", "archive", "findings",
-})
+    ".mypy_cache", ".pytest_cache", ".ruff_cache",
+)
 
 
 def _skip(p: Path) -> bool:
