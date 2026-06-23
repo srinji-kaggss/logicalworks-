@@ -1,5 +1,13 @@
 """lgwks_workflows — unified AI workflow harness.
 
+⚠️ DEPRECATED HEAD (boilerplate). This orchestrator's head is KILLED — it is no
+longer a living peer orchestrator. Its CLI registration is kept only as a
+deprecated shim (removing it would cascade into the manifest/verb-budget gates);
+the workflow bodies are frozen boilerplate pending absorption into the daemon
+(the single source of truth). See engine/deprecated_heads.py +
+engine/DAEMON-ABSORPTION-LOG.md. Do not add workflows; route new work through
+engine.dispatch → daemon.
+
 Maps natural intents to existing verb chains so an agent/machine caller does not need
 to know the exact 53+ command names. Instead:
   lgwks workflow <name> [args]              # exact
@@ -49,6 +57,9 @@ from typing import Any
 
 import lgwks_ui as ui
 from lgwks_phase import PhaseResult, verdict_from_phases  # canonical phase/verdict (one source of truth)
+
+# Head killed — frozen boilerplate pending daemon absorption (engine/deprecated_heads.py).
+_DEPRECATED_HEAD = True
 from lgwks_repo import _is_repo
 
 
