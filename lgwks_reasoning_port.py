@@ -87,7 +87,9 @@ def _run_olmo_mlx(prompt: str, framing: str, context: str | None) -> str | None:
     any failure returns None so the caller degrades to agent_handoff (INV-6).
     EASY-FIX-LATER: tune sampler/max_tokens/chat-template per OLMo-3 card.
     """
-    try:
+    from lgwks_model_port import _model_timeout, _run_bounded
+
+    def _go() -> str:
         from mlx_lm import generate, load  # type: ignore
         model, tokenizer = load(_OLMO_MODEL_DIR)
         parts = [framing]
@@ -96,8 +98,14 @@ def _run_olmo_mlx(prompt: str, framing: str, context: str | None) -> str | None:
         parts.append(f"\nTask:\n{prompt}")
         full = "\n".join(parts)
         return generate(model, tokenizer, prompt=full, max_tokens=1024, verbose=False)
+
+    try:
+        # bound the load+generate so a stuck weight load degrades to handoff
+        # instead of hanging the caller — a hang is not an Exception. The cure
+        # lives in model_port; reuse it rather than restate it.
+        return _run_bounded(_go, _model_timeout())
     except Exception:
-        return None  # degrade to handoff — never block, never fabricate
+        return None  # degrade to handoff (TimeoutError included) — never block
 
 
 def reason(
