@@ -137,11 +137,13 @@ def _web(query: str, read_top: int = 3) -> tuple[str, list[str]]:
     return "\n\n".join(blocks), sources
 
 
-def ground(query: str, want_docs: bool = True, want_web: bool = True) -> dict:
+def ground(query: str, want_docs: bool = True, want_web: bool = True, read_top: int = 3) -> dict:
     """Fuse the sources for one query. Returns {query, docs, web, sources, has_evidence, doc_sources}.
-    doc_sources are verifiable citation URLs (ctx7 docs + web results), not model-claimed."""
+    doc_sources are verifiable citation URLs (ctx7 docs + web results), not model-claimed.
+    read_top = how many primary web sources to READ per front — the deterministic depth lever the
+    deep-research gather scales up (so depth comes from compute, not more model rounds)."""
     docs, doc_sources = _ctx7_docs(query) if want_docs else ("", [])
-    web, web_sources = _web(query) if want_web else ("", [])
+    web, web_sources = _web(query, read_top=read_top) if want_web else ("", [])
     sources = [n for n, v in (("docs", docs), ("web", web)) if v]  # agnostic role labels, no brands
     return {"query": query, "docs": docs, "web": web,
             "doc_sources": list(dict.fromkeys(doc_sources + web_sources)),

@@ -258,7 +258,8 @@ def _crawl(cfg: AutoConfig, frontier: str) -> tuple[str, bool, list[str]]:
         # sweep IS the live fetch; the signed scope-frozen spine remains future hardening for
         # write_quarantine runs, not a blocker for read-only research.
         import lgwks_ground
-        g = lgwks_ground.ground(f"{cfg.objective} {frontier}".strip())
+        # read_top = cfg.max_pages → deterministic depth per front (the gather scale lever).
+        g = lgwks_ground.ground(f"{cfg.objective} {frontier}".strip(), read_top=max(1, cfg.max_pages))
         return lgwks_ground.as_findings(g), g["has_evidence"], g.get("doc_sources", [])
     # estimate = offline PLANNING (no fetch) — explicit, never a silent empty crawl.
     return ((f"[PLANNING — no document content fetched] frontier node: {frontier!r}. "
@@ -573,11 +574,33 @@ def run_auto(cfg: AutoConfig, emit=print) -> AutoResult:
             emit("    guide decomposition unavailable (Tongue offline / malformed) — "
                  "falling back to seed-the-digest.")
     else:
-        agenda = _market_seed_agenda(cfg.objective, cfg.purpose)
-        if agenda:
-            emit(f"    seeded market agenda: {len(agenda)} topic-specific questions")
-            (out_dir / "agenda.json").write_text(_canon({"summary": "investment-style seed agenda",
+        # BARE OBJECTIVE — bind the AI as the bounded planner (one call): turn the objective into a
+        # BROAD frontier of concrete search fronts the deterministic gather then crawls at scale.
+        # This is the correct min/max binding (Director 2026-06-23): AI directs, compute goes deep —
+        # not the old narrow deterministic market-seed (kept only as the fail-closed fallback).
+        emit("    planning objective → research frontier …")
+        pl = lgwks_tongue.compile_research_plan(cfg.objective, cfg.purpose)
+        budget.charge()
+        if pl and pl.get("agenda"):
+            for a in pl["agenda"]:
+                ns = _agenda_node(a.get("node", ""))      # injection-guard the model-emitted node
+                if ns:
+                    agenda.append({"id": a["id"], "node": ns,
+                                   "question": _sanitize_carry(a["question"]),
+                                   "why": _sanitize_carry(a.get("why", "")),
+                                   "canonical": bool(a.get("canonical", False))})
+            (out_dir / "agenda.json").write_text(_canon({"summary": pl.get("summary", ""),
                                                          "agenda": agenda}))
+            dropped = len(pl["agenda"]) - len(agenda)
+            emit(f"    plan: {len(agenda)} research fronts"
+                 + (f" ({dropped} unsafe nodes dropped)" if dropped else "")
+                 + f" · {sum(1 for a in agenda if a.get('canonical'))} canonical")
+        else:
+            agenda = _market_seed_agenda(cfg.objective, cfg.purpose)
+            if agenda:
+                emit(f"    planner offline — seeded market agenda: {len(agenda)} questions")
+                (out_dir / "agenda.json").write_text(_canon({"summary": "investment-style seed agenda",
+                                                             "agenda": agenda}))
 
     agenda_i = 0
     if agenda:
@@ -903,84 +926,97 @@ def _looks_like_library_query(query: str) -> bool:
     return any(t in q for t in _LIBRARY_QUERY_TERMS)
 
 
+def _single_shot_ground(objective: str, args: argparse.Namespace, notice: str = "") -> int:
+    """Single-shot grounding (ctx7 fundamental docs + web), no autonomous loop. The model is NOT
+    required, so this is also the graceful (announced, never silent) fallback when the deep loop's
+    reasoning model is offline."""
+    import sys
+    import lgwks_ui as ui
+    import lgwks_ground
+    if notice:
+        print(notice, file=sys.stderr)
+    want_docs = _looks_like_library_query(objective)
+    g = lgwks_ground.ground(objective, want_docs=want_docs, read_top=max(1, getattr(args, "sources", 8)))
+    findings = lgwks_ground.as_findings(g)
+    if getattr(args, "json", False):
+        print(json.dumps({
+            "schema": "lgwks.research.live.v0", "query": objective,
+            "has_evidence": g.get("has_evidence", False),
+            "sources": g.get("doc_sources", []), "findings": findings,
+        }, indent=2))
+        return 0 if g.get("has_evidence") else 2
+    on = ui.color_on()
+    print("\n".join(ui.band("lgwks · research (quick)", f"Grounding: {objective}", on=on)))
+    print(findings)
+    if not g.get("has_evidence"):
+        print("\n[research] no evidence retrieved — check capability auth (lgwks doctor)", file=sys.stderr)
+        return 2
+    return 0
+
+
 def research_command(args: argparse.Namespace) -> int:
-    """Unified research command: merges begin, probe, and orchestrators."""
+    """Unified research command. DEFAULT = deep, grounded, AI-planned research (the product the
+    Director expects from `lgwks research <q>`). The AI is bound as the BOUNDED director — it plans
+    the frontier once and reasons per round — while the DETERMINISTIC gather (read_top pages × the
+    planned fronts) provides the depth. `--probe` = fast repo world-view (no fetch); `--quick`/`--live`
+    = single-shot grounding (no loop, no model required)."""
     objective = args.prompt
     purpose = getattr(args, "purpose", "general research")
-    
-    # If --deep is requested, run the autonomous loop
-    if getattr(args, "deep", False):
-        cfg = AutoConfig(
-            objective=objective,
-            purpose=purpose,
-            start=getattr(args, "start", objective),
-            max_rounds=getattr(args, "rounds", 6),
-            token_budget=getattr(args, "budget", 120_000),
-            crawl_mode="ground" if getattr(args, "live", False) else "estimate",
-            max_pages=getattr(args, "sources", 8),
-            project=getattr(args, "project", None) or "research",
-        )
-        res = run_auto(cfg)
-        return 0 if res.ledger_intact else 1
-    
-    import lgwks_ui as ui
 
-    # --live (without --deep): single-shot grounding. The flag is documented as
-    # "fetch real evidence from web" — honor that directly instead of silently
-    # falling through to the repo world-view (which fetches nothing).
-    if getattr(args, "live", False):
-        import sys
-        import lgwks_ground
-        # Route by query shape: library/API/code questions benefit from ctx7 docs;
-        # factual/entity/event questions ("who is the CEO of X") do NOT — pulling docs
-        # there drowns the answer in an unrelated SDK whose name merely matches a token.
-        want_docs = _looks_like_library_query(objective)
-        g = lgwks_ground.ground(objective, want_docs=want_docs)
-        findings = lgwks_ground.as_findings(g)
+    # --probe: fast local repo world-view (no network). Was the old default; now explicit.
+    if getattr(args, "probe", False):
+        import lgwks_ui as ui
+        import lgwks_session
+        import lgwks_engine
+        repo = Path(getattr(args, "repo", ".")).resolve()
+        session_summary = lgwks_session.session_begin(repo)
+        engine_result = lgwks_engine.run_engine(objective, repo=repo)
         if getattr(args, "json", False):
-            print(json.dumps({
-                "schema": "lgwks.research.live.v0",
-                "query": objective,
-                "has_evidence": g.get("has_evidence", False),
-                "sources": g.get("doc_sources", []),
-                "findings": findings,
-            }, indent=2))
-            return 0 if g.get("has_evidence") else 2
+            print(json.dumps({"session": session_summary, "subconscious": engine_result}, indent=2))
+            return 0
         on = ui.color_on()
-        print("\n".join(ui.band("lgwks · research (live)", f"Grounding: {objective}", on=on)))
-        print(findings)
-        if not g.get("has_evidence"):
-            print("\n[research] no evidence retrieved — check capability auth (lgwks doctor) or try --deep",
-                  file=sys.stderr)
-            return 2
+        print("\n".join(ui.band("lgwks · research (probe)", f"World-view: {objective}", on=on)))
         return 0
 
-    # Otherwise, run the "begin" style engine probe (repo world-view).
-    import lgwks_session
-    import lgwks_engine
-    repo = Path(getattr(args, "repo", ".")).resolve()
+    # --quick / --live: single-shot grounding (no autonomous loop).
+    if getattr(args, "quick", False) or getattr(args, "live", False):
+        return _single_shot_ground(objective, args)
 
-    session_summary = lgwks_session.session_begin(repo)
-    engine_result = lgwks_engine.run_engine(objective, repo=repo)
-
-    if getattr(args, "json", False):
-        print(json.dumps({"session": session_summary, "subconscious": engine_result}, indent=2))
-        return 0
-
-    on = ui.color_on()
-    print("\n".join(ui.band("lgwks · research", f"Starting: {objective}", on=on)))
-    return 0
+    # DEFAULT (and --deep): the autonomous deep-research loop — grounded + AI-planned.
+    # crawl_mode is ALWAYS "ground" here (no more estimate-mode trap where --deep fetched nothing).
+    cfg = AutoConfig(
+        objective=objective, purpose=purpose, start=getattr(args, "start", objective),
+        max_rounds=getattr(args, "rounds", 12),
+        token_budget=getattr(args, "budget", 200_000),
+        crawl_mode="ground",
+        max_pages=getattr(args, "sources", 8),
+        project=getattr(args, "project", None) or "research",
+    )
+    res = run_auto(cfg)
+    # Graceful, ANNOUNCED degrade (constitution: never silently degrade): if the reasoning model is
+    # offline the loop fails closed immediately — don't leave the user empty-handed; do a single-shot
+    # grounded pass (which needs no model) so `lgwks research` still returns real evidence.
+    if res.stop_reason == "tongue_offline":
+        return _single_shot_ground(
+            objective, args,
+            notice="[research] reasoning model offline — the autonomous deep loop needs it; "
+                   "falling back to single-shot grounding (start the model for full deep research).")
+    return 0 if res.ledger_intact else 1
 
 
 def add_parser(sub):
     """Integrate unified research with a subparser."""
-    p = sub.add_parser("research", help="unified research orchestrator (begin, probe, auto)")
+    p = sub.add_parser("research", help="deep, grounded, AI-planned research (default); --probe/--quick for less")
     p.add_argument("prompt", help="research query or objective")
-    p.add_argument("--deep", action="store_true", help="run autonomous deep-research loop (akinator style)")
-    p.add_argument("--live", action="store_true", help="fetch real evidence from web (ground mode)")
-    p.add_argument("--sources", type=int, default=8, help="max sources to crawl")
-    p.add_argument("--rounds", type=int, default=6, help="max autonomous rounds")
-    p.add_argument("--budget", type=int, default=120_000, help="token budget")
+    p.add_argument("--deep", action="store_true",
+                   help="(default behavior) autonomous deep-research loop — AI plans the frontier, "
+                        "deterministic gather goes deep")
+    p.add_argument("--probe", action="store_true", help="fast local repo world-view only (no network fetch)")
+    p.add_argument("--quick", action="store_true", help="single-shot grounding (ctx7 docs + web), no loop")
+    p.add_argument("--live", action="store_true", help="alias of --quick (single-shot grounding)")
+    p.add_argument("--sources", type=int, default=8, help="pages READ per research front (deterministic depth)")
+    p.add_argument("--rounds", type=int, default=12, help="max autonomous rounds (AI reasoning steps; bounded)")
+    p.add_argument("--budget", type=int, default=200_000, help="token budget for the bounded AI reasoning")
     p.add_argument("--repo", default=".", help="repo context")
     p.add_argument("--json", action="store_true", help="machine output")
     p.set_defaults(func=research_command)
