@@ -1,7 +1,9 @@
 """engine — the ONE canonical orchestrator entrypoint (the Membrane Engine).
 
-Collapses the five prior peer orchestrators (lgwks_do / lgwks_workflows /
-lgwks_agent / lgwks_research / lgwks_workflow_aetherius) into a single loop:
+Collapses the prior peer orchestrators (lgwks_do / lgwks_workflows /
+lgwks_route — heads killed; lgwks_workflow_aetherius — deleted) into one loop,
+with lgwks_agent + lgwks_research kept as the canonical perceive/plan/research
+primitives it delegates to:
 
     perceive  →  sanitize (membrane)  →  plan  →  gate  →  dispatch (ENQUEUE)
 
