@@ -203,12 +203,23 @@ impl Screen for FlightScreen {
                         let idx = (c as usize) - ('1' as usize);
                         if let Some(step) = state.packet.next_steps.get(idx) {
                             let payload = step.args.clone().unwrap_or(serde_json::Value::Null);
-                            self.status_msg = Some(format!("→ {}", step.kind));
-                            return ScreenCmd::InjectIntent {
+                            
+                            let is_high_risk = step.risk.as_deref() == Some("high");
+                            let inject_cmd = ScreenCmd::InjectIntent {
                                 kind:    step.kind.clone(),
                                 scope:   "human_affordance".to_string(),
                                 payload,
                             };
+
+                            if is_high_risk {
+                                return ScreenCmd::Confirm {
+                                    prompt: format!("Execute high-risk affordance: {}?", step.kind),
+                                    on_confirm: Box::new(inject_cmd),
+                                };
+                            } else {
+                                self.status_msg = Some(format!("→ {}", step.kind));
+                                return inject_cmd;
+                            }
                         }
                         return ScreenCmd::None;
                     }

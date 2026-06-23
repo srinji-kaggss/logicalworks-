@@ -31,6 +31,7 @@ pub struct App {
     pub state:       Arc<RwLock<DaemonState>>,
     status_msg:      Option<String>,
     status_ttl:      u8,    // clear status_msg after N ticks
+    confirm_overlay: crate::ui::confirm_overlay::ConfirmOverlay,
 }
 
 impl App {
@@ -49,11 +50,19 @@ impl App {
             state,
             status_msg: None,
             status_ttl: 0,
+            confirm_overlay: crate::ui::confirm_overlay::ConfirmOverlay::new(),
         }
     }
 
     /// Main event dispatch. Called from the run() loop below.
     pub fn handle_event(&mut self, event: Event) {
+        if self.confirm_overlay.active {
+            if let Some(cmd) = self.confirm_overlay.handle_event(&event) {
+                self.execute_cmd(cmd);
+            }
+            return;
+        }
+
         match &event {
             // ── Global key bindings ──────────────────────────────────────────
             Event::Key(key) => {
@@ -119,8 +128,8 @@ impl App {
                     self.set_status(format!("→ {kind} injected"), 8);
                 }
             }
-            ScreenCmd::Confirm { prompt: _, on_confirm: _ } => {
-                // TODO U-09: render confirmation overlay
+            ScreenCmd::Confirm { prompt, on_confirm } => {
+                self.confirm_overlay.show(prompt, on_confirm);
             }
         }
     }
@@ -145,6 +154,8 @@ impl App {
         self.render_tabs(frame, chunks[0]);
         self.render_screen(frame, chunks[1]);
         self.render_status_bar(frame, chunks[2]);
+
+        self.confirm_overlay.render(frame, area);
     }
 
     fn render_tabs(&self, frame: &mut Frame, area: Rect) {

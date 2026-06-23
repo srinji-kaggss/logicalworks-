@@ -9,6 +9,7 @@ mod app;
 mod bridge;
 mod screens;
 mod tui;
+mod ui;
 
 use app::{App, run};
 use bridge::{DaemonBridge, DaemonState, spawn_poll_task};
