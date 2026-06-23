@@ -172,6 +172,14 @@ impl FlightScreen {
         );
         frame.render_widget(input_widget, chunks[2]);
 
+        let telemetry_chunks = Layout::default()
+            .direction(Direction::Horizontal)
+            .constraints([
+                Constraint::Percentage(50),
+                Constraint::Percentage(50),
+            ])
+            .split(chunks[1]);
+
         // Telemetry Sparkline
         let entropy_data = &state.packet.entropy_history;
         let title = format!(" TELEMETRY · TPS: {:.1} · ENTROPY ", state.packet.tps);
@@ -185,7 +193,37 @@ impl FlightScreen {
             )
             .data(entropy_data)
             .style(Style::default().fg(EMERALD));
-        frame.render_widget(sparkline, chunks[1]);
+        frame.render_widget(sparkline, telemetry_chunks[0]);
+
+        // Steering Dials
+        let dials = &state.packet.steering_dials;
+        let mut dial_spans = vec![];
+        for (i, (name, val)) in dials.iter().enumerate() {
+            let width = 10;
+            let filled = (val * width as f32).round() as usize;
+            let empty = width - filled;
+            let bar = format!("{}{}", "■".repeat(filled), "□".repeat(empty));
+            let color = match i % 3 {
+                0 => EMERALD,
+                1 => AMBER,
+                _ => ratatui::style::Color::Rgb(150, 100, 255), // Purple accent
+            };
+            dial_spans.push(Span::styled(format!(" {} ", name), Style::default().fg(CREAM_DIM)));
+            dial_spans.push(Span::styled(bar, Style::default().fg(color)));
+            if i < dials.len() - 1 {
+                dial_spans.push(Span::raw(" │ "));
+            }
+        }
+        
+        let dials_widget = Paragraph::new(Line::from(dial_spans))
+            .block(
+                Block::default()
+                    .title(Span::styled(" STEERING DIALS ", Style::default().fg(MUTED)))
+                    .borders(Borders::ALL)
+                    .border_type(BorderType::Rounded)
+                    .border_style(Style::default().fg(SLATE_DIM)),
+            );
+        frame.render_widget(dials_widget, telemetry_chunks[1]);
     }
 }
 

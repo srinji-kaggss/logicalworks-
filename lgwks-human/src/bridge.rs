@@ -16,15 +16,17 @@ use std::{
 // Matches lgwks_ui.py — single source of truth lives here, render modules import
 pub mod palette {
     use ratatui::style::Color;
-    pub const SLATE:       Color = Color::Indexed(67);
-    pub const SLATE_DIM:   Color = Color::Indexed(60);
-    pub const CREAM:       Color = Color::Indexed(230);
-    pub const CREAM_DIM:   Color = Color::Indexed(187);
-    pub const EMERALD:     Color = Color::Indexed(78);
-    pub const EMERALD_DIM: Color = Color::Indexed(36);
-    pub const AMBER:       Color = Color::Indexed(179);
-    pub const MUTED:       Color = Color::Indexed(245);
-    pub const RED_ERR:     Color = Color::Indexed(196);
+    // Opencode-like rich dark palette
+    pub const BG_MAIN:     Color = Color::Rgb(8, 8, 8); // Rich black
+    pub const SLATE:       Color = Color::Rgb(160, 160, 175);
+    pub const SLATE_DIM:   Color = Color::Rgb(80, 80, 95);
+    pub const CREAM:       Color = Color::Rgb(240, 240, 245);
+    pub const CREAM_DIM:   Color = Color::Rgb(190, 190, 200);
+    pub const EMERALD:     Color = Color::Rgb(0, 255, 170); // Neon green/cyan
+    pub const EMERALD_DIM: Color = Color::Rgb(0, 120, 80);
+    pub const AMBER:       Color = Color::Rgb(255, 180, 0); // Warning/Highlight
+    pub const MUTED:       Color = Color::Rgb(100, 100, 110);
+    pub const RED_ERR:     Color = Color::Rgb(255, 60, 80);
 }
 
 // ── Data models ────────────────────────────────────────────────────────────
@@ -89,6 +91,7 @@ pub struct ContextPacket {
     pub provenance:         Option<serde_json::Value>,
     pub entropy_history:    Vec<u64>,
     pub tps:                f32,
+    pub steering_dials:     Vec<(String, f32)>, // Vector of (Name, Value [0-1])
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]

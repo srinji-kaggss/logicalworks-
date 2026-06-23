@@ -139,6 +139,12 @@ impl App {
     /// Render the full frame.
     pub fn render(&self, frame: &mut Frame) {
         let area = frame.area();
+        
+        // Base dark background (Opencode aesthetic)
+        let base_block = ratatui::widgets::Block::default()
+            .style(Style::default().bg(crate::bridge::palette::BG_MAIN));
+        frame.render_widget(base_block, area);
+
         let chunks = Layout::default()
             .direction(Direction::Vertical)
             .constraints([

@@ -128,6 +128,15 @@ async fn main() -> Result<()> {
                         st.packet.entropy_history.remove(0);
                     }
                     st.packet.tps = 45.0 + (rand::random::<f32>() * 10.0);
+                    
+                    // Simulate steering dials drift
+                    let dials = vec![
+                        ("safety".to_string(), 0.8 + (rand::random::<f32>() * 0.1)),
+                        ("creativity".to_string(), 0.4 + (rand::random::<f32>() * 0.2)),
+                        ("formality".to_string(), 0.9),
+                        ("deception".to_string(), rand::random::<f32>() * 0.05),
+                    ];
+                    st.packet.steering_dials = dials;
                 }
                 let _ = event_tx.send(tui::Event::DaemonTick);
             }
