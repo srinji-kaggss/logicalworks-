@@ -29,7 +29,7 @@ PACKET_SCHEMA = "lgwks.context.packet.v1"  # #122: promoted from lgwks.daemon.pa
 CONTEXT_PACKET_SECTIONS = (
     "session_head", "queue", "recent_events", "event_count",
     "active_task", "retrieval", "known_failures", "commitments",
-    "constraints", "allowed_capabilities", "provenance",
+    "constraints", "allowed_capabilities", "provenance", "next_steps", "telemetry",
 )
 WORKTREE_SCHEMA = "lgwks.daemon.worktree.v0"
 
@@ -215,6 +215,39 @@ def _known_failures(events: list[dict[str, Any]]) -> list[dict[str, Any]]:
                 "ts": ev.get("ts"),
             })
     return out
+
+
+def _next_steps(events: list[dict[str, Any]], head: dict[str, Any] | None) -> list[dict[str, Any]]:
+    """PULSE Affordance Model: constructs next steps with provenance explaining *why* chosen."""
+    affordances = []
+    for ev in events:
+        payload = ev.get("payload") or {}
+        for step in payload.get("affordances", []):
+            affordances.append({
+                "affordance": step,
+                "provenance": {
+                    "source_event": ev.get("event_id"),
+                    "reason": f"Signal derived from {ev.get('kind')} event payload (PULSE Model)",
+                    "timestamp": ev.get("ts"),
+                    "model": "PULSE Affordance Model"
+                }
+            })
+    return affordances
+
+
+def _telemetry(events: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Extensive telemetry and provenance stream for high-fidelity rendering."""
+    stream = []
+    for ev in events:
+        stream.append({
+            "event_id": ev.get("event_id"),
+            "ts": ev.get("ts"),
+            "latency_ms": (ev.get("payload") or {}).get("latency_ms", 0),
+            "actor": ev.get("actor"),
+            "lane": ev.get("lane"),
+            "provenance_trace": ev.get("scope"),
+        })
+    return stream
 
 
 def validate_context_packet(packet: dict[str, Any]) -> dict[str, Any]:
@@ -594,9 +627,13 @@ class DaemonEventStore:
             "commitments": [],   # transcript-cortex sourced; stubbed-but-shaped (#122 seam)
             "constraints": [],   # active governance/AUP constraints; stubbed-but-shaped (#122 seam)
             "allowed_capabilities": allowed_capabilities,
+            "next_steps": _next_steps(events, head),
+            "telemetry": _telemetry(events),
             "provenance": {
                 "watermark_event_id": events[0]["event_id"] if events else None,
                 "store_versions": {},
+                "stream": _telemetry(events),
+                "model": "PULSE",
             },
         }
 
