@@ -268,9 +268,16 @@ def test_home_quick_v_launches_viz():
             return val
         return "q"
         
+    # Precondition mocks: the 'v'→viz dispatch lives behind a non-empty command
+    # tree and a repo context (viz is only a quick action when a repo is selected).
+    # Without these the entryway falls into the fallback loop and never reaches the
+    # viz branch — so the test must set up the precondition, not weaken the assertion.
+    from pathlib import Path
     with patch("builtins.input", mock_home_input), \
          patch("lgwks_graph_viz.GraphBrowser") as mock_browser_cls, \
          patch("lgwks_graph.get_graph") as mock_get_graph, \
+         patch("lgwks_home._build_command_tree", return_value={"solve": {}}), \
+         patch("lgwks_home._detect_repo_context", return_value=(Path("/tmp/repo"), [])), \
          patch("builtins.print"):
         
         mock_browser = MagicMock()

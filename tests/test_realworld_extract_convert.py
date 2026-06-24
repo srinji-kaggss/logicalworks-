@@ -348,10 +348,11 @@ class TestImageBranch(unittest.TestCase):
 
 class TestPdfUrlSniff(unittest.TestCase):
     def test_arxiv_style_pdf_url_routes_by_magic_bytes(self):
-        # https://arxiv.org/pdf/1706.03762 → _ext_of parses ".03762" (not .pdf).
-        # Must sniff %PDF and route to _pdf, not return empty from the HTML branch.
+        # https://arxiv.org/pdf/1706.03762 → _ext_of parses ".03762" (not .pdf) →
+        # ambiguous → global sniff classifies the bytes as PDF → _pdf. No URL pattern.
         url = "https://arxiv.org/pdf/1706.03762"
-        with mock.patch.object(extract_mod, "_download", return_value=b"%PDF-1.4\nfakebody"), \
+        with mock.patch.object(extract_mod, "_sniff_url_kind",
+                               return_value=("pdf", b"%PDF-1.4\nfakebody")), \
              mock.patch.object(extract_mod, "_pdf", return_value="PDF BODY TEXT") as p_pdf:
             r = extract_mod.extract(url, max_chars=500)
         self.assertTrue(r["ok"])
@@ -359,16 +360,42 @@ class TestPdfUrlSniff(unittest.TestCase):
         self.assertEqual(r["text"], "PDF BODY TEXT")
         p_pdf.assert_called_once()
 
-    def test_pdf_signaling_url_that_is_not_pdf_falls_back_to_html(self):
-        url = "https://example.com/pdf-viewer"
-        with mock.patch.object(extract_mod, "_download", return_value=b"<html>not a pdf</html>"), \
-             mock.patch.object(extract_mod, "_pdf") as p_pdf, \
+    def test_url_sniff_routes_zip_to_office(self):
+        url = "https://publisher.example/article/10.1234/x"  # ext is ".1234/x"? ambiguous
+        with mock.patch.object(extract_mod, "_sniff_url_kind",
+                               return_value=("xlsx", b"PK\x03\x04zip")), \
+             mock.patch.object(extract_mod, "_zip_doc_text", return_value="XLSX BODY") as p_z:
+            r = extract_mod.extract(url, max_chars=500)
+        self.assertTrue(r["ok"])
+        self.assertEqual(r["kind"], "office")
+        p_z.assert_called_once()
+
+    def test_url_sniff_html_falls_back_to_html_ladder(self):
+        url = "https://example.com/some/page"
+        with mock.patch.object(extract_mod, "_sniff_url_kind", return_value=("html", b"")), \
              mock.patch.object(extract_mod, "_html", return_value="HTML BODY TEXT"):
             r = extract_mod.extract(url, max_chars=500)
         self.assertTrue(r["ok"])
         self.assertEqual(r["kind"], "html")
         self.assertEqual(r["text"], "HTML BODY TEXT")
-        p_pdf.assert_not_called()  # magic check failed → never treated as PDF
+
+    def test_sniff_url_kind_detects_pdf_from_bytes(self):
+        # unit-level: feed %PDF bytes through a mocked opener → ("pdf", full)
+        body = b"%PDF-1.4\nthe rest of the pdf"
+        from io import BytesIO
+        class _Resp:
+            def __init__(self, b): self._b = BytesIO(b)
+            def read(self, n=-1): return self._b.read(n)
+            def __enter__(self): return self
+            def __exit__(self, *a): return False
+        with mock.patch.object(extract_mod, "_remote_allowed", return_value=True), \
+             mock.patch.object(extract_mod, "_opener") as op, \
+             mock.patch.object(extract_mod, "_sniff_mime", create=True, return_value="application/pdf"):
+            op.return_value.open.return_value.__enter__.return_value = _Resp(body)
+            op.return_value.open.return_value.__exit__ = lambda *a: False
+            kind, data = extract_mod._sniff_url_kind("https://x/y")
+        self.assertEqual(kind, "pdf")
+        self.assertTrue(data.startswith(b"%PDF"))
 
 
 # ---------------------------------------------------------------------------

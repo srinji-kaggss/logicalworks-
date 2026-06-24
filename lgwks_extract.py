@@ -266,17 +266,33 @@ def _zip_doc_text(data: bytes, ext: str, max_chars: int) -> str:
     except Exception:
         return ""
     ext = (ext or "").lower()
+    # Normalize the hint to a routing subkind. Accept either a real extension
+    # (.docx/...) or an already-classified subkind (docx/xlsx/pptx/odt/epub) from
+    # the global URL content sniff, so URL-fetched zips with no extension route
+    # correctly. Unknown hint → auto-detect from the namelist.
     if ext in {".docx", ".doc"}:
+        ext = "docx"
+    elif ext in {".pptx", ".ppt"}:
+        ext = "pptx"
+    elif ext in {".xlsx", ".xls"}:
+        ext = "xlsx"
+    elif ext in {".odt", ".odp", ".ods"}:
+        ext = "odt"
+    elif ext == ".epub":
+        ext = "epub"
+    if ext not in {"docx", "pptx", "xlsx", "odt", "epub"}:
+        ext = _zip_subkind(data)  # auto-detect by peeking inside
+    if ext == "docx":
         pick = [n for n in names if n in ("word/document.xml",
                                           "word/footnotes.xml", "word/endnotes.xml")]
-    elif ext in {".pptx", ".ppt"}:
+    elif ext == "pptx":
         pick = [n for n in names if n.startswith("ppt/slides/slide") and n.endswith(".xml")]
-    elif ext in {".xlsx", ".xls"}:
+    elif ext == "xlsx":
         pick = [n for n in names if n == "xl/sharedStrings.xml"]
         pick += [n for n in names if n.startswith("xl/worksheets/sheet") and n.endswith(".xml")]
-    elif ext in {".odt", ".odp", ".ods"}:
+    elif ext == "odt":
         pick = [n for n in names if n == "content.xml"]
-    elif ext == ".epub":
+    elif ext == "epub":
         pick = [n for n in names if n.endswith((".xhtml", ".html", ".htm"))
                 and "nav" not in os.path.basename(n).lower()]
     else:
@@ -384,15 +400,75 @@ def _download(url: str) -> bytes:
         return b""
 
 
-def _sniff_pdf(url: str) -> bytes | None:
-    """Fetch a URL and confirm it is a PDF by magic bytes (%PDF). Returns the full
-    bytes if it IS a PDF (caller reuses them), else None. Fixes extension-less PDF
-    URLs — e.g. https://arxiv.org/pdf/1706.03762 — whose path suffix parses as
-    ".03762" and was misrouted to the HTML branch (empty result)."""
-    raw = _download(url)
-    if raw[:4] == b"%PDF":
-        return raw
-    return None
+def _zip_subkind(raw: bytes) -> str:
+    """Peek inside a ZIP container to classify it as a routing kind: epub / docx /
+    xlsx / pptx / odt / office(generic). Used by the global content sniff for
+    URL-fetched zips whose extension is unknown or misleading (e.g. a publisher
+    serving an .xlsx at /export/123). Never raises."""
+    import io as _io
+    import zipfile
+    try:
+        zf = zipfile.ZipFile(_io.BytesIO(raw))
+        names = zf.namelist()
+    except Exception:
+        return "office"
+    if "mimetype" in names:
+        try:
+            mt = zf.read("mimetype").decode("utf-8", "replace").strip().lower()
+        except Exception:
+            mt = ""
+        if "epub" in mt:
+            return "epub"
+        if "opendocument" in mt:
+            return "odt"
+    if any(n.startswith("word/") for n in names):
+        return "docx"
+    if any(n.startswith("xl/") for n in names):
+        return "xlsx"
+    if any(n.startswith("ppt/") for n in names):
+        return "pptx"
+    return "office"
+
+
+def _sniff_url_kind(url: str) -> tuple[str, bytes]:
+    """GLOBAL content detection for a URL: stream the leading bytes and classify by
+    what they ARE (magic bytes), not by any URL pattern or substring. Returns
+    (kind, body): body is the full fetched bytes for document kinds
+    (pdf/epub/office/image) and b"" for html/unknown (the caller defers to the HTML
+    ladder, which re-fetches with crwl/curl/VL quality). One connection for documents,
+    a 1KB probe for pages. Definitive extensions are routed earlier as fast-paths; the
+    sniff is the global truth for ambiguous URLs (arxiv /pdf/<id>, doi redirects,
+    publisher /article/<doi>, scholar result links, shortened links) — it works for
+    everything because it reads the bytes, not the URL."""
+    if not _remote_allowed(url):
+        return ("html", b"")
+    try:
+        from lgwks_input import _sniff_mime  # canonical magic sniffer — one source of truth
+    except Exception:
+        _sniff_mime = None  # type: ignore[assignment]
+    try:
+        req = urllib.request.Request(url, headers=_headers(url))
+        with _opener().open(req, timeout=30) as resp:
+            head = resp.read(1024)
+            if not head:
+                return ("html", b"")
+            if head[:4] == b"%PDF":
+                return ("pdf", head + resp.read())
+            if head[:2] == b"PK":
+                full = head + resp.read()
+                return (_zip_subkind(full), full)
+            if _sniff_mime and _sniff_mime(head).startswith("image/"):
+                return ("image", head + resp.read())
+            return ("html", b"")  # html/text/unknown → defer to the _html ladder
+    except urllib.error.HTTPError as exc:
+        try:
+            import lgwks_auth_runtime
+            lgwks_auth_runtime.note_auth_failure(url, exc.code)
+        except Exception:
+            pass
+        return ("html", b"")
+    except Exception:
+        return ("html", b"")
 
 
 def extract(target: str, max_chars: int = 8000) -> dict:
@@ -455,22 +531,32 @@ def extract(target: str, max_chars: int = 8000) -> dict:
         kind = "text"
         text = _trim(Path(target).read_text(errors="replace"), max_chars) if Path(target).exists() else ""
     else:
-        # URL whose path signals a PDF but lacks a .pdf suffix (arxiv /pdf/<id>,
-        # doi redirects, /download/<n>) — verify by magic bytes before HTML fallback,
-        # so a real PDF is never returned empty. Magic check keeps it safe: a non-PDF
-        # "/pdf-viewer" HTML page sniffs None and still goes through _html.
-        if is_url and "pdf" in target.lower():
-            sniffed = _sniff_pdf(target)
-            if sniffed is not None:
-                kind = "pdf"
-                text = _pdf(sniffed, max_chars)
-            else:
-                kind = "html"
-                text = _html(target, max_chars)
+        # AMBIGUOUS target — extension didn't match a definitive kind. Route by
+        # CONTENT, not URL pattern (the global engine): for URLs, sniff the actual
+        # bytes and dispatch to the matching extractor; anything that isn't a
+        # document (html/text/unknown) defers to the _html escalation ladder.
+        # This is what makes scholar result links, doi redirects, publisher
+        # /article/<doi>, arxiv /pdf/<id>, and shortened links all work — they're
+        # classified by what the bytes ARE, not by a brittle URL substring.
+        if is_url:
+            skind, sbytes = _sniff_url_kind(target)
+            if skind == "pdf":
+                kind, text = "pdf", _pdf(sbytes, max_chars)
+            elif skind in ("epub", "docx", "xlsx", "pptx", "odt", "office"):
+                kind, text = ("epub" if skind == "epub" else "office"), _zip_doc_text(sbytes, skind, max_chars)
+            elif skind == "image":
+                kind = "image"
+                try:
+                    import lgwks_input
+                    text = lgwks_input._ocr_image_bytes(sbytes, timeout=60) or ""
+                except Exception:
+                    text = ""
+            else:  # html / unknown → the HTML escalation ladder (crwl → curl → VL)
+                kind, text = "html", _html(target, max_chars)
         else:
+            # local file with an unrecognized extension: read as text.
             kind = "html"
-            text = _html(target, max_chars) if is_url else (
-                _trim(Path(target).read_text(errors="replace"), max_chars) if Path(target).exists() else "")
+            text = _trim(Path(target).read_text(errors="replace"), max_chars) if Path(target).exists() else ""
 
     result = {"source": target, "kind": kind, "ok": bool(text), "text": text}
     # Site-aware enrichment for supported platforms (Twitter/X, Reddit, Scholar)
