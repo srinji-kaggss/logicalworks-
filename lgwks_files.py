@@ -19,9 +19,51 @@ import sys
 from pathlib import Path
 
 
-def _extract(target: str, max_chars: int) -> dict:
+def _extract(target: str, max_chars: int, page_range: tuple[int, int] | None = None) -> dict:
     import lgwks_extract
-    return lgwks_extract.extract(target, max_chars=max_chars)
+    return lgwks_extract.extract(target, max_chars=max_chars, page_range=page_range)
+
+
+def _parse_page_range(s: str | None) -> tuple[int, int] | None:
+    """Parse a 'M-N' (or 'M') page spec into a 1-indexed (first,last) range. None if absent/invalid."""
+    if not s:
+        return None
+    try:
+        if "-" in s:
+            a, b = s.split("-", 1)
+            rng = (int(a), int(b))
+        else:
+            n = int(s)
+            rng = (n, n)
+        return rng if rng[0] >= 1 and rng[1] >= rng[0] else None
+    except Exception:
+        return None
+
+
+def _truncation_notice(doc: dict, target: str) -> str:
+    """A visible marker for the non-JSON path so a human/agent piping the text can SEE
+    that the extract is a slice, not the whole, and how to continue. Experience fix for
+    'stopped midway and captured noise' — never let truncation be silent."""
+    if not doc.get("truncated"):
+        return ""
+    bits = [f"showed {doc.get('chars', len(doc.get('text', '')))} chars"]
+    total = doc.get("total_pages")
+    if doc.get("pages"):
+        bits.append(f"pages {doc['pages']}" + (f" of {total}" if total is not None else ""))
+    elif total is not None:
+        bits.append(f"of {total} pages")
+    cont = f"continue: lgwks extract {target!r}"
+    if total is not None:
+        # suggest the next unread page onward. If a range was read, continue after its
+        # last page; else (char-cap mid-stream) suggest paginating from page 2.
+        try:
+            last_read = int(doc["pages"].split("\u2013")[1]) if doc.get("pages") else 1
+        except Exception:
+            last_read = 1
+        nxt = last_read + 1
+        if nxt <= total:
+            cont += f" --pages {nxt}-{total}"
+    return f"[\u2026 truncated: {', '.join(bits)} \u2014 {cont}]"
 
 
 def _is_safe_path(target: str, repo_root: Path, allow_absolute: bool = False) -> bool:
@@ -54,7 +96,8 @@ def extract_command(args) -> int:
         print(f"error: blocked path (outside repo): {args.target}", file=sys.stderr)
         return 1
 
-    doc = _extract(args.target, getattr(args, "max_chars", 8000))
+    doc = _extract(args.target, getattr(args, "max_chars", 8000),
+                   _parse_page_range(getattr(args, "pages", None)))
     if getattr(args, "json", False):
         print(json.dumps(doc, ensure_ascii=False, indent=2))
         return 0 if doc["ok"] else 1
@@ -62,6 +105,11 @@ def extract_command(args) -> int:
         print(f"extract: could not read {args.target!r} (kind={doc['kind']})", file=sys.stderr)
         return 1
     print(doc["text"])
+    # Experience fix: never let truncation be silent. Marker to stderr so piped stdout
+    # (the text) stays clean, but a human/agent still sees it's a slice + how to continue.
+    notice = _truncation_notice(doc, args.target)
+    if notice:
+        print(notice, file=sys.stderr)
     return 0
 
 
@@ -80,7 +128,8 @@ def convert_command(args) -> int:
             print(f"error: blocked output path (outside repo): {args.out}", file=sys.stderr)
             return 1
 
-    doc = _extract(source, getattr(args, "max_chars", 20000))
+    doc = _extract(source, getattr(args, "max_chars", 20000),
+                   _parse_page_range(getattr(args, "pages", None)))
     if not doc["ok"]:
         print(f"convert: could not read {source!r} (kind={doc['kind']})", file=sys.stderr)
         return 1
@@ -106,6 +155,7 @@ def add_parser(sub) -> None:
     extract.add_argument("target", help="file path or URL")
     extract.add_argument("--json", action="store_true", help="structured extraction envelope")
     extract.add_argument("--max-chars", type=int, default=8000, help="maximum extracted characters")
+    extract.add_argument("--pages", default=None, help="PDF page range to read, e.g. 4-12 or 7 (resume a truncated extract)")
     extract.add_argument("--allow-absolute", action="store_true", default=True,
                          help="allow absolute local paths")
     extract.set_defaults(func=extract_command)
@@ -115,6 +165,7 @@ def add_parser(sub) -> None:
     convert.add_argument("--to", choices=["txt", "md", "json"], default="txt")
     convert.add_argument("--out", default="-", help="output file, or - for stdout")
     convert.add_argument("--max-chars", type=int, default=20000, help="maximum extracted characters")
+    convert.add_argument("--pages", default=None, help="PDF page range to read, e.g. 4-12 (resume a truncated extract)")
     convert.add_argument("--allow-absolute", action="store_true", default=True,
                          help="allow absolute local paths")
     convert.set_defaults(func=convert_command)

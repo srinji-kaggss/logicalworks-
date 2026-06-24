@@ -399,6 +399,81 @@ class TestPdfUrlSniff(unittest.TestCase):
 
 
 # ---------------------------------------------------------------------------
+# 2e. Truncation honesty + pagination — the "stopped midway" experience fix
+# ---------------------------------------------------------------------------
+
+class TestTruncationSignal(unittest.TestCase):
+    def test_text_over_cap_is_flagged_truncated(self):
+        with tempfile.TemporaryDirectory() as td:
+            p = Path(td) / "big.txt"
+            p.write_text("X" * 5000)
+            r = extract_mod.extract(str(p), max_chars=1000)
+        self.assertTrue(r["ok"])
+        self.assertTrue(r["truncated"], "output hit the cap → must signal truncated")
+        self.assertEqual(r["chars"], 1000)
+        self.assertLessEqual(r["chars"], 1000)
+
+    def test_text_under_cap_not_truncated(self):
+        with tempfile.TemporaryDirectory() as td:
+            p = Path(td) / "small.txt"
+            p.write_text("tiny content")
+            r = extract_mod.extract(str(p), max_chars=1000)
+        self.assertTrue(r["ok"])
+        self.assertFalse(r["truncated"])
+        self.assertEqual(r["chars"], len("tiny content"))
+
+    def test_blocked_url_envelope_has_truncated_field(self):
+        r = extract_mod.extract("http://127.0.0.1/x")
+        self.assertFalse(r["ok"])
+        # additive fields always present so consumers can branch uniformly
+        self.assertIn("truncated", r)
+        self.assertEqual(r["chars"], 0)
+
+    def test_pdf_page_range_threads_to_pdftotext(self):
+        # page_range must reach pdftotext as -f/-l. Mock the binary + count probe.
+        with mock.patch.object(extract_mod, "_bin", side_effect=lambda n: "/fake/pdftotext" if n == "pdftotext" else None), \
+             mock.patch("subprocess.run") as srun:
+            srun.return_value = mock.Mock(returncode=0, stdout=b"PAGE RANGE TEXT")
+            with mock.patch.object(extract_mod, "_pdf_page_count", return_value=12):
+                with tempfile.TemporaryDirectory() as td:
+                    p = Path(td) / "x.pdf"; p.write_bytes(b"%PDF-1.4 fake")
+                    r = extract_mod.extract(str(p), max_chars=500, page_range=(4, 12))
+        # the run call's argv must contain -f 4 -l 12
+        cmd = srun.call_args[0][0]
+        self.assertEqual(cmd[cmd.index("-f") + 1], "4")
+        self.assertEqual(cmd[cmd.index("-l") + 1], "12")
+        self.assertEqual(r["pages"], "4\u201312")
+        self.assertEqual(r["total_pages"], 12)
+
+
+class TestCLITruncationMarker(unittest.TestCase):
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.d = Path(self.tmp.name)
+        self.env = {**os.environ, "LGWKS_CACHE_DIR": str(self.d / "c")}
+
+    def tearDown(self):
+        self.tmp.cleanup()
+
+    def test_marker_to_stderr_when_truncated(self):
+        p = self.d / "big.txt"; p.write_text("Y" * 9000)
+        r = subprocess.run([sys.executable, str(_DISPATCHER), "extract", str(p), "--max-chars", "1000"],
+                           capture_output=True, text=True, cwd=str(_REPO), env=self.env, timeout=60)
+        self.assertEqual(r.returncode, 0)
+        self.assertIn("truncated", r.stderr)
+        self.assertIn("continue:", r.stderr)
+        # stdout stays the clean text (no marker polluting the pipe)
+        self.assertNotIn("truncated", r.stdout)
+
+    def test_no_marker_when_not_truncated(self):
+        p = self.d / "s.txt"; p.write_text("small")
+        r = subprocess.run([sys.executable, str(_DISPATCHER), "extract", str(p)],
+                           capture_output=True, text=True, cwd=str(_REPO), env=self.env, timeout=60)
+        self.assertEqual(r.returncode, 0)
+        self.assertNotIn("truncated", r.stderr)
+
+
+# ---------------------------------------------------------------------------
 # 2b. ZIP-container documents — office (docx/xlsx/pptx) + epub (stdlib fallback)
 #     Portable fixtures built with stdlib zipfile; no markitdown / real files needed.
 # ---------------------------------------------------------------------------
