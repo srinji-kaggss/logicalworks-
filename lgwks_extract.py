@@ -7,7 +7,7 @@ and couldn't read it. This turns any URL or local file — pdf · docx · xlsx �
 into bounded markdown/text the Tongue can reason over, picking the best extractor present (resolver).
 
 Degrade chain per type, LOUD on total failure (never silently drop a source):
-  pdf   : pdftotext (poppler) → pymupdf(fitz) → ""
+  pdf   : pdftotext (poppler) → pymupdf(fitz) → render+OCR for image-only PDFs (poppler + Vision/tesseract)
   office: markitdown → ""    (docx/xlsx/pptx)
   html  : crwl md-fit → curl+strip
   text  : read directly
@@ -50,6 +50,10 @@ _WALL_RE = re.compile(
     re.I,
 )
 _PDF_EXT = {".pdf"}
+# Image-only-PDF OCR tier: hard cap on pages rendered+OCR'd so a huge PDF can never
+# run unbounded. The max_chars budget also early-stops once enough text is gathered.
+_PDF_OCR_PAGE_CAP = 25
+_PDF_OCR_DPI = 150
 _OFFICE_EXT = {".docx", ".xlsx", ".pptx", ".doc", ".xls", ".ppt"}
 # Text-classification extensions via the canonical composition seam (#150 C-13):
 # the shared set is the one source of truth (substrate_config.TEXT_EXT — includes
@@ -57,7 +61,7 @@ _OFFICE_EXT = {".docx", ".xlsx", ".pptx", ".doc", ".xls", ".ppt"}
 # onto the canonical fixes the prior accidental drift where extract lacked ".jsonl":
 # such a file is now classified kind="text" instead of kind="html" (the extracted
 # text is identical — both branches read_text — only the label is corrected).
-from lgwks_substrate_config import TEXT_EXT as _BASE_TEXT_EXT, with_extras  # one source of truth
+from lgwks_substrate_config import TEXT_EXT as _BASE_TEXT_EXT, with_extras, IMAGE_EXTS as _IMAGE_EXTS  # one source of truth
 _TEXT_EXT = with_extras(_BASE_TEXT_EXT, ".log")
 
 
@@ -161,8 +165,52 @@ def _opener() -> urllib.request.OpenerDirector:
     return urllib.request.build_opener(_SafeRedirectHandler())
 
 
+def _pdf_render_ocr(raw: bytes, max_chars: int) -> str:
+    """Image-only-PDF tier: render pages to images (poppler pdftoppm) and OCR each via
+    the ONE canonical OCR port (lgwks_input._ocr_image_bytes: tesseract → macOS Vision).
+    Local, zero-egress, zero new deps. Bounded by both _PDF_OCR_PAGE_CAP and max_chars
+    (early-stops once the budget is reached). Returns "" if poppler/OCR are unavailable
+    or nothing is recognised — same honest-empty contract as the tiers above it."""
+    pdftoppm = _bin("pdftoppm")
+    if not pdftoppm:
+        return ""
+    try:
+        import lgwks_input  # function-local: lgwks_input._try_pdf_text imports _pdf back → avoid import cycle
+    except Exception:
+        return ""
+    if not lgwks_input._ocr_available():
+        return ""
+    try:
+        with tempfile.TemporaryDirectory() as td:
+            fd, pdf_tmp = tempfile.mkstemp(suffix=".pdf", dir=td)
+            with os.fdopen(fd, "wb") as fh:
+                fh.write(raw)
+            prefix = os.path.join(td, "pg")
+            r = subprocess.run(
+                [pdftoppm, "-png", "-r", str(_PDF_OCR_DPI),
+                 "-l", str(_PDF_OCR_PAGE_CAP), pdf_tmp, prefix],
+                capture_output=True, timeout=120,
+            )
+            if r.returncode != 0:
+                return ""
+            chunks: list[str] = []
+            total = 0
+            for img in sorted(Path(td).glob("pg-*.png")):
+                if total >= max_chars:
+                    break
+                text = lgwks_input._ocr_image_bytes(img.read_bytes(), timeout=60) or ""
+                if text:
+                    chunks.append(text)
+                    total += len(text)
+            return _trim("\n\n".join(chunks), max_chars)
+    except Exception:
+        return ""
+
+
 def _pdf(raw: bytes, max_chars: int) -> str:
-    """pdftotext (stdin→stdout) first; pymupdf as fallback. Both bounded."""
+    """Degrade chain for PDF → text. Deterministic first, sensor last:
+    pdftotext (text layer) → pymupdf (text layer) → render+OCR (image-only PDFs).
+    All tiers bounded by max_chars; never egresses; never silently calls a cloud OCR."""
     exe = _bin("pdftotext")
     if exe:
         try:
@@ -176,16 +224,85 @@ def _pdf(raw: bytes, max_chars: int) -> str:
         import fitz  # pymupdf
         import io
         doc = fitz.open(stream=io.BytesIO(raw), filetype="pdf")
-        return _trim("\n".join(page.get_text() for page in doc), max_chars)
+        text = _trim("\n".join(page.get_text() for page in doc), max_chars)
+        if text:
+            return text
+    except Exception:
+        pass
+    # Tier 3 — image-only PDF (no text layer): render pages and OCR locally.
+    return _pdf_render_ocr(raw, max_chars)
+
+
+def _strip_xml(xml: str) -> str:
+    """XML/XHTML → readable text: turn block-level close tags into newlines, strip the
+    rest, unescape entities. Stdlib only (re + html). Used by _zip_doc_text."""
+    import html as _html
+    xml = re.sub(r"</(?:p|div|tr|br|li|h[1-6]|table|sectPr)\s*>", "\n", xml, flags=re.I)
+    text = _TAG.sub(" ", xml)
+    text = _html.unescape(text)
+    return text
+
+
+_ZIP_DOC_EXT = {".docx", ".doc", ".pptx", ".ppt", ".xlsx", ".xls",
+                ".odt", ".odp", ".ods", ".epub"}
+
+
+def _zip_doc_text(data: bytes, ext: str, max_chars: int) -> str:
+    """Zero-dependency text extraction from ZIP-container documents
+    (docx/xlsx/pptx/odt/ods/odp/epub) using only stdlib zipfile. This is the
+    always-available tier behind markitdown in _office, and the primary path for
+    .epub (markitdown does not read epubs). Never raises; bounded by max_chars.
+
+    docx → word/document.xml (+ footnotes/endnotes)
+    pptx → ppt/slides/slide*.xml
+    xlsx → xl/sharedStrings.xml + xl/worksheets/sheet*.xml   (strings table + numbers)
+    odt/odp/ods → content.xml
+    epub  → OPS XHTML/HTML chapters"""
+    import io as _io
+    import zipfile
+    try:
+        zf = zipfile.ZipFile(_io.BytesIO(data))
+        names = zf.namelist()
     except Exception:
         return ""
+    ext = (ext or "").lower()
+    if ext in {".docx", ".doc"}:
+        pick = [n for n in names if n in ("word/document.xml",
+                                          "word/footnotes.xml", "word/endnotes.xml")]
+    elif ext in {".pptx", ".ppt"}:
+        pick = [n for n in names if n.startswith("ppt/slides/slide") and n.endswith(".xml")]
+    elif ext in {".xlsx", ".xls"}:
+        pick = [n for n in names if n == "xl/sharedStrings.xml"]
+        pick += [n for n in names if n.startswith("xl/worksheets/sheet") and n.endswith(".xml")]
+    elif ext in {".odt", ".odp", ".ods"}:
+        pick = [n for n in names if n == "content.xml"]
+    elif ext == ".epub":
+        pick = [n for n in names if n.endswith((".xhtml", ".html", ".htm"))
+                and "nav" not in os.path.basename(n).lower()]
+    else:
+        pick = [n for n in names if n.endswith((".xml", ".xhtml", ".html", ".htm"))][:60]
+    parts: list[str] = []
+    try:
+        for n in pick:
+            parts.append(_strip_xml(zf.read(n).decode("utf-8", "replace")))
+    except Exception:
+        pass
+    joined = "\n".join(p for p in parts if p and p.strip())
+    return _trim(joined, max_chars)
 
 
 def _office(local_path: str, max_chars: int) -> str:
-    """markitdown handles docx/xlsx/pptx → markdown. Requires a local file path."""
+    """docx/xlsx/pptx → markdown. Tier 1: markitdown (richest, when installed).
+    Tier 2: stdlib zipfile extraction (always available, zero deps). Both bounded."""
     try:
         from markitdown import MarkItDown
-        return _trim(MarkItDown().convert(local_path).text_content, max_chars)
+        text = _trim(MarkItDown().convert(local_path).text_content, max_chars)
+        if text:
+            return text
+    except Exception:
+        pass
+    try:
+        return _zip_doc_text(Path(local_path).read_bytes(), Path(local_path).suffix, max_chars)
     except Exception:
         return ""
 
@@ -267,6 +384,17 @@ def _download(url: str) -> bytes:
         return b""
 
 
+def _sniff_pdf(url: str) -> bytes | None:
+    """Fetch a URL and confirm it is a PDF by magic bytes (%PDF). Returns the full
+    bytes if it IS a PDF (caller reuses them), else None. Fixes extension-less PDF
+    URLs — e.g. https://arxiv.org/pdf/1706.03762 — whose path suffix parses as
+    ".03762" and was misrouted to the HTML branch (empty result)."""
+    raw = _download(url)
+    if raw[:4] == b"%PDF":
+        return raw
+    return None
+
+
 def extract(target: str, max_chars: int = 8000) -> dict:
     """Any URL or local path → {text, kind, ok, source}. ok=False is honest failure (never silent ext)."""
     ext = _ext_of(target)
@@ -303,13 +431,46 @@ def extract(target: str, max_chars: int = 8000) -> dict:
                     os.unlink(staged_tmp)
                 except OSError:
                     pass
+    elif ext in _IMAGE_EXTS:
+        # Image file (png/jpg/...) → OCR via the SAME canonical port the PDF-render
+        # tier uses (lgwks_input._ocr_image_bytes). Never returns raw image bytes as
+        # "text" (which previously surfaced as binary garbage @ ok=True).
+        kind = "image"
+        raw = _download(target) if is_url else (Path(target).read_bytes() if Path(target).exists() else b"")
+        if raw:
+            try:
+                import lgwks_input  # function-local: same OCR primitive, no second path
+                text = lgwks_input._ocr_image_bytes(raw, timeout=60) or ""
+            except Exception:
+                text = ""
+        else:
+            text = ""
+    elif ext == ".epub":
+        # EPUB is a ZIP of XHTML chapters — extract the readable text, never the
+        # raw container bytes (which previously surfaced as binary garbage @ ok=True).
+        kind = "epub"
+        raw = _download(target) if is_url else (Path(target).read_bytes() if Path(target).exists() else b"")
+        text = _zip_doc_text(raw, ext, max_chars) if raw else ""
     elif ext in _TEXT_EXT and not is_url:
         kind = "text"
         text = _trim(Path(target).read_text(errors="replace"), max_chars) if Path(target).exists() else ""
     else:
-        kind = "html"
-        text = _html(target, max_chars) if is_url else (
-            _trim(Path(target).read_text(errors="replace"), max_chars) if Path(target).exists() else "")
+        # URL whose path signals a PDF but lacks a .pdf suffix (arxiv /pdf/<id>,
+        # doi redirects, /download/<n>) — verify by magic bytes before HTML fallback,
+        # so a real PDF is never returned empty. Magic check keeps it safe: a non-PDF
+        # "/pdf-viewer" HTML page sniffs None and still goes through _html.
+        if is_url and "pdf" in target.lower():
+            sniffed = _sniff_pdf(target)
+            if sniffed is not None:
+                kind = "pdf"
+                text = _pdf(sniffed, max_chars)
+            else:
+                kind = "html"
+                text = _html(target, max_chars)
+        else:
+            kind = "html"
+            text = _html(target, max_chars) if is_url else (
+                _trim(Path(target).read_text(errors="replace"), max_chars) if Path(target).exists() else "")
 
     result = {"source": target, "kind": kind, "ok": bool(text), "text": text}
     # Site-aware enrichment for supported platforms (Twitter/X, Reddit, Scholar)

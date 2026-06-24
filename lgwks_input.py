@@ -14,8 +14,8 @@ text/code extensions + UTF-8 decodable  → text,      strategy=text_direct
 PDF                                      → text,      strategy=text_direct
 DOCX/PPTX/XLSX/RTF                       → text,      strategy=text_direct (if markitdown)
                                          → quarantine if markitdown unavailable
-PNG/JPEG/GIF/WEBP/BMP/TIFF              → image,     strategy=ocr_image (tesseract if avail)
-                                         → image,     strategy=visual_embed if no OCR
+PNG/JPEG/GIF/WEBP/BMP/TIFF              → image,     strategy=ocr_image (tesseract or macOS Vision)
+                                          → image,     strategy=visual_embed if no OCR backend
 MP4/MOV/AVI/MKV/WEBM                    → video,     strategy=video_embed (I4 native VL)
 audio (MP3/WAV/FLAC/AAC/OGG)            → quarantine strategy=none
 anything else                            → quarantine strategy=none
@@ -23,7 +23,7 @@ anything else                            → quarantine strategy=none
 Extraction strategies
 ---------------------
   text_direct   — parsed_unit already populated; no-op in extract()
-  ocr_image     — tesseract OCR on raw_bytes → new text ModalityItem
+  ocr_image     — OCR (tesseract, else macOS Vision) on raw_bytes → new text ModalityItem
   visual_embed  — no OCR available; I4 embeds image natively via Qwen3-VL
   video_embed   — I4 embeds video natively via Qwen3-VL-Embedding-8B video API
                   (raw_bytes passed directly; no frame extraction here)
@@ -51,6 +51,7 @@ from __future__ import annotations
 
 import hashlib
 import mimetypes
+import os
 import subprocess
 import sys
 import tempfile
@@ -234,16 +235,16 @@ def _try_doc_text(data: bytes, filename: str, max_chars: int = 100_000) -> Optio
         return text[:max_chars] if text and text.strip() else None
     except (ImportError, Exception):
         pass
-    if ext == ".docx":
-        try:
-            import io as _io
-            import docx  # type: ignore[import-untyped]
-            doc = docx.Document(_io.BytesIO(data))
-            text = "\n".join(p.text for p in doc.paragraphs)
-            return text[:max_chars] if text.strip() else None
-        except (ImportError, Exception):
-            pass
-    return None
+    # Canonical zero-dep fallback: stdlib zipfile extraction of any ZIP-container
+    # document (docx/xlsx/pptx/odt/epub). ONE primitive — shared with
+    # lgwks_extract._office — drops the python-docx dependency assumption and covers
+    # every office format (not just .docx).
+    try:
+        from lgwks_extract import _zip_doc_text  # type: ignore[import-untyped]
+        text = _zip_doc_text(data, ext, max_chars)
+        return text if text and text.strip() else None
+    except Exception:
+        return None
 
 
 def _decode_text(data: bytes, max_chars: int = 500_000) -> Optional[str]:
@@ -275,25 +276,119 @@ def _tesseract_available() -> bool:
         return False
 
 
-def _ocr_image_bytes(data: bytes, timeout: int = 30) -> Optional[str]:
-    """Run tesseract on image bytes. Returns None if unavailable or produces no text."""
-    if not _tesseract_available():
+def _cache_dir() -> Path:
+    """User-level cache for the compiled Vision helper (never committed; arch-specific).
+    NOT lgwks_cache (that is URL-keyed untrusted-content storage — a different concept).
+    Honours LGWKS_CACHE_DIR, else the per-platform cache default."""
+    env = os.environ.get("LGWKS_CACHE_DIR")
+    if env:
+        return Path(env).expanduser()
+    if sys.platform == "darwin":
+        return Path.home() / "Library" / "Caches" / "lgwks"
+    xdg = os.environ.get("XDG_CACHE_HOME")
+    return (Path(xdg).expanduser() / "lgwks") if xdg else (Path.home() / ".cache" / "lgwks")
+
+
+_VISION_SRC = _REPO_ROOT / "tools" / "vision_ocr.swift"
+
+
+def _vision_available() -> bool:
+    """macOS Vision OCR is usable iff swiftc is on PATH AND the helper source exists.
+    Memoized: handle() is a hot path. Never egresses — Vision ships with the OS."""
+    if "_VISION_OK" in globals():
+        return globals()["_VISION_OK"]  # type: ignore[index]
+    ok = False
+    if sys.platform == "darwin" and _VISION_SRC.exists():
+        try:
+            ok = subprocess.run(["swiftc", "--version"],
+                                capture_output=True, timeout=4).returncode == 0
+        except (FileNotFoundError, subprocess.TimeoutExpired, OSError):
+            ok = False
+    globals()["_VISION_OK"] = ok
+    return ok
+
+
+def _vision_binary() -> Optional[str]:
+    """Compile tools/vision_ocr.swift ONCE to a cached binary keyed on a hash of the
+    source, so the ~one-time swiftc cost is paid only on first use or when the source
+    changes. Returns the binary path, or None if unavailable/compile failed."""
+    try:
+        src = _VISION_SRC.read_bytes()
+    except OSError:
+        return None
+    key = hashlib.blake2b(src, digest_size=8).hexdigest()
+    try:
+        _cache_dir().mkdir(parents=True, exist_ok=True)
+    except OSError:
+        return None
+    bin_path = _cache_dir() / f"vision_ocr-{key}"
+    if not bin_path.exists():
+        try:
+            r = subprocess.run(["swiftc", "-O", str(_VISION_SRC), "-o", str(bin_path)],
+                               capture_output=True, timeout=90)
+            if r.returncode != 0:
+                return None
+        except (FileNotFoundError, subprocess.TimeoutExpired, OSError):
+            return None
+    return str(bin_path)
+
+
+def _vision_ocr_bytes(data: bytes, timeout: int = 30) -> Optional[str]:
+    """On-device macOS Vision OCR of image bytes. None if unavailable or no text."""
+    if not _vision_available():
+        return None
+    binary = _vision_binary()
+    if not binary:
         return None
     img_path: Optional[Path] = None
     try:
-        with tempfile.NamedTemporaryFile(suffix=".png", delete=False) as f:
+        with tempfile.NamedTemporaryFile(suffix=".img", delete=False) as f:
             img_path = Path(f.name)
             f.write(data)
-        r = subprocess.run(["tesseract", str(img_path), "stdout", "--psm", "3"],
-                           capture_output=True, timeout=timeout)
-        img_path.unlink(missing_ok=True)
+        r = subprocess.run([binary, str(img_path)], capture_output=True, timeout=timeout)
         if r.returncode == 0:
             text = r.stdout.decode("utf-8", errors="replace").strip()
             return text or None
     except Exception:
+        pass
+    finally:
         if img_path:
             img_path.unlink(missing_ok=True)
     return None
+
+
+def _ocr_available() -> bool:
+    """Any OCR backend present (tesseract OR macOS Vision). The single gate the image
+    router uses. Fixes the bug where 'OCR' was assumed to mean 'tesseract', leaving
+    Vision-only machines with a dead OCR path (images AND image-only PDFs)."""
+    return _tesseract_available() or _vision_available()
+
+
+def _ocr_image_bytes(data: bytes, timeout: int = 30) -> Optional[str]:
+    """OCR image bytes via the ONE canonical resolver chain:
+    tesseract (if present) -> macOS Vision (if present) -> None.
+
+    Deterministic, never egresses. This is the single OCR primitive the whole repo
+    routes through — direct image items here, AND rendered PDF pages from
+    lgwks_extract._pdf. Returns recognized text, or None."""
+    if _tesseract_available():
+        img_path: Optional[Path] = None
+        try:
+            with tempfile.NamedTemporaryFile(suffix=".png", delete=False) as f:
+                img_path = Path(f.name)
+                f.write(data)
+            r = subprocess.run(["tesseract", str(img_path), "stdout", "--psm", "3"],
+                               capture_output=True, timeout=timeout)
+            if r.returncode == 0:
+                text = r.stdout.decode("utf-8", errors="replace").strip()
+                if text:
+                    return text
+        except Exception:
+            pass
+        finally:
+            if img_path:
+                img_path.unlink(missing_ok=True)
+    return _vision_ocr_bytes(data, timeout=timeout)
 
 
 # ---------------------------------------------------------------------------
@@ -348,7 +443,7 @@ def handle(data: bytes, origin: str, *, filename: str = "") -> list[ModalityItem
 
         # image
         if mime.startswith("image/") or ext in _IMAGE_EXTS:
-            strategy = STRATEGY_OCR_IMAGE if _tesseract_available() else STRATEGY_VISUAL_EMBED
+            strategy = STRATEGY_OCR_IMAGE if _ocr_available() else STRATEGY_VISUAL_EMBED
             return [ModalityItem(
                 schema=SCHEMA, modality="image",
                 parsed_unit=None, raw_bytes=data,
