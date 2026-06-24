@@ -466,17 +466,20 @@ class TestVideoStrategy(unittest.TestCase):
 
 
 # ---------------------------------------------------------------------------
-# A14 — image strategy: OCR_IMAGE if tesseract, else VISUAL_EMBED
+# A14 — image strategy: OCR_IMAGE if any OCR backend (tesseract OR macOS Vision),
+#       else VISUAL_EMBED. Retargeted from _tesseract_available to _ocr_available
+#       when the OCR port was generalized (invariant preserved: OCR_IMAGE iff an
+#       OCR backend is reachable; the old "OCR == tesseract" assumption was the bug).
 # ---------------------------------------------------------------------------
 
 class TestImageStrategy(unittest.TestCase):
-    def test_ocr_strategy_when_tesseract_available(self):
-        with patch("lgwks_input._tesseract_available", return_value=True):
+    def test_ocr_strategy_when_ocr_available(self):
+        with patch("lgwks_input._ocr_available", return_value=True):
             items = handle(_PNG_MAGIC, "img.png")
         self.assertEqual(items[0].extraction_strategy, STRATEGY_OCR_IMAGE)
 
-    def test_visual_embed_when_tesseract_unavailable(self):
-        with patch("lgwks_input._tesseract_available", return_value=False):
+    def test_visual_embed_when_no_ocr(self):
+        with patch("lgwks_input._ocr_available", return_value=False):
             items = handle(_PNG_MAGIC, "img.png")
         self.assertEqual(items[0].extraction_strategy, STRATEGY_VISUAL_EMBED)
 

@@ -209,9 +209,13 @@ class TestMaturityScream(unittest.TestCase):
     @unittest.skipUnless(_shutil.which("node"), "node not available")
     def test_maturity_reports_all_axes_and_unmeasured(self):
         import subprocess
+        # report-only, non-blocking assessment. node cold-starts the maturity
+        # profiler in ~2s in isolation but is far slower under concurrent full-suite
+        # load; 180s tripped flakily there. Bumped to 480s with a logged reason
+        # (the assertion contract is unchanged — it only checks the report shape).
         proc = subprocess.run(
             ["node", str(self._ROOT / "scripts" / "ci" / "maturity.mjs")],
-            cwd=self._ROOT, text=True, capture_output=True, timeout=180,
+            cwd=self._ROOT, text=True, capture_output=True, timeout=480,
             env={**os.environ, "LGWKS_NO_MODELS": "1"},
         )
         self.assertEqual(proc.returncode, 0, proc.stdout + proc.stderr)  # report-only
