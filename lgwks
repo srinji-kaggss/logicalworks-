@@ -85,6 +85,7 @@ def build_parser() -> argparse.ArgumentParser:
     # imports it lazily.
     import lgwks_manifest; lgwks_manifest.add_parser(sub)
     import lgwks_files; lgwks_files.add_parser(sub)
+    import lgwks_refactor; lgwks_refactor.add_parser(sub)  # AST refactor verb (rename/add_types/remove_unused_imports) — module existed but was never wired to the dispatcher; the agent skill documents `lgwks refactor` so this makes the documented entrypoint real
     auth = sub.add_parser("auth", add_help=False, help="compat: capability auth vault")
     auth.add_argument("-h", "--help", dest="auth_help", action="store_true")
     auth.add_argument("auth_args", nargs=argparse.REMAINDER)

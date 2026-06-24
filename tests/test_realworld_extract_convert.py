@@ -474,6 +474,34 @@ class TestCLITruncationMarker(unittest.TestCase):
 
 
 # ---------------------------------------------------------------------------
+# 4. Agent entrypoint — `lgwks refactor` must stay wired (regression guard).
+#    The verb module existed since 8bc4485 but was un-wired in the 7bf1eb6
+#    "CLI Layering" cleanup; the agent skill documents it. Never let it vanish again.
+# ---------------------------------------------------------------------------
+
+class TestAgentEntrypointRefactor(unittest.TestCase):
+    def test_refactor_is_a_valid_verb(self):
+        r = subprocess.run([sys.executable, str(_DISPATCHER), "refactor", "--help"],
+                           capture_output=True, text=True, cwd=str(_REPO),
+                           env={**os.environ, "LGWKS_NO_MODELS": "1"}, timeout=30)
+        self.assertEqual(r.returncode, 0, f"refactor verb missing:\n{r.stderr}")
+        self.assertIn("rename", r.stdout)
+        self.assertIn("remove_unused_imports", r.stdout)
+
+    def test_refactor_rename_preview_works(self):
+        with tempfile.TemporaryDirectory() as td:
+            p = Path(td) / "t.py"
+            p.write_text("def old_fn():\n    return 1\n\nx = old_fn()\n")
+            r = subprocess.run([sys.executable, str(_DISPATCHER), "refactor", "--file",
+                                str(p), "--preview", "rename", "--old", "old_fn",
+                                "--new", "new_fn"],
+                               capture_output=True, text=True, cwd=str(_REPO),
+                               env={**os.environ, "LGWKS_NO_MODELS": "1"}, timeout=30)
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertIn("2 changes", r.stdout.replace("\n", " "))
+
+
+# ---------------------------------------------------------------------------
 # 2b. ZIP-container documents — office (docx/xlsx/pptx) + epub (stdlib fallback)
 #     Portable fixtures built with stdlib zipfile; no markitdown / real files needed.
 # ---------------------------------------------------------------------------
