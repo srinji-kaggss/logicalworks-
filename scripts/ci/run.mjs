@@ -84,6 +84,13 @@ const COMMIT_LANES = [
   { id: 'rust.crawler', gate: 'commit', cmd: ['cargo', 'test', '--manifest-path', 'crawler/Cargo.toml'] },
   { id: 'rust.axiom', gate: 'commit', cmd: ['cargo', 'test', '--manifest-path', 'axiom/rust/Cargo.toml'] },
   { id: 'rust.tui', gate: 'commit', cmd: ['cargo', 'test', '--manifest-path', 'tui/Cargo.toml'] },
+  // Docs gate (Director: "documentation has to be updated before CI is run"). The
+  // docs/ knowledge bundle must be OKF-conformant (§9: every concept has a non-empty
+  // `type`) AND fresh (generated indexes/frontmatter current — a body changed without
+  // re-running gen_okf.py --write fails this). CI does not care WHO ran the generator
+  // (human, agent, or eventually the lgwks daemon); only that the bundle is current.
+  // See docs/concepts/knowledge-format.md.
+  { id: 'docs.okf', gate: 'commit', cmd: ['python3', 'scripts/gen_okf.py', '--verify'] },
 ];
 
 // Tier-specific Keel runners (now VENDORED at the pinned SHA — #241). Each runs over

@@ -1,3 +1,11 @@
+---
+type: Reference
+title: jarvis crawl - substrate bridge
+description: As of commit on branch issue-34-jarvis-substrate-bridge, lgwks jarvis crawl <url routes
+tags: [reference]
+timestamp: 2026-06-07T09:17:50-04:00
+---
+
 # jarvis crawl -> substrate bridge
 
 ## Summary

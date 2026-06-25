@@ -1,3 +1,11 @@
+---
+type: Reference
+title: Runtime And OpenRouter Policy
+description: Current lgwks already treats OpenRouter as a generation seam and keeps embeddings/local substrate paths separate.
+tags: [bot-fabric, reference]
+timestamp: 2026-06-06T10:24:49-04:00
+---
+
 # Runtime And OpenRouter Policy
 
 ## End-to-end runtime

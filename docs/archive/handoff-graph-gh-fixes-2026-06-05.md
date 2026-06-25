@@ -1,3 +1,11 @@
+---
+type: Archive
+title: Handoff — Graph Rust Indexing + GH Branch Awareness
+description: _rust_import_to_path uses file-existence heuristics with progressive fallback.
+tags: [archive]
+timestamp: 2026-06-23T00:24:35-04:00
+---
+
 # Handoff — Graph Rust Indexing + GH Branch Awareness
 
 **Date:** 2026-06-05  

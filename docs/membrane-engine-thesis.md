@@ -1,3 +1,11 @@
+---
+type: Thesis
+title: The Membrane Engine — a ground-up symbolic orchestrator that knows when compute becomes AI
+description: An LLM's "understanding" and its "safety" are not reasoning — they are linear directions in a continuous residual stream; therefore a correct harness is a deterministic symbolic engine that treats eve
+tags: [thesis]
+timestamp: 2026-06-23T13:29:37-04:00
+---
+
 # The Membrane Engine — a ground-up symbolic orchestrator that knows when compute becomes AI
 
 > Branch `investigate/orchestration-gaps`. Companion to `docs/orchestration-gap-analysis.md` (the "before": 5 peer orchestrators, no single owner). This is the "after": one engine, first-principles.
@@ -212,4 +220,3 @@ But PULSE has exactly **one fatal gap vs GLOSSOPETRAE: it is asserted, not falsi
 - **P4RS3LT0NGV3's** tool-registry pattern → our capability registry; its **decoder/lexeme analysis** → liftable for the channel-validity probe (it can *decode* the stego classes, which is a defensive capability).
 
 **Net recommendation:** **Build PULSE (it is better-defined, ours, and the natural membrane protocol); validate it with GLOSSOPETRAE's falsification method; seed the membrane's threat-detector with GLOSSOPETRAE's covert-channel corpus; lift P4RS3LT0NGV3's registry+decoder.** Quarantine all three repos' *offense* modules (covert channels, anti-classifier, payloads) — they are **threat-model inputs, not dependencies**. Same awe/fear posture: their findings build our immune system; their weapons stay in the armory.
-

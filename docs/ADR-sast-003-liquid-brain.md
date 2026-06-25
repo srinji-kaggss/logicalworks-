@@ -1,3 +1,11 @@
+---
+type: ADR
+title: ADR-sast-003: The Liquid Brain SAST — Biological Flow-Based Vulnerability Detection
+description: Traditional SAST is a "Solid Brain" (centralized, rule-based, rigid).
+tags: [adr]
+timestamp: 2026-06-13T00:02:26-04:00
+---
+
 # ADR-sast-003: The Liquid Brain SAST — Biological Flow-Based Vulnerability Detection
 
 **Status**: PROPOSED 2026-06-13

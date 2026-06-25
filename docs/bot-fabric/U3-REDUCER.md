@@ -1,3 +1,11 @@
+---
+type: Reference
+title: U3 — Deterministic Reducer
+description: Status: spec
+tags: [bot-fabric, reference]
+timestamp: 2026-06-06T10:26:16-04:00
+---
+
 # U3 — Deterministic Reducer
 
 Status: spec

@@ -1,3 +1,11 @@
+---
+type: Plan
+title: Plan: lgwks CLI Harness Rewrite + Graph Engine Gap Analysis
+description: A Claude Code-style REPL that is:
+tags: [plan]
+timestamp: 2026-06-05T13:34:17-04:00
+---
+
 # Plan: lgwks CLI Harness Rewrite + Graph Engine Gap Analysis
 
 ## 1. Problem Statement

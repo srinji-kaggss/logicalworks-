@@ -1,3 +1,11 @@
+---
+type: Archive
+title: OSS Porting Notes — Mac Native + JEPA References
+description: Date: 2026-06-06
+tags: [archive]
+timestamp: 2026-06-23T00:24:35-04:00
+---
+
 # OSS Porting Notes — Mac Native + JEPA References
 
 Date: 2026-06-06

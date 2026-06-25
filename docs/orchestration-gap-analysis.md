@@ -1,3 +1,11 @@
+---
+type: Reference
+title: Orchestration Gap Analysis — lgwks / logicalworks-
+description: The orchestration is "messed" in a precise, structural way: the repo holds at least five peer orchestrators that each independently sequence multi-phase work, plus the one loop they were supposed to c
+tags: [reference]
+timestamp: 2026-06-23T13:29:37-04:00
+---
+
 # Orchestration Gap Analysis — lgwks / logicalworks-
 
 > Branch: `investigate/orchestration-gaps` (off `origin/main` @ `762a595`). Originally a read-only diagnosis (the "before").

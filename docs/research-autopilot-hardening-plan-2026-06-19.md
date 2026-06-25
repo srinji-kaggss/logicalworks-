@@ -1,3 +1,11 @@
+---
+type: Plan
+title: LGWKS Research Autopilot Hardening Plan - 2026-06-19
+description: LGWKS is trying to formalize LLM development, not just wrap another search API.
+tags: [plan]
+timestamp: 2026-06-19T10:28:09-04:00
+---
+
 # LGWKS Research Autopilot Hardening Plan - 2026-06-19
 
 ## Why This Exists

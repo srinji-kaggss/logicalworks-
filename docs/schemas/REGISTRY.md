@@ -1,3 +1,11 @@
+---
+type: Schema
+title: Schema Registry (lgwks) — all contracts, one index
+description: the shape authority — verify it before reuse (rows record where truth lives, they are not the truth).
+tags: [schema, schemas]
+timestamp: 2026-06-23T11:19:01-04:00
+---
+
 # Schema Registry (lgwks) — all contracts, one index
 
 **Status:** live registry, created 2026-06-10 from a full-repo contract inventory.

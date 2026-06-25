@@ -1,3 +1,11 @@
+---
+type: Archive
+title: Product Reference Patterns — 2026-06-06
+description: Purpose: record useful product/runtime patterns from external references without copying branding, wording, or visual structure.
+tags: [archive]
+timestamp: 2026-06-23T00:24:35-04:00
+---
+
 # Product Reference Patterns — 2026-06-06
 
 Purpose: record useful product/runtime patterns from external references without copying branding, wording, or visual structure.

@@ -1,3 +1,11 @@
+---
+type: Reference
+title: Bot Fabric CLI Wiring
+description: Status: spec
+tags: [bot-fabric, reference]
+timestamp: 2026-06-06T13:13:23-04:00
+---
+
 # Bot Fabric CLI Wiring
 
 Status: spec

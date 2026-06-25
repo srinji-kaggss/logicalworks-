@@ -1,3 +1,11 @@
+---
+type: Reference
+title: Architecture — Logic OS Kernel
+description: Status: active doctrine
+tags: [reference]
+timestamp: 2026-06-08T16:38:05-04:00
+---
+
 # Architecture — Logic OS Kernel
 
 Status: active doctrine

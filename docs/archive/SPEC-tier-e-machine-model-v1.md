@@ -1,3 +1,11 @@
+---
+type: Archive
+title: SPEC — Tier-E Machine: the model (v1, FINALIZE)
+description: Status: drafting (Director, 2026-06-02).
+tags: [archive]
+timestamp: 2026-06-23T00:24:35-04:00
+---
+
 > **STATUS: historical draft (2026-06-02).** Data/ingestion authority is now
 > `spec/second-harness/INGESTION-LAYER.md` + `INGESTION-PLAN.md` (v1.0, final);
 > model-stack build truth is `spec/second-harness/BUILDLOG-model-stack.md`.

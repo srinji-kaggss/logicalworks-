@@ -1,3 +1,11 @@
+---
+type: Spec
+title: SPEC - Axiom narration claims IR
+description: Date: 2026-06-06
+tags: [spec]
+timestamp: 2026-06-06T20:25:26-04:00
+---
+
 # SPEC - Axiom narration claims IR
 
 Date: 2026-06-06

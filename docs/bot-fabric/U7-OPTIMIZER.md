@@ -1,3 +1,11 @@
+---
+type: Reference
+title: U7 — Optimizer Bot
+description: Status: spec
+tags: [bot-fabric, reference]
+timestamp: 2026-06-06T13:13:23-04:00
+---
+
 # U7 — Optimizer Bot
 
 Status: spec

@@ -1,3 +1,11 @@
+---
+type: Law
+title: Escalation Ladder Law
+description: Status: active, non-negotiable
+tags: [law]
+timestamp: 2026-06-17T06:21:56-04:00
+---
+
 # Escalation Ladder Law
 
 Status: active, non-negotiable

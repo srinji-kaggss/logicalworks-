@@ -1,3 +1,11 @@
+---
+type: Research
+title: Firecrawl Agent Research Artifact — Interpretability + Observability + Competitors
+description: 3.
+tags: [research, research-artifacts]
+timestamp: 2026-06-24T20:18:37-04:00
+---
+
 # Firecrawl Agent Research Artifact — Interpretability + Observability + Competitors
 
 > **Source:** firecrawl MCP agent (job `019efc19-8190-76c2-99a1-0f8e763e4a99`), 2026-06-24.

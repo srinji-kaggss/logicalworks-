@@ -1,3 +1,11 @@
+---
+type: Reference
+title: Field note — out-of-band guardrails & channel-validity (how the AUP block "just worked")
+description: While analyzing the jailbreak corpus, I Read the L1B3RT4S README into context.
+tags: [reference]
+timestamp: 2026-06-23T13:29:37-04:00
+---
+
 # Field note — out-of-band guardrails & channel-validity (how the AUP block "just worked")
 
 > For lgwks + logic-os-kernel. Captures three real events from this session and the one principle they share, so we can build the same class of defense. Companion to `docs/membrane-engine-thesis.md`.

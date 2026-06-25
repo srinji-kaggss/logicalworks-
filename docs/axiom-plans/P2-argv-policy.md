@@ -1,3 +1,11 @@
+---
+type: Plan
+title: P2 - Test Matrix Argv Policy Gate
+description: Add a deterministic policy gate for lgwks axiom test-matrix argv commands.
+tags: [axiom-plans, plan]
+timestamp: 2026-06-06T20:59:55-04:00
+---
+
 # P2 - Test Matrix Argv Policy Gate
 
 ## Goal
@@ -58,4 +66,3 @@ Even with `--allow-risky`, record `"policy": {"risk": "risky", "allowed_by": "fl
 
 - Do not use AI/model classification.
 - Do not inspect command strings with shell parsing; matrix uses argv.
-
