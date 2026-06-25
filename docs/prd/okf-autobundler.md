@@ -3,7 +3,7 @@ type: PRD
 title: OKF Auto-Bundler — lgwks reads code, moves docs into OKF, flags dupes
 description: Future lgwks capability that organizes the repo into the OKF bundle by MOVING files (never editing content) and flagging duplicate concepts as it goes.
 tags: [prd, okf, factory-spec, daemon, future]
-owning_issue: TBD
+owning_issue: "339"
 timestamp: 2026-06-25T00:00:00Z
 ---
 
