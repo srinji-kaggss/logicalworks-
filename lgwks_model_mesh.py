@@ -102,12 +102,15 @@ MESH_LAW: list[dict[str, Any]] = [
         notes="Truly Multimodal. Native speech-to-speech (Ear/Mouth). Wisprflow feel.",
     ),
 
-    # V. THE EYE (Visual Agent)
+    # V. THE EYE (Universal Multimodal Embedding Space)
     _entry(
-        name="mlx-community/Qwen3.7-VL-8B-Instruct-4bit", runtime="mlx", locality="local", role="embed",
+        name="Qwen/Qwen3-VL-Embedding-8B", runtime="mlx", locality="local", role="embed",
         input_schema="lgwks.modality.item.v1", output_schema="lgwks.vector.record.v1",
         trust_class="sensor", status="current_law",
-        notes="Visual Agent. Operates terminal/GUI via screenshots. Everything is VL.",
+        notes="Shared text/image/video vector space via lgwks_embed_port; the ONE "
+              "semantic embedder. Pinned by the source spec "
+              "(MODEL-RUNTIME-FINALIZATION-2026-06-13 §92/§117) as Qwen/Qwen3-VL-Embedding-8B. "
+              "Hub catalog key (the runtime id) is the name minus its org: Qwen3-VL-Embedding-8B.",
     ),
 
     # VI. THE BRAIN (Deep Reasoning)
@@ -141,7 +144,8 @@ MESH_LAW: list[dict[str, Any]] = [
         name="mlx-community/Qwen3-VL-8B-Instruct-4bit", runtime="mlx", locality="local", role="embed",
         input_schema="lgwks.modality.item.v1", output_schema="lgwks.vector.record.v1",
         trust_class="sensor", status="candidate_reference",
-        notes="Candidate shared text/image/video space; does not replace Qwen3.7-VL current law.",
+        notes="Candidate VL-Instruct visual agent (GUI operation); does not replace the "
+              "Qwen3-VL-Embedding-8B embed current law.",
     ),
     _entry(
         name="Qwen/Qwen3-Reranker-0.6B", runtime="mlx", locality="local", role="rerank",

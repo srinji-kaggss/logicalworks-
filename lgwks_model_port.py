@@ -81,6 +81,76 @@ def models_suppressed() -> bool:
     return bool(os.environ.get("LGWKS_NO_MODELS"))
 
 
+# ── Locality axis — WHERE a role runs (orthogonal to the trust-tier ladder) ──
+# The ladder above chooses WHICH tier answers (deterministic→sensor→generative).
+# This axis chooses WHERE that tier's model lives, and it is the ONE selector:
+#   LOCAL     — the on-device Model Mesh (MESH_LAW) + lgwks_model_hub. Privacy-
+#               first, no network. The DEFAULT.
+#   CLOUD     — the models.dev catalog (lgwks_models_dev). Used ONLY when the user
+#               opts in (LGWKS_MODEL_LOCALITY=cloud, or an explicit locality= arg).
+#   AETHERIUS — the future end-of-ingestion model; reserved slot, DEFERRED
+#               ("data is a whole workstream"). Resolves to None today.
+LOCAL = "local"
+CLOUD = "cloud"
+AETHERIUS = "aetherius"
+LOCALITIES = (LOCAL, CLOUD, AETHERIUS)
+
+
+def active_locality() -> str:
+    """The user's chosen locality. LOCAL unless explicitly opted out — so the
+    default path is private and touches no network. An unknown value falls back
+    to LOCAL (fail-safe to the private plane, never silently to the cloud)."""
+    val = (os.environ.get("LGWKS_MODEL_LOCALITY") or LOCAL).strip().lower()
+    return val if val in LOCALITIES else LOCAL
+
+
+def _hub_key(law_name: str | None) -> str | None:
+    """Map a MESH_LAW model name to its lgwks_model_hub catalog key.
+
+    Convention, true for every current_law entry: the hub key is the law name
+    minus its org prefix (`mlx-community/ModernBERT-base-mlx-4bit` →
+    `ModernBERT-base-mlx-4bit`; `Qwen/Qwen3-VL-Embedding-8B` →
+    `Qwen3-VL-Embedding-8B`). Reconstructable by hand — split on '/'. If a future
+    law name breaks the convention, hub.load_model fails closed with a clear
+    "unknown model" error rather than embedding silently wrong."""
+    return law_name.split("/")[-1] if law_name else None
+
+
+def resolve_model(role: str, *, locality: str | None = None,
+                  trust_class: str = "sensor") -> dict[str, Any] | None:
+    """Resolve the model for `role` on the chosen locality — the ONE selector
+    across the locality axis. Returns a descriptor, or None to DEFER.
+
+      LOCAL  → the pinned MESH_LAW model for (role, trust_class); `runtime_id` is
+               the model_hub catalog key. Pure data + string work; no network.
+      CLOUD  → a normalized models.dev card for the configured cloud ref
+               (env `LGWKS_CLOUD_<ROLE>_MODEL`). Opt-in: None when unconfigured or
+               unreachable — never silently falls back to local.
+      AETHERIUS → reserved; None today (the model is deferred).
+
+    The model id ALWAYS comes from the law (local) or the card (cloud) — never a
+    literal at the call site (#222). Callers read `descriptor["runtime_id"]`.
+    """
+    loc = locality or active_locality()
+    if loc == CLOUD:
+        ref = os.environ.get(f"LGWKS_CLOUD_{role.upper()}_MODEL")
+        if not ref:
+            return None  # cloud is opt-in AND must be configured; never guess a model
+        import lgwks_models_dev as md
+        card = md.resolve(ref)
+        if not card:
+            return None  # unknown/unreachable cloud ref → defer, do not fabricate
+        return {"role": role, "locality": CLOUD, "law_name": ref,
+                "runtime_id": ref, "card": card}
+    if loc == AETHERIUS:
+        return None  # reserved slot — no model/training here yet
+    law_name = mesh.model_name_for_role(role, trust_class=trust_class)
+    if not law_name:
+        return None
+    return {"role": role, "locality": LOCAL, "law_name": law_name,
+            "runtime_id": _hub_key(law_name)}
+
+
 def _model_timeout() -> float:
     """Wall-clock cap (seconds) for a single weight-tier rung. A model load or
     download that exceeds this is treated as a failed rung — the harness escalates
@@ -301,7 +371,7 @@ def classify(text: str, *, threshold: float = 0.60) -> dict[str, Any]:
 
 
 def embed(text: str = "", *, modality: str = "text",
-          media: Any = None) -> dict[str, Any]:
+          media: Any = None, locality: str | None = None) -> dict[str, Any]:
     """role=embed — one multimodal vector (text/image/video), as a port envelope.
 
     Embedding is the role where the deterministic tier is ALWAYS present (the
@@ -311,11 +381,21 @@ def embed(text: str = "", *, modality: str = "text",
     `mode="sensor"` when the Eye answered, `mode="degraded"` (audit vector only,
     is_semantic=False) when no model was reachable. Never deferred — an audit
     vector always exists.
+
+    `locality` picks the plane via the ONE selector (LOCAL Mesh default ⊕ CLOUD
+    models.dev opt-in); the Eye's id is resolved from the law / card by
+    `resolve_model`, never a literal. CLOUD routes through the existing remote
+    seam and degrades to the audit vector if it is unconfigured/unreachable.
     """
+    loc = locality or active_locality()
+    sel = resolve_model("embed", locality=loc)
+    eye = (sel["law_name"] if sel else
+           mesh.model_name_for_role("embed", trust_class="sensor"))
+    provider = "openrouter-vl" if loc == CLOUD else "auto"
     import lgwks_run
-    dual = lgwks_run.embed_dual(text, embed_on=True, modality=modality, media=media)
+    dual = lgwks_run.embed_dual(text, embed_on=True, provider=provider,
+                                modality=modality, media=media)
     sem = dual.get("sem")
-    eye = mesh.model_name_for_role("embed", trust_class="sensor")
     if sem and sem.get("vector"):
         return _envelope(
             "embed", ok=True, mode="sensor", tier="sensor", model=eye, trust="sensor",
