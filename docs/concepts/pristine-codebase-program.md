@@ -76,13 +76,15 @@ Status reflects 2026-06-25. Each becomes one or more sub-issues.
 | # | Rot | What the slop was trying to do | Canonical fix | State |
 |---|-----|-------------------------------|---------------|-------|
 | R0 | **Hand-transcribed model law** (`MESH_LAW`) — hallucinated embed id, misattributed source | one model law, single source of truth | generate from `model-law.json`; gate via `model.law` lane | **DONE** |
-| R1 | **Escalation has no tier ceiling** — only the all-or-nothing `LGWKS_NO_MODELS` flag | "don't use the LLM until truly needed," set per-request | caller-set `ceiling` on `escalate()`; `NO_MODELS` becomes `ceiling=deterministic` | spec'd → [escalation-robustness](escalation-robustness.md) |
-| R2 | **Unbounded sinks / hang-carriers** (#320) — model/network/subprocess calls that can hang; invisible to a no-model CI | bounded, fail-closed external calls | one bounded primitive (`_run_bounded`); **Keel invariant** that every hang-class sink routes through it | spec'd → [escalation-robustness](escalation-robustness.md) |
-| R3 | **Forked orchestrators** (#255) — multiple agentic entrypoints, legacy verb surface | one "do something" front door (`route act`) | absorb surface, then collapse; no-regrowth gate | open |
-| R4 | **Duplicated utilities** (#150/#152) — `_sha`/`_cosine`/`_tokens` drift | one primitive per concept | centralize + route all callers; #223 tracks | partial |
-| R5 | **Model-port stragglers** (#222) — `lgwks_map`/`geoexpr`/`score` resolve models outside the one port | one cognition gateway | route through `lgwks_model_port` | open |
-| R6 | **God-functions** — `build_run` (~471 lines), `lgwks_jarvis` (~420), research (~275) | one readable pipeline | decompose behind existing seams when touched | open |
-| R7 | **Hand-maintained laws beyond `MESH_LAW`** | law = generated truth, not typed | apply the R0 pattern to remaining hand-laws | scan needed |
+| R1 | **Escalation has no tier ceiling** — only the all-or-nothing `LGWKS_NO_MODELS` flag | "don't use the LLM until truly needed," set per-request | caller-set `ceiling` on `escalate()`; `NO_MODELS` becomes `ceiling=deterministic` | **DONE** (PR #346) |
+| R2 | **Unbounded sinks / hang-carriers** (#320) — model/network/subprocess calls that can hang; invisible to a no-model CI | bounded, fail-closed external calls | one bounded primitive (`_run_bounded`); **`runtime.bounded` Keel lane** proves every hang-class sink routes through it | **DONE** (PR #346) |
+| R3 | **Forked orchestrators** (#255) — `agent.act`/`route.act_intent` run caps inline instead of enqueuing through the one front door | one "do something" front door = `engine.dispatch` (verb: `agent`; `route` retired) | shim `route`→dispatch, enqueue write caps, absorb `lgwks_do` leaves (R9); no-regrowth gate | spec'd → [build-order](pristine-build-order.md) **M5** |
+| R4 | **Duplicated utilities** (#150/#152) — `_cosine`/plain-`hashlib`/`datetime.now` drift | one primitive per concept (`lgwks_vecmath`/`lgwks_hashing`/`lgwks_clock`/`lgwks_redact`/`lgwks_proc`) | route all callers + delete dup; regrowth source-scan gate; #223 tracks | spec'd → [build-order](pristine-build-order.md) **M2** |
+| R5 | **Model-port stragglers** (#222) — the **embed role** is reached beside `lgwks_model_port` (4 `embed_dual` + 5 `_embedding` callers; two embed ports) | one cognition gateway | route through `lgwks_model_port.embed`; straggler guard (suspects map/score/cohere were false) | spec'd → [build-order](pristine-build-order.md) **M3** |
+| R6 | **God-functions** — `build_run` (469), `lgwks_jarvis.crawl_command` (418), `lgwks_research.run_auto` (385) | one readable pipeline | decompose behind existing seams when touched; collapse the jarvis↔build_run chunk-loop dup | spec'd → [build-order](pristine-build-order.md) **M6** |
+| R7 | **Hand-maintained laws beyond `MESH_LAW`** — `_MODEL_CATALOG` names must match the law but are ungated; `DOMAINS` verb taxonomy | law = generated/gated truth, not typed | parity gate catalog↔law; DOMAINS↔verb gate; apply R0 pattern | spec'd → [build-order](pristine-build-order.md) **M1/M4** |
+| R8 | **No module-coverage gate** — ~20 `lgwks_*.py` with live callers have zero tests; `coverage_guard` only checks test *files* run | every live module is tested | module-coverage lane + excluded-with-reason list | spec'd → [build-order](pristine-build-order.md) **M4** |
+| R9 | **Killed head still live** — `lgwks_do` is a declared deprecated head yet `lgwks_agent` calls its `_run_review`/`_run_aup_check` on the front door | killed heads have no live callers | absorb the leaves into daemon handlers; delete | spec'd → [build-order](pristine-build-order.md) **M5** |
 
 This table is a seed, not a ceiling. The **completeness critic** is part of the job:
 when an item closes, ask "what rot did closing it reveal?" and add it.
@@ -104,6 +106,7 @@ The program is complete when all hold, each provable by a command:
 
 # See also
 
+* [Build Order (R3→R9)](pristine-build-order.md) — the sequential, fork-resolved playbook for executing the rest, with human checkpoints.
 * [Two-Plane Model Layer](model-layer.md) — the one port the ladder runs through.
 * [Escalation & Robustness](escalation-robustness.md) — R1+R2, the first worked design.
 * [LGWKS OKF](knowledge-format.md) — the docs bundle this lives in.

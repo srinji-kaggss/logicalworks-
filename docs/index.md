@@ -60,7 +60,7 @@ okf_version: "0.1"
 * [Archive](archive/) — 28 concept(s)
 * [Axiom Plans](axiom-plans/) — 6 concept(s)
 * [Bot Fabric](bot-fabric/) — 21 concept(s)
-* [Concepts](concepts/) — 5 concept(s)
+* [Concepts](concepts/) — 6 concept(s)
 * [Frontier](frontier/) — 9 concept(s)
 * [Handoff](handoff/) — 4 concept(s)
 * [Navmap](navmap/) — 2 concept(s)
