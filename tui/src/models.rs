@@ -64,6 +64,46 @@ pub struct NavMapIndex {
     pub modules: HashMap<String, NavModule>,
 }
 
+// ── Model selector (epic #335 / S3 #338) ────────────────────────────────────
+// Mirror of `lgwks models list --json` (lgwks.model.catalog.v1). The TUI holds
+// NO catalog of its own — these structs only deserialize the Python projection.
+#[derive(Debug, Clone, Deserialize)]
+pub struct LocalModel {
+    pub role: String,
+    pub law_name: String,
+    pub runtime_id: String,
+    #[serde(default)]
+    pub trust_class: Option<String>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+pub struct CloudProvider {
+    pub id: String,
+    pub models: u32,
+}
+
+#[derive(Debug, Clone, Deserialize, Default)]
+pub struct CloudPlane {
+    #[serde(default)]
+    pub opt_in: bool,
+    #[serde(default)]
+    pub providers: Vec<CloudProvider>,
+    #[serde(default)]
+    pub degraded: bool,
+    // NOTE: the catalog JSON also carries `models` (per-provider drilldown from
+    // `models list --provider X`). The TUI does not drill in yet, so it is left
+    // out here — serde ignores the extra field until that screen lands.
+}
+
+#[derive(Debug, Clone, Deserialize)]
+pub struct ModelCatalog {
+    pub active_locality: String,
+    pub default_locality: String,
+    pub local: Vec<LocalModel>,
+    #[serde(default)]
+    pub cloud: CloudPlane,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct HarvestMetrics {
     pub turns_collected: u32,

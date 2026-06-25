@@ -1,7 +1,7 @@
 use anyhow::{Result, anyhow};
 use rusqlite::Connection;
 use std::path::{Path, PathBuf};
-use crate::models::{DaemonEvent, WorkItem, DaemonStatus, NavMapIndex, WorkflowDef, HarvestMetrics};
+use crate::models::{DaemonEvent, WorkItem, DaemonStatus, NavMapIndex, WorkflowDef, HarvestMetrics, ModelCatalog};
 use std::fs;
 use std::collections::HashMap;
 
@@ -37,6 +37,21 @@ impl Db {
 
         let workflows: HashMap<String, WorkflowDef> = serde_json::from_slice(&output.stdout)?;
         Ok(workflows)
+    }
+
+    /// The unified two-plane model catalog, sourced from the Python selector
+    /// (`lgwks models list --json`). Offline-safe: the Python side serves a cached
+    /// cloud snapshot, so this never depends on the network.
+    pub fn get_model_catalog(&self) -> Result<ModelCatalog> {
+        let output = std::process::Command::new("python3")
+            .args([self.script_path.to_str().unwrap_or("lgwks"), "models", "list", "--json"])
+            .current_dir(&self.repo_root)
+            .output()?;
+        if !output.status.success() {
+            return Err(anyhow!("models list failed: {}", String::from_utf8_lossy(&output.stderr)));
+        }
+        let catalog: ModelCatalog = serde_json::from_slice(&output.stdout)?;
+        Ok(catalog)
     }
 
     pub fn get_navmap(&self) -> Result<NavMapIndex> {

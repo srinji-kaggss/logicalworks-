@@ -214,7 +214,7 @@ def add_parser(sub: Any) -> None:
     lp.add_argument("--provider", default=None)
     rp = s.add_parser("resolve", help="resolve providerID/modelID to a card")
     rp.add_argument("ref")
-    p.set_defaults(_run=_run)
+    p.set_defaults(func=_run)  # dispatcher convention: args.func(args)
 
 
 def _run(args: argparse.Namespace) -> int:
@@ -245,7 +245,7 @@ def main(argv: list[str] | None = None) -> int:
     add_parser(sub)
     # add_parser registers under "models-dev"; for standalone, accept the action directly
     args = parser.parse_args(["models-dev", *(argv if argv is not None else sys.argv[1:])])
-    return args._run(args)
+    return args.func(args)
 
 
 if __name__ == "__main__":
