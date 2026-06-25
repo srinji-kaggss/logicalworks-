@@ -98,6 +98,14 @@ const COMMIT_LANES = [
   // catches a future re-introduction of a hallucinated model id (e.g. the Qwen3.7-VL embed
   // drift). See lgwks_model_mesh.py + scripts/gen_model_law.py.
   { id: 'model.law', gate: 'commit', cmd: ['python3', 'scripts/gen_model_law.py', '--verify'] },
+  // Boundedness gate (R2 of the Pristine Program #345). A no-model CI is correct but
+  // BLIND to whether a model/network/subprocess call is time-bounded — exactly how the
+  // `review` hang shipped green (#319/#320). This lane STATICALLY proves every hang-class
+  // I/O sink in the lgwks_*.py runtime (subprocess.* + urllib/requests/curl_cffi network)
+  // either carries a timeout= or is inventoried out-of-scope with a reason; a new unbounded
+  // model/network sink fails the lane. See docs/concepts/escalation-robustness.md (R2) +
+  // spec/second-harness/runtime-bounded-inventory.json.
+  { id: 'runtime.bounded', gate: 'commit', cmd: ['python3', 'scripts/check_runtime_bounded.py', '--verify'] },
 ];
 
 // Tier-specific Keel runners (now VENDORED at the pinned SHA — #241). Each runs over

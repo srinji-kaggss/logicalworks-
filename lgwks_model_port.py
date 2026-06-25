@@ -360,6 +360,14 @@ def escalate(
                 result = _run_bounded(att.run, _model_timeout())
             else:
                 result = att.run()  # deterministic tier is pure code; never capped
+        except TimeoutError as exc:  # the rung HUNG past its bound — fail-closed
+            # Distinct from a plain error so the training ledger can read "the model
+            # hung" vs "the model errored". Boundedness (R2) guarantees we reach
+            # here instead of blocking the CLI; the ladder escalates/defers.
+            trace.append({"tier": att.trust_class, "model": att.model,
+                          "label": att.label, "outcome": "timeout",
+                          "why": f"{exc}"})
+            continue
         except Exception as exc:  # a rung failing is an escalation, never a crash
             trace.append({"tier": att.trust_class, "model": att.model,
                           "label": att.label, "outcome": "error",

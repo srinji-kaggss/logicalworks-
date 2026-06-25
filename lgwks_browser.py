@@ -335,14 +335,21 @@ def render(url: str, max_chars: int = 8000, *, use_session: bool = False,
         try:
             import asyncio
             import nodriver
+            # Bound the navigation + content fetch so a stalled page cannot hang the
+            # CLI forever — the sibling playwright paths cap page.goto at 30s; nodriver
+            # had NO bound (the one genuinely-unbounded network sink, R2). browser.stop()
+            # runs in `finally` so a timeout never leaks the browser process.
+            _nav_timeout = 30.0  # seconds — matches page.goto(timeout=30000)
             async def _nodriver_render():
                 browser = await nodriver.start()
-                page = await browser.get(url)
-                await asyncio.sleep(wait_ms / 1000.0)
-                html = await page.get_content()
-                text = _text_from(html, max_chars)
-                await browser.stop()
-                return {"ok": True, "text": text, "html": html, "reason": "rendered:nodriver"}
+                try:
+                    page = await asyncio.wait_for(browser.get(url), _nav_timeout)
+                    await asyncio.sleep(wait_ms / 1000.0)
+                    html = await asyncio.wait_for(page.get_content(), _nav_timeout)
+                    text = _text_from(html, max_chars)
+                    return {"ok": True, "text": text, "html": html, "reason": "rendered:nodriver"}
+                finally:
+                    await browser.stop()
             return asyncio.run(_nodriver_render())
         except Exception as e:
             return {"ok": False, "text": "", "reason": f"nodriver failed: {type(e).__name__}"}

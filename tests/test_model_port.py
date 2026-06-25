@@ -238,6 +238,53 @@ class TestTierCeiling(unittest.TestCase):
         self.assertIn("[ceiling=deterministic]", env["why"])
 
 
+class TestBoundedness(unittest.TestCase):
+    """R2 (port half) — a weight tier that HANGS is bounded and fails closed.
+
+    Proven at the port seam with a fake slow rung and a tiny timeout — A14: the
+    deterministic layer validates the nondeterministic path's SHAPE (bound +
+    defer + trace) without loading any real weights.
+    """
+
+    def setUp(self):
+        self._saved_to = os.environ.get("LGWKS_MODEL_TIMEOUT")
+        self._saved_nm = os.environ.get("LGWKS_NO_MODELS")
+        os.environ.pop("LGWKS_NO_MODELS", None)
+        os.environ["LGWKS_MODEL_TIMEOUT"] = "0.05"  # 50ms cap for the test
+
+    def tearDown(self):
+        for k, v in (("LGWKS_MODEL_TIMEOUT", self._saved_to),
+                     ("LGWKS_NO_MODELS", self._saved_nm)):
+            if v is None:
+                os.environ.pop(k, None)
+            else:
+                os.environ[k] = v
+
+    def test_r2_weight_tier_hang_defers_within_timeout(self):
+        import time
+
+        def hang():
+            time.sleep(5)  # far past the 50ms cap — simulates a stuck model load
+            return {"v": "never"}
+
+        start = time.monotonic()
+        env = mp.escalate("classify", [mp.Attempt("generative", hang, model="g")])
+        elapsed = time.monotonic() - start
+
+        self.assertEqual(env["mode"], "deferred", "a hung model must fail closed to deferred")
+        self.assertIsNone(env["value"])
+        self.assertLess(elapsed, 2.0, "escalate did not return within the bound — it hung")
+        outcomes = [t["outcome"] for t in env["escalation"]]
+        self.assertIn("timeout", outcomes, "the hang was not recorded in the trace")
+
+    def test_r2_deterministic_rung_is_never_capped(self):
+        """The bound applies to weight tiers only — pure-code rungs run uncapped
+        even under a tiny model timeout (they cannot hang on I/O)."""
+        env = mp.escalate("extract", [mp.Attempt("deterministic", lambda: [1, 2])])
+        self.assertEqual(env["mode"], "deterministic")
+        self.assertEqual(env["value"], [1, 2])
+
+
 class TestRoleHelpers(unittest.TestCase):
     def setUp(self):
         self._saved = os.environ.get("LGWKS_NO_MODELS")
