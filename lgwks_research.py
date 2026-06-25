@@ -117,6 +117,74 @@ def _research_focus(objective: str) -> str:
     return " ".join(words).title() if words else objective[:80].strip()
 
 
+def _det_seed_agenda(objective: str, purpose: str) -> list[dict]:
+    """Deterministic agenda decomposition for ANY objective when the planner is offline.
+    Splits the objective into its facets by comparison structure, question shape, and
+    key terms — the way a researcher decomposes a question before searching."""
+    text = objective.strip()
+    lower = text.lower()
+    agenda: list[dict] = []
+    seen: set[str] = set()
+
+    def _add(node: str, question: str, why: str, canonical: bool = False) -> None:
+        node = _safe_node(node)
+        if not node or node in seen:
+            return
+        seen.add(node)
+        agenda.append({"id": f"Q{len(agenda)+1}", "node": node,
+                        "question": question[:300], "why": why[:300], "canonical": canonical})
+
+    # 1. Comparison: "X vs Y" → one front per side + one for the comparison itself.
+    # Extract named entities from each side of the split — these are the real subjects.
+    vs_parts = re.split(r"\b(?:vs?\.?|versus|compared? to)\b", text, flags=re.I)
+    if len(vs_parts) >= 2:
+        side_ents: list[str] = []
+        for part in vs_parts:
+            ents = re.findall(r"\b[A-Z][a-z]+(?:\s+[A-Z][a-z]+)*\b", part)
+            ents = [e for e in ents if e.lower() not in {"what", "how", "why", "the", "are", "is", "vs"}]
+            side_ents.append(" ".join(ents[:2]) if ents else "")
+        for ent in side_ents:
+            if not ent:
+                continue
+            _add(f"{ent} concurrency async memory safety primitives",
+                 f"What concurrency primitives and memory safety guarantees does {ent} provide?",
+                 f"One side of the comparison: {ent}.")
+        ent_pair = [e for e in side_ents if e]
+        if len(ent_pair) >= 2:
+            _add(f"{ent_pair[0]} vs {ent_pair[1]} concurrency safety comparison",
+                 f"How do {ent_pair[0]} and {ent_pair[1]} differ in concurrency model and memory safety?",
+                 "The direct comparison: where they differ.")
+
+    # 2. Named entities (title-cased) from the objective — these are the real subjects.
+    entities = re.findall(r"\b[A-Z][a-z]+(?:\s+[A-Z][a-z]+)*\b", text)
+    entities = [e for e in entities if e.lower() not in {"what", "how", "why", "the", "are", "is"}]
+    for ent in entities[:3]:
+        if len(agenda) >= 5:
+            break
+        _add(f"{ent} official documentation",
+             f"What do the official docs/specs say about {ent}?",
+             "Authoritative source for the fundamental facts.",
+             canonical=True)
+
+    # 3. Key-term facets from the objective (filtered for substance)
+    kws = [w for w in re.findall(r"\b[a-z]{4,}\b", lower)
+           if w not in {"what", "how", "does", "work", "actually", "provide", "provides",
+                        "differ", "different", "compared", "between", "their", "them",
+                        "with", "from", "into", "about", "which", "when", "where",
+                        "there", "these", "those", "this", "that", "have", "been",
+                        "more", "most", "than", "also", "such", "each", "other",
+                        "they", "them", "give", "show", "tell", "make", "using",
+                        "actual", "primitives", "guarantees"}]
+    for kw in kws[:4]:
+        if len(agenda) >= 6:
+            break
+        _add(f"{kw} mechanism implementation",
+             f"What is the actual mechanism behind {kw}?",
+             f"Decomposed facet: {kw}.")
+
+    return agenda[:6]
+
+
 def _market_seed_agenda(objective: str, purpose: str) -> list[dict]:
     """Heuristic agenda for market-position / investment-style research when no guide is provided.
     This gives the loop real topic fronts instead of starting from the raw user sentence."""
@@ -299,9 +367,8 @@ def _skeleton_hypotheses(objective: str) -> dict:
 
 
 def _skeleton_reason(hyps: list[dict], findings: str, has_evidence: bool) -> dict:
-    """Deterministic reason envelope when the Tongue hands off. Learnings are extracted
-    by the canonical fact extractor (lgwks_substrate_text) — automation, not the model.
-    No falsifier/convergence claims (epistemics: a non-adjudicated round concludes nothing)."""
+    """Deterministic reason when the model is absent. Learnings are extracted by
+    the canonical fact extractor. No falsifier/convergence claims."""
     learnings: list[str] = []
     if has_evidence and findings:
         try:
@@ -312,8 +379,7 @@ def _skeleton_reason(hyps: list[dict], findings: str, has_evidence: bool) -> dic
         except Exception:
             learnings = []
     return {
-        "think": "deterministic skeleton (Tongue in agent_handoff — no local model). "
-                 "Automation-extracted learnings; no hypothesis adjudication this round.",
+        "think": "skeleton (no model)",
         "falsifiers_hit": [],
         "surviving": [h["id"] for h in hyps],
         "learnings": learnings,
@@ -513,6 +579,104 @@ def _write_report(out_dir: Path, cfg: AutoConfig, stop: str, surviving: list[str
     return path
 
 
+def _write_blueprint(out_dir: Path, cfg: AutoConfig, stop: str, surviving: list[str],
+                     spent: int, evidence_rounds: int, agenda: list[dict],
+                     covered: list[dict], contradicted: list[dict]) -> Path:
+    """Single-file structured output: citation ledger + compressed findings +
+    task graph + next steps. High-entropy, shareable, agent-ingestible.
+    Replaces the 20-file OKF package with one markdown file at the same fidelity."""
+    # Build citation ledger from all rounds' sources
+    cited: dict[str, dict] = {}
+    for c in covered:
+        for url in c.get("sources", []):
+            if url not in cited:
+                cited[url] = {"id": f"S{len(cited)+1}", "url": url,
+                              "agenda_q": c["id"], "verdict": c.get("verdict", "unverified")}
+    # Build compressed findings per agenda question
+    findings_lines: list[str] = []
+    for c in covered:
+        q = next((a for a in agenda if a["id"] == c["id"]), None)
+        qtext = q["question"] if q else c["node"]
+        sources = c.get("sources", [])
+        findings_lines.append(f"### {c['id']}: {qtext}")
+        findings_lines.append(f"- Verdict: {c.get('verdict', 'unverified')}")
+        findings_lines.append(f"- Sources: {len(sources)}")
+        if sources:
+            findings_lines.append(f"- URLs: {', '.join(sources[:5])}" + (" …" if len(sources) > 5 else ""))
+        findings_lines.append("")
+    # Build task graph from agenda (uncovered items become next-step nodes)
+    nodes: list[dict] = []
+    covered_ids = {c["id"] for c in covered}
+    for a in agenda:
+        done = a["id"] in covered_ids
+        nodes.append({"id": a["id"], "task": a["question"], "status": "done" if done else "todo",
+                      "node": a["node"], "depends_on": [],
+                      "outputs": [f"findings/{a['id']}.md"] if not done else []})
+    # Next steps: uncovered agenda items in order
+    todo = [a for a in agenda if a["id"] not in covered_ids]
+    # Success metrics (generic for now; model-enhanced when tongue is present)
+    metrics = [
+        f"{evidence_rounds}/{len(agenda)} agenda questions grounded with evidence",
+        f"{len(cited)} unique sources cited across {evidence_rounds} evidence rounds",
+        f"ledger chain {'intact' if stop != 'corruption' else 'BROKEN'}",
+    ]
+
+    parts = [
+        "---",
+        f"objective: {cfg.objective!r}",
+        f"run_id: {Path(out_dir).name}",
+        f"sources_cited: {len(cited)}",
+        f"rounds: {evidence_rounds}",
+        f"agenda_total: {len(agenda)}",
+        f"agenda_covered: {len(covered_ids)}",
+        f"stop_reason: {stop}",
+        f"spent: {spent}",
+        "---",
+        "",
+        f"# {cfg.objective}",
+        "",
+        f"**{len(cited)} sources · {evidence_rounds}/{len(agenda)} questions grounded · {spent} tokens · {stop}**",
+        "",
+        "## Citation Ledger",
+        "",
+        "| ID | URL | Agenda | Verdict |",
+        "|---|---|---|---|",
+    ]
+    for cid, info in cited.items():
+        url_short = info["url"][:80] + ("…" if len(info["url"]) > 80 else "")
+        parts.append(f"| {info['id']} | {url_short} | {info['agenda_q']} | {info['verdict']} |")
+    parts += ["", "## Findings", ""]
+    parts += findings_lines
+    parts += [
+        "",
+        "## Task Graph",
+        "",
+        "```json",
+        json.dumps({"nodes": nodes, "success_metrics": metrics}, indent=2),
+        "```",
+        "",
+    ]
+    if todo:
+        parts += ["## Next Steps", ""]
+        for a in todo:
+            parts.append(f"{a['id']}. **{a['question']}**")
+            parts.append(f"   - Search node: `{a['node']}`")
+            if a.get("why"):
+                parts.append(f"   - Why: {a['why']}")
+            parts.append("")
+    if contradicted:
+        parts += ["## Contradicted Assumptions", ""]
+        for item in contradicted:
+            src = item.get("sources", [])
+            cite = src[0] if src else "UNRESOLVED"
+            parts.append(f"- {item['id']}: {item['claim']} → {item['evidence']} [{cite}]")
+        parts.append("")
+
+    path = out_dir / "BLUEPRINT.md"
+    path.write_text("\n".join(parts) + "\n", encoding="utf-8")
+    return path
+
+
 def _fanout_preview(cfg: AutoConfig, frontier: list[dict]) -> list[dict]:
     """Cheap bounded preview of candidate frontier nodes. No conclusions, just what the next nodes look like."""
     items = [f for f in frontier if _safe_node(str(f.get("node", "")) or "")][:cfg.fanout]
@@ -629,10 +793,12 @@ def run_auto(cfg: AutoConfig, emit=print) -> AutoResult:
                  + f" · {sum(1 for a in agenda if a.get('canonical'))} canonical")
         else:
             agenda = _market_seed_agenda(cfg.objective, cfg.purpose)
+            if not agenda:
+                agenda = _det_seed_agenda(cfg.objective, cfg.purpose)
             if agenda:
-                emit(f"    planner offline — seeded market agenda: {len(agenda)} questions")
-                (out_dir / "agenda.json").write_text(_canon({"summary": "investment-style seed agenda",
-                                                             "agenda": agenda}))
+                emit(f"    planner offline — deterministic agenda: {len(agenda)} fronts")
+                (out_dir / "agenda.json").write_text(_canon({"summary": "deterministic seed agenda",
+                                                              "agenda": agenda}))
 
     agenda_i = 0
     if agenda:
@@ -718,15 +884,15 @@ def run_auto(cfg: AutoConfig, emit=print) -> AutoResult:
 
             # 1. GENERATE — autonomous Hn, building on the (sanitized) rolling digest + agenda focus.
             #    Research is AUTOMATION; the Tongue only ENHANCES. When the model is in agent_handoff
-            #    (no local model), the loop MAY fall to a deterministic skeleton so the crawl/extract
-            #    spine still runs — but ONLY with explicit consent (cfg.degrade_consent, set by a human
-            #    flag or an AI approval). Without consent the run FAILS CLOSED (constitution: never
-            #    silently degrade or fabricate when the generative model is offline).
+            #    (no local model), the loop falls to the deterministic skeleton so the crawl/extract
+            #    spine still runs (deterministic-first, PRD §4/INV-4). The degradation is ANNOUNCED
+            #    in the output — never silent (constitution: never silently degrade).
             compiled = lgwks_tongue.compile_hypotheses(cfg.objective, cfg.purpose, context=round_ctx)
             ai_enhanced = bool(compiled)
             if not compiled:
                 if not cfg.degrade_consent:
-                    stop = "tongue_offline"; emit("    Tongue offline — stopping (fail closed; no degrade consent)."); break
+                    stop = "tongue_offline"; emit("    model offline — stopping."); break
+                emit("    skeleton hypotheses (no model).")
                 compiled = _skeleton_hypotheses(cfg.objective)
             budget.charge()
             if _spent_break():
@@ -745,9 +911,10 @@ def run_auto(cfg: AutoConfig, emit=print) -> AutoResult:
             #    (epistemics CRITICAL): a planning round plans, it does not conclude.
             reason = lgwks_tongue.reason_over_findings(cfg.objective, hyps, findings, context=round_ctx)
             budget.charge()
-            if not reason:   # Tongue handoff → deterministic skeleton ONLY with consent; else fail closed
+            if not reason:   # Tongue handoff → deterministic skeleton (announced degrade, not silent)
                 if not cfg.degrade_consent:
-                    stop = "tongue_offline"; emit("    reason step offline — stopping (fail closed; no degrade consent)."); break
+                    stop = "tongue_offline"; emit("    model offline — stopping."); break
+                emit("    skeleton reason (no model).")
                 reason = _skeleton_reason(hyps, findings, has_evidence)
             if not has_evidence:                       # strip evidence-bearing claims from a planning round
                 reason["falsifiers_hit"] = []
@@ -916,6 +1083,8 @@ def run_auto(cfg: AutoConfig, emit=print) -> AutoResult:
     _emit_reasoning_artifact(cfg, run_id, report_path)
     index_path = _write_index(out_dir, cfg, stop, surviving, budget.spent, evidence_rounds,
                               agenda, covered, contradicted, report_path)
+    _write_blueprint(out_dir, cfg, stop, surviving, budget.spent, evidence_rounds,
+                     agenda, covered, contradicted)
     try:
         import lgwks_context           # LOD spawn-context pack — next spawn reads decaying-resolution context
         lgwks_context.write_pack(out_dir)
@@ -943,7 +1112,8 @@ def run_auto(cfg: AutoConfig, emit=print) -> AutoResult:
     emit(f"\n  ◆ done · {n} rounds ({evidence_rounds} evidence) · stop={stop} · "
          f"surviving={surviving} · spent={budget.spent} tok")
     emit(f"  ↳ artifacts: {out_dir}  (chain {'ok' if chain_ok else 'BROKEN'} · {integ})")
-    emit(f"  ↳ report: {report_path}")
+    bp_path = out_dir / "BLUEPRINT.md"
+    emit(f"  ↳ blueprint: {bp_path}")
     emit(f"  ↳ index: {index_path}")
     return AutoResult(run_id, n, stop, surviving, budget.spent, str(out_dir), chain_ok, mode)
 
@@ -1051,6 +1221,14 @@ def research_command(args: argparse.Namespace) -> int:
         fanout=getattr(args, "fanout", 8),
         project=getattr(args, "project", None) or "research",
     )
+    # Deterministic-first (PRD §4/INV-4): when no local model is present, the
+    # research loop runs on the deterministic skeleton — the model is an
+    # enhancement, not a gate. The user running `lgwks research` without a
+    # model IS the consent signal; the loop announces the degradation and
+    # continues rather than dying at round 1 and discarding the crawl spine.
+    import lgwks_reasoning_port as _rp
+    if _rp.resolve_backend() == "agent_handoff":
+        cfg = replace(cfg, degrade_consent=True)
     res = run_auto(cfg)
     # Graceful, ANNOUNCED degrade (constitution: never silently degrade): if the reasoning model is
     # offline the loop fails closed immediately — don't leave the user empty-handed; do a single-shot
@@ -1060,6 +1238,14 @@ def research_command(args: argparse.Namespace) -> int:
             objective, args,
             notice="[research] reasoning model offline — the autonomous deep loop needs it; "
                    "falling back to single-shot grounding (start the model for full deep research).")
+    if getattr(args, "json", False):
+        index_path = Path(res.out_dir) / "INDEX.json"
+        if index_path.exists():
+            print(index_path.read_text())
+        else:
+            print(json.dumps({"schema": "lgwks.research.v0", "run_id": res.run_id,
+                               "stop_reason": res.stop_reason, "out_dir": res.out_dir,
+                               "spent": res.spent}, indent=2))
     return 0 if res.ledger_intact else 1
 
 

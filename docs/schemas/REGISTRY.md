@@ -159,6 +159,9 @@ side-database (the external `~/ingestion_results/*.db` stores are exactly the lo
 | `lgwks.manifest.v0` / `lgwks.intent.v0` / `lgwks.hooks.v0` / `lgwks.audit.v0` / `lgwks.gh.v0` / `lgwks.session.summary.v0` | 0 | live, research-grade | `lgwks_schema.py:66-133`, `lgwks_gh.py:82` |
 | `lgwks.agent.v1` | 1 | **live** — single-agent front-door envelope (world-view + compiled-workflow trigger): intent → capability selections + workflow plan | `lgwks_agent.py`, `lgwks_manifest.py` |
 | `lgwks.research.live.v0` | 0 | **live (2026-06-23), research-grade** — `research --live` single-shot grounding result: `{schema, query, has_evidence, sources[], findings}`; sources are verifiable citation URLs from the grounding pass (web floor + crawl), never model-claimed | `lgwks_research.py` (`research_command` --live path) |
+| `lgwks.research.v0` | 0 | **live, research-grade** — autonomous deep-research loop INDEX.json: `{schema, objective, purpose, stop_reason, spent, evidence_rounds, surviving, agenda, covered, contradicted, rounds}` | `lgwks_research.py` (`_write_index`) |
+| `lgwks.research.gather.v1` | 1 | **live** — parallel gather result per agenda front: `{schema, fanout, fronts, evidence_fronts, sources, items[{id,node,has_evidence,source_count,preview}]}` | `lgwks_research.py` (`run_auto` parallel gather) |
+| `lgwks.engine.run.v1` | 1 | **live** — engine run envelope from the Rust crawler substrate | `engine/engine.py` |
 | `lgwks.intent.centroids.v1` | 1 | live (cache) | `lgwks_intent_classifier.py:68` |
 | `lgwks.config.v1` | 1 | **live** (Issue 158) — validated YAML config | `lgwks_config.py` | jsonschema |
 | `lgwks.inbound.v1` | 1 | live (**I7**) — reflex pack: `handles[]`, `scores{}`, `budget{limit_tokens,used_tokens,truncated_count,truncated[]}` (count exact, cid list bounded ≤64), `depth_handles[{id,est_tokens,kind}]` | `lgwks_inbound.py` |
