@@ -56,7 +56,7 @@ class TestGeneratedLaw(unittest.TestCase):
 
 
 class TestGateBites(unittest.TestCase):
-    """A tampered prose table must trip the gate (the anti-hallucination check)."""
+    """The gate must bite on prose drift AND catalog parity violations."""
 
     def test_prose_drift_is_caught(self):
         law = gen.load_law()
@@ -66,6 +66,29 @@ class TestGateBites(unittest.TestCase):
         problems = gen.reconcile_prose(law)
         self.assertTrue(problems, "prose drift went undetected — the gate does not bite")
         self.assertIn("row 5", problems[0])
+
+    def test_catalog_parity_is_caught(self):
+        """A law entry added without a matching catalog entry must trip the gate."""
+        import copy
+        law = copy.deepcopy(gen.load_law())
+        # Inject a phantom current_law mlx entry that isn't in _MODEL_CATALOG.
+        law["entries"].append({
+            "entry": {
+                "name": "mlx-community/phantom-model-not-in-catalog",
+                "runtime": "mlx",
+                "locality": "local",
+                "role": "proposal",
+                "trust_class": "generative",
+                "status": "current_law",
+                "notes": "phantom — must fail parity",
+            }
+        })
+        problems = gen.check_catalog_parity(law)
+        self.assertTrue(problems, "catalog parity mismatch went undetected — the gate does not bite")
+        self.assertTrue(
+            any("phantom-model-not-in-catalog" in p for p in problems),
+            f"expected phantom name in parity error; got: {problems}"
+        )
 
 
 if __name__ == "__main__":

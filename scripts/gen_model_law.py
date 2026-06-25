@@ -26,6 +26,7 @@ Run from repo root:  python3 scripts/gen_model_law.py --write
 from __future__ import annotations
 
 import argparse
+import ast
 import json
 import re
 import sys
@@ -180,6 +181,54 @@ def validate_vocab(law: dict) -> list[str]:
     return problems
 
 
+# ── catalog parity (the R7.1 gate: catalog keys == law local+current_law, by short name) ──
+_CATALOG_RUNTIMES = frozenset({"mlx", "transformers"})
+_HUB = ROOT / "lgwks_model_hub.py"
+
+
+def _catalog_keys() -> set[str]:
+    """AST-extract _MODEL_CATALOG keys from lgwks_model_hub without importing it."""
+    tree = ast.parse(_HUB.read_text(encoding="utf-8"))
+    for node in ast.walk(tree):
+        if (
+            isinstance(node, ast.AnnAssign)
+            and isinstance(node.target, ast.Name)
+            and node.target.id == "_MODEL_CATALOG"
+            and isinstance(node.value, ast.Dict)
+        ):
+            return {str(k.value) for k in node.value.keys if isinstance(k, ast.Constant)}
+    raise ValueError(f"{_HUB.name}: _MODEL_CATALOG not found")
+
+
+def check_catalog_parity(law: dict) -> list[str]:
+    """Compare catalog keys against law local+current_law (mlx/transformers) by short name.
+
+    Short name = name.split('/')[-1] — the naming convention used throughout the catalog.
+    Axiom-Byte-Framework (runtime='axiom') and custom-runtime entries are catalog-exempt.
+    """
+    law_names = {
+        row["entry"]["name"].split("/")[-1]
+        for row in law["entries"]
+        if row["entry"].get("locality") == "local"
+        and row["entry"].get("status") == "current_law"
+        and row["entry"].get("runtime") in _CATALOG_RUNTIMES
+    }
+    catalog = _catalog_keys()
+    problems: list[str] = []
+    in_law_not_catalog = law_names - catalog
+    in_catalog_not_law = catalog - law_names
+    if in_law_not_catalog:
+        problems.append(
+            f"in law current_law but missing from _MODEL_CATALOG: {sorted(in_law_not_catalog)}"
+        )
+    if in_catalog_not_law:
+        problems.append(
+            f"in _MODEL_CATALOG but not law current_law: {sorted(in_catalog_not_law)}"
+            " — either promote in model-law.json or remove from catalog"
+        )
+    return problems
+
+
 # ── commands ────────────────────────────────────────────────────────────────
 def cmd_write() -> int:
     law = load_law()
@@ -210,6 +259,9 @@ def cmd_verify() -> int:
 
     # 3. prose drift.
     problems += reconcile_prose(law)
+
+    # 4. catalog parity — law local+current_law (mlx/transformers) == _MODEL_CATALOG keys.
+    problems += check_catalog_parity(law)
 
     if problems:
         print("model.law: NO-GO")

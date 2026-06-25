@@ -2,8 +2,8 @@
 """build_model_mesh — freeze the model law as a queryable manifest (#119).
 
 Emits `.lgwks/model_mesh.json` (`lgwks.model.mesh.v1`) from the static law in
-`lgwks_model_mesh.MESH_LAW`, which is transcribed verbatim from the spec
-(`spec/second-harness/MODEL-RUNTIME-FINALIZATION-2026-06-13.md` §3.1/§3.2).
+`lgwks_model_mesh.MESH_LAW`, generated from the one canonical source
+`spec/second-harness/model-law.json` (prose anchor: `docs/AETHERIUS_SPEC_2026.md §3`).
 
 This script records inventory; it does NOT change it. It imports no model
 package and touches no `store/models/` weights — the mesh is descriptive. The
