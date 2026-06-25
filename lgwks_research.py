@@ -1060,6 +1060,14 @@ def research_command(args: argparse.Namespace) -> int:
             objective, args,
             notice="[research] reasoning model offline — the autonomous deep loop needs it; "
                    "falling back to single-shot grounding (start the model for full deep research).")
+    if getattr(args, "json", False):
+        index_path = Path(res.out_dir) / "INDEX.json"
+        if index_path.exists():
+            print(index_path.read_text())
+        else:
+            print(json.dumps({"schema": "lgwks.research.v0", "run_id": res.run_id,
+                               "stop_reason": res.stop_reason, "out_dir": res.out_dir,
+                               "spent": res.spent}, indent=2))
     return 0 if res.ledger_intact else 1
 
 
