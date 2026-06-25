@@ -3,8 +3,11 @@
 The contract this locks (Director's law):
   M1  the ladder prefers DETERMINISM — a deterministic rung that resolves wins
       and no model is ever touched (model is the last resort, not the default)
-  M2  LGWKS_NO_MODELS suppresses the weight tiers (sensor/generative); the
-      deterministic tier still runs
+  M2  LGWKS_NO_MODELS suppresses the weight tiers (sensor/generative) — it is the
+      env form of ceiling="deterministic", so skipped rungs trace as above_ceiling;
+      the deterministic tier still runs
+  R1  the tier ceiling caps how high the ladder may climb per-request; NO_MODELS
+      collapses to ceiling="deterministic" (equal envelopes); default is no-op
   M3  fail-closed — when nothing resolves the envelope is mode=deferred with
       value=None: the harness NEVER fabricates (INV-3)
   M4  LAW IS TRUTH — the model id in an envelope comes from MESH_LAW, not a literal
@@ -65,7 +68,7 @@ class TestEscalation(unittest.TestCase):
         self.assertFalse(ran["sensor"], "sensor ran under the kill-switch")
         self.assertEqual(env["mode"], "deferred")
         outcomes = [t["outcome"] for t in env["escalation"]]
-        self.assertIn("suppressed", outcomes)
+        self.assertIn("above_ceiling", outcomes)  # kill-switch == ceiling=deterministic
 
     def test_m3_fail_closed_never_fabricates(self):
         env = mp.escalate("extract", [
@@ -103,6 +106,136 @@ class TestEscalation(unittest.TestCase):
         self.assertEqual(env["value"], ["recovered"])
         outcomes = {t["outcome"] for t in env["escalation"]}
         self.assertIn("error", outcomes)
+
+
+class TestTierCeiling(unittest.TestCase):
+    """R1 — the caller-set tier ceiling ('threshold, not chain').
+
+    The ceiling caps how high the ladder may climb for a request; LGWKS_NO_MODELS
+    is collapsed to the special case ceiling="deterministic" (one mechanism).
+    """
+
+    def setUp(self):
+        self._saved = os.environ.get("LGWKS_NO_MODELS")
+        os.environ.pop("LGWKS_NO_MODELS", None)
+
+    def tearDown(self):
+        if self._saved is None:
+            os.environ.pop("LGWKS_NO_MODELS", None)
+        else:
+            os.environ["LGWKS_NO_MODELS"] = self._saved
+
+    def test_r1_ceiling_sensor_never_invokes_generative(self):
+        """ceiling='sensor' skips the generative rung as above_ceiling, runs sensor."""
+        ran = {"sensor": False, "generative": False}
+
+        def sensor():
+            ran["sensor"] = True
+            return None  # unavailable → would normally escalate to generative
+
+        def generative():
+            ran["generative"] = True
+            return {"v": "llm"}
+
+        env = mp.escalate("classify", [
+            mp.Attempt("sensor", sensor, model="s"),
+            mp.Attempt("generative", generative, model="g"),
+        ], ceiling="sensor")
+        self.assertTrue(ran["sensor"], "sensor should run under ceiling=sensor")
+        self.assertFalse(ran["generative"], "generative ran above the ceiling")
+        gen = [t for t in env["escalation"] if t["tier"] == "generative"]
+        self.assertTrue(gen and gen[0]["outcome"] == "above_ceiling")
+        self.assertEqual(env["mode"], "deferred")
+
+    def test_r1_ceiling_deterministic_equals_no_models(self):
+        """ceiling='deterministic' produces byte-equal envelopes to LGWKS_NO_MODELS=1."""
+        def build():
+            # fresh attempts each run — callables are single-use by intent
+            return [
+                mp.Attempt("deterministic", lambda: None),
+                mp.Attempt("sensor", lambda: {"v": 1}, model="s"),
+                mp.Attempt("generative", lambda: {"v": 2}, model="g"),
+            ]
+
+        env_ceiling = mp.escalate("classify", build(), ceiling="deterministic")
+
+        os.environ["LGWKS_NO_MODELS"] = "1"
+        try:
+            env_killswitch = mp.escalate("classify", build())  # default ceiling
+        finally:
+            os.environ.pop("LGWKS_NO_MODELS", None)
+
+        self.assertEqual(env_ceiling, env_killswitch,
+                         "ceiling=deterministic must equal the NO_MODELS envelope")
+        self.assertEqual(env_ceiling["mode"], "deferred")
+        self.assertIn("[ceiling=deterministic]", env_ceiling["why"])
+
+    def test_r1_default_ceiling_is_no_op(self):
+        """Default ceiling='generative' reproduces current envelopes exactly."""
+        def build():
+            return [mp.Attempt("generative", lambda: {"v": 9}, model="g")]
+
+        env_default = mp.escalate("extract", build())
+        env_explicit = mp.escalate("extract", build(), ceiling="generative")
+        self.assertEqual(env_default, env_explicit)
+        self.assertEqual(env_default["mode"], "generative")
+        self.assertEqual(env_default["value"], {"v": 9})
+        # no ceiling annotation leaks into an unrestricted run
+        self.assertNotIn("[ceiling=", env_default["why"])
+
+    def test_r1_unknown_ceiling_fails_loud_not_open(self):
+        """An invalid ceiling raises rather than silently permitting the LLM."""
+        with self.assertRaises(ValueError):
+            mp.escalate("classify", [mp.Attempt("deterministic", lambda: None)],
+                        ceiling="turbo")
+
+    def test_r1_default_ceiling_is_identity_even_for_unknown_tier(self):
+        """Default ceiling never skips a rung — even a miscatalogued trust_class
+        keeps its pre-ceiling behaviour (the default is a provable no-op)."""
+        ran = {"weird": False}
+
+        def weird():
+            ran["weird"] = True
+            return {"v": 1}
+
+        env = mp.escalate("classify", [mp.Attempt("mystery-tier", weird, model="m")])
+        self.assertTrue(ran["weird"], "unknown-tier rung was skipped under default ceiling")
+        self.assertEqual(env["value"], {"v": 1})
+        self.assertNotIn("above_ceiling", [t["outcome"] for t in env["escalation"]])
+
+    def test_r1_restriction_fails_closed_on_unknown_tier(self):
+        """Under a real restriction, an unknown (last-ranked) tier is skipped, not
+        silently let past — fail-closed."""
+        ran = {"weird": False}
+
+        def weird():
+            ran["weird"] = True
+            return {"v": 1}
+
+        env = mp.escalate("classify", [mp.Attempt("mystery-tier", weird, model="m")],
+                          ceiling="sensor")
+        self.assertFalse(ran["weird"], "unknown-tier rung ran above a sensor ceiling")
+        self.assertIn("above_ceiling", [t["outcome"] for t in env["escalation"]])
+
+    def test_r1_no_models_kill_switch_cannot_be_raised_by_ceiling(self):
+        """Security: a caller-supplied ceiling can never talk PAST the env
+        kill-switch. NO_MODELS forces deterministic even if ceiling='generative'."""
+        ran = {"gen": False}
+
+        def gen():
+            ran["gen"] = True
+            return {"v": "llm"}
+
+        os.environ["LGWKS_NO_MODELS"] = "1"
+        try:
+            env = mp.escalate("classify",
+                              [mp.Attempt("generative", gen, model="g")],
+                              ceiling="generative")  # caller tries to lift the floor
+        finally:
+            os.environ.pop("LGWKS_NO_MODELS", None)
+        self.assertFalse(ran["gen"], "ceiling='generative' defeated the kill-switch")
+        self.assertEqual(env["mode"], "deferred")
+        self.assertIn("[ceiling=deterministic]", env["why"])
 
 
 class TestRoleHelpers(unittest.TestCase):
