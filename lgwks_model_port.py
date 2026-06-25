@@ -330,6 +330,16 @@ def escalate(
             f"ceiling {ceiling!r} is not a trust_class; "
             f"expected one of {mesh.TIER_ORDER}"
         )
+    # Validate every rung's trust_class too (fail loud, same as ceiling). A miscatalogued
+    # class (e.g. a typo "llm") sorts last and, at the default ceiling, would otherwise RUN
+    # uncapped and be reported in the envelope under that bogus `trust` label — a caller
+    # reading `trust` for a downstream decision would trust an untrusted tier. Reject it.
+    for a in attempts:
+        if a.trust_class not in mesh.TIER_ORDER:
+            raise ValueError(
+                f"Attempt.trust_class {a.trust_class!r} is not a trust_class; "
+                f"expected one of {mesh.TIER_ORDER}"
+            )
     ordered = sorted(attempts, key=lambda a: mesh.tier_rank(a.trust_class))
     # The kill-switch collapses to the most restrictive ceiling. After this line
     # there is a single notion of "how high may we climb": effective_ceiling.

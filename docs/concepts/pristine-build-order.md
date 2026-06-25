@@ -33,11 +33,22 @@ already done here. Where a fork genuinely needs the Director, it is marked
 4. **Never weaken a gate to go green.** Fix the thing under test. Retargeting a stale test
    to canonical behavior is allowed ONLY when the invariant is preserved — and you must
    say so in the commit. (See `feedback`: no-gate-weakening.)
+   - **No silent self-allow-listing.** A no-regrowth gate (R4.7/R5.4/R3.4/R6.4) protects you
+     only if its allow-list cannot grow in the same breath as the straggler it should catch.
+     Every allow-list/inventory addition MUST carry a tracking-issue reference and a one-line
+     reason in the same commit; adding a straggler AND its own allow-list entry is the
+     anti-pattern the gate exists to stop. If a fix tempts you to add an allow-list row,
+     that is a 🔶 — surface it, don't self-pardon.
 5. **One small commit per leaf**, on the milestone branch. Conventional message; end every
    commit body with:
    `Co-Authored-By: Claude Opus 4.8 (1M context) <noreply@anthropic.com>`
 6. **Do NOT push to origin/gdrive and do NOT open PRs.** Commit locally only. Pushing
-   upstream happens at a checkpoint, by the Director with Opus. (See "Checkpoints".)
+   upstream happens at a checkpoint, by the Director with Opus. (See "Checkpoints".) This is
+   not honor-system: install the repo's pre-push block before starting work —
+   `git config --local --add hook... ` is not enough, so set a `pre-push` hook that exits 1
+   with "Pristine Program: push is checkpoint-gated — see pristine-build-order.md" (a sample
+   is in the Checkpoints section). The human removes it to push at a checkpoint. If you
+   cannot install the hook, STOP and say so — do not proceed on the honor system.
 7. **If you hit a 🔶 DIRECTOR-GATED fork, STOP** that leaf, do the full blast-radius
    analysis, and surface it at the next checkpoint. Do the un-gated leaves around it.
 
@@ -118,8 +129,12 @@ that drift. One primitive per concept; route every caller; gate against regrowth
   asserted; suite green.
 - **R4.2 plain-hash** 🟡 — route plain content-hash sites to `lgwks_hashing`:
   `lgwks_score:346`, `lgwks_viz_project:254`, `lgwks_portal._sha:57` (width-12 →
-  `content_id(n=12)`), `lgwks_jarvis:85`. *Accept:* byte-identical IDs (assert vs a
-  pre-image); no bare `hashlib.sha256(` left there.
+  `content_id(n=12)`), `lgwks_jarvis:85`. *Accept:* IDs are byte-identical to the OLD
+  output for the SAME input — assert the full digest **including encoding** (hex vs base64),
+  algorithm, and truncation width, not just the width. `content_id(n=12)` must reproduce the
+  exact 12-char string `hashlib.sha256(x)…[:12]` produced, or stored CIDs fork silently. If
+  encodings differ, this is NOT a mechanical route — STOP (🔶) and surface it. No bare
+  `hashlib.sha256(` left there.
 - **R4.3 ISO-clock** 🟢 — route `lgwks_models_dev:82,98` and `scripts/build_model_mesh.py:31`
   to `lgwks_clock`. *Accept:* no `datetime.now(` in those; `test_clock_formatters` green.
 - **R4.7 regrowth guard** 🟢 — add ONE source-scan test (model it on
@@ -231,10 +246,15 @@ comment-banner phase seams and existing helpers — extract behind them, invent 
 - **R6.1** 🟡 — extract `build_run` phases (chunks/media/concepts/graph/vectors/relational —
   the `# ──` banners) into private helpers; `build_run` becomes a ~40–80-line sequencer.
   *Accept:* `build_run` ≤ ~80 lines; `tests/test_substrate_gate_projection.py` green.
-- **R6.2** 🟡 — **kills the R3∩R6 dup:** `crawl_command:677` reimplements build_run's
-  chunk-ingest loop ("Mirrors lgwks_substrate_run.build_run"). Route it through the R6.1
-  helper / `build_run`. *Accept:* no "Mirrors build_run" loop in jarvis; parity test asserts
-  identical chunk CIDs for the same input. (Coupled to M5; sequence the jarvis dup once.)
+- **R6.2** 🔴🔶 — **kills the R3∩R6 dup, but it is semantics-bearing, not mechanical:**
+  `crawl_command:677` reimplements build_run's chunk-ingest loop ("Mirrors
+  lgwks_substrate_run.build_run"). The two loops are historically divergent — chunk-boundary
+  logic differences produce DIFFERENT CIDs, which forks stored content. Do NOT treat as a
+  🟡 routing. **First** write a parity test asserting jarvis-crawl and `build_run` produce
+  identical chunk CIDs for a fixed input and **land it red/green as a real gate** (not just an
+  acceptance note); only then route `crawl_command` through the R6.1 helper. If the CIDs
+  already differ today, that is a 🔶 — surface the divergence to Opus before changing either.
+  (Coupled to M5; sequence the jarvis dup once.)
 - **R6.3** 🔴 — extract `run_auto`'s per-round body into `_run_round(state)`; **thread the
   rolling digest/budget/frontier state explicitly** (the one real behavior-change risk).
   *Accept:* `run_auto` ≤ ~120 lines; research tests green; add a golden-trajectory test if
@@ -262,6 +282,20 @@ Gates: node scripts/ci/run.mjs → <GO/NO-GO>; full suite → <N passed / M fail
 Blast-radius notes for each open fork: <2–3 lines each>.
 Paste this to the Director and wait. Do not start the next milestone until Opus rules.
 ```
+
+## The push-block hook (install before any work — the checkpoint rule is not honor-system)
+
+Write `.git/hooks/pre-push` (chmod +x) so a stray/auto push fails closed:
+
+```sh
+#!/bin/sh
+echo "Pristine Program: push is checkpoint-gated — see docs/concepts/pristine-build-order.md" >&2
+echo "The Director removes this hook to push at a checkpoint." >&2
+exit 1
+```
+
+The human deletes the hook to push at a checkpoint, then restores it. If you (the executing
+agent) cannot install it, STOP and say so — do not work on the honor system.
 
 The Director takes that to Opus, who reviews the diff, resolves the 🔶 forks, pushes the
 milestone branch(es) to origin+gdrive, and opens the PR(s). Only then does the agent

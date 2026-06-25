@@ -82,6 +82,50 @@ class TestSinkDetection(unittest.TestCase):
         self.assertEqual(len(net), 1)
         self.assertTrue(net[0]["bounded"])
 
+    # ── Hardening regressions (hacker pass H1/H3/H4) — detector blind spots ──
+
+    def test_aliased_subprocess_import_is_not_invisible(self):
+        """H1: `import subprocess as sp; sp.run(...)` was invisible — the live
+        lgwks_workflows playwright sink shipped GO. Alias must be tracked."""
+        src = "import subprocess as sp\nsp.run(['playwright','install'])\n"
+        sub = [s for s in _scan_src(self.tmp, src) if s["kind"] == "subprocess"]
+        self.assertEqual(len(sub), 1, "aliased subprocess import not detected")
+        self.assertFalse(sub[0]["bounded"])
+
+    def test_from_subprocess_import_run_is_detected(self):
+        """H1: `from subprocess import run; run(...)` (bare-name call)."""
+        src = "from subprocess import run\nrun(['curl', url])\n"
+        sub = [s for s in _scan_src(self.tmp, src) if s["kind"] == "subprocess"]
+        self.assertEqual(len(sub), 1)
+        self.assertFalse(sub[0]["bounded"])
+
+    def test_timeout_none_is_not_bounded(self):
+        """H3: timeout=None blocks forever — must NOT count as bounded."""
+        src = "import subprocess\nsubprocess.run(['curl', url], timeout=None)\n"
+        sinks = _scan_src(self.tmp, src)
+        self.assertFalse(sinks[0]["bounded"], "timeout=None wrongly accepted as bounded")
+
+    def test_os_popen_is_a_sink(self):
+        """H4: os.popen runs a shell pipe with no timeout API — must be a sink."""
+        src = "import os\nos.popen('curl ' + url)\n"
+        sub = [s for s in _scan_src(self.tmp, src) if s["kind"] == "subprocess"]
+        self.assertEqual(len(sub), 1)
+        self.assertFalse(sub[0]["bounded"])
+
+    def test_aliased_net_import_is_detected(self):
+        """H4: `from curl_cffi import requests as _curl; _curl.get(url)`."""
+        src = "from curl_cffi import requests as _curl\n_curl.get(url)\n"
+        net = [s for s in _scan_src(self.tmp, src) if s["kind"] == "network"]
+        self.assertEqual(len(net), 1, "aliased net import not detected")
+        self.assertFalse(net[0]["bounded"])
+
+    def test_stored_session_client_is_detected(self):
+        """H4: a stored client `s = requests.Session(); s.get(url)`."""
+        src = "import requests\ns = requests.Session()\ns.get(url)\n"
+        net = [s for s in _scan_src(self.tmp, src) if s["kind"] == "network"]
+        self.assertEqual(len(net), 1, "stored Session client not detected")
+        self.assertFalse(net[0]["bounded"])
+
 
 class TestGateOnKnownBad(unittest.TestCase):
     """The lane VERDICT: a known-bad sink that is unbounded and not inventoried
@@ -107,11 +151,19 @@ class TestGateOnKnownBad(unittest.TestCase):
 
     def test_live_repo_passes_the_gate(self):
         """The real runtime must currently satisfy the invariant (GO) — i.e. the
-        committed inventory covers every unbounded sink. Guards against an
-        uninventoried sink slipping in with this very change."""
-        _all, violations, stale = crb.evaluate_full()
+        committed inventory covers every unbounded sink, with no stale entries and
+        no count drift. Guards against an uninventoried sink slipping in."""
+        _all, violations, stale, mism = crb.evaluate_full()
         self.assertEqual(violations, [], f"uninventoried unbounded sinks: {violations}")
         self.assertEqual(stale, [], f"stale inventory entries: {stale}")
+        self.assertEqual(mism, [], f"inventory count drift: {mism}")
+
+    def test_inventory_entries_declare_lines(self):
+        """H2: every out_of_scope entry must enumerate `lines` so the count-match
+        gate can detect a new sink sharing a coarse (file,callee,target) key."""
+        inv = crb.load_inventory()
+        missing = [e for e in inv.get("out_of_scope", []) if not e.get("lines")]
+        self.assertEqual(missing, [], f"entries without load-bearing `lines`: {missing}")
 
 
 if __name__ == "__main__":

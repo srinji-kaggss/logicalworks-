@@ -338,6 +338,22 @@ existing backends (the parallel of, and runtime counterpart to, `lgwks.reasoning
 **Repurpose when:** any new role-dispatch / resolve-degrade need → an escalate() ladder + this
 envelope, never a fresh per-caller try/except.
 
+**`lgwks.model.selection.v1`** (`lgwks_model_port.py`, `SELECTION_SCHEMA`): the locality-axis
+companion to `lgwks.model.port.v1` — the resolved *where* a role's model lives (LOCAL mesh / CLOUD
+models.dev / AETHERIUS reserved) for one request, orthogonal to the trust-tier ladder. `{schema,
+role, locality, law_name, runtime_id, card?}`. **Repurpose when:** any locality-resolution need →
+this shape, not a new per-caller dict.
+
+**`lgwks.model.catalog.v1`** (`lgwks_model_port.py`, also consumed by `tui/src/models.rs` over the
+Python↔Rust boundary): the read-only catalog the port exposes to surfaces — the per-role model
+roster pinned from `MESH_LAW`, so the TUI never resolves model ids itself. **Repurpose when:** any
+surface needs the model roster → read this catalog, never re-derive from the mesh.
+
+**`lgwks.models_dev.v1`** (`lgwks_models_dev.py`, `SCHEMA`): the normalized CLOUD model card from the
+`models.dev` catalog (the opt-in non-local locality). Offline-first cache; shape mirrors the local
+`_MODEL_CATALOG` fields so a caller treats local and cloud cards uniformly. **Repurpose when:** any
+cloud-catalog field need → extend this card, not a parallel cloud shape.
+
 ### 12. JEPA manifest-level ids (live, supplement family 7)
 | id | ver | status | defined in | validation |
 |----|-----|--------|-----------|------------|

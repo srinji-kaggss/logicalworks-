@@ -189,33 +189,29 @@ class TestTierCeiling(unittest.TestCase):
             mp.escalate("classify", [mp.Attempt("deterministic", lambda: None)],
                         ceiling="turbo")
 
-    def test_r1_default_ceiling_is_identity_even_for_unknown_tier(self):
-        """Default ceiling never skips a rung — even a miscatalogued trust_class
-        keeps its pre-ceiling behaviour (the default is a provable no-op)."""
-        ran = {"weird": False}
-
-        def weird():
-            ran["weird"] = True
-            return {"v": 1}
-
-        env = mp.escalate("classify", [mp.Attempt("mystery-tier", weird, model="m")])
-        self.assertTrue(ran["weird"], "unknown-tier rung was skipped under default ceiling")
-        self.assertEqual(env["value"], {"v": 1})
+    def test_r1_default_ceiling_does_not_skip_valid_rungs(self):
+        """Default ceiling='generative' never skips a (valid) rung — a provable no-op."""
+        env = mp.escalate("classify", [
+            mp.Attempt("deterministic", lambda: None),
+            mp.Attempt("sensor", lambda: {"v": 1}, model="s"),
+        ])
+        self.assertEqual(env["mode"], "sensor")
         self.assertNotIn("above_ceiling", [t["outcome"] for t in env["escalation"]])
 
-    def test_r1_restriction_fails_closed_on_unknown_tier(self):
-        """Under a real restriction, an unknown (last-ranked) tier is skipped, not
-        silently let past — fail-closed."""
+    def test_r1_miscatalogued_trust_class_raises_not_runs(self):
+        """M7 (hardening): an Attempt with a trust_class outside TIER_ORDER must RAISE,
+        never run uncapped and be reported under a bogus `trust` label. A typo'd
+        'llm'-class rung at the default ceiling used to execute and surface as trust='llm';
+        now it fails loud."""
         ran = {"weird": False}
 
         def weird():
             ran["weird"] = True
             return {"v": 1}
 
-        env = mp.escalate("classify", [mp.Attempt("mystery-tier", weird, model="m")],
-                          ceiling="sensor")
-        self.assertFalse(ran["weird"], "unknown-tier rung ran above a sensor ceiling")
-        self.assertIn("above_ceiling", [t["outcome"] for t in env["escalation"]])
+        with self.assertRaises(ValueError):
+            mp.escalate("classify", [mp.Attempt("mystery-tier", weird, model="m")])
+        self.assertFalse(ran["weird"], "a miscatalogued-tier rung ran instead of raising")
 
     def test_r1_no_models_kill_switch_cannot_be_raised_by_ceiling(self):
         """Security: a caller-supplied ceiling can never talk PAST the env
