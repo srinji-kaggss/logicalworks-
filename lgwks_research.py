@@ -39,7 +39,7 @@ EIG_FLOOR = 0.15       # a frontier node below this MODEL-ESTIMATED priority is 
 CONVERGE_STREAK = 2    # converged must hold for ≥2 consecutive EVIDENCE rounds (anti-injection, hacker R1)
 ROUND_CAP = 100        # hard upper bound on --rounds (hacker F8 — unbounded-spend guard)
 BUDGET_CAP = 5_000_000 # hard upper bound on --budget tokens (hacker F8)
-FANOUT_CAP = 4         # bounded preview fan-out for cheap frontier scans
+FANOUT_CAP = 300       # bounded parallel agenda gather — the "beat ChatGPT/Firecrawl" scale (Director 2026-06-24)
 ALLOWED_FUNCTIONS = ("generate", "falsify", "expand", "contrarian")
 # Provenance tier of run output = WHO produced the reasoning; all tiers emit the SAME OKF artifact
 # shape (tier is a field, not a format). ml-attention is the ENTRYPOINT — the embedding/attention
@@ -535,6 +535,38 @@ def _fanout_preview(cfg: AutoConfig, frontier: list[dict]) -> list[dict]:
         return list(ex.map(inspect, items))
 
 
+def _parallel_gather(cfg: AutoConfig, agenda: list[dict], fanout: int) -> list[dict]:
+    """Fan out the agenda gather: crawl up to `fanout` agenda items IN PARALLEL, pooling evidence.
+
+    This is the "compute goes deep" half of the AI-directs/compute-goes-deep binding (Director
+    2026-06-24). The AI planned the agenda (the fronts); this gathers them concurrently so a
+    20-front research run finishes in ~1 round of wall-time instead of 20 sequential rounds.
+
+    Thread-safe: _crawl is I/O-bound (subprocess + HTTP), each call creates its own dict — no
+    shared mutable state. Bounded by `fanout` (default 8, cap 300) via a semaphore-sized pool.
+
+    Returns one dict per agenda item: {id, node, question, findings, has_evidence, sources}.
+    The caller pools findings into the rolling digest before the reasoning rounds begin.
+    """
+    if not agenda:
+        return []
+    items = agenda[:fanout]
+    if len(items) <= 1:
+        f, he, s = _crawl(cfg, str(items[0].get("node", "")))
+        return [{"id": items[0].get("id"), "node": str(items[0].get("node", "")),
+                 "question": str(items[0].get("question", "")),
+                 "findings": f, "has_evidence": he, "sources": s}]
+
+    def gather(item: dict) -> dict:
+        f, he, s = _crawl(cfg, str(item.get("node", "")))
+        return {"id": item.get("id"), "node": str(item.get("node", "")),
+                "question": str(item.get("question", "")),
+                "findings": f, "has_evidence": he, "sources": s}
+
+    with concurrent.futures.ThreadPoolExecutor(max_workers=min(fanout, len(items))) as ex:
+        return list(ex.map(gather, items))
+
+
 def run_auto(cfg: AutoConfig, emit=print) -> AutoResult:
     """Drive the autonomous loop. `emit` is the progress sink (live viz hooks here — Unit C)."""
     run_id = _run_id(cfg)
@@ -607,6 +639,32 @@ def run_auto(cfg: AutoConfig, emit=print) -> AutoResult:
         cur_item = agenda[0]; agenda_i = 1; frontier = cur_item["node"]
     else:
         cur_item = None; frontier = cfg.start
+
+    # PARALLEL GATHER (Director 2026-06-24): fan out the agenda crawl concurrently — the "compute
+    # goes deep" half. The AI planned the fronts (agenda); this gathers them in parallel so a
+    # 20-front run finishes in ~1 wall-time pass instead of 20 sequential rounds. Pooled evidence
+    # is appended to the rolling digest so the reasoning rounds reason over ALL gathered evidence.
+    pooled: list[dict] = []
+    if agenda and cfg.crawl_mode in ("ground", "live"):
+        emit(f"    parallel gather: {min(cfg.fanout, len(agenda))}/{len(agenda)} fronts "
+             f"(fanout={cfg.fanout}) …")
+        pooled = _parallel_gather(cfg, agenda, cfg.fanout)
+        ev = [p for p in pooled if p["has_evidence"]]
+        total_sources = sum(len(p["sources"]) for p in pooled)
+        emit(f"    gathered: {len(ev)}/{len(pooled)} fronts with evidence · {total_sources} sources")
+        (out_dir / "pooled_gather.json").write_text(_canon(
+            {"schema": "lgwks.research.gather.v1", "fanout": cfg.fanout,
+             "fronts": len(pooled), "evidence_fronts": len(ev),
+             "sources": total_sources,
+             "items": [{"id": p["id"], "node": p["node"], "has_evidence": p["has_evidence"],
+                        "source_count": len(p["sources"]),
+                        "preview": " ".join(p["findings"].split())[:200]} for p in pooled]}))
+        # Append pooled findings to the rolling digest so reasoning rounds see ALL evidence.
+        if pooled:
+            pool_text = "\n\n".join(f"[{p['id']}] {p['node']}:\n{p['findings'][:2000]}"
+                                    for p in pooled if p["has_evidence"])
+            digest = (digest + "\n\nPOOLED EVIDENCE (parallel gather):\n" + pool_text)[-8000:]
+
     covered: list[dict] = []
     surviving: list[str] = []
     dry_streak = 0
@@ -990,6 +1048,7 @@ def research_command(args: argparse.Namespace) -> int:
         token_budget=getattr(args, "budget", 200_000),
         crawl_mode="ground",
         max_pages=getattr(args, "sources", 8),
+        fanout=getattr(args, "fanout", 8),
         project=getattr(args, "project", None) or "research",
     )
     res = run_auto(cfg)
@@ -1015,6 +1074,8 @@ def add_parser(sub):
     p.add_argument("--quick", action="store_true", help="single-shot grounding (ctx7 docs + web), no loop")
     p.add_argument("--live", action="store_true", help="alias of --quick (single-shot grounding)")
     p.add_argument("--sources", type=int, default=8, help="pages READ per research front (deterministic depth)")
+    p.add_argument("--fanout", type=int, default=8,
+                   help="parallel agenda gather width (fronts crawled concurrently; default 8, cap 300)")
     p.add_argument("--rounds", type=int, default=12, help="max autonomous rounds (AI reasoning steps; bounded)")
     p.add_argument("--budget", type=int, default=200_000, help="token budget for the bounded AI reasoning")
     p.add_argument("--repo", default=".", help="repo context")
