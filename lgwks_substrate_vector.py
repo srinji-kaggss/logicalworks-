@@ -16,11 +16,7 @@ from typing import Any
 import lgwks_run
 from lgwks_substrate_config import EmbeddingProviderUnavailable
 from lgwks_substrate_io import _load_run_manifest, _read_jsonl
-
-
-def _dot(a: list[float], b: list[float]) -> float:
-    """Inner product of two vectors."""
-    return sum(x * y for x, y in zip(a, b))
+from lgwks_vecmath import dot as _dot
 
 
 def _provider_matches_vector_space(requested: str, canonical: str) -> bool:

@@ -17,7 +17,6 @@ from __future__ import annotations
 
 import json
 import sys
-from datetime import datetime, timezone
 from pathlib import Path
 
 _REPO = Path(__file__).resolve().parent.parent
@@ -26,9 +25,10 @@ _OUT = _REPO / ".lgwks" / "model_mesh.json"
 
 def main() -> int:
     sys.path.insert(0, str(_REPO))
+    from lgwks_clock import now_iso
     import lgwks_model_mesh as mesh_mod
 
-    now = datetime.now(timezone.utc).replace(microsecond=0).isoformat()
+    now = now_iso()
     mesh = mesh_mod.build_mesh(generated_at=now)
 
     _OUT.parent.mkdir(parents=True, exist_ok=True)

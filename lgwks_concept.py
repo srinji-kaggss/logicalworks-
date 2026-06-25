@@ -591,7 +591,7 @@ class ConceptGraph:
         for slug, vec in self._vectors.items():
             if query_vec is vec:
                 continue
-            dot = sum(a * b for a, b in zip(query_vec, vec))
+            dot = _vm.dot(query_vec, vec)
             scores.append((slug, round(dot, 4)))
         scores.sort(key=lambda kv: -kv[1])
         return scores[:top_k]
