@@ -417,12 +417,43 @@ def _html(url: str, max_chars: int) -> str:
             r = _curl.get(url, impersonate="chrome124", timeout=25, headers=_headers(url))
             if r.status_code == 200:
                 import lgwks_html
-                best = lgwks_html.html_to_markdown(r.text)
+                # html_to_markdown returns (markdown, title, links, media) — take text only
+                best = lgwks_html.html_to_markdown(r.text)[0]
         except Exception:
             pass
 
     # Check Gate 2 Success
     if best and not _WALL_RE.search(best[:1500]) and len(best) > 200:
+        return _trim(best, max_chars)
+
+    # GATE 2.5: Raw urllib — zero-dep, proxy-aware. Runs whenever curl_cffi is
+    # unavailable or fails (e.g. proxy CA not in bundled libssl). Cheaper and more
+    # reliable than a generative fallback for standard public pages.
+    if not best or len(best) <= 200:
+        try:
+            _UA_GATE25 = ("Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) "
+                          "AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36")
+            req = urllib.request.Request(url, headers={"User-Agent": _UA_GATE25, **_headers(url)})
+            with _opener().open(req, timeout=20) as resp:
+                raw = resp.read(2_000_000)
+            html_raw = raw.decode("utf-8", "replace")
+            # Prefer the content-extract seam (strips nav/chrome → clean article text).
+            # Fall back to lgwks_html markdown conversion when content_extract yields nothing.
+            try:
+                import lgwks_content_extract
+                _candidate = lgwks_content_extract.extract_main_content(html_raw, max_chars=max_chars)
+                best = _candidate if _candidate.strip() else ""
+            except Exception:
+                best = ""
+            if not best:
+                import lgwks_html
+                best = lgwks_html.html_to_markdown(html_raw)[0]
+        except Exception:
+            pass
+
+    # Gate 2.5 uses a looser length check: _WALL_RE already catches JS-wall stubs above;
+    # genuinely short pages (e.g. simple landing pages) should not be discarded.
+    if best and not _WALL_RE.search(best[:1500]):
         return _trim(best, max_chars)
 
     # GATE 3: Generative (Vision / Qwen3-VL)

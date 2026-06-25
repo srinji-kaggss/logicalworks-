@@ -29,6 +29,8 @@ from typing import Any
 
 SCHEMA = "lgwks.reasoning.result.v0"  # research-grade (breakable); daemon-dispatch wiring pending
 
+_ANTHROPIC_MODEL_DEFAULT = "claude-haiku-4-5-20251001"
+
 _REPO_ROOT = Path(__file__).resolve().parent
 _MODEL_STORE = _REPO_ROOT / "store" / "models"
 
@@ -75,6 +77,85 @@ def _olmo_available() -> bool:
     return importlib.util.find_spec("mlx_lm") is not None
 
 
+def _anthropic_key() -> tuple[str, str]:
+    """Return (api_key, auth_style) where auth_style is 'x-api-key' or 'bearer'.
+    Reads from ANTHROPIC_API_KEY (standard) or CLAUDE_SESSION_INGRESS_TOKEN_FILE
+    (Claude Code session). Returns ('', '') if neither is available."""
+    key = os.environ.get("ANTHROPIC_API_KEY", "").strip()
+    if key:
+        return key, "x-api-key"
+    token_file = os.environ.get("CLAUDE_SESSION_INGRESS_TOKEN_FILE", "").strip()
+    if token_file:
+        try:
+            k = Path(token_file).read_text().strip()
+            if k:
+                return k, "bearer"
+        except Exception:
+            pass
+    return "", ""
+
+
+def _anthropic_available() -> bool:
+    """True when an API key (env or session file) is present."""
+    key, _ = _anthropic_key()
+    return bool(key)
+
+
+def _run_anthropic(prompt: str, framing: str, context: str | None) -> str | None:
+    """Call Anthropic Messages API via stdlib urllib. Returns text or None on failure.
+
+    Uses Authorization: Bearer for session tokens (sk-ant-si-…) and x-api-key for
+    standard API keys. Bypasses proxy for api.anthropic.com (in no_proxy list).
+    Falls back gracefully on any error — never raises, never blocks (INV-6).
+    """
+    import json
+    import urllib.request
+
+    key, auth_style = _anthropic_key()
+    if not key:
+        return None
+
+    base_url = os.environ.get("ANTHROPIC_BASE_URL", "https://api.anthropic.com").rstrip("/")
+    model_id = os.environ.get("LGWKS_REASONING_MODEL_ID", _ANTHROPIC_MODEL_DEFAULT)
+
+    parts = [framing]
+    if context:
+        parts.append(f"\nContext:\n{context}")
+    parts.append(f"\nTask:\n{prompt}")
+    full_prompt = "\n".join(parts)
+
+    payload = json.dumps({
+        "model": model_id,
+        "max_tokens": 2048,
+        "messages": [{"role": "user", "content": full_prompt}],
+    }).encode()
+
+    auth_header = ({"Authorization": f"Bearer {key}"}
+                   if auth_style == "bearer"
+                   else {"x-api-key": key})
+
+    req = urllib.request.Request(
+        f"{base_url}/v1/messages",
+        data=payload,
+        headers={"Content-Type": "application/json",
+                 "anthropic-version": "2023-06-01",
+                 **auth_header},
+        method="POST",
+    )
+
+    try:
+        # api.anthropic.com is in no_proxy — use a plain opener (no proxy injection)
+        opener = urllib.request.build_opener(urllib.request.ProxyHandler({}))
+        with opener.open(req, timeout=60) as resp:
+            data = json.loads(resp.read())
+        for block in data.get("content", []):
+            if block.get("type") == "text":
+                return block["text"]
+        return None
+    except Exception:
+        return None
+
+
 def resolve_backend() -> str:
     """Pick the reasoning backend. Safe default is agent_handoff (never fabricate)."""
     from lgwks_model_port import models_suppressed
@@ -85,8 +166,14 @@ def resolve_backend() -> str:
         return "agent_handoff"
     if forced == "olmo":
         return "olmo_mlx" if _olmo_available() else "agent_handoff"
-    # auto: prefer the owned local model when it's actually present, else hand off
-    return "olmo_mlx" if _olmo_available() else "agent_handoff"
+    if forced == "anthropic":
+        return "anthropic_api" if _anthropic_available() else "agent_handoff"
+    # auto: prefer owned local model, then Anthropic API, then hand off
+    if _olmo_available():
+        return "olmo_mlx"
+    if _anthropic_available():
+        return "anthropic_api"
+    return "agent_handoff"
 
 
 def _framing(persona: str) -> str:
@@ -144,7 +231,15 @@ def reason(
             return {**base, "ok": True, "mode": "local",
                     "model": Path(_OLMO_MODEL_DIR).name,  # law-derived id, never hardcoded
                     "text": text}
-        backend = base["backend"] = "agent_handoff"  # OLMo failed → hand off
+        backend = base["backend"] = "anthropic_api" if _anthropic_available() else "agent_handoff"
+
+    if backend == "anthropic_api":
+        text = _run_anthropic(prompt, framing, context)
+        if text is not None:
+            model_id = os.environ.get("LGWKS_REASONING_MODEL_ID", _ANTHROPIC_MODEL_DEFAULT)
+            return {**base, "ok": True, "mode": "local",  # "local" = synchronous text available
+                    "model": model_id, "text": text}
+        backend = base["backend"] = "agent_handoff"  # Anthropic call failed → hand off
 
     # agent_handoff: the frontier layer is the working agent (operator's pick).
     target = agent or os.environ.get("LGWKS_AGENT") or "working_agent"
