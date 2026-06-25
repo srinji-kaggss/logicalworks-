@@ -1,3 +1,11 @@
+---
+type: Archive
+title: Handoff — Unified State Fabric DB + Tokenizer-Aware Ingestion (Phase 1)
+description: Every workflow and command lands here.
+tags: [archive]
+timestamp: 2026-06-23T00:24:35-04:00
+---
+
 # Handoff — Unified State Fabric DB + Tokenizer-Aware Ingestion (Phase 1)
 
 **Date:** 2026-06-15

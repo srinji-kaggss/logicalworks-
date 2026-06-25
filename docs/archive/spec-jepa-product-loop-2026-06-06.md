@@ -1,3 +1,11 @@
+---
+type: Archive
+title: SPEC — JEPA Product Loop (v0)
+description: Status: proposed and partially implemented
+tags: [archive]
+timestamp: 2026-06-23T00:24:35-04:00
+---
+
 # SPEC — JEPA Product Loop (v0)
 
 Status: proposed and partially implemented  

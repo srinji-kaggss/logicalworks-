@@ -1,3 +1,11 @@
+---
+type: Handoff
+title: Handoff — Ingestion = aggressive compression; #308 reframed (2026-06-22)
+description: Status: course-correction session.
+tags: [handoff]
+timestamp: 2026-06-22T20:22:32-04:00
+---
+
 # Handoff — Ingestion = aggressive compression; #308 reframed (2026-06-22)
 
 Status: **course-correction session. No code landed. Repo clean at `5b2bfaf` (== origin/main).**

@@ -1,3 +1,11 @@
+---
+type: Reference
+title: CODEBASE EXTRACTION — Interpretability, Observability, Research Orchestration, Affordances
+description: envelope that is the single canonical shape every observer emits.
+tags: [reference]
+timestamp: 2026-06-24T20:18:37-04:00
+---
+
 # CODEBASE EXTRACTION — Interpretability, Observability, Research Orchestration, Affordances
 
 > **Method:** every claim below is verified by reading the source (line numbers cited) and/or

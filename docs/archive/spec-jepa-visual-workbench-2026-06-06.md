@@ -1,3 +1,11 @@
+---
+type: Archive
+title: SPEC — JEPA Visual Workbench (v0)
+description: Status: planning only
+tags: [archive]
+timestamp: 2026-06-23T00:24:35-04:00
+---
+
 # SPEC — JEPA Visual Workbench (v0)
 
 Status: planning only

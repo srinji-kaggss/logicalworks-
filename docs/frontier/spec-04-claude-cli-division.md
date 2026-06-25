@@ -1,3 +1,11 @@
+---
+type: Spec
+title: SPEC-04 — The Claude + CLI Division of Labor
+description: A tool call today costs: tokens to figure out the command, tokens for raw output flooding context,
+tags: [frontier, spec]
+timestamp: 2026-06-02T16:48:56-04:00
+---
+
 # SPEC-04 — The Claude + CLI Division of Labor
 
 > Context, not a build unit. Why the gates exist: they let the CLI absorb deterministic work so the

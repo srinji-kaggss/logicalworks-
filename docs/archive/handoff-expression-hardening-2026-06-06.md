@@ -1,3 +1,11 @@
+---
+type: Archive
+title: Handoff — Expression Hardening Follow-Through
+description: Follow-through hardening landed in the expression compiler and manifest surface:
+tags: [archive]
+timestamp: 2026-06-23T00:24:35-04:00
+---
+
 # Handoff — Expression Hardening Follow-Through
 
 **Date:** 2026-06-06  

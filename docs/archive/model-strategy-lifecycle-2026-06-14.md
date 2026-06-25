@@ -1,3 +1,11 @@
+---
+type: Archive
+title: Model & LLM Strategy — Full Lifecycle Deep Dive
+description: Cross-references (existing canonical surfaces this brief extends, do not supersede):
+tags: [archive]
+timestamp: 2026-06-23T00:24:35-04:00
+---
+
 # Model & LLM Strategy — Full Lifecycle Deep Dive
 
 **Date:** 2026-06-14 · **Status:** strategy brief · **Audience:** senior AI/ML engineer

@@ -41,6 +41,14 @@ CANONICAL_VERBS = {
     # deliberate capability restoration, not accidental regrowth — this entry records
     # the decision the no-regrowth gate exists to force.
     "refactor",
+    # Added (2026-06-25, epic #335 / S3 #338): `models` is the ONE selector across
+    # the model locality axis — local Mesh (MESH_LAW) ⊕ cloud models.dev ⊕ reserved
+    # Aetherius — list/get/use/locality. It is the single user-facing entrypoint for
+    # the two-plane model layer the TUI projects; there was no prior selection verb
+    # (`model-hub` manages local weights, a different concern). The raw cloud catalog
+    # (lgwks_models_dev) is deliberately NOT a second top-level verb — it is reached
+    # via `models list --provider X`. A budgeted, deliberate addition, not regrowth.
+    "models",
 }
 # Collapsed into canonical grouped forms; served by deprecation shim (warn+rewrite).
 SHIMMED_VERBS = {"run": "state run", "context": "state context", "agent-os": "ops agent-os"}

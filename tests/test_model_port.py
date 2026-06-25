@@ -146,5 +146,93 @@ class TestRoleHelpers(unittest.TestCase):
         self.assertTrue(env["model"], "law must supply a proposal model id")
 
 
+class TestLocalitySelector(unittest.TestCase):
+    """S2 (#337): model_port is the ONE selector across the locality axis.
+
+    LOCAL Mesh is the private default; CLOUD models.dev is strictly opt-in and
+    must be configured; AETHERIUS is a reserved (deferred) slot. The model id is
+    resolved from the law (local) or the models.dev card (cloud), never a literal.
+    """
+
+    def setUp(self):
+        self._saved_loc = os.environ.get("LGWKS_MODEL_LOCALITY")
+        os.environ.pop("LGWKS_MODEL_LOCALITY", None)
+
+    def tearDown(self):
+        if self._saved_loc is None:
+            os.environ.pop("LGWKS_MODEL_LOCALITY", None)
+        else:
+            os.environ["LGWKS_MODEL_LOCALITY"] = self._saved_loc
+        os.environ.pop("LGWKS_CLOUD_EMBED_MODEL", None)
+
+    def test_default_locality_is_local_private(self):
+        # privacy-first: with nothing set, the plane is LOCAL (no network)
+        self.assertEqual(mp.active_locality(), mp.LOCAL)
+
+    def test_unknown_locality_falls_back_to_local(self):
+        os.environ["LGWKS_MODEL_LOCALITY"] = "mars"
+        self.assertEqual(mp.active_locality(), mp.LOCAL, "must fail-safe to private, never cloud")
+
+    def test_local_resolves_embed_id_from_law_not_literal(self):
+        sel = mp.resolve_model("embed", locality=mp.LOCAL)
+        self.assertIsNotNone(sel)
+        self.assertEqual(sel["locality"], mp.LOCAL)
+        law_name = mesh.model_name_for_role("embed", trust_class="sensor")
+        self.assertEqual(sel["law_name"], law_name, "id must come from MESH_LAW")
+        # hub catalog key is the law name minus its org — reconstructable by hand
+        self.assertEqual(sel["runtime_id"], law_name.split("/")[-1])
+
+    def test_cloud_is_opt_in_unconfigured_defers(self):
+        # CLOUD selected but no ref configured → None (never silently local)
+        self.assertIsNone(mp.resolve_model("embed", locality=mp.CLOUD))
+
+    def test_cloud_resolves_via_models_dev_card(self):
+        import lgwks_models_dev as md
+        os.environ["LGWKS_CLOUD_EMBED_MODEL"] = "acme/embed-1"
+        fake = {"ref": "acme/embed-1", "locality": "cloud", "context": 8192}
+        orig = md.resolve
+        md.resolve = lambda ref: fake if ref == "acme/embed-1" else None
+        try:
+            sel = mp.resolve_model("embed", locality=mp.CLOUD)
+        finally:
+            md.resolve = orig
+        self.assertIsNotNone(sel)
+        self.assertEqual(sel["locality"], mp.CLOUD)
+        self.assertEqual(sel["runtime_id"], "acme/embed-1")
+        self.assertEqual(sel["card"], fake)
+
+    def test_aetherius_slot_is_reserved_defers(self):
+        self.assertIsNone(mp.resolve_model("embed", locality=mp.AETHERIUS))
+
+
+class TestRunEmbedRoutesThroughPort(unittest.TestCase):
+    """S2: lgwks_run.embed resolves its model id via the port/law, not a literal.
+
+    Behavioural no-literal proof: capture the id handed to hub.mlx_embed and assert
+    it equals the law-resolved hub key — so a future law rename moves the runtime
+    with it, and there is no second copy of the id to drift.
+    """
+
+    def test_embed_uses_port_resolved_id(self):
+        import lgwks_model_hub as hub
+        import lgwks_run
+        captured: dict[str, object] = {}
+        orig = hub.mlx_embed
+
+        def _fake(text, model_name="ModernBERT-base-mlx-4bit"):  # noqa: ANN001
+            captured["model_name"] = model_name
+            return {"ok": True, "vector": [0.1] * 8, "is_semantic": True}
+
+        hub.mlx_embed = _fake
+        try:
+            vec, label, is_sem = lgwks_run.embed("hi", embed_on=True, provider="auto")
+        finally:
+            hub.mlx_embed = orig
+        law_name = mesh.model_name_for_role("embed", trust_class="sensor")
+        self.assertEqual(captured["model_name"], law_name.split("/")[-1],
+                         "embed must use the law-resolved id, not a literal")
+        self.assertTrue(is_sem)
+
+
 if __name__ == "__main__":
     unittest.main()

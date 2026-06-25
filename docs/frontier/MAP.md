@@ -1,3 +1,11 @@
+---
+type: Reference
+title: Frontier Program — End-to-End Map
+description: We are not building a better code generator — that road ends at the wall every frontier
+tags: [frontier, reference]
+timestamp: 2026-06-02T16:48:56-04:00
+---
+
 # Frontier Program — End-to-End Map
 
 > Audience: autonomous coding agents (Kimi fleet) + the orchestrating generative AI.

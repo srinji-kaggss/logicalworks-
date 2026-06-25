@@ -1,3 +1,11 @@
+---
+type: Spec
+title: SPEC-01 — The Verifier Oracle + the Comprehension Gate
+description: One typed interface that all gates implement, so the Coherence Engine (spec-00), the existing
+tags: [frontier, spec]
+timestamp: 2026-06-02T16:48:56-04:00
+---
+
 # SPEC-01 — The Verifier Oracle + the Comprehension Gate
 
 > The one new primitive. Everything else is a Verifier. Read MAP.md, then spec-00.

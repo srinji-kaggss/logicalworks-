@@ -1,3 +1,11 @@
+---
+type: ADR
+title: ADR-sast-001: Semantic Code Graph (SCG) — Agnostic Vulnerability Substrate
+description: The previous SAST implementation (lgwks_bot_code_hacker.py) relied on hardcoded AST (Abstract Syntax Tree) matching specific to Python.
+tags: [adr]
+timestamp: 2026-06-12T23:10:49-04:00
+---
+
 # ADR-sast-001: Semantic Code Graph (SCG) — Agnostic Vulnerability Substrate
 
 **Status**: PROPOSED 2026-06-13

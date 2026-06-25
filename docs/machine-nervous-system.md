@@ -1,3 +1,11 @@
+---
+type: Reference
+title: Machine Nervous System
+description: This document describes the intended end-to-end runtime for lgwks after the
+tags: [reference]
+timestamp: 2026-06-09T18:24:42-04:00
+---
+
 # Machine Nervous System
 
 This document describes the intended end-to-end runtime for `lgwks` after the

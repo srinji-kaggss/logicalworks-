@@ -1,3 +1,11 @@
+---
+type: Plan
+title: Graph Visual+Query Layer — Factory Spec
+description: The graph exists (lgwks_graph.py, 1,200 lines, 24 public methods, Cypher-like query engine).
+tags: [plan]
+timestamp: 2026-06-05T20:46:14-04:00
+---
+
 # Graph Visual+Query Layer — Factory Spec
 
 **Status:** Draft — pending Director approval  

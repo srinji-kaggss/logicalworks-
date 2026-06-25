@@ -1,3 +1,11 @@
+---
+type: Reference
+title: BUILD — End-to-End Entry Point
+description: 3.
+tags: [frontier, reference]
+timestamp: 2026-06-02T16:48:56-04:00
+---
+
 # BUILD — End-to-End Entry Point
 
 > **You are an implementing agent (Kimi / lower agent). This folder is self-contained.**

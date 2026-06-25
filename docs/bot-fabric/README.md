@@ -1,3 +1,11 @@
+---
+type: Reference
+title: Bot Fabric
+description: Purpose: define the end-to-end non-AI bot system, the JEPA world-model layer, and the minimal AI synthesis layer for lgwks.
+tags: [bot-fabric, reference]
+timestamp: 2026-06-06T10:43:25-04:00
+---
+
 # Bot Fabric
 
 Purpose: define the end-to-end non-AI bot system, the JEPA world-model layer, and the minimal AI synthesis layer for `lgwks`.

@@ -1,3 +1,11 @@
+---
+type: Plan
+title: Daemon Core Plan
+description: Status: active plan · scope: the vendor-neutral daemon core plus the first research experience
+tags: [plan]
+timestamp: 2026-06-17T07:54:06-04:00
+---
+
 # Daemon Core Plan
 
 Status: active plan · scope: the vendor-neutral daemon core plus the first research experience

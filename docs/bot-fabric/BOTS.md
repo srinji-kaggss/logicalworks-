@@ -1,3 +1,11 @@
+---
+type: Reference
+title: Non-AI Bots
+description: Bots are very well-coded deterministic workers.
+tags: [bot-fabric, reference]
+timestamp: 2026-06-06T10:24:49-04:00
+---
+
 # Non-AI Bots
 
 ## Thesis

@@ -78,6 +78,11 @@ def build_parser() -> argparse.ArgumentParser:
     # callers are still served by _apply_deprecation_shim (warn + rewrite); the
     # surface is held by the verb-budget gate in tests/test_cli_contract.py.
     import lgwks_model_hub; lgwks_model_hub.add_parser(sub)
+    # model layer (epic #335 / S3 #338): `models` = the ONE selector across the
+    # locality axis (local Mesh ⊕ cloud models.dev). The raw cloud catalog lives in
+    # lgwks_models_dev (library + standalone main); it is surfaced through
+    # `models list --provider X`, NOT as a second top-level verb.
+    import lgwks_model_port; lgwks_model_port.add_parser(sub)
     # `jarvis` top-level verb removed (#218 consolidation finished): `jarvis crawl`
     # is identical to `crawl --engine legacy` (crawl_command delegates to it) and
     # `jarvis remap-db` is absorbed as `crawl --remap-db`. Legacy callers are

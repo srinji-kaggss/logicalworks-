@@ -1,3 +1,11 @@
+---
+type: Archive
+title: JEPA Scientific Approach — 2026-06-06
+description: Status: active research doctrine for the lgwks JEPA path
+tags: [archive]
+timestamp: 2026-06-23T00:24:35-04:00
+---
+
 # JEPA Scientific Approach — 2026-06-06
 
 Status: active research doctrine for the `lgwks` JEPA path

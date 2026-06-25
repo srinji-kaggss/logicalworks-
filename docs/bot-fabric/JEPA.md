@@ -1,3 +1,11 @@
+---
+type: Reference
+title: JEPA In The Bot Fabric
+description: JEPA is not one of the bots.
+tags: [bot-fabric, reference]
+timestamp: 2026-06-06T10:24:49-04:00
+---
+
 # JEPA In The Bot Fabric
 
 ## What JEPA is here
