@@ -301,12 +301,24 @@ list; never calls `lgwks_do`/`lgwks_workflows`). The multi-event generalisation 
 `_workflow_for_intent` (left intact). **Repurpose when:** any cross-event/latent-workflow detection —
 add a trigger, do not hard-code a new classifier branch.
 
+**`lgwks.model.law.v1`** (model law SOURCE; `spec/second-harness/model-law.json`, generator
+`scripts/gen_model_law.py`; CI lane `model.law`): the ONE authored source of the model law.
+`{schema, describes, intent, sources, spec_divergences[], prose_table[], entries[]}` where each
+`entries[]` row = `{layer?, aetherius_row?, provenance, entry{…the lgwks.model.mesh.v1 fields…}}`.
+`lgwks_model_mesh.MESH_LAW` is GENERATED from `entries[]` (never hand-typed) and the
+`prose_table` is gated against `docs/AETHERIUS_SPEC_2026.md` §3 so the spec prose and the law
+cannot drift apart — the bug class (a hallucinated id like the `Qwen3.7-VL` embed) is killed at
+source. Provenance: the 8-component `current_law` stack is Aetherius §3; the embed Eye id is the
+FINALIZATION §3 correction (see `spec_divergences`). **Repurpose when:** any change to model
+inventory/law → edit THIS file + re-run the generator, never the generated block or the prose alone.
+
 **`lgwks.model.mesh.v1`** (**#119** — model law as data; `lgwks_model_mesh.py`, builder
 `scripts/build_model_mesh.py` → `.lgwks/model_mesh.json`; JSON-Schema:
-`docs/schemas/lgwks.model.mesh.v1.json`): single queryable manifest of the model-stack law
-(spec MODEL-RUNTIME-FINALIZATION §3.1 current law + §3.2 open slots). `{schema, generated_at,
-models[]}` where each entry = `{name, runtime, locality, role, input_schema, output_schema,
-trust_class, fallback, health{status,latency_ms_p50,last_checked}, eval_gate, status
+`docs/schemas/lgwks.model.mesh.v1.json`): single queryable manifest of the model-stack law,
+GENERATED from `lgwks.model.law.v1` (`spec/second-harness/model-law.json`) — current_law stack
+from `docs/AETHERIUS_SPEC_2026.md` §3, embed Eye from MODEL-RUNTIME-FINALIZATION §3. `{schema,
+generated_at, models[]}` where each entry = `{name, runtime, locality, role, input_schema,
+output_schema, trust_class, fallback, health{status,latency_ms_p50,last_checked}, eval_gate, status
 (current_law/open_slot/candidate_reference), notes?}`. **Records inventory; does not change it**
 — no new default, no selection, loads no model. `role`+`trust_class`+`input/output_schema`+
 `eval_gate` are the locked join keys for #120/#122 + the future LogicGPT-1 eval path. Doctor
@@ -325,6 +337,22 @@ Honors `LGWKS_NO_MODELS`; fail-closed — when no tier answers, `mode="deferred"
 existing backends (the parallel of, and runtime counterpart to, `lgwks.reasoning.result.v0`).
 **Repurpose when:** any new role-dispatch / resolve-degrade need → an escalate() ladder + this
 envelope, never a fresh per-caller try/except.
+
+**`lgwks.model.selection.v1`** (`lgwks_model_port.py`, `SELECTION_SCHEMA`): the locality-axis
+companion to `lgwks.model.port.v1` — the resolved *where* a role's model lives (LOCAL mesh / CLOUD
+models.dev / AETHERIUS reserved) for one request, orthogonal to the trust-tier ladder. `{schema,
+role, locality, law_name, runtime_id, card?}`. **Repurpose when:** any locality-resolution need →
+this shape, not a new per-caller dict.
+
+**`lgwks.model.catalog.v1`** (`lgwks_model_port.py`, also consumed by `tui/src/models.rs` over the
+Python↔Rust boundary): the read-only catalog the port exposes to surfaces — the per-role model
+roster pinned from `MESH_LAW`, so the TUI never resolves model ids itself. **Repurpose when:** any
+surface needs the model roster → read this catalog, never re-derive from the mesh.
+
+**`lgwks.models_dev.v1`** (`lgwks_models_dev.py`, `SCHEMA`): the normalized CLOUD model card from the
+`models.dev` catalog (the opt-in non-local locality). Offline-first cache; shape mirrors the local
+`_MODEL_CATALOG` fields so a caller treats local and cloud cards uniformly. **Repurpose when:** any
+cloud-catalog field need → extend this card, not a parallel cloud shape.
 
 ### 12. JEPA manifest-level ids (live, supplement family 7)
 | id | ver | status | defined in | validation |

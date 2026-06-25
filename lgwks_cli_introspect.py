@@ -30,7 +30,7 @@ DOMAINS: dict[str, list[str]] = {
     # Research and knowledge work — the conscious-layer tools
     "Research":  ["fetch", "refine", "preview", "extract", "convert",
                   "manifest", "login", "cohere", "comprehend", "geo", "public",
-                  "akinator", "run", "context", "model-hub", "capture", "jepa",
+                  "akinator", "run", "context", "model-hub", "models", "capture", "jepa",
                   "workflow", "research", "crawl"],
     "GitHub":    ["gh"],
     "DevOps":    ["repo", "review", "project", "batch", "refactor", "hooks"],
