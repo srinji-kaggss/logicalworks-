@@ -91,6 +91,13 @@ const COMMIT_LANES = [
   // (human, agent, or eventually the lgwks daemon); only that the bundle is current.
   // See docs/concepts/knowledge-format.md.
   { id: 'docs.okf', gate: 'commit', cmd: ['python3', 'scripts/gen_okf.py', '--verify'] },
+  // Model-law gate (same doctrine as docs.okf, for the model stack). MESH_LAW is GENERATED
+  // from the one authored source spec/second-harness/model-law.json; this lane proves the
+  // committed block is fresh (not hand-edited), every entry conforms to the mesh vocabulary,
+  // AND the Aetherius §3 prose stack table still matches the source — the last check is what
+  // catches a future re-introduction of a hallucinated model id (e.g. the Qwen3.7-VL embed
+  // drift). See lgwks_model_mesh.py + scripts/gen_model_law.py.
+  { id: 'model.law', gate: 'commit', cmd: ['python3', 'scripts/gen_model_law.py', '--verify'] },
 ];
 
 // Tier-specific Keel runners (now VENDORED at the pinned SHA — #241). Each runs over

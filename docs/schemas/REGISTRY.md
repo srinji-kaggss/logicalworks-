@@ -301,12 +301,24 @@ list; never calls `lgwks_do`/`lgwks_workflows`). The multi-event generalisation 
 `_workflow_for_intent` (left intact). **Repurpose when:** any cross-event/latent-workflow detection —
 add a trigger, do not hard-code a new classifier branch.
 
+**`lgwks.model.law.v1`** (model law SOURCE; `spec/second-harness/model-law.json`, generator
+`scripts/gen_model_law.py`; CI lane `model.law`): the ONE authored source of the model law.
+`{schema, describes, intent, sources, spec_divergences[], prose_table[], entries[]}` where each
+`entries[]` row = `{layer?, aetherius_row?, provenance, entry{…the lgwks.model.mesh.v1 fields…}}`.
+`lgwks_model_mesh.MESH_LAW` is GENERATED from `entries[]` (never hand-typed) and the
+`prose_table` is gated against `docs/AETHERIUS_SPEC_2026.md` §3 so the spec prose and the law
+cannot drift apart — the bug class (a hallucinated id like the `Qwen3.7-VL` embed) is killed at
+source. Provenance: the 8-component `current_law` stack is Aetherius §3; the embed Eye id is the
+FINALIZATION §3 correction (see `spec_divergences`). **Repurpose when:** any change to model
+inventory/law → edit THIS file + re-run the generator, never the generated block or the prose alone.
+
 **`lgwks.model.mesh.v1`** (**#119** — model law as data; `lgwks_model_mesh.py`, builder
 `scripts/build_model_mesh.py` → `.lgwks/model_mesh.json`; JSON-Schema:
-`docs/schemas/lgwks.model.mesh.v1.json`): single queryable manifest of the model-stack law
-(spec MODEL-RUNTIME-FINALIZATION §3.1 current law + §3.2 open slots). `{schema, generated_at,
-models[]}` where each entry = `{name, runtime, locality, role, input_schema, output_schema,
-trust_class, fallback, health{status,latency_ms_p50,last_checked}, eval_gate, status
+`docs/schemas/lgwks.model.mesh.v1.json`): single queryable manifest of the model-stack law,
+GENERATED from `lgwks.model.law.v1` (`spec/second-harness/model-law.json`) — current_law stack
+from `docs/AETHERIUS_SPEC_2026.md` §3, embed Eye from MODEL-RUNTIME-FINALIZATION §3. `{schema,
+generated_at, models[]}` where each entry = `{name, runtime, locality, role, input_schema,
+output_schema, trust_class, fallback, health{status,latency_ms_p50,last_checked}, eval_gate, status
 (current_law/open_slot/candidate_reference), notes?}`. **Records inventory; does not change it**
 — no new default, no selection, loads no model. `role`+`trust_class`+`input/output_schema`+
 `eval_gate` are the locked join keys for #120/#122 + the future LogicGPT-1 eval path. Doctor
