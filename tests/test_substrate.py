@@ -56,6 +56,23 @@ class TestSubstrateScoring(unittest.TestCase):
             {"href": "https://portal.example.com/c"},
         ]))
 
+    def test_text_discovered_links_extracts_markdown_and_bare_urls(self):
+        links = substrate._text_discovered_links(
+            "For AI agents visit https://developer.walkme.com/llms.txt.\n"
+            "- [Create](https://developer.walkme.com/reference/create-a-new-language.md)\n"
+            "- [Relative](reference/get-list-languages.md)\n",
+            "https://developer.walkme.com/",
+        )
+        hrefs = [row["href"] for row in links]
+        self.assertIn("https://developer.walkme.com/llms.txt", hrefs)
+        self.assertIn("https://developer.walkme.com/reference/create-a-new-language.md", hrefs)
+        self.assertIn("https://developer.walkme.com/reference/get-list-languages.md", hrefs)
+
+    def test_llms_txt_is_ai_docs_index(self):
+        self.assertTrue(substrate._is_ai_docs_index("https://developer.walkme.com/llms.txt"))
+        self.assertTrue(substrate._is_ai_docs_index("https://developer.walkme.com/llms-full.txt"))
+        self.assertFalse(substrate._is_ai_docs_index("https://developer.walkme.com/reference/page.md"))
+
 
 class TestSubstrateBuild(unittest.TestCase):
     def test_build_from_local_folder(self):
@@ -234,6 +251,63 @@ class TestSubstrateBuild(unittest.TestCase):
         self.assertTrue(any(row["status"] == "auth_saved_but_failed" for row in frontier))
         # render should be called: initial + verification (2 times), NOT a second save_session
         self.assertEqual(call_count["render"], 2)
+
+    def test_crawl_site_expands_llms_txt_markdown_frontier(self):
+        """Docs sites often expose AI indexes as plain Markdown, not anchors.
+        The crawler must use those text links as frontier and treat llms.txt as a
+        manifest so default shallow crawls still reach listed pages."""
+        pages = {
+            "https://developer.walkme.com/": (
+                "For AI agents: visit https://developer.walkme.com/llms.txt for an index.",
+                "Home",
+            ),
+            "https://developer.walkme.com/llms.txt": (
+                "# WalkMe API Documentation\n"
+                "- [Create a New Language](https://developer.walkme.com/reference/create-a-new-language.md)\n"
+                "- [Get Languages List](https://developer.walkme.com/reference/get-list-languages.md)\n",
+                "llms.txt",
+            ),
+            "https://developer.walkme.com/reference/create-a-new-language.md": (
+                "# Create a New Language\nPOST https://api.walkme.com/public/v2/systems/{SYSTEM_GUID}/languages",
+                "Create a New Language",
+            ),
+            "https://developer.walkme.com/reference/get-list-languages.md": (
+                "# Get Languages List\nGET https://api.walkme.com/public/v2/systems/{SYSTEM_GUID}/languages",
+                "Get Languages List",
+            ),
+        }
+
+        def fake_render(url, **_kwargs):
+            clean = substrate._canonicalize_crawl_url(url)
+            text, _title = pages[clean]
+            return {"ok": True, "html": f"<html>{text}</html>", "text": text}
+
+        def fake_html_to_markdown(html, url):
+            text, title = pages[substrate._canonicalize_crawl_url(url)]
+            return text, title, [], []
+
+        with mock.patch.object(substrate.lgwks_browser, "_remote_allowed", return_value=True):
+            with mock.patch.object(substrate.lgwks_browser, "render", side_effect=fake_render):
+                with mock.patch.object(substrate, "html_to_markdown", side_effect=fake_html_to_markdown):
+                    docs, frontier = substrate._crawl_site(
+                        "https://developer.walkme.com",
+                        max_pages=10,
+                        max_depth=1,
+                        browser_engine="webkit",
+                        login_if_needed=False,
+                        login_url="",
+                        success_selector=None,
+                        max_auto_bypass_attempts=0,
+                        max_auth_handoffs=0,
+                        click_discovery=False,
+                        max_clicks_per_page=20,
+                    )
+
+        sources = {doc["source"] for doc in docs}
+        self.assertIn("https://developer.walkme.com/llms.txt", sources)
+        self.assertIn("https://developer.walkme.com/reference/create-a-new-language.md", sources)
+        self.assertIn("https://developer.walkme.com/reference/get-list-languages.md", sources)
+        self.assertTrue(any(row["url"] == "https://developer.walkme.com/llms.txt" and row["status"] == "ok" for row in frontier))
 
 
 class TestCrawlMap(unittest.TestCase):

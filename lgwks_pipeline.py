@@ -1010,214 +1010,285 @@ def _parameter_snapshot() -> dict[str, Any]:
     }
 
 
-# ══════════════════════════════════════════════════════════════════════════════
-# DAG EXECUTOR
-# ══════════════════════════════════════════════════════════════════════════════
+@dataclass(frozen=True)
+class _PipelineBootstrap:
+    run_id: str
+    out_dir: Path
+    text_provider: str
+    corpus_dims: int | None
+    embed_dims: int | None
+    query_text: str
+    query_vec: list[float]
+    query_tokens: list[str]
+    query_entities: list[str]
 
-def run_pipeline(args: argparse.Namespace) -> dict[str, Any]:
-    """Full DAG.  Returns manifest dict."""
-    ts = _clock.stamp_compact()  # canonical UTC stamp (#223 foundation-bypass)
+
+def _bootstrap_pipeline(args: argparse.Namespace, ts: str) -> _PipelineBootstrap:
     run_id = f"pipeline-{_sha(args.target + ts)}-{ts}"
     out_dir = PIPELINE_STORE / run_id
     out_dir.mkdir(parents=True, exist_ok=True)
-    warnings: list[str] = []
 
     print(f"[pipeline] run_id={run_id}", file=sys.stderr)
     print(f"[pipeline] target={args.target}", file=sys.stderr)
 
-    # ── Stage 0: Bootstrap ────────────────────────────────────────────────────
     text_provider = _resolve_text_provider()
     # //why read corpus dims here: substrate stores full 4096-d vectors (dims=0 path).
     # Query must be in the same space or _cos() returns 0.0 for every chunk (len guard).
     corpus_dims: int | None = _read_substrate_dims(args.target)
     embed_dims: int | None = 0 if (corpus_dims and corpus_dims > 256) else None
     print(f"[stage 0] text_provider={text_provider} corpus_dims={corpus_dims} embed_dims={embed_dims}", file=sys.stderr)
+
     query_text = getattr(args, "query", "") or args.target
     query_vec, _, _ = embed_text(query_text, text_provider, dims=embed_dims)
-    query_tokens = _tokenize(query_text)
-    query_entities = extract_chunk_entities(query_text)
+    return _PipelineBootstrap(
+        run_id=run_id,
+        out_dir=out_dir,
+        text_provider=text_provider,
+        corpus_dims=corpus_dims,
+        embed_dims=embed_dims,
+        query_text=query_text,
+        query_vec=query_vec,
+        query_tokens=_tokenize(query_text),
+        query_entities=extract_chunk_entities(query_text),
+    )
 
-    # ── Stage 1: Ingest — streaming, batched ──────────────────────────────────
+
+def _ingest_stage(args: argparse.Namespace) -> tuple[list[PipelineChunk], dict[str, list[float]]]:
     print(f"[stage 1] ingesting {args.target} ...", file=sys.stderr)
     all_chunks: list[PipelineChunk] = []
-    prefetched_vecs: dict[str, list[float]] = {}   # substrate pre-computed vectors
-
+    prefetched_vecs: dict[str, list[float]] = {}
     for batch, batch_vecs in iter_dataset(args.target, DATASET_BATCH_SIZE):
         all_chunks.extend(batch)
         prefetched_vecs.update(batch_vecs)
-
     print(
         f"[stage 1] {len(all_chunks)} chunks, "
         f"{len(prefetched_vecs)} pre-computed vectors from substrate",
         file=sys.stderr,
     )
+    return all_chunks, prefetched_vecs
 
-    # ── Stage 1.5: CRDT node tracking (I9) ───────────────────────────────────
+
+def _crdt_tracking_stage(args: argparse.Namespace, all_chunks: list[PipelineChunk]) -> tuple[Any, Any]:
     import lgwks_crdt as _crdt
-    _tenant = getattr(args, "tenant", "world")
+
+    tenant = getattr(args, "tenant", "world")
     world_nodes = _crdt.GSet()
     tenant_edges = _crdt.ORSet()
-    for _c in all_chunks:
-        world_nodes = world_nodes.add(_c.chunk_id)
-        if _c.source_id:
-            tenant_edges = tenant_edges.add(_c.chunk_id, tag=f"{_tenant}:{_c.chunk_id[:8]}")
+    for chunk in all_chunks:
+        world_nodes = world_nodes.add(chunk.chunk_id)
+        if chunk.source_id:
+            tenant_edges = tenant_edges.add(chunk.chunk_id, tag=f"{tenant}:{chunk.chunk_id[:8]}")
     print(f"[stage 1.5] crdt world_nodes={len(world_nodes.value())} tenant_edges={len(tenant_edges.value())}", file=sys.stderr)
+    return world_nodes, tenant_edges
 
-    # ── Stage 2: Qualify ──────────────────────────────────────────────────────
+
+def _qualify_stage(all_chunks: list[PipelineChunk], warnings: list[str]) -> None:
     avg_fact = sum(c.fact_score for c in all_chunks) / max(len(all_chunks), 1)
     print(f"[stage 2] avg_fact_score={avg_fact:.3f}", file=sys.stderr)
     if avg_fact < 0.05:
         warnings.append(f"low_fact_density:{avg_fact:.3f}")
-
-    # Extract entities for all chunks using entity graph (T1 regex, always works)
     for c in all_chunks:
         if not c.entities:
             c.entities = extract_chunk_entities(c.text)
 
-    # ── Stage 3: Embed — skip chunks with prefetched vectors ──────────────────
+
+def _embed_one_chunk(chunk: PipelineChunk, text_provider: str, embed_dims: int | None) -> EmbedResult:
+    if chunk.image_b64:
+        vec, prov, sem = embed_multimodal(chunk.text, chunk.image_b64, chunk.image_mime)
+        return EmbedResult(
+            chunk_id=chunk.chunk_id, vector=vec, dims=len(vec),
+            provider=prov, is_semantic=sem,
+            signal_path="mm" if sem else "math",
+        )
+    vec, prov, sem = embed_text(chunk.text, text_provider, dims=embed_dims)
+    return EmbedResult(
+        chunk_id=chunk.chunk_id, vector=vec, dims=len(vec),
+        provider=prov, is_semantic=sem,
+        signal_path="ml" if sem else "math",
+    )
+
+
+def _embedding_stage(
+    all_chunks: list[PipelineChunk],
+    prefetched_vecs: dict[str, list[float]],
+    text_provider: str,
+    embed_dims: int | None,
+) -> tuple[dict[str, EmbedResult], dict[str, int]]:
     print(f"[stage 3] embedding ...", file=sys.stderr)
     embeds: dict[str, EmbedResult] = {}
     providers_used: dict[str, int] = {}
 
-    # Re-use substrate vectors when available — avoid redundant embedding
     for c in all_chunks:
         if c.chunk_id in prefetched_vecs:
             vec = prefetched_vecs[c.chunk_id]
-            er = EmbedResult(
+            embeds[c.chunk_id] = EmbedResult(
                 chunk_id=c.chunk_id, vector=vec, dims=len(vec),
                 provider="substrate:reused", is_semantic=True,
                 signal_path="ml",
             )
-            embeds[c.chunk_id] = er
             providers_used["substrate:reused"] = providers_used.get("substrate:reused", 0) + 1
 
-    # Embed remaining chunks in parallel
     to_embed = [c for c in all_chunks if c.chunk_id not in embeds]
-
-    def _embed_one(chunk: PipelineChunk) -> EmbedResult:
-        if chunk.image_b64:
-            vec, prov, sem = embed_multimodal(chunk.text, chunk.image_b64, chunk.image_mime)
-            return EmbedResult(
-                chunk_id=chunk.chunk_id, vector=vec, dims=len(vec),
-                provider=prov, is_semantic=sem,
-                signal_path="mm" if sem else "math",
-            )
-        vec, prov, sem = embed_text(chunk.text, text_provider, dims=embed_dims)
-        return EmbedResult(
-            chunk_id=chunk.chunk_id, vector=vec, dims=len(vec),
-            provider=prov, is_semantic=sem,
-            signal_path="ml" if sem else "math",
-        )
-
     max_workers = min(8, os.cpu_count() or 4)
     with ThreadPoolExecutor(max_workers=max_workers) as pool:
-        futs = {pool.submit(_embed_one, c): c for c in to_embed}
+        futs = {
+            pool.submit(_embed_one_chunk, c, text_provider, embed_dims): c
+            for c in to_embed
+        }
         for fut in as_completed(futs):
             er = fut.result()
             embeds[er.chunk_id] = er
             providers_used[er.provider] = providers_used.get(er.provider, 0) + 1
 
     print(f"[stage 3] embedded={len(embeds)}, providers={providers_used}", file=sys.stderr)
+    return embeds, providers_used
 
-    # ── Stage 5: Recall ───────────────────────────────────────────────────────
+
+def _ranking_stages(
+    bootstrap: _PipelineBootstrap,
+    all_chunks: list[PipelineChunk],
+    embeds: dict[str, EmbedResult],
+) -> tuple[list[RankedChunk], list[RankedChunk], list[RankedChunk], list[RankedChunk], list[NoiseRecord], dict[str, list[float]]]:
     print(f"[stage 5] recall k={RECALL_K} ...", file=sys.stderr)
-    recalled = recall_stage(query_vec, all_chunks, embeds, k=RECALL_K)
+    recalled = recall_stage(bootstrap.query_vec, all_chunks, embeds, k=RECALL_K)
 
-    # ── Stage 6: Fast rank ────────────────────────────────────────────────────
     avg_doc_len = sum(len(c.text.split()) for c in all_chunks) / max(len(all_chunks), 1)
     print(f"[stage 6] fast rank k={FAST_RANK_K} ...", file=sys.stderr)
     fast_ranked = fast_rank_stage(
-        query_tokens, query_entities, recalled, k=FAST_RANK_K, avg_doc_len=avg_doc_len,
+        bootstrap.query_tokens, bootstrap.query_entities, recalled, k=FAST_RANK_K,
+        avg_doc_len=avg_doc_len,
     )
 
-    # ── Stage 7: Heavy rank ───────────────────────────────────────────────────
     print(f"[stage 7] heavy rank k={HEAVY_RANK_K} ...", file=sys.stderr)
     heavy_ranked = heavy_rank_stage(fast_ranked, k=HEAVY_RANK_K)
 
-    # ── Stage 8: Rerank ───────────────────────────────────────────────────────
     print(f"[stage 8] rerank ...", file=sys.stderr)
     ranked, noise_records = rerank_stage(heavy_ranked)
     noise_embeds = {
         nr.chunk_id: embeds[nr.chunk_id].vector
         for nr in noise_records if nr.chunk_id in embeds
     }
+    return recalled, fast_ranked, heavy_ranked, ranked, noise_records, noise_embeds
 
-    # ── Stage 9: Pack ─────────────────────────────────────────────────────────
+
+def _pack_and_cleanup_stage(
+    ranked: list[RankedChunk],
+    noise_records: list[NoiseRecord],
+    noise_embeds: dict[str, list[float]],
+    bootstrap: _PipelineBootstrap,
+    args: argparse.Namespace,
+    warnings: list[str],
+) -> tuple[dict[str, Any], float]:
     print(f"[stage 9] packing ...", file=sys.stderr)
-    pack = pack_stage(ranked, noise_records, noise_embeds, out_dir, args)
-
-    # ── Stage 10: Cleanup ─────────────────────────────────────────────────────
+    pack = pack_stage(ranked, noise_records, noise_embeds, bootstrap.out_dir, args)
     print(f"[stage 10] coherence gate ...", file=sys.stderr)
-    pack, coherence, cleanup_warnings = cleanup_stage(pack, query_vec, text_provider, dims=embed_dims)
+    pack, coherence, cleanup_warnings = cleanup_stage(
+        pack, bootstrap.query_vec, bootstrap.text_provider, dims=bootstrap.embed_dims,
+    )
     warnings.extend(cleanup_warnings)
     print(f"[stage 10] coherence={coherence:.3f}", file=sys.stderr)
+    return pack, coherence
 
-    # ── Stage 11: Research (opt-in via --research) ───────────────────────────
-    research_summary: dict[str, Any] | None = None
-    if getattr(args, "research", False):
-        print(f"[stage 11] starting research loop ...", file=sys.stderr)
-        research_summary = research_stage(ranked, query_text, args)
-        if research_summary:
-            print(f"[stage 11] research done: {research_summary}", file=sys.stderr)
 
-    # ── Stage 12: Waste ledger (I11, opt-in via LGWKS_TRANSCRIPT_PATH) ──────────
-    waste_result: dict[str, Any] | None = None
-    _transcript_path = os.environ.get("LGWKS_TRANSCRIPT_PATH", "")
-    if _transcript_path:
-        try:
-            import lgwks_waste as _waste
-            _inbound_pack = {
-                "schema": "lgwks.inbound.v1",
-                "handles": [r.chunk.chunk_id for r in ranked],
-                "depth_handles": [
-                    {"id": r.chunk.chunk_id, "est_tokens": math.ceil(len(r.chunk.text) / 4)}
-                    for r in ranked
-                ],
-                "budget": {
-                    "used_tokens": sum(math.ceil(len(r.chunk.text) / 4) for r in ranked),
-                    "truncated": [],
-                },
-            }
-            _ledger = _waste.build_ledger([_inbound_pack], _transcript_path)
-            _waste.persist_ledger(_ledger)
-            _rate = _waste.waste_rate(_ledger)
-            _worst = _waste.worst_item(_ledger)
-            waste_result = {
-                "waste_rate": _rate,
-                "tokens_injected": _ledger["totals"]["tokens_injected"],
-                "tokens_used": _ledger["totals"]["tokens_used"],
-                "worst_cid": _worst["cid"] if _worst else None,
-            }
-            if _rate > _waste.SUGGEST_CUT_THRESHOLD:
-                warnings.append(f"waste_rate_high:{_rate:.3f}")
-            print(f"[stage 12] waste_rate={_rate:.3f}", file=sys.stderr)
-        except Exception as _exc:
-            waste_result = {"error": str(_exc)}
-            print(f"[stage 12] waste ledger error: {_exc}", file=sys.stderr)
+def _maybe_research_stage(
+    args: argparse.Namespace,
+    ranked: list[RankedChunk],
+    query_text: str,
+) -> dict[str, Any] | None:
+    if not getattr(args, "research", False):
+        return None
+    print(f"[stage 11] starting research loop ...", file=sys.stderr)
+    research_summary = research_stage(ranked, query_text, args)
+    if research_summary:
+        print(f"[stage 11] research done: {research_summary}", file=sys.stderr)
+    return research_summary
 
-    # ── Write artifacts ───────────────────────────────────────────────────────
-    (out_dir / "pack.json").write_text(
+
+def _maybe_waste_stage(ranked: list[RankedChunk], warnings: list[str]) -> dict[str, Any] | None:
+    transcript_path = os.environ.get("LGWKS_TRANSCRIPT_PATH", "")
+    if not transcript_path:
+        return None
+    try:
+        import lgwks_waste as _waste
+
+        inbound_pack = {
+            "schema": "lgwks.inbound.v1",
+            "handles": [r.chunk.chunk_id for r in ranked],
+            "depth_handles": [
+                {"id": r.chunk.chunk_id, "est_tokens": math.ceil(len(r.chunk.text) / 4)}
+                for r in ranked
+            ],
+            "budget": {
+                "used_tokens": sum(math.ceil(len(r.chunk.text) / 4) for r in ranked),
+                "truncated": [],
+            },
+        }
+        ledger = _waste.build_ledger([inbound_pack], transcript_path)
+        _waste.persist_ledger(ledger)
+        rate = _waste.waste_rate(ledger)
+        worst = _waste.worst_item(ledger)
+        result = {
+            "waste_rate": rate,
+            "tokens_injected": ledger["totals"]["tokens_injected"],
+            "tokens_used": ledger["totals"]["tokens_used"],
+            "worst_cid": worst["cid"] if worst else None,
+        }
+        if rate > _waste.SUGGEST_CUT_THRESHOLD:
+            warnings.append(f"waste_rate_high:{rate:.3f}")
+        print(f"[stage 12] waste_rate={rate:.3f}", file=sys.stderr)
+        return result
+    except Exception as exc:
+        print(f"[stage 12] waste ledger error: {exc}", file=sys.stderr)
+        return {"error": str(exc)}
+
+
+def _write_pipeline_artifacts(
+    *,
+    bootstrap: _PipelineBootstrap,
+    pack: dict[str, Any],
+    world_nodes: Any,
+    tenant_edges: Any,
+) -> dict[str, Any]:
+    import lgwks_crdt as _crdt
+
+    (bootstrap.out_dir / "pack.json").write_text(
         json.dumps(pack, indent=2, ensure_ascii=False), encoding="utf-8"
     )
-
-    # Reconverge with all prior runs (ARCH L6): load the stable replica, merge this
-    # run's CRDT state into it, commit back. out_dir is per-run, so the replica lives
-    # at the stable store root — else every run would start empty and never converge.
-    _crdt_sink = _crdt.JsonFileSink(PIPELINE_STORE / "crdt_replica.json")
-    _crdt_merged = _crdt.reconverge(
-        _crdt_sink, {"world_nodes": world_nodes, "tenant_edges": tenant_edges}
+    crdt_sink = _crdt.JsonFileSink(PIPELINE_STORE / "crdt_replica.json")
+    crdt_merged = _crdt.reconverge(
+        crdt_sink, {"world_nodes": world_nodes, "tenant_edges": tenant_edges}
     )
-    # The per-run snapshot/artifact reflects the CONVERGED state (prior ⊕ this run).
-    _crdt_state = {k: _crdt.serialise(v) for k, v in _crdt_merged.items()}
-    (out_dir / "crdt_state.json").write_text(
-        json.dumps(_crdt_state, indent=2, ensure_ascii=False), encoding="utf-8"
+    crdt_state = {k: _crdt.serialise(v) for k, v in crdt_merged.items()}
+    (bootstrap.out_dir / "crdt_state.json").write_text(
+        json.dumps(crdt_state, indent=2, ensure_ascii=False), encoding="utf-8"
     )
+    return crdt_state
 
+
+def _build_pipeline_manifest(
+    *,
+    args: argparse.Namespace,
+    bootstrap: _PipelineBootstrap,
+    all_chunks: list[PipelineChunk],
+    prefetched_vecs: dict[str, list[float]],
+    recalled: list[RankedChunk],
+    fast_ranked: list[RankedChunk],
+    heavy_ranked: list[RankedChunk],
+    ranked: list[RankedChunk],
+    noise_records: list[NoiseRecord],
+    pack: dict[str, Any],
+    coherence: float,
+    providers_used: dict[str, int],
+    crdt_state: dict[str, Any],
+    warnings: list[str],
+    research_summary: dict[str, Any] | None,
+    waste_result: dict[str, Any] | None,
+) -> dict[str, Any]:
     manifest: dict[str, Any] = {
         "schema": PIPELINE_MANIFEST_SCHEMA,
-        "run_id": run_id,
+        "run_id": bootstrap.run_id,
         "target": args.target,
-        "created_at": _clock.now_iso(),  # canonical UTC ISO (#223; Z→+00:00, completes #151)
+        "created_at": _clock.now_iso(),
         "counts": {
             "ingested": len(all_chunks),
             "prefetched_vectors": len(prefetched_vecs),
@@ -1232,12 +1303,12 @@ def run_pipeline(args: argparse.Namespace) -> dict[str, Any]:
         "coherence_score": coherence,
         "providers_used": providers_used,
         "parameters": _parameter_snapshot(),
-        "crdt_state": _crdt_state,
+        "crdt_state": crdt_state,
         "artifacts": {
-            "pack": str(out_dir / "pack.json"),
-            "ranked_views": str(out_dir / "ranked_views.jsonl"),
-            "crdt_state": str(out_dir / "crdt_state.json"),
-            "manifest": str(out_dir / "manifest.json"),
+            "pack": str(bootstrap.out_dir / "pack.json"),
+            "ranked_views": str(bootstrap.out_dir / "ranked_views.jsonl"),
+            "crdt_state": str(bootstrap.out_dir / "crdt_state.json"),
+            "manifest": str(bootstrap.out_dir / "manifest.json"),
         },
         "warnings": warnings,
     }
@@ -1245,11 +1316,52 @@ def run_pipeline(args: argparse.Namespace) -> dict[str, Any]:
         manifest["research"] = research_summary
     if waste_result is not None:
         manifest["waste"] = waste_result
+    return manifest
 
+
+def _write_manifest(out_dir: Path, manifest: dict[str, Any]) -> None:
     (out_dir / "manifest.json").write_text(
         json.dumps(manifest, indent=2, ensure_ascii=False), encoding="utf-8"
     )
-    print(f"[pipeline] ✓ complete → {out_dir / 'manifest.json'}", file=sys.stderr)
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# DAG EXECUTOR
+# ══════════════════════════════════════════════════════════════════════════════
+
+def run_pipeline(args: argparse.Namespace) -> dict[str, Any]:
+    """Full DAG.  Returns manifest dict."""
+    bootstrap = _bootstrap_pipeline(args, _clock.stamp_compact())
+    warnings: list[str] = []
+
+    all_chunks, prefetched_vecs = _ingest_stage(args)
+    world_nodes, tenant_edges = _crdt_tracking_stage(args, all_chunks)
+    _qualify_stage(all_chunks, warnings)
+    embeds, providers_used = _embedding_stage(
+        all_chunks, prefetched_vecs, bootstrap.text_provider, bootstrap.embed_dims,
+    )
+    recalled, fast_ranked, heavy_ranked, ranked, noise_records, noise_embeds = _ranking_stages(
+        bootstrap, all_chunks, embeds,
+    )
+    pack, coherence = _pack_and_cleanup_stage(
+        ranked, noise_records, noise_embeds, bootstrap, args, warnings,
+    )
+    research_summary = _maybe_research_stage(args, ranked, bootstrap.query_text)
+    waste_result = _maybe_waste_stage(ranked, warnings)
+    crdt_state = _write_pipeline_artifacts(
+        bootstrap=bootstrap, pack=pack, world_nodes=world_nodes,
+        tenant_edges=tenant_edges,
+    )
+    manifest = _build_pipeline_manifest(
+        args=args, bootstrap=bootstrap, all_chunks=all_chunks,
+        prefetched_vecs=prefetched_vecs, recalled=recalled, fast_ranked=fast_ranked,
+        heavy_ranked=heavy_ranked, ranked=ranked, noise_records=noise_records,
+        pack=pack, coherence=coherence, providers_used=providers_used,
+        crdt_state=crdt_state, warnings=warnings,
+        research_summary=research_summary, waste_result=waste_result,
+    )
+    _write_manifest(bootstrap.out_dir, manifest)
+    print(f"[pipeline] ✓ complete → {bootstrap.out_dir / 'manifest.json'}", file=sys.stderr)
     return manifest
 
 

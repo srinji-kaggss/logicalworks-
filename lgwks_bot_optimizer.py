@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import ast
 import re
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Optional, Any
 
@@ -163,6 +164,331 @@ def _detect_symbol_clusters(defines: list[str]) -> list[str]:
     return []
 
 
+@dataclass(frozen=True)
+class _GraphStats:
+    file_nodes: list[str]
+    in_degrees: dict[str, int]
+    out_degrees: dict[str, int]
+    avg_in: float
+    avg_out: float
+    betweenness: dict[str, float]
+
+
+def _scan_files(repo: Path) -> dict[str, dict]:
+    import lgwks_repo_scan
+
+    file_info = {}
+    for p in lgwks_repo_scan.py_files(repo):
+        rel = str(p.relative_to(repo))
+        try:
+            file_info[rel] = _analyze_file(p)
+        except Exception as exc:
+            file_info[rel] = {
+                "error": str(exc),
+                "line_count": 0,
+                "public_symbols": [],
+                "unused_params": [],
+                "imports": [],
+            }
+    return file_info
+
+
+def _target_files(file_info: dict[str, dict], changed_files: Optional[list[str]]) -> list[str]:
+    if changed_files is None:
+        return list(file_info.keys())
+    return [f for f in changed_files if f.endswith(".py") and f in file_info]
+
+
+def _append_parse_failures(
+    findings: list[dict],
+    *,
+    targets_rel: list[str],
+    file_info: dict[str, dict],
+    run_id: str,
+    repo_str: str,
+) -> None:
+    for rel in targets_rel:
+        if "error" in file_info[rel]:
+            findings.append(_failure_record(run_id, repo_str, rel, file_info[rel]["error"]))
+
+
+def _graph_stats(graph: Any) -> _GraphStats:
+    file_nodes = [nid for nid in graph.nodes if graph.nodes[nid].kind == "file"]
+    if file_nodes:
+        in_degrees = {nid: len(graph.predecessors(nid)) for nid in file_nodes}
+        out_degrees = {nid: len(graph.neighbors(nid)) for nid in file_nodes}
+        avg_in = sum(in_degrees.values()) / len(file_nodes)
+        avg_out = sum(out_degrees.values()) / len(file_nodes)
+    else:
+        in_degrees = {}
+        out_degrees = {}
+        avg_in = 0.0
+        avg_out = 0.0
+
+    try:
+        betweenness = graph.betweenness_centrality()
+    except Exception:
+        betweenness = {}
+
+    return _GraphStats(file_nodes, in_degrees, out_degrees, avg_in, avg_out, betweenness)
+
+
+def _import_counts(file_info: dict[str, dict]) -> dict[str, int]:
+    counts: dict[str, int] = {}
+    for info in file_info.values():
+        for imp in info.get("imports", []):
+            counts[imp] = counts.get(imp, 0) + 1
+    return counts
+
+
+def _symbol_registry(file_info: dict[str, dict]) -> list[tuple[str, str, set[str]]]:
+    all_symbols: list[tuple[str, str, set[str]]] = []
+    for rel, info in file_info.items():
+        for sym in info.get("public_symbols", []):
+            stems = _get_stems(sym)
+            if stems:
+                all_symbols.append((rel, sym, stems))
+    return all_symbols
+
+
+def _append_god_module_finding(
+    findings: list[dict],
+    *,
+    rel: str,
+    line_count: int,
+    stats: _GraphStats,
+    run_id: str,
+    repo_str: str,
+) -> None:
+    if rel not in stats.file_nodes:
+        return
+
+    in_deg = stats.in_degrees.get(rel, 0)
+    out_deg = stats.out_degrees.get(rel, 0)
+    btwn = stats.betweenness.get(rel, 0.0)
+    deg_exceeded = (
+        (stats.avg_in > 0 and in_deg > 3 * stats.avg_in)
+        or (stats.avg_out > 0 and out_deg > 3 * stats.avg_out)
+    )
+    if not (deg_exceeded and btwn > 0.1 and line_count > 500):
+        return
+
+    severity = "high" if btwn > 0.15 or line_count > 800 else "medium"
+    findings.append(_make(
+        run_id=run_id, repo=repo_str, file=rel,
+        kind="god_module",
+        summary=f"God module detected: line count {line_count}, betweenness centrality {btwn:.4f}",
+        severity=severity, confidence=0.9,
+        evidence=[
+            {"type": "metric", "name": "line_count", "value": line_count},
+            {"type": "metric", "name": "in_degree", "value": in_deg},
+            {"type": "metric", "name": "out_degree", "value": out_deg},
+            {"type": "metric", "name": "betweenness_centrality", "value": btwn},
+        ],
+        tags=["god-module", "architecture", "o1"],
+    ))
+
+
+def _append_split_candidate_finding(
+    findings: list[dict],
+    *,
+    rel: str,
+    line_count: int,
+    public_symbols: list[str],
+    run_id: str,
+    repo_str: str,
+) -> None:
+    if line_count > 350 and len(public_symbols) > 8:
+        findings.append(_make(
+            run_id=run_id, repo=repo_str, file=rel,
+            kind="split_candidate",
+            summary=f"Split candidate: file defines {len(public_symbols)} public symbols across {line_count} lines",
+            severity="medium", confidence=0.9,
+            evidence=[
+                {"type": "metric", "name": "line_count", "value": line_count},
+                {"type": "metric", "name": "public_symbols_count", "value": len(public_symbols)},
+            ],
+            tags=["split-candidate", "size", "o2"],
+        ))
+        return
+
+    clusters = _detect_symbol_clusters(public_symbols)
+    if clusters:
+        findings.append(_make(
+            run_id=run_id, repo=repo_str, file=rel,
+            kind="split_candidate",
+            summary=f"Split candidate: multiple disjoint responsibility clusters: {', '.join(clusters)}",
+            severity="medium", confidence=0.5,
+            evidence=[
+                {"type": "trace", "name": "symbol_clusters", "value": ", ".join(clusters)},
+            ],
+            tags=["split-candidate", "clusters", "o2"],
+        ))
+
+
+def _append_duplicate_import_findings(
+    findings: list[dict],
+    *,
+    rel: str,
+    imports: list[str],
+    counts: dict[str, int],
+    run_id: str,
+    repo_str: str,
+) -> None:
+    for imp in imports:
+        if imp not in _RE_EXPORTS:
+            continue
+        cnt = counts.get(imp, 0)
+        if cnt < 5:
+            continue
+        facade = _RE_EXPORTS[imp]
+        findings.append(_make(
+            run_id=run_id, repo=repo_str, file=rel,
+            kind="token_waste_duplicate_import",
+            summary=f"Import of '{imp}' directly in {cnt} files; use shared facade '{facade}' instead",
+            severity="medium", confidence=0.7,
+            evidence=[
+                {"type": "metric", "name": "import_count", "value": cnt},
+                {"type": "external_ref", "name": "suggested_facade", "value": facade},
+            ],
+            tags=["token-waste", "import", "o3"],
+        ))
+
+
+def _append_reimplemented_utility_findings(
+    findings: list[dict],
+    *,
+    rel: str,
+    public_symbols: list[str],
+    all_symbols: list[tuple[str, str, set[str]]],
+    run_id: str,
+    repo_str: str,
+) -> None:
+    if _is_shared(rel):
+        return
+    for sym in public_symbols:
+        stems = _get_stems(sym)
+        if not stems:
+            continue
+        for other_file, other_sym, other_stems in all_symbols:
+            if other_file == rel or _is_shared(other_file):
+                continue
+            sim = _jaccard_similarity(stems, other_stems)
+            if sim >= 0.8:
+                findings.append(_make(
+                    run_id=run_id, repo=repo_str, file=rel,
+                    kind="token_waste_reimplemented_utility",
+                    summary=f"Symbol '{sym}' has high stem similarity ({sim:.2f}) with '{other_sym}' in {other_file}",
+                    severity="medium", confidence=0.7,
+                    evidence=[
+                        {"type": "trace", "name": "overlapping_symbol", "value": other_sym},
+                        {"type": "metric", "name": "overlap_score", "value": sim},
+                    ],
+                    tags=["token-waste", "duplication", "o3"],
+                    symbol=sym,
+                ))
+
+
+def _append_dead_parameter_findings(
+    findings: list[dict],
+    *,
+    rel: str,
+    unused_params: list[tuple[str, str, int]],
+    run_id: str,
+    repo_str: str,
+) -> None:
+    for func_name, param_name, lineno in unused_params:
+        findings.append(_make(
+            run_id=run_id, repo=repo_str, file=rel,
+            kind="dead_parameter",
+            summary=f"Parameter '{param_name}' in public function '{func_name}' is never referenced",
+            severity="medium", confidence=0.7,
+            evidence=[
+                {"type": "file_excerpt", "name": "lineno", "value": lineno},
+                {"type": "trace", "name": "parameter", "value": param_name},
+            ],
+            tags=["token-waste", "dead-code", "o3"],
+            symbol=func_name,
+        ))
+
+
+def _append_reuse_candidate_findings(
+    findings: list[dict],
+    *,
+    rel: str,
+    public_symbols: list[str],
+    all_symbols: list[tuple[str, str, set[str]]],
+    run_id: str,
+    repo_str: str,
+) -> None:
+    if _is_shared(rel):
+        return
+    for sym in public_symbols:
+        stems = _get_stems(sym)
+        if not stems:
+            continue
+        matching_files = {rel}
+        for other_file, _other_sym, other_stems in all_symbols:
+            if other_file == rel or _is_shared(other_file):
+                continue
+            if _jaccard_similarity(stems, other_stems) >= 0.85:
+                matching_files.add(other_file)
+        if len(matching_files) >= 3:
+            findings.append(_make(
+                run_id=run_id, repo=repo_str, file=rel,
+                kind="reuse_candidate",
+                summary=f"Symbol '{sym}' is duplicated or highly similar across {len(matching_files)} files; consider moving to a shared module",
+                severity="low", confidence=0.7,
+                evidence=[
+                    {"type": "trace", "name": "matching_files", "value": ", ".join(sorted(matching_files))},
+                ],
+                tags=["reuse-candidate", "architecture", "o4"],
+                symbol=sym,
+            ))
+
+
+def _append_file_findings(
+    findings: list[dict],
+    *,
+    rel: str,
+    info: dict,
+    stats: _GraphStats,
+    counts: dict[str, int],
+    all_symbols: list[tuple[str, str, set[str]]],
+    run_id: str,
+    repo_str: str,
+) -> None:
+    if "error" in info:
+        return
+
+    line_count = info["line_count"]
+    public_symbols = info["public_symbols"]
+    _append_god_module_finding(
+        findings, rel=rel, line_count=line_count, stats=stats,
+        run_id=run_id, repo_str=repo_str,
+    )
+    _append_split_candidate_finding(
+        findings, rel=rel, line_count=line_count, public_symbols=public_symbols,
+        run_id=run_id, repo_str=repo_str,
+    )
+    _append_duplicate_import_findings(
+        findings, rel=rel, imports=info["imports"], counts=counts,
+        run_id=run_id, repo_str=repo_str,
+    )
+    _append_reimplemented_utility_findings(
+        findings, rel=rel, public_symbols=public_symbols, all_symbols=all_symbols,
+        run_id=run_id, repo_str=repo_str,
+    )
+    _append_dead_parameter_findings(
+        findings, rel=rel, unused_params=info["unused_params"],
+        run_id=run_id, repo_str=repo_str,
+    )
+    _append_reuse_candidate_findings(
+        findings, rel=rel, public_symbols=public_symbols, all_symbols=all_symbols,
+        run_id=run_id, repo_str=repo_str,
+    )
+
+
 def run(
     repo: Path | str,
     changed_files: Optional[list[str]] = None,
@@ -187,209 +513,22 @@ def run(
     if graph is None:
         return [_failure_record(run_id, repo_str, "graph_cache", "missing graph cache")]
 
-    # Find py files in the repo (canonical enumerator — excludes vendored venvs
-    # like .venv-models that previously hung review by ast-parsing all of torch)
-    import lgwks_repo_scan
-    py_files = lgwks_repo_scan.py_files(repo)
-
-    # Analyze all Python files in the repo to get baseline/graph statistics
-    file_info = {}
-    for p in py_files:
-        rel = str(p.relative_to(repo))
-        try:
-            file_info[rel] = _analyze_file(p)
-        except Exception as exc:
-            file_info[rel] = {"error": str(exc), "line_count": 0, "public_symbols": [], "unused_params": [], "imports": []}
-
-    # Decide which files to scan findings for
-    if changed_files is not None:
-        targets_rel = [f for f in changed_files if f.endswith(".py") and f in file_info]
-    else:
-        targets_rel = list(file_info.keys())
-
+    file_info = _scan_files(repo)
+    targets_rel = _target_files(file_info, changed_files)
     findings: list[dict] = []
+    _append_parse_failures(
+        findings, targets_rel=targets_rel, file_info=file_info,
+        run_id=run_id, repo_str=repo_str,
+    )
 
-    # Emit analyzer failures for files that failed to parse
-    for rel in targets_rel:
-        if "error" in file_info[rel]:
-            findings.append(_failure_record(run_id, repo_str, rel, file_info[rel]["error"]))
-
-    # -- Graph stats for O1 God Module --
-    file_nodes = [nid for nid in graph.nodes if graph.nodes[nid].kind == "file"]
-    if file_nodes:
-        in_degrees = {nid: len(graph.predecessors(nid)) for nid in file_nodes}
-        out_degrees = {nid: len(graph.neighbors(nid)) for nid in file_nodes}
-        avg_in = sum(in_degrees.values()) / len(file_nodes)
-        avg_out = sum(out_degrees.values()) / len(file_nodes)
-    else:
-        in_degrees = {}
-        out_degrees = {}
-        avg_in = 0.0
-        avg_out = 0.0
-
-    try:
-        bc = graph.betweenness_centrality()
-    except Exception:
-        bc = {}
-
-    # -- Global Import counts for O3 --
-    import_counts: dict[str, int] = {}
-    for rel, info in file_info.items():
-        for imp in info.get("imports", []):
-            import_counts[imp] = import_counts.get(imp, 0) + 1
-
-    # -- Global Symbol Registry for O3 Re-implementation & O4 Reuse Candidate --
-    all_symbols: list[tuple[str, str, set[str]]] = []  # (rel_file, sym_name, stems)
-    for rel, info in file_info.items():
-        for sym in info.get("public_symbols", []):
-            stems = _get_stems(sym)
-            if stems:
-                all_symbols.append((rel, sym, stems))
+    stats = _graph_stats(graph)
+    counts = _import_counts(file_info)
+    all_symbols = _symbol_registry(file_info)
 
     for rel in targets_rel:
-        info = file_info[rel]
-        if "error" in info:
-            continue
-
-        line_count = info["line_count"]
-        public_symbols = info["public_symbols"]
-        unused_params = info["unused_params"]
-        imports = info["imports"]
-
-        # ── O1: God Module ──
-        if rel in file_nodes:
-            in_deg = in_degrees.get(rel, 0)
-            out_deg = out_degrees.get(rel, 0)
-            btwn = bc.get(rel, 0.0)
-            
-            # Check thresholds: in-degree or out-degree > 3x average, betweenness > 0.1, line count > 500
-            deg_exceeded = (avg_in > 0 and in_deg > 3 * avg_in) or (avg_out > 0 and out_deg > 3 * avg_out)
-            if deg_exceeded and btwn > 0.1 and line_count > 500:
-                severity = "high" if btwn > 0.15 or line_count > 800 else "medium"
-                findings.append(_make(
-                    run_id=run_id, repo=repo_str, file=rel,
-                    kind="god_module",
-                    summary=f"God module detected: line count {line_count}, betweenness centrality {btwn:.4f}",
-                    severity=severity, confidence=0.9,
-                    evidence=[
-                        {"type": "metric", "name": "line_count", "value": line_count},
-                        {"type": "metric", "name": "in_degree", "value": in_deg},
-                        {"type": "metric", "name": "out_degree", "value": out_deg},
-                        {"type": "metric", "name": "betweenness_centrality", "value": btwn},
-                    ],
-                    tags=["god-module", "architecture", "o1"],
-                ))
-
-        # ── O2: Split Candidate ──
-        # Threshold A: lines > 350 and defines > 8 public symbols
-        if line_count > 350 and len(public_symbols) > 8:
-            findings.append(_make(
-                run_id=run_id, repo=repo_str, file=rel,
-                kind="split_candidate",
-                summary=f"Split candidate: file defines {len(public_symbols)} public symbols across {line_count} lines",
-                severity="medium", confidence=0.9,
-                evidence=[
-                    {"type": "metric", "name": "line_count", "value": line_count},
-                    {"type": "metric", "name": "public_symbols_count", "value": len(public_symbols)},
-                ],
-                tags=["split-candidate", "size", "o2"],
-            ))
-        else:
-            # Threshold B: multiple disjoint clusters from symbol names
-            clusters = _detect_symbol_clusters(public_symbols)
-            if clusters:
-                findings.append(_make(
-                    run_id=run_id, repo=repo_str, file=rel,
-                    kind="split_candidate",
-                    summary=f"Split candidate: multiple disjoint responsibility clusters: {', '.join(clusters)}",
-                    severity="medium", confidence=0.5,
-                    evidence=[
-                        {"type": "trace", "name": "symbol_clusters", "value": ", ".join(clusters)},
-                    ],
-                    tags=["split-candidate", "clusters", "o2"],
-                ))
-
-        # ── O3: Token-Waste Indicator ──
-        # 1. Duplicate imports when re-export exists
-        for imp in imports:
-            if imp in _RE_EXPORTS:
-                cnt = import_counts.get(imp, 0)
-                if cnt >= 5:
-                    facade = _RE_EXPORTS[imp]
-                    findings.append(_make(
-                        run_id=run_id, repo=repo_str, file=rel,
-                        kind="token_waste_duplicate_import",
-                        summary=f"Import of '{imp}' directly in {cnt} files; use shared facade '{facade}' instead",
-                        severity="medium", confidence=0.7,
-                        evidence=[
-                            {"type": "metric", "name": "import_count", "value": cnt},
-                            {"type": "external_ref", "name": "suggested_facade", "value": facade},
-                        ],
-                        tags=["token-waste", "import", "o3"],
-                    ))
-
-        # 2. Re-implemented utility patterns (Jaccard similarity >= 0.8)
-        if not _is_shared(rel):
-            for sym in public_symbols:
-                stems = _get_stems(sym)
-                if not stems:
-                    continue
-                for other_file, other_sym, other_stems in all_symbols:
-                    if other_file == rel or _is_shared(other_file):
-                        continue
-                    sim = _jaccard_similarity(stems, other_stems)
-                    if sim >= 0.8:
-                        findings.append(_make(
-                            run_id=run_id, repo=repo_str, file=rel,
-                            kind="token_waste_reimplemented_utility",
-                            summary=f"Symbol '{sym}' has high stem similarity ({sim:.2f}) with '{other_sym}' in {other_file}",
-                            severity="medium", confidence=0.7,
-                            evidence=[
-                                {"type": "trace", "name": "overlapping_symbol", "value": other_sym},
-                                {"type": "metric", "name": "overlap_score", "value": sim},
-                            ],
-                            tags=["token-waste", "duplication", "o3"],
-                            symbol=sym,
-                        ))
-
-        # 3. Dead parameters
-        for func_name, param_name, lineno in unused_params:
-            findings.append(_make(
-                run_id=run_id, repo=repo_str, file=rel,
-                kind="dead_parameter",
-                summary=f"Parameter '{param_name}' in public function '{func_name}' is never referenced",
-                severity="medium", confidence=0.7,
-                evidence=[
-                    {"type": "file_excerpt", "name": "lineno", "value": lineno},
-                    {"type": "trace", "name": "parameter", "value": param_name},
-                ],
-                tags=["token-waste", "dead-code", "o3"],
-                symbol=func_name,
-            ))
-
-        # ── O4: Reuse Candidate ──
-        if not _is_shared(rel):
-            for sym in public_symbols:
-                stems = _get_stems(sym)
-                if not stems:
-                    continue
-                matching_files = {rel}
-                for other_file, other_sym, other_stems in all_symbols:
-                    if other_file == rel or _is_shared(other_file):
-                        continue
-                    if _jaccard_similarity(stems, other_stems) >= 0.85:
-                        matching_files.add(other_file)
-                if len(matching_files) >= 3:
-                    findings.append(_make(
-                        run_id=run_id, repo=repo_str, file=rel,
-                        kind="reuse_candidate",
-                        summary=f"Symbol '{sym}' is duplicated or highly similar across {len(matching_files)} files; consider moving to a shared module",
-                        severity="low", confidence=0.7,
-                        evidence=[
-                            {"type": "trace", "name": "matching_files", "value": ", ".join(sorted(matching_files))},
-                        ],
-                        tags=["reuse-candidate", "architecture", "o4"],
-                        symbol=sym,
-                    ))
+        _append_file_findings(
+            findings, rel=rel, info=file_info[rel], stats=stats, counts=counts,
+            all_symbols=all_symbols, run_id=run_id, repo_str=repo_str,
+        )
 
     return findings

@@ -84,8 +84,11 @@ from lgwks_substrate_crawl import (
     _crawl_map,
     _crawl_site,
     _frontier_status_counts,
+    _is_ai_docs_index,
     _looks_like_login_gate,
+    _merge_discovered_links,
     _should_discover_clicks,
+    _text_discovered_links,
 )
 
 # Vector layer
@@ -187,8 +190,11 @@ __all__ = [
     "_bucket_facts",
     # Crawl
     "_canonicalize_crawl_url",
+    "_is_ai_docs_index",
     "_looks_like_login_gate",
+    "_merge_discovered_links",
     "_should_discover_clicks",
+    "_text_discovered_links",
     "_crawl_site",
     "_crawl_map",
     "_frontier_status_counts",

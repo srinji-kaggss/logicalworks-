@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import argparse
 import ast
+import copy
 import lgwks_hashing
 import json
 import os
@@ -405,29 +406,29 @@ def run_watch_mode(args: argparse.Namespace) -> int:
         return 0
 
 
-def review_command(args: argparse.Namespace) -> int:
-    repo = Path(getattr(args, "repo", ".")).resolve()
-    if not _is_repo(repo):
-        print(f"error: {repo} is not a git repo", file=sys.stderr)
-        return 3
+def _default_plan() -> dict[str, Any]:
+    return copy.deepcopy(DEFAULT_PLAN)
 
-    if getattr(args, "watch", False):
-        return run_watch_mode(args)
 
+def _load_bot_plan(repo: Path) -> dict[str, Any]:
     plan_path = repo / ".lgwks" / "bot-plan.json"
-    if plan_path.exists():
-        try:
-            with plan_path.open("r", encoding="utf-8") as f:
-                plan = json.load(f)
-            import lgwks_project_artifacts as artifacts
-            ok, errs = artifacts.validate_bot_plan(plan)
-            if not ok:
-                plan = DEFAULT_PLAN
-        except Exception:
-            plan = DEFAULT_PLAN
-    else:
-        plan = DEFAULT_PLAN
+    if not plan_path.exists():
+        return _default_plan()
 
+    try:
+        with plan_path.open("r", encoding="utf-8") as f:
+            plan = json.load(f)
+        import lgwks_project_artifacts as artifacts
+
+        ok, _errs = artifacts.validate_bot_plan(plan)
+        if ok:
+            return plan
+    except Exception:
+        pass
+    return _default_plan()
+
+
+def _apply_review_args_to_plan(plan: dict[str, Any], args: argparse.Namespace) -> None:
     if getattr(args, "bots", "") and args.bots != "all":
         requested_bots = [b.strip() for b in args.bots.split(",")]
         for p_bot in plan["bots"]:
@@ -439,32 +440,31 @@ def review_command(args: argparse.Namespace) -> int:
     if getattr(args, "l_budget", None) is not None:
         plan["policy"]["l_budget"] = float(args.l_budget)
 
-    changed_files = None
+
+def _changed_files_for_review(repo: Path, args: argparse.Namespace) -> list[str] | None:
     if getattr(args, "changed", ""):
-        changed_files = [f.strip() for f in args.changed.split(",") if f.strip()]
-    elif getattr(args, "ref", "") != "HEAD":
+        return [f.strip() for f in args.changed.split(",") if f.strip()]
+    if getattr(args, "ref", "") != "HEAD":
         files, _ = _git_diff(repo, args.ref)
-        changed_files = files
-    elif getattr(args, "bots", "") not in ("", "all"):
-        # Auto-detect changed files for bounded bot runs with no explicit scope
+        return files
+    if getattr(args, "bots", "") not in ("", "all"):
         files, _ = _git_diff(repo, "HEAD")
-        changed_files = files
+        return files
+    return None
 
-    # 1. Load or refresh graph
+
+def _load_review_graph(repo: Path) -> Any | None:
     try:
-        graph = graph_engine.get_graph(repo)
+        return graph_engine.get_graph(repo)
     except Exception:
-        graph = None
+        return None
 
-    # 2. Run selected bots
-    all_findings = []
-    ts = _clock.stamp_compact()  # canonical UTC stamp (#223 foundation-bypass)
-    run_id = f"run:{ts}:" + lgwks_hashing.content_id(str(repo), 8)
 
-    # Legacy static check findings map to BOT_RECORD_SCHEMA
-    legacy_artifact = review_repo(repo, getattr(args, "ref", "HEAD"))
+def _legacy_records(repo: Path, ref: str, run_id: str) -> tuple[ReviewArtifact, list[dict[str, Any]]]:
+    legacy_artifact = review_repo(repo, ref)
+    records: list[dict[str, Any]] = []
     for f in legacy_artifact.findings:
-        all_findings.append({
+        records.append({
             "schema": "lgwks.bot.record.v1",
             "run_id": run_id,
             "bot": "review",
@@ -484,9 +484,20 @@ def review_command(args: argparse.Namespace) -> int:
             },
             "world_refs": [{"kind": "concept", "id": f.check}],
             "tags": ["review", "static-heuristic"],
-            "created_at": _clock.now_iso(),  # canonical UTC ISO (#223; Z→+00:00, completes #151)
+            "created_at": _clock.now_iso(),
         })
+    return legacy_artifact, records
 
+
+def _run_enabled_bots(
+    *,
+    plan: dict[str, Any],
+    repo: Path,
+    changed_files: list[str] | None,
+    graph: Any | None,
+    run_id: str,
+) -> list[dict[str, Any]]:
+    findings: list[dict[str, Any]] = []
     for p_bot in plan["bots"]:
         if not p_bot["enabled"]:
             continue
@@ -494,77 +505,84 @@ def review_command(args: argparse.Namespace) -> int:
         if bot_name == "code_hacker":
             import lgwks_bot_code_hacker as hacker
             try:
-                hacker_findings = hacker.run(repo, changed_files=changed_files, run_id=run_id)
-                all_findings.extend(hacker_findings)
+                findings.extend(hacker.run(repo, changed_files=changed_files, run_id=run_id))
             except Exception as exc:
                 print(f"warning: code_hacker bot failed: {exc}", file=sys.stderr)
         elif bot_name == "slop_math":
             import lgwks_bot_slop_math as slop
             try:
-                slop_findings = slop.run_all(repo, graph=graph, run_id=run_id, changed_files=changed_files)
-                all_findings.extend(slop_findings)
+                findings.extend(slop.run_all(repo, graph=graph, run_id=run_id, changed_files=changed_files))
             except Exception as exc:
                 print(f"warning: slop_math bot failed: {exc}", file=sys.stderr)
         elif bot_name == "optimizer":
             try:
                 import lgwks_bot_optimizer as optimizer
-                opt_findings = optimizer.run(repo, changed_files=changed_files, graph=graph, run_id=run_id)
-                all_findings.extend(opt_findings)
+
+                findings.extend(optimizer.run(repo, changed_files=changed_files, graph=graph, run_id=run_id))
             except (ImportError, AttributeError):
                 pass
         elif bot_name == "stress":
             try:
                 import lgwks_bot_stress as stress
-                stress_findings = stress.run(repo, store_path=str(repo / "findings/"), run_id=run_id)
-                all_findings.extend(stress_findings)
+
+                findings.extend(stress.run(repo, store_path=str(repo / "findings/"), run_id=run_id))
             except (ImportError, AttributeError):
                 pass
+    return findings
 
-    # 3. Reduce findings (U3)
-    import lgwks_project_artifacts as artifacts
-    bc_metrics = {}
-    if graph:
-        try:
-            bc = graph.betweenness_centrality()
-            bc_metrics = {k: {"blast_radius": v, "betweenness": v} for k, v in bc.items()}
-        except Exception:
-            pass
 
-    reduced = artifacts.reduce_bot_records(all_findings, repo_graph_metrics=bc_metrics)
+def _repo_graph_metrics(graph: Any | None) -> dict[str, dict[str, float]]:
+    if not graph:
+        return {}
+    try:
+        bc = graph.betweenness_centrality()
+        return {k: {"blast_radius": v, "betweenness": v} for k, v in bc.items()}
+    except Exception:
+        return {}
 
-    # 4. Build JEPA package (U4)
-    world_db_bindings = []
+
+def _world_db_bindings(reduced: dict[str, Any]) -> list[str]:
+    bindings = []
     for f in reduced.get("findings_normalized", []):
         for ref in f.get("world_refs", []):
-            world_db_bindings.append(f"wdb:{ref['kind']}:{ref['id']}")
-    world_db_bindings = list(set(world_db_bindings))
+            bindings.append(f"wdb:{ref['kind']}:{ref['id']}")
+    return list(set(bindings))
 
-    built = artifacts.build_jepa_package(
+
+def _build_review_package(
+    *,
+    artifacts: Any,
+    reduced: dict[str, Any],
+    plan: dict[str, Any],
+    repo: Path,
+) -> dict[str, Any]:
+    return artifacts.build_jepa_package(
         reduced,
         repo=str(repo),
         plan_id=f"plan:{plan.get('plan_id', 'default')}",
-        world_db_bindings=world_db_bindings,
+        world_db_bindings=_world_db_bindings(reduced),
         prior_package_refs=[],
     )
 
-    # 5. Check artifact strength (U11)
-    synth_status = "skipped"
-    strength = artifacts.evaluate_artifact_strength(
-        reduced["review_packet"],
-        built["package"],
-        built["machine_packet"],
-        built["links_index"],
-        synth_status=synth_status,
-    )
 
-    # 6. Optionally run synthesizer (U9) if --synth and strength passes
+def _run_synthesis_if_enabled(
+    *,
+    plan: dict[str, Any],
+    reduced: dict[str, Any],
+    built: dict[str, Any],
+    strength: dict[str, Any],
+    repo: Path,
+) -> tuple[str, float, int, dict[str, Any]]:
+    synth_status = "skipped"
     l_score = 0.0
     invented_claim_count = 0
     l_budget = plan["policy"].get("l_budget", 0.15)
     machine_packet = built["machine_packet"]
+
     if plan["synth"]["enabled"] and strength["pass"]:
         try:
             import lgwks_synthesizer
+
             synth_input = {
                 "schema": "lgwks.synth.input.v1",
                 "package_id": built["package"]["package_id"],
@@ -591,14 +609,28 @@ def review_command(args: argparse.Namespace) -> int:
         except Exception as exc:
             print(f"warning: synthesis failed: {exc}", file=sys.stderr)
             synth_status = "unavailable"
+    return synth_status, l_score, invented_claim_count, machine_packet
 
+
+def _write_review_outputs(
+    *,
+    repo: Path,
+    plan: dict[str, Any],
+    reduced: dict[str, Any],
+    built: dict[str, Any],
+    strength: dict[str, Any],
+    synth_status: str,
+    l_score: float,
+    invented_claim_count: int,
+    machine_packet: dict[str, Any],
+) -> None:
     out_root = repo / plan["outputs"].get("root", "findings/")
     out_root.mkdir(parents=True, exist_ok=True)
-
+    l_budget = plan["policy"].get("l_budget", 0.15)
     machine_packet.update({
         "l_score": l_score,
         "l_budget_used": f"{int(round((l_score / l_budget) * 100)) if l_budget else 0}%",
-        "session_date": _clock.now_iso(),  # canonical UTC ISO (#223; Z→+00:00, completes #151)
+        "session_date": _clock.now_iso(),
         "grounded_claim_count": len(reduced["findings_normalized"]),
         "invented_claim_count": invented_claim_count,
         "synth_status": synth_status,
@@ -608,10 +640,15 @@ def review_command(args: argparse.Namespace) -> int:
     (out_root / "report.md").write_text(report_md, encoding="utf-8")
     (out_root / "machine-packet.json").write_text(json.dumps(machine_packet, indent=2), encoding="utf-8")
 
-    if getattr(args, "json", False):
-        print(json.dumps(machine_packet, indent=2))
-        return 0
 
+def _print_review_summary(
+    *,
+    legacy_artifact: ReviewArtifact,
+    reduced: dict[str, Any],
+    built: dict[str, Any],
+    strength: dict[str, Any],
+    l_score: float,
+) -> None:
     print(f"L score: {l_score:.2f}")
 
     on = ui.color_on()
@@ -622,7 +659,7 @@ def review_command(args: argparse.Namespace) -> int:
     out.append(ui.spine(ui.fg(f"Findings: {len(reduced['findings_normalized'])} reduced anomalies", ui.CREAM_DIM, on=on), on=on))
 
     top_findings_map = {tf["finding_id"]: tf for tf in reduced["review_packet"]["top_findings"]}
-    for idx, card in enumerate(built["human_summary"].get("anomaly_cards", [])[:5], start=1):
+    for card in built["human_summary"].get("anomaly_cards", [])[:5]:
         color = ui.RUST if card["severity"] in ("critical", "high") else ui.AMBER
         out.append(ui.spine(ui.fg(f"  [{card['severity'].upper()}] {card['title']}", color, on=on), on=on))
         out.append(ui.twig(card["why_it_matters"], 1, "card", on=on))
@@ -637,15 +674,75 @@ def review_command(args: argparse.Namespace) -> int:
         if loc:
             out.append(ui.twig(f"drilldown: {loc}", 2, "link", on=on))
 
-    out.append(""); out.append("  " + ui.footer("lgwks · review", on=on)); out.append("")
+    out.append("")
+    out.append("  " + ui.footer("lgwks · review", on=on))
+    out.append("")
     print("\n".join(out))
 
+
+def _review_exit_code(reduced: dict[str, Any], strength: dict[str, Any]) -> int:
     has_high = any(f["severity"] in ("high", "critical") for f in reduced["findings_normalized"])
     if has_high:
         return 1
     if not strength["pass"]:
         return 2
     return 0
+
+
+def review_command(args: argparse.Namespace) -> int:
+    repo = Path(getattr(args, "repo", ".")).resolve()
+    if not _is_repo(repo):
+        print(f"error: {repo} is not a git repo", file=sys.stderr)
+        return 3
+
+    if getattr(args, "watch", False):
+        return run_watch_mode(args)
+
+    plan = _load_bot_plan(repo)
+    _apply_review_args_to_plan(plan, args)
+    changed_files = _changed_files_for_review(repo, args)
+    graph = _load_review_graph(repo)
+
+    ts = _clock.stamp_compact()  # canonical UTC stamp (#223 foundation-bypass)
+    run_id = f"run:{ts}:" + lgwks_hashing.content_id(str(repo), 8)
+    legacy_artifact, all_findings = _legacy_records(repo, getattr(args, "ref", "HEAD"), run_id)
+    all_findings.extend(_run_enabled_bots(
+        plan=plan, repo=repo, changed_files=changed_files, graph=graph, run_id=run_id,
+    ))
+
+    import lgwks_project_artifacts as artifacts
+
+    bc_metrics = _repo_graph_metrics(graph)
+    reduced = artifacts.reduce_bot_records(all_findings, repo_graph_metrics=bc_metrics)
+    built = _build_review_package(
+        artifacts=artifacts, reduced=reduced, plan=plan, repo=repo,
+    )
+    strength = artifacts.evaluate_artifact_strength(
+        reduced["review_packet"],
+        built["package"],
+        built["machine_packet"],
+        built["links_index"],
+        synth_status="skipped",
+    )
+
+    synth_status, l_score, invented_claim_count, machine_packet = _run_synthesis_if_enabled(
+        plan=plan, reduced=reduced, built=built, strength=strength, repo=repo,
+    )
+    _write_review_outputs(
+        repo=repo, plan=plan, reduced=reduced, built=built, strength=strength,
+        synth_status=synth_status, l_score=l_score,
+        invented_claim_count=invented_claim_count, machine_packet=machine_packet,
+    )
+
+    if getattr(args, "json", False):
+        print(json.dumps(machine_packet, indent=2))
+        return 0
+
+    _print_review_summary(
+        legacy_artifact=legacy_artifact, reduced=reduced, built=built,
+        strength=strength, l_score=l_score,
+    )
+    return _review_exit_code(reduced, strength)
 
 
 def add_parser(sub) -> None:

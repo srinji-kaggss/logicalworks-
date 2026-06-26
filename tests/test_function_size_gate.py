@@ -26,17 +26,13 @@ THRESHOLD = 200  # lines (inclusive def→end) above which a function needs a re
 # gate fails if the live size exceeds it (growth) or if the entry is stale (the
 # function shrank ≤ THRESHOLD or vanished). All tracked for decomposition in #351.
 ALLOWED: dict[tuple[str, str], int] = {
-    ("lgwks_jarvis.py", "crawl_command"): 418,        # Pristine R6.2 — jarvis brain-graph sink
     ("lgwks_research.py", "run_auto"): 213,           # R6.3 done — round body extracted (was 385); residual setup+report
     ("lgwks_research.py", "_run_round"): 212,         # R6.3 — extracted round body w/ explicit _RoundState; 7 cohesive step-seams remain
     ("lgwks_substrate_run.py", "_ingest_docs"): 278,  # R6.1 residue — per-doc ingest loop
-    ("lgwks_substrate_crawl.py", "_crawl_site"): 321,
-    ("lgwks_home.py", "_browser_entryway"): 282,
-    ("lgwks_bot_stress.py", "run"): 253,
-    ("lgwks_review.py", "review_command"): 241,
-    ("lgwks_pipeline.py", "run_pipeline"): 237,
-    ("lgwks_bot_optimizer.py", "run"): 230,
-    ("lgwks_graph.py", "extract_from_repo"): 225,
+    # NOTE: the 8 entries formerly here (jarvis.crawl_command, substrate_crawl._crawl_site,
+    # home._browser_entryway, bot_stress.run, review.review_command, pipeline.run_pipeline,
+    # bot_optimizer.run, graph.extract_from_repo) were decomposed ≤ THRESHOLD by the
+    # two-plane branch merge — removed so the allow-list stays honest (#351).
 }
 
 SKIP_DIRS = {"node_modules", "site-packages", "build", "dist", "__pycache__", "archive"}

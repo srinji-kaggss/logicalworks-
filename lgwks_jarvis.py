@@ -510,25 +510,42 @@ def _crawl_via_substrate(args: argparse.Namespace) -> dict:
     }
 
 
-def crawl_command(args: argparse.Namespace) -> int:
-    keywords = parse_keywords(args.keyword_terms, args.keywords)
-    source = args.source
-    run_name = args.name or slugify(source or " ".join(keywords))
-    run_id = f"{run_name}-{_clock.stamp_compact()}"  # canonical UTC stamp (was local time)
-    estimate = estimate_seconds(args.max_pages, args.workers, len(keywords))
-    if getattr(args, "estimate_only", False):
-        print(json.dumps({"estimated_seconds": estimate, "estimated_minutes": round(estimate / 60, 2)}, indent=2))
-        return 0
+@dataclass
+class _LegacyCrawlRun:
+    run_name: str
+    run_id: str
+    run_dir: Path
+    raw_dir: Path
+    records_dir: Path
+    graph_dir: Path
+    gnn_dir: Path
+    gate: Any
+    writer: GateWriter
+    manifest_path: Path
+    config: dict[str, Any]
+    run_cid: str
 
-    # --- Engine dispatch (#34): URL sources default to the substrate auth-aware
-    # runtime; --engine legacy or keyword-only sources stay on the deterministic
-    # Jarvis crawler below. ---
-    engine = getattr(args, "engine", "substrate")
-    if source and engine != "legacy":
-        payload = _crawl_via_substrate(args)
-        print(json.dumps(payload, indent=2))
-        return 0 if payload.get("ok", True) else 1
 
+@dataclass
+class _LegacyCrawlRows:
+    source_rows: list[dict]
+    doc_rows: list[dict]
+    chunk_rows: list[dict]
+    node_rows: list[dict]
+    edge_rows: list[dict]
+    chunk_vectors: dict[str, list[float]]
+    chunk_texts: dict[str, str]
+    chunk_to_doc: dict[str, str]
+    terms: Counter
+
+
+def _init_legacy_crawl(
+    args: argparse.Namespace,
+    *,
+    keywords: list[str],
+    run_name: str,
+    run_id: str,
+) -> _LegacyCrawlRun:
     run_dir = RUN_ROOT / run_id
     raw_dir = run_dir / "raw"
     records_dir = run_dir / "records"
@@ -537,8 +554,6 @@ def crawl_command(args: argparse.Namespace) -> int:
     for directory in (raw_dir, records_dir, graph_dir, gnn_dir):
         directory.mkdir(parents=True, exist_ok=True)
 
-    # #165 step 3: persist into the one State Fabric (gate keyed on run NAME so runs
-    # of the same topic accumulate + dedup), not a per-run research.sqlite island.
     gate = lgwks_storage.get_gate(run_name)
     writer = GateWriter(gate, run_id)
     manifest_path = run_dir / "run-manifest.json"
@@ -564,34 +579,36 @@ def crawl_command(args: argparse.Namespace) -> int:
             "config_json": json.dumps(config, sort_keys=True),
         },
     )
-    # The run is a graph node; each source links back to it via discovered_in_run,
-    # so run_id is recoverable provenance without being a shard key.
     writer.node(f"run:{run_id}", "run", run_name, {"created_at": utc_now()}, artifact_cid=run_cid)
+    return _LegacyCrawlRun(
+        run_name=run_name, run_id=run_id, run_dir=run_dir, raw_dir=raw_dir,
+        records_dir=records_dir, graph_dir=graph_dir, gnn_dir=gnn_dir,
+        gate=gate, writer=writer, manifest_path=manifest_path, config=config,
+        run_cid=run_cid,
+    )
 
+
+def _fetch_legacy_pages(
+    ctx: _LegacyCrawlRun,
+    args: argparse.Namespace,
+    *,
+    source: str,
+    keywords: list[str],
+    estimate: int,
+) -> tuple[list[CrawlResult], Counter, list[str], deque[tuple[str, int, str]], str]:
     seeds, warnings = build_seed_urls(source, keywords, args.max_pages, getattr(args, "search_expansion", False))
     if not seeds:
-        writer.close()
+        ctx.writer.close()
         raise SystemExit("no seed URLs found")
 
-    estimated_msg = f"Estimated compute: {estimate}s ({round(estimate / 60, 2)} min) for {args.max_pages} pages @ {args.workers} workers"
-    print(estimated_msg)
+    print(f"Estimated compute: {estimate}s ({round(estimate / 60, 2)} min) for {args.max_pages} pages @ {args.workers} workers")
     for warning in warnings:
         print(f"warning: {warning}", file=sys.stderr)
 
-    before_id = make_snapshot(writer, "before-crawl", [u for u, _ in seeds], Counter(), {})
+    before_id = make_snapshot(ctx.writer, "before-crawl", [u for u, _ in seeds], Counter(), {})
     queue: deque[tuple[str, int, str]] = deque((url, 0, origin) for url, origin in seeds)
     seen: set[str] = set()
     fetched: list[CrawlResult] = []
-    source_rows: list[dict] = []
-    doc_rows: list[dict] = []
-    chunk_rows: list[dict] = []
-    node_rows: list[dict] = []
-    edge_rows: list[dict] = []
-    chunk_vectors: dict[str, list[float]] = {}
-    chunk_texts: dict[str, str] = {}
-    chunk_to_doc: dict[str, str] = {}
-    seen_chunk_hashes: set[str] = set()
-
     while queue and len(seen) < args.max_pages:
         batch: list[tuple[str, int, str]] = []
         while queue and len(batch) < args.workers and len(seen) + len(batch) < args.max_pages:
@@ -609,11 +626,11 @@ def crawl_command(args: argparse.Namespace) -> int:
                 url, depth, origin = future_map[future]
                 result = future.result()
                 fetched.append(result)
-                writer.record(
+                ctx.writer.record(
                     "crawl_event",
                     {
-                        "id": f"event-{sha(run_id + url)}",
-                        "run_id": run_id,
+                        "id": f"event-{sha(ctx.run_id + url)}",
+                        "run_id": ctx.run_id,
                         "created_at": utc_now(),
                         "url": url,
                         "status": result.status,
@@ -632,89 +649,77 @@ def crawl_command(args: argparse.Namespace) -> int:
                         if not getattr(args, "include_external", False) and source and normalize_url(source) and not same_site(link, source):
                             continue
                         queue.append((link, depth + 1, "site-link"))
+    return fetched, Counter(), warnings, queue, before_id
+
+
+def _build_legacy_rows(
+    ctx: _LegacyCrawlRun,
+    args: argparse.Namespace,
+    *,
+    keywords: list[str],
+    fetched: list[CrawlResult],
+) -> _LegacyCrawlRows:
+    source_rows: list[dict] = []
+    doc_rows: list[dict] = []
+    chunk_rows: list[dict] = []
+    node_rows: list[dict] = []
+    edge_rows: list[dict] = []
+    chunk_vectors: dict[str, list[float]] = {}
+    chunk_texts: dict[str, str] = {}
+    chunk_to_doc: dict[str, str] = {}
+    seen_chunk_hashes: set[str] = set()
 
     for idx, result in enumerate(fetched, start=1):
         source_id = f"source-{sha(result.url)}"
-        raw_path = raw_dir / f"{idx:03d}-{slugify(result.title or result.url)}.md"
-        body = f"# {result.title}\n\nSource: {result.url}\n\n{result.text}\n"
-        raw_path.write_text(body, encoding="utf-8")
+        raw_path = ctx.raw_dir / f"{idx:03d}-{slugify(result.title or result.url)}.md"
+        raw_path.write_text(f"# {result.title}\n\nSource: {result.url}\n\n{result.text}\n", encoding="utf-8")
         source_row = {
-            "id": source_id,
-            "run_id": run_id,
-            "url": result.url,
-            "title": result.title,
-            "axis": "keyword" if keywords else "site",
-            "tier": "primary",
-            "raw_path": str(raw_path),
-            "status": result.status,
-            "error": result.error,
-            "elapsed_seconds": round(result.elapsed, 3),
-            "discovered_by": "crawl",
-            "score": score_page(result, keywords),
+            "id": source_id, "run_id": ctx.run_id, "url": result.url,
+            "title": result.title, "axis": "keyword" if keywords else "site",
+            "tier": "primary", "raw_path": str(raw_path), "status": result.status,
+            "error": result.error, "elapsed_seconds": round(result.elapsed, 3),
+            "discovered_by": "crawl", "score": score_page(result, keywords),
         }
         source_rows.append(source_row)
-        writer.edge(f"run:{run_id}", source_id, "discovered_in_run", {}, artifact_cid=run_cid)
+        ctx.writer.edge(f"run:{ctx.run_id}", source_id, "discovered_in_run", {}, artifact_cid=ctx.run_cid)
         if result.status != "ok" or not result.text.strip():
             continue
         doc_id = f"doc-{sha(result.url + result.text)}"
         chunks = chunk_text(result.text, getattr(args, "chunk_words", 450), getattr(args, "chunk_overlap", 70))
         doc_row = {
-            "id": doc_id,
-            "run_id": run_id,
-            "source_id": source_id,
-            "title": result.title,
-            "path": str(raw_path),
+            "id": doc_id, "run_id": ctx.run_id, "source_id": source_id,
+            "title": result.title, "path": str(raw_path),
             "content_sha256": lgwks_hashing.digest(result.text),
-            "word_count": word_count(result.text),
-            "chunk_count": len(chunks),
+            "word_count": word_count(result.text), "chunk_count": len(chunks),
         }
         doc_rows.append(doc_row)
-        writer.embed(doc_id, result.text[:20_000], scope="document", meta={"source_id": source_id})
+        ctx.writer.embed(doc_id, result.text[:20_000], scope="document", meta={"source_id": source_id})
         for pos, chunk in enumerate(chunks):
-            # Content-addressed chunk identity: identical content collapses to one
-            # node + one embedding across documents/positions. Provenance (which doc
-            # contained the chunk, and where) is preserved as doc->chunk containment
-            # edges, so dedup is lossless. Mirrors lgwks_substrate_run.build_run — one
-            # canonical dedup primitive. The gate makes the dedup cross-run, not
-            # per-run: an identical chunk seen in a later run reuses the same cid.
             content_sha = lgwks_hashing.digest(chunk)
             chunk_id = f"chunk-{content_sha[:16]}"
-            occurrence_edge = {
-                "id": f"edge-{sha(doc_id + chunk_id)}",
-                "run_id": run_id,
-                "from_id": doc_id,
-                "to_id": chunk_id,
-                "kind": "contains",
-                "weight": 1.0,
-                "evidence": None,
+            ctx.writer.edge(doc_id, chunk_id, "contains", {"position": pos}, artifact_cid=chunk_id)
+            edge_rows.append({
+                "id": f"edge-{sha(doc_id + chunk_id)}", "run_id": ctx.run_id,
+                "from_id": doc_id, "to_id": chunk_id, "kind": "contains",
+                "weight": 1.0, "evidence": None,
                 "metadata_json": json.dumps({"position": pos}, sort_keys=True),
-            }
-            writer.edge(doc_id, chunk_id, "contains", {"position": pos}, artifact_cid=chunk_id)
-            edge_rows.append(occurrence_edge)
+            })
             if content_sha in seen_chunk_hashes:
-                # Duplicate content this run: provenance recorded via the edge above;
-                # do not re-insert the row or re-embed identical content.
                 continue
             seen_chunk_hashes.add(content_sha)
             stype = semantic_type_scores(chunk)
-            chunk_row = {
-                "id": chunk_id,
-                "run_id": run_id,
-                "document_id": doc_id,
-                "source_id": source_id,
-                "position": pos,
-                "text": chunk,
-                "content_sha256": content_sha,
-                "word_count": word_count(chunk),
+            chunk_rows.append({
+                "id": chunk_id, "run_id": ctx.run_id, "document_id": doc_id,
+                "source_id": source_id, "position": pos, "text": chunk,
+                "content_sha256": content_sha, "word_count": word_count(chunk),
                 "semantic_type_json": json.dumps(stype, sort_keys=True),
-            }
-            chunk_rows.append(chunk_row)
+            })
             vector = deterministic_embedding(chunk)
             chunk_vectors[chunk_id] = vector
             chunk_texts[chunk_id] = chunk
             chunk_to_doc[chunk_id] = doc_id
-            writer.embed(chunk_id, chunk, scope="chunk",
-                         meta={"document_id": doc_id, "source_id": source_id, "position": pos})
+            ctx.writer.embed(chunk_id, chunk, scope="chunk",
+                             meta={"document_id": doc_id, "source_id": source_id, "position": pos})
 
     terms = concept_terms((row["text"] for row in chunk_rows), getattr(args, "max_terms", 80))
     for term, weight in terms.items():
@@ -725,209 +730,309 @@ def crawl_command(args: argparse.Namespace) -> int:
             "semantic_type": max(type_scores, key=lambda k: type_scores[k]),
             "source": "deterministic-ngram",
         }
-        row = {
-            "id": node_id,
-            "run_id": run_id,
-            "kind": "concept",
-            "label": term,
-            "weight": float(weight),
+        node_rows.append({
+            "id": node_id, "run_id": ctx.run_id, "kind": "concept",
+            "label": term, "weight": float(weight),
             "metadata_json": json.dumps(metadata, sort_keys=True),
-        }
-        node_rows.append(row)
-        writer.node(node_id, "concept", term, {**metadata, "weight": float(weight)}, artifact_cid=node_id)
-        writer.embed(node_id, term, scope="understanding-node")
+        })
+        ctx.writer.node(node_id, "concept", term, {**metadata, "weight": float(weight)}, artifact_cid=node_id)
+        ctx.writer.embed(node_id, term, scope="understanding-node")
 
+    _append_legacy_term_edges(ctx, node_rows, edge_rows, chunk_texts)
+    _append_legacy_similarity_edges(ctx, args, edge_rows, chunk_vectors, chunk_to_doc)
+    return _LegacyCrawlRows(
+        source_rows, doc_rows, chunk_rows, node_rows, edge_rows,
+        chunk_vectors, chunk_texts, chunk_to_doc, terms,
+    )
+
+
+def _append_legacy_term_edges(
+    ctx: _LegacyCrawlRun,
+    node_rows: list[dict],
+    edge_rows: list[dict],
+    chunk_texts: dict[str, str],
+) -> None:
     term_ids = {row["label"]: row["id"] for row in node_rows}
     for chunk_id, text in chunk_texts.items():
         present = [term for term in term_ids if term in text.lower()]
         for term in present[:12]:
-            edge_id = f"edge-{sha(chunk_id + term)}"
-            row = {
-                "id": edge_id,
-                "run_id": run_id,
-                "from_id": chunk_id,
-                "to_id": term_ids[term],
-                "kind": "mentions",
-                "weight": float(text.lower().count(term)),
-                "evidence": text[:240],
+            weight = float(text.lower().count(term))
+            edge_rows.append({
+                "id": f"edge-{sha(chunk_id + term)}", "run_id": ctx.run_id,
+                "from_id": chunk_id, "to_id": term_ids[term],
+                "kind": "mentions", "weight": weight, "evidence": text[:240],
                 "metadata_json": json.dumps({"fusion_signal": "lexical"}, sort_keys=True),
-            }
-            writer.edge(chunk_id, term_ids[term], "mentions",
-                        {"fusion_signal": "lexical", "weight": float(text.lower().count(term))},
-                        artifact_cid=chunk_id)
-            edge_rows.append(row)
+            })
+            ctx.writer.edge(chunk_id, term_ids[term], "mentions",
+                            {"fusion_signal": "lexical", "weight": weight},
+                            artifact_cid=chunk_id)
 
+
+def _append_legacy_similarity_edges(
+    ctx: _LegacyCrawlRun,
+    args: argparse.Namespace,
+    edge_rows: list[dict],
+    chunk_vectors: dict[str, list[float]],
+    chunk_to_doc: dict[str, str],
+) -> None:
+    threshold = getattr(args, "similarity_threshold", 0.72)
     chunk_items = list(chunk_vectors.items())
     for i, (left_id, left_vec) in enumerate(chunk_items):
         for right_id, right_vec in chunk_items[i + 1:i + 80]:
             if chunk_to_doc.get(left_id) == chunk_to_doc.get(right_id):
                 continue
             score = cosine(left_vec, right_vec)
-            if score >= getattr(args, "similarity_threshold", 0.72):
-                edge_id = f"edge-{sha(left_id + right_id)}"
-                row = {
-                    "id": edge_id,
-                    "run_id": run_id,
-                    "from_id": left_id,
-                    "to_id": right_id,
-                    "kind": "late_fusion_similarity",
-                    "weight": round(score, 4),
+            if score >= threshold:
+                edge_rows.append({
+                    "id": f"edge-{sha(left_id + right_id)}", "run_id": ctx.run_id,
+                    "from_id": left_id, "to_id": right_id,
+                    "kind": "late_fusion_similarity", "weight": round(score, 4),
                     "evidence": None,
-                    "metadata_json": json.dumps({"fusion_signal": "hash_embedding", "threshold": getattr(args, "similarity_threshold", 0.72)}, sort_keys=True),
-                }
-                writer.edge(left_id, right_id, "late_fusion_similarity",
-                            {"fusion_signal": "hash_embedding", "weight": round(score, 4),
-                             "threshold": getattr(args, "similarity_threshold", 0.72)},
-                            artifact_cid=left_id)
-                edge_rows.append(row)
+                    "metadata_json": json.dumps({"fusion_signal": "hash_embedding", "threshold": threshold}, sort_keys=True),
+                })
+                ctx.writer.edge(left_id, right_id, "late_fusion_similarity",
+                                {"fusion_signal": "hash_embedding", "weight": round(score, 4),
+                                 "threshold": threshold},
+                                artifact_cid=left_id)
 
+
+def _write_legacy_compression_records(ctx: _LegacyCrawlRun, args: argparse.Namespace, node_rows: list[dict]) -> None:
     compress_limit = getattr(args, "compress_limit", 96)
-    if len(node_rows) > compress_limit:
-        for row in sorted(node_rows, key=lambda r: r["weight"])[: len(node_rows) - compress_limit]:
-            label = json.loads(row["metadata_json"]).get("semantic_type", "compressed")
-            writer.record(
-                "compressed_node",
-                {
-                    "id": f"compressed-{sha(run_id + row['id'])}",
-                    "run_id": run_id,
-                    "reason": "compute_limit_low_weight_concept",
-                    "source_node_json": json.dumps(row, sort_keys=True),
-                    "compressed_label": label,
-                    "metadata_json": json.dumps({"compress_limit": compress_limit}, sort_keys=True),
-                },
-            )
+    if len(node_rows) <= compress_limit:
+        return
+    for row in sorted(node_rows, key=lambda r: r["weight"])[: len(node_rows) - compress_limit]:
+        label = json.loads(row["metadata_json"]).get("semantic_type", "compressed")
+        ctx.writer.record(
+            "compressed_node",
+            {
+                "id": f"compressed-{sha(ctx.run_id + row['id'])}",
+                "run_id": ctx.run_id,
+                "reason": "compute_limit_low_weight_concept",
+                "source_node_json": json.dumps(row, sort_keys=True),
+                "compressed_label": label,
+                "metadata_json": json.dumps({"compress_limit": compress_limit}, sort_keys=True),
+            },
+        )
 
-    frontier_terms = [term for term, _ in terms.most_common(20)]
-    counts = {"documents": len(doc_rows), "chunks": len(chunk_rows),
-              "nodes": len(node_rows), "edges": len(edge_rows)}
-    after_id = make_snapshot(writer, "after-crawl", list(queue), terms, counts)
-    coverage = min(1.0, len(doc_rows) / max(1, args.max_pages))
+
+def _write_understanding_and_drills(
+    ctx: _LegacyCrawlRun,
+    args: argparse.Namespace,
+    *,
+    keywords: list[str],
+    source: str,
+    run_name: str,
+    estimate: int,
+    before_id: str,
+    queue: deque[tuple[str, int, str]],
+    warnings: list[str],
+    rows: _LegacyCrawlRows,
+) -> tuple[str, list[str]]:
+    frontier_terms = [term for term, _ in rows.terms.most_common(20)]
+    counts = {"documents": len(rows.doc_rows), "chunks": len(rows.chunk_rows),
+              "nodes": len(rows.node_rows), "edges": len(rows.edge_rows)}
+    after_id = make_snapshot(ctx.writer, "after-crawl", list(queue), rows.terms, counts)
+    coverage = min(1.0, len(rows.doc_rows) / max(1, args.max_pages))
     uncertainty = round(1.0 - coverage + (0.15 if warnings else 0), 4)
     understanding_summary = (
-        f"Mapped {len(doc_rows)} documents and {len(chunk_rows)} chunks into {len(node_rows)} concept nodes. "
+        f"Mapped {len(rows.doc_rows)} documents and {len(rows.chunk_rows)} chunks into {len(rows.node_rows)} concept nodes. "
         f"Dominant terms: {', '.join(frontier_terms[:8])}."
     )
-    understanding_id = f"understanding-{sha(run_id + understanding_summary)}"
-    understanding_schema = {
-        "research_understanding": {
-            "tracked_separately_from_questions": True,
-            "late_fusion_signals": ["lexical", "hash_embedding", "temporal_snapshot"],
-            "semantic_types": sorted(SEMANTIC_TYPES),
-        }
-    }
-    writer.record(
+    understanding_id = f"understanding-{sha(ctx.run_id + understanding_summary)}"
+    ctx.writer.record(
         "understanding",
         {
-            "id": understanding_id,
-            "run_id": run_id,
-            "created_at": utc_now(),
-            "scope": "crawl",
-            "before_snapshot_id": before_id,
-            "after_snapshot_id": after_id,
-            "summary": understanding_summary,
-            "coverage_score": round(coverage, 4),
-            "uncertainty_score": uncertainty,
-            "evidence_json": json.dumps({"top_terms": frontier_terms[:20], "source_count": len(source_rows)}, sort_keys=True),
-            "schema_json": json.dumps(understanding_schema, sort_keys=True),
+            "id": understanding_id, "run_id": ctx.run_id, "created_at": utc_now(),
+            "scope": "crawl", "before_snapshot_id": before_id,
+            "after_snapshot_id": after_id, "summary": understanding_summary,
+            "coverage_score": round(coverage, 4), "uncertainty_score": uncertainty,
+            "evidence_json": json.dumps({"top_terms": frontier_terms[:20], "source_count": len(rows.source_rows)}, sort_keys=True),
+            "schema_json": json.dumps({
+                "research_understanding": {
+                    "tracked_separately_from_questions": True,
+                    "late_fusion_signals": ["lexical", "hash_embedding", "temporal_snapshot"],
+                    "semantic_types": sorted(SEMANTIC_TYPES),
+                }
+            }, sort_keys=True),
         },
     )
-    writer.embed(understanding_id, understanding_summary, scope="research-understanding")
-
+    ctx.writer.embed(understanding_id, understanding_summary, scope="research-understanding")
     drill_keywords = keywords or [slugify(source or run_name)]
+    _write_legacy_drills(ctx, args, drill_keywords, frontier_terms, rows.source_rows, uncertainty, estimate, coverage)
+    return understanding_summary, frontier_terms
+
+
+def _write_legacy_drills(
+    ctx: _LegacyCrawlRun,
+    args: argparse.Namespace,
+    drill_keywords: list[str],
+    frontier_terms: list[str],
+    source_rows: list[dict],
+    uncertainty: float,
+    estimate: int,
+    coverage: float,
+) -> None:
     for keyword in drill_keywords:
-        drill_id = f"drill-{sha(run_id + keyword)}"
-        writer.record(
+        drill_id = f"drill-{sha(ctx.run_id + keyword)}"
+        ctx.writer.record(
             "drill",
             {
-                "id": drill_id,
-                "run_id": run_id,
-                "keyword": keyword,
+                "id": drill_id, "run_id": ctx.run_id, "keyword": keyword,
                 "state": "complete" if coverage >= 0.95 else "frontier-open",
-                "target_pages": args.max_pages,
-                "crawled_pages": len(doc_rows),
-                "ask_count": 3,
-                "compute_estimate_seconds": estimate,
+                "target_pages": args.max_pages, "crawled_pages": len(source_rows),
+                "ask_count": 3, "compute_estimate_seconds": estimate,
                 "metadata_json": json.dumps({"coverage_score": coverage, "uncertainty_score": uncertainty}, sort_keys=True),
             },
         )
-        questions = next_questions(keyword, frontier_terms, source_rows, uncertainty)
-        for ask_index, (question, thought, gain) in enumerate(questions, start=1):
+        for ask_index, (question, thought, gain) in enumerate(next_questions(keyword, frontier_terms, source_rows, uncertainty), start=1):
             qid = f"question-{sha(drill_id + str(ask_index) + question)}"
-            writer.record(
+            ctx.writer.record(
                 "question",
                 {
-                    "id": qid,
-                    "run_id": run_id,
-                    "created_at": utc_now(),
-                    "drill_id": drill_id,
-                    "ask_index": ask_index,
-                    "question": question,
-                    "what_were_you_thinking": thought,
-                    "expected_information_gain": gain,
-                    "answered": 0,
-                    "answer": None,
+                    "id": qid, "run_id": ctx.run_id, "created_at": utc_now(),
+                    "drill_id": drill_id, "ask_index": ask_index,
+                    "question": question, "what_were_you_thinking": thought,
+                    "expected_information_gain": gain, "answered": 0, "answer": None,
                 },
             )
-            writer.embed(qid, f"{question}\n{thought}", scope="question-trace")
+            ctx.writer.embed(qid, f"{question}\n{thought}", scope="question-trace")
 
-    # The queryable sources/documents/chunks surface (gate relational projection).
-    src_url = {s["id"]: s["url"] for s in source_rows}
-    writer.project_relational(
+
+def _persist_legacy_artifacts(
+    ctx: _LegacyCrawlRun,
+    rows: _LegacyCrawlRows,
+    *,
+    estimate: int,
+    understanding_summary: str,
+    warnings: list[str],
+) -> Path:
+    src_url = {s["id"]: s["url"] for s in rows.source_rows}
+    ctx.writer.project_relational(
         source_rows=[{"source_id": s["id"], "source": s["url"], "title": s["title"],
-                      "discovered_by": s["discovered_by"], "depth": 0} for s in source_rows],
+                      "discovered_by": s["discovered_by"], "depth": 0} for s in rows.source_rows],
         doc_rows=[{"document_id": d["id"], "source_id": d["source_id"], "title": d["title"],
-                   "source": src_url.get(d["source_id"], ""), "word_count": d["word_count"]} for d in doc_rows],
+                   "source": src_url.get(d["source_id"], ""), "word_count": d["word_count"]} for d in rows.doc_rows],
         chunk_rows=[{"chunk_id": c["id"], "document_id": c["document_id"],
                      "source": src_url.get(c["source_id"], ""), "url": "", "text": c["text"],
                      "stem_text": "", "hash": c["content_sha256"], "fact_score": 0.0,
                      "chunk_kind": "chunk", "position": c["position"],
-                     "tokenization_id": writer._tok, "artifact_cid": c["id"]} for c in chunk_rows],
+                     "tokenization_id": ctx.writer._tok, "artifact_cid": c["id"]} for c in rows.chunk_rows],
     )
-    writer.commit()
+    ctx.writer.commit()
+    write_jsonl(ctx.records_dir / "sources.jsonl", rows.source_rows)
+    write_jsonl(ctx.records_dir / "documents.jsonl", rows.doc_rows)
+    write_jsonl(ctx.records_dir / "chunks.jsonl", rows.chunk_rows)
+    write_jsonl(ctx.records_dir / "nodes.jsonl", rows.node_rows)
+    write_jsonl(ctx.records_dir / "edges.jsonl", rows.edge_rows)
+    write_gnn_exports(ctx.gnn_dir, ctx.run_id, rows.node_rows, rows.edge_rows, ctx.writer.features)
+    write_graph(ctx.graph_dir, ctx.run_id, rows.node_rows, rows.edge_rows)
+    return write_report(
+        ctx.run_dir, ctx.run_id, estimate, understanding_summary,
+        rows.terms, rows.source_rows, rows.doc_rows, rows.edge_rows, warnings,
+    )
 
-    write_jsonl(records_dir / "sources.jsonl", source_rows)
-    write_jsonl(records_dir / "documents.jsonl", doc_rows)
-    write_jsonl(records_dir / "chunks.jsonl", chunk_rows)
-    write_jsonl(records_dir / "nodes.jsonl", node_rows)
-    write_jsonl(records_dir / "edges.jsonl", edge_rows)
-    write_gnn_exports(gnn_dir, run_id, node_rows, edge_rows, writer.features)
-    write_graph(graph_dir, run_id, node_rows, edge_rows)
-    report_path = write_report(run_dir, run_id, estimate, understanding_summary, terms, source_rows, doc_rows, edge_rows, warnings)
 
-    gate_root = str(gate.root)
+def _write_legacy_manifest(
+    ctx: _LegacyCrawlRun,
+    args: argparse.Namespace,
+    *,
+    keywords: list[str],
+    estimate: int,
+    report_path: Path,
+    rows: _LegacyCrawlRows,
+    warnings: list[str],
+) -> str:
+    gate_root = str(ctx.gate.root)
+    drill_count = len(keywords or [slugify(args.source or ctx.run_name)])
     manifest = {
-        "run_id": run_id,
-        "name": run_name,
+        "run_id": ctx.run_id,
+        "name": ctx.run_name,
         "created_at": utc_now(),
         "schema_version": SCHEMA_VERSION,
         "prompt": getattr(args, "prompt", ""),
         "keywords": keywords,
         "estimated_compute_seconds": estimate,
         "artifacts": {
-            "root": str(run_dir),
+            "root": str(ctx.run_dir),
             "store": gate_root,
             "report": str(report_path),
-            "mermaid": str(graph_dir / "research-map.mmd"),
-            "html": str(graph_dir / "research-map.html"),
-            "gnn": str(gnn_dir),
+            "mermaid": str(ctx.graph_dir / "research-map.mmd"),
+            "html": str(ctx.graph_dir / "research-map.html"),
+            "gnn": str(ctx.gnn_dir),
         },
         "counts": {
-            "sources": len(source_rows),
-            "documents": len(doc_rows),
-            "chunks": len(chunk_rows),
-            "nodes": len(node_rows),
-            "edges": len(edge_rows),
-            "questions": len(drill_keywords) * 3,
+            "sources": len(rows.source_rows),
+            "documents": len(rows.doc_rows),
+            "chunks": len(rows.chunk_rows),
+            "nodes": len(rows.node_rows),
+            "edges": len(rows.edge_rows),
+            "questions": drill_count * 3,
         },
-        "config": config,
+        "config": ctx.config,
         "warnings": warnings,
     }
-    manifest_path.write_text(json.dumps(manifest, indent=2, sort_keys=True), encoding="utf-8")
-    writer.close()
+    ctx.manifest_path.write_text(json.dumps(manifest, indent=2, sort_keys=True), encoding="utf-8")
+    return gate_root
+
+
+def _legacy_crawl_command(
+    args: argparse.Namespace,
+    *,
+    keywords: list[str],
+    source: str,
+    run_name: str,
+    run_id: str,
+    estimate: int,
+) -> int:
+    ctx = _init_legacy_crawl(args, keywords=keywords, run_name=run_name, run_id=run_id)
+    fetched, _terms, warnings, queue, before_id = _fetch_legacy_pages(
+        ctx, args, source=source, keywords=keywords, estimate=estimate,
+    )
+    rows = _build_legacy_rows(ctx, args, keywords=keywords, fetched=fetched)
+    _write_legacy_compression_records(ctx, args, rows.node_rows)
+    understanding_summary, _frontier_terms = _write_understanding_and_drills(
+        ctx, args, keywords=keywords, source=source, run_name=run_name,
+        estimate=estimate, before_id=before_id, queue=queue, warnings=warnings,
+        rows=rows,
+    )
+    report_path = _persist_legacy_artifacts(
+        ctx, rows, estimate=estimate, understanding_summary=understanding_summary,
+        warnings=warnings,
+    )
+    gate_root = _write_legacy_manifest(
+        ctx, args, keywords=keywords, estimate=estimate, report_path=report_path,
+        rows=rows, warnings=warnings,
+    )
+    ctx.writer.close()
     print(f"run: {run_id}")
     print(f"report: {report_path}")
     print(f"store: {gate_root}")
     return 0
+
+
+def crawl_command(args: argparse.Namespace) -> int:
+    keywords = parse_keywords(args.keyword_terms, args.keywords)
+    source = args.source
+    run_name = args.name or slugify(source or " ".join(keywords))
+    run_id = f"{run_name}-{_clock.stamp_compact()}"  # canonical UTC stamp (was local time)
+    estimate = estimate_seconds(args.max_pages, args.workers, len(keywords))
+    if getattr(args, "estimate_only", False):
+        print(json.dumps({"estimated_seconds": estimate, "estimated_minutes": round(estimate / 60, 2)}, indent=2))
+        return 0
+
+    # --- Engine dispatch (#34): URL sources default to the substrate auth-aware
+    # runtime; --engine legacy or keyword-only sources stay on the deterministic
+    # Jarvis crawler below. ---
+    engine = getattr(args, "engine", "substrate")
+    if source and engine != "legacy":
+        payload = _crawl_via_substrate(args)
+        print(json.dumps(payload, indent=2))
+        return 0 if payload.get("ok", True) else 1
+
+    return _legacy_crawl_command(
+        args, keywords=keywords, source=source, run_name=run_name,
+        run_id=run_id, estimate=estimate,
+    )
 
 
 def next_questions(keyword: str, frontier_terms: list[str], sources: list[dict], uncertainty: float) -> list[tuple[str, str, float]]:
