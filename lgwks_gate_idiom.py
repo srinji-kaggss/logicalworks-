@@ -51,7 +51,7 @@ class IdiomVerifier:
                     notes.append(f"skipped duplicate content: {p}")
                     continue
                 seen_hashes.add(digest)
-                vec = lgwks_embed._embedding(text)
+                vec = lgwks_embed.audit_embedding(text)
                 paths.append(p)
                 vecs.append(vec)
             except Exception:
@@ -91,7 +91,7 @@ class IdiomVerifier:
             )
 
         try:
-            candidate_vec = lgwks_embed._embedding(candidate_text)
+            candidate_vec = lgwks_embed.audit_embedding(candidate_text)
         except Exception as exc:
             return Verdict(
                 gate_id=self.gate_id,

@@ -5,7 +5,7 @@ Wires together existing lgwks modules:
   - lgwks_substrate.build_run()    — crawl + chunk + embed + entity graph
   - lgwks_run.embed()              — provider chain (apple-local → deterministic)
   - lgwks_run._deterministic_embed()
-  - lgwks_embed._embedding()
+  - lgwks_embed.audit_embedding()  — public deterministic audit-vector door
   - lgwks_entity_graph.extract_mentions(), GraphDB
   - lgwks_intent_classifier.IntentClassifier
   - lgwks_jepa.build_package()

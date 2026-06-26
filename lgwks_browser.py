@@ -17,6 +17,7 @@ from __future__ import annotations
 
 import json
 import logging
+import os
 import re
 import ipaddress
 import select
@@ -109,7 +110,13 @@ def _should_stop_click_discovery(metrics: dict[str, int]) -> bool:
 
 
 def _browser_path(engine: str) -> Path | None:
-    """Return the expected browser executable path, or None if not found."""
+    """Return the browser executable path, or None if not found.
+
+    Checks playwright's computed path first, then scans PLAYWRIGHT_BROWSERS_PATH
+    for pre-installed browsers (managed/cloud environments where playwright's own
+    expected revision differs from what's installed).
+    """
+    # Primary: playwright's own resolution
     try:
         from playwright.sync_api import sync_playwright
         with sync_playwright() as p:
@@ -119,6 +126,18 @@ def _browser_path(engine: str) -> Path | None:
                 return Path(executable)
     except Exception:
         pass
+    # Fallback: scan PLAYWRIGHT_BROWSERS_PATH for pre-installed binaries
+    pw_path = os.environ.get("PLAYWRIGHT_BROWSERS_PATH")
+    if pw_path:
+        if engine == "chromium":
+            # matches chromium-NNNN/chrome-linux/chrome (older) or chrome-linux64/chrome (newer)
+            for candidate in sorted(Path(pw_path).glob("chromium*/chrome-linux*/chrome"), reverse=True):
+                if candidate.exists():
+                    return candidate
+        elif engine == "webkit":
+            for candidate in sorted(Path(pw_path).glob("webkit*/pw_run.sh"), reverse=True):
+                if candidate.exists():
+                    return candidate
     return None
 
 
@@ -303,24 +322,40 @@ def render(url: str, max_chars: int = 8000, *, use_session: bool = False,
     """
     if not _remote_allowed(url):
         return {"ok": False, "text": "", "reason": "blocked URL"}
-    ok, why = available(browser_engine)
-    if not ok:
-        return {"ok": False, "text": "", "reason": why}
     if browser_engine not in ("chromium", "webkit", "nodriver"):
         return {"ok": False, "text": "", "reason": f"unknown browser_engine: {browser_engine!r} — use 'chromium', 'webkit' or 'nodriver'"}
+    ok, why = available(browser_engine)
+    if not ok:
+        # Browser unavailable — raw HTTP is the reliable floor for public pages.
+        return _raw_render_fallback(url, max_chars, with_html=with_html,
+                                    user_agent=user_agent, extra_headers=extra_headers,
+                                    reason=why)
 
     if browser_engine == "nodriver":
         try:
             import asyncio
             import nodriver
+            # Bound EVERY blocking await so a stalled browser cannot hang the CLI — the
+            # sibling playwright paths cap page.goto at 30s; nodriver had NO bound (R2).
+            # start() and stop() are bounded too: launch/attach can hang, and stop() on a
+            # wedged browser can hang in `finally` and mask the very timeout we raise.
+            # Caveat: asyncio cancellation of a CDP call is best-effort — a truly wedged
+            # Chrome subprocess may still need OS-level cleanup; this prevents the CLI
+            # hang, it does not guarantee the child process is killed.
+            _nav_timeout = 30.0  # seconds — matches page.goto(timeout=30000)
             async def _nodriver_render():
-                browser = await nodriver.start()
-                page = await browser.get(url)
-                await asyncio.sleep(wait_ms / 1000.0)
-                html = await page.get_content()
-                text = _text_from(html, max_chars)
-                await browser.stop()
-                return {"ok": True, "text": text, "html": html, "reason": "rendered:nodriver"}
+                browser = await asyncio.wait_for(nodriver.start(), _nav_timeout)
+                try:
+                    page = await asyncio.wait_for(browser.get(url), _nav_timeout)
+                    await asyncio.sleep(wait_ms / 1000.0)
+                    html = await asyncio.wait_for(page.get_content(), _nav_timeout)
+                    text = _text_from(html, max_chars)
+                    return {"ok": True, "text": text, "html": html, "reason": "rendered:nodriver"}
+                finally:
+                    try:
+                        await asyncio.wait_for(browser.stop(), 10.0)
+                    except Exception:
+                        pass  # best-effort cleanup; never mask the original result/error
             return asyncio.run(_nodriver_render())
         except Exception as e:
             return {"ok": False, "text": "", "reason": f"nodriver failed: {type(e).__name__}"}
@@ -332,10 +367,26 @@ def render(url: str, max_chars: int = 8000, *, use_session: bool = False,
     try:
         with sync_playwright() as p:
             engine = p.webkit if browser_engine == "webkit" else p.chromium
-            # //why: webkit launch takes no chromium-specific flags; keep args clean per engine
+            # //why: webkit takes no chromium-specific flags; keep args clean per engine
             launch_kwargs: dict = {"headless": True}
             if browser_engine == "chromium":
                 launch_kwargs["args"] = ["--disable-blink-features=AutomationControlled"]
+                # Forward the system proxy so the browser subprocess can reach the internet
+                # through the same egress path as Python's urllib (e.g. managed cloud envs).
+                proxy_url = os.environ.get("HTTPS_PROXY") or os.environ.get("https_proxy")
+                if proxy_url:
+                    launch_kwargs["proxy"] = {"server": proxy_url}
+            # Use a pre-installed binary when playwright's expected revision is absent.
+            found_exe = _browser_path(browser_engine)
+            if found_exe:
+                try:
+                    default_exe = Path(
+                        (p.webkit if browser_engine == "webkit" else p.chromium).executable_path
+                    )
+                    if not default_exe.exists():
+                        launch_kwargs["executable_path"] = str(found_exe)
+                except Exception:
+                    launch_kwargs["executable_path"] = str(found_exe)
             browser = engine.launch(**launch_kwargs)
             try:
                 ctx_kwargs: dict = {
@@ -374,7 +425,7 @@ def render(url: str, max_chars: int = 8000, *, use_session: bool = False,
                 browser.close()
     except Exception as e:
         reason = f"render failed: {type(e).__name__}: {e}"
-        if not use_session and not auth_headers:
+        if not storage and not auth_headers:
             return _raw_render_fallback(
                 url,
                 max_chars,

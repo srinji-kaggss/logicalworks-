@@ -1,0 +1,24 @@
+{
+  "_doc": "Out-of-scope inventory for the runtime.bounded Keel lane (R2, Pristine Program #345). Every UNBOUNDED hang-class sink in the root lgwks_*.py runtime that the lane detects must be listed here with a reason, or the lane fails (no silent omissions). A sink that carries its own timeout= needs NO entry. Entries are keyed by (file, callee, target) as emitted by check_runtime_bounded.py --list; one entry can cover several call sites sharing that key (lines listed for reference).",
+  "_scope": "The lane STATICALLY detects the I/O sink class it can prove: subprocess.* and network-library calls (urllib urlopen/opener.open, requests/httpx/curl_cffi verbs). NOT statically gated here, because they are library-method calls needing receiver-type inference: (a) browser-driver navigation (nodriver/playwright) and (b) in-process native model inference (mlx encode / coreml predict). Those are bounded by convention at their call sites (playwright page.goto timeout=30000; nodriver wait_for added in R2; the embed worker via LGWKS_EMBED_TIMEOUT) and are tracked as a follow-up for a typed sink pass — stated, not silently omitted.",
+  "_stale_policy": "An entry that matches zero current unbounded sinks is STALE and fails the lane — the inventory must track reality (same discipline as coverage_guard's stale-lane check).",
+  "out_of_scope": [
+    {"file": "lgwks_bot_stress.py", "callee": "subprocess.Popen", "target": "dynamic", "lines": [93, 144, 164, 213, 250], "reason": "local stress-test child processes (self-spawned python); not network/model, awaited via wait()/communicate()"},
+    {"file": "lgwks_codebase.py", "callee": "subprocess.check_output", "target": "git", "lines": [415, 576], "reason": "local git (ls-files / rev-parse HEAD); cannot hang on the network"},
+    {"file": "lgwks_codebase.py", "callee": "subprocess.check_output", "target": "dynamic", "lines": [514], "reason": "local git ls-files (argv built from a list); local"},
+    {"file": "lgwks_daemon.py", "callee": "subprocess.Popen", "target": "dynamic", "lines": [608], "reason": "detached local daemon launch; startup/shutdown explicitly deadline-bounded by START_TIMEOUT_S / STOP_TIMEOUT_S + wait(timeout=)"},
+    {"file": "lgwks_dsl.py", "callee": "subprocess.run", "target": "dynamic", "lines": [88], "reason": "dispatches a local lgwks verb in the process tree; the inner verb owns its own sinks"},
+    {"file": "lgwks_embed_port.py", "callee": "subprocess.run", "target": "dynamic", "lines": [330, 338], "reason": "local python import probe (mlx_vlm / transformers tier detection); no network or inference"},
+    {"file": "lgwks_embed_port.py", "callee": "subprocess.Popen", "target": "dynamic", "lines": [368], "reason": "model-load/inference worker; bounded-elsewhere — every RPC read is wall-clock capped by _readline_bounded (LGWKS_EMBED_TIMEOUT, default 180s) and close() uses wait(timeout=5). The canonical bounded-worker pattern."},
+    {"file": "lgwks_gh.py", "callee": "subprocess.check_output", "target": "git", "lines": [85], "reason": "local git config read (remote.origin.url); fast, local"},
+    {"file": "lgwks_home.py", "callee": "subprocess.run", "target": "dynamic", "lines": [430], "reason": "dispatches a sibling lgwks verb locally; the inner verb owns its own sinks"},
+    {"file": "lgwks_home.py", "callee": "subprocess.call", "target": "dynamic", "lines": [864], "reason": "launches the local interactive lgwks-tui; blocks until the user exits, by design — not a network/model hang"},
+    {"file": "lgwks_intent.py", "callee": "subprocess.run", "target": "dynamic", "lines": [511], "reason": "executes a recommended local lgwks/next command interactively; the inner command owns its own sinks"},
+    {"file": "lgwks_keyvault.py", "callee": "subprocess.run", "target": "security", "lines": [75], "reason": "local macOS Keychain store-prompt (security add-generic-password); blocks on user input by design, not a network hang"},
+    {"file": "lgwks_model_hub.py", "callee": "subprocess.run", "target": "dynamic", "lines": [107], "reason": "dead helper (_run has zero call sites); model downloads happen in scripts/setup_models.py, not the runtime"},
+    {"file": "lgwks_repl.py", "callee": "subprocess.run", "target": "dynamic", "lines": [306, 424], "reason": "REPL dispatch of a local lgwks verb / interactive shell-escape; intentionally interactive, inner command owns its sinks"},
+    {"file": "lgwks_spawn.py", "callee": "subprocess.check_output", "target": "git", "lines": [28], "reason": "local git rev-parse HEAD; fast, local"},
+    {"file": "lgwks_verify.py", "callee": "subprocess.run", "target": "node", "lines": [274, 283], "reason": "local node Keel/CI runner (qualify.mjs / run.mjs --tier); local compute, not network"},
+    {"file": "lgwks_verify.py", "callee": "subprocess.run", "target": "dynamic", "lines": [296], "reason": "local node Keel runner (keel run.mjs --profile); local"}
+  ]
+}

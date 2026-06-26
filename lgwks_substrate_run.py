@@ -11,15 +11,14 @@ from __future__ import annotations
 
 import argparse
 import json
+from dataclasses import dataclass
 import lgwks_clock as _clock  # canonical timestamps (#223 foundation-bypass)
-import re
 from collections import Counter
-from dataclasses import dataclass, field
 from datetime import date
 from pathlib import Path
 from typing import Any
 
-import lgwks_run
+import lgwks_model_port as port
 import lgwks_sqlite
 import lgwks_storage
 import lgwks_substrate_config as config
@@ -147,33 +146,21 @@ def _policy_pack_gaps(
 
 
 @dataclass
-class _BuildRows:
-    source_rows: list[dict[str, Any]] = field(default_factory=list)
-    doc_rows: list[dict[str, Any]] = field(default_factory=list)
-    chunk_rows: list[dict[str, Any]] = field(default_factory=list)
-    fact_rows: list[dict[str, Any]] = field(default_factory=list)
-    fact_vector_rows: list[dict[str, Any]] = field(default_factory=list)
-    vector_rows: list[dict[str, Any]] = field(default_factory=list)
-    graph_input_rows: list[dict[str, Any]] = field(default_factory=list)
-    provider_counts: Counter[str] = field(default_factory=Counter)
-    semantic_vectors: int = 0
-    chunk_by_content: dict[str, dict[str, Any]] = field(default_factory=dict)
+class _IngestBundle:
+    source_rows: list[dict[str, Any]]
+    doc_rows: list[dict[str, Any]]
+    chunk_rows: list[dict[str, Any]]
+    fact_rows: list[dict[str, Any]]
+    fact_vector_rows: list[dict[str, Any]]
+    vector_rows: list[dict[str, Any]]
+    graph_input_rows: list[dict[str, Any]]
+    provider_counts: Counter
+    semantic_vectors: int
 
 
-def _project_name(args: argparse.Namespace) -> str:
-    return args.project or io._slug(Path(args.target).name)
-
-
-def _new_run_dir(args: argparse.Namespace) -> tuple[str, Path]:
-    run_id = f"{_project_name(args)}-{_clock.stamp_compact()}"  # canonical UTC stamp (#223; was local)
-    run_dir = RUN_ROOT / run_id
-    run_dir.mkdir(parents=True, exist_ok=True)
-    return run_id, run_dir
-
-
-def _load_build_docs(args: argparse.Namespace, source_kind: str) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
+def _fetch_docs(args: argparse.Namespace, source_kind: str) -> tuple[list[dict[str, Any]], Any]:
     if source_kind == "url":
-        return crawl._crawl_site(
+        docs, frontier = crawl._crawl_site(
             args.target,
             max_pages=args.max_pages,
             max_depth=args.max_depth,
@@ -188,308 +175,298 @@ def _load_build_docs(args: argparse.Namespace, source_kind: str) -> tuple[list[d
             crawl_mode=getattr(args, "crawl_mode", "link-then-click"),
             embed_screenshots=bool(getattr(args, "embed_screenshots", False)),
         )
-    return _build_from_local(Path(args.target).resolve(), source_kind, args.max_files, args.max_chars), []
+    else:
+        docs = _build_from_local(Path(args.target).resolve(), source_kind, args.max_files, args.max_chars)
+        frontier = []
+    return docs, frontier
 
 
-def _append_source_doc_rows(rows: _BuildRows, doc: dict[str, Any], idx: int) -> tuple[str, str]:
-    source_identity = f"{doc['source']}|{doc['discovered_by']}|{doc['depth']}|{idx}"
-    source_id = f"src-{io._sha(source_identity)[:16]}"
-    doc_id = f"doc-{io._sha(source_identity + doc['title'])[:16]}"
-    rows.source_rows.append({
-        "source_id": source_id,
-        "source": doc["source"],
-        "title": doc["title"],
-        "discovered_by": doc["discovered_by"],
-        "depth": doc["depth"],
-    })
-    rows.doc_rows.append({
-        "document_id": doc_id,
-        "source_id": source_id,
-        "title": doc["title"],
-        "source": doc["source"],
-        "word_count": len(re.findall(r"\S+", doc["text"])),
-    })
-    return source_id, doc_id
+def _ingest_docs(docs, args, gate, tok_id, run_id, source_kind) -> "_IngestBundle":
+    source_rows: list[dict[str, Any]] = []
+    doc_rows: list[dict[str, Any]] = []
+    chunk_rows: list[dict[str, Any]] = []
+    fact_rows: list[dict[str, Any]] = []
+    fact_vector_rows: list[dict[str, Any]] = []
+    vector_rows: list[dict[str, Any]] = []
+    graph_input_rows: list[dict[str, Any]] = []
+    provider_counts: Counter[str] = Counter()
+    semantic_vectors = 0
+    # Content-addressed chunk dedup, run-wide (across docs): content hash -> node.
+    # Identical content (re-crawl, repeated boilerplate, shared sections) collapses
+    # to ONE node + ONE embedding instead of N. See the chunk loop below.
+    chunk_by_content: dict[str, dict[str, Any]] = {}
+    for idx, doc in enumerate(docs, start=1):
+        source_identity = f"{doc['source']}|{doc['discovered_by']}|{doc['depth']}|{idx}"
+        source_id = f"src-{io._sha(source_identity)[:16]}"
+        doc_id = f"doc-{io._sha(source_identity + doc['title'])[:16]}"
+        screenshot_b64 = doc.get("screenshot_b64") or ""
+        source_rows.append({
 
-
-def _append_fact_vectors(
-    rows: _BuildRows,
-    *,
-    sentence: str,
-    chunk_kind: str,
-    tok_id: str,
-    gate: Any,
-    args: argparse.Namespace,
-    run_id: str,
-    chunk_id: str,
-) -> None:
-    dual = lgwks_run.embed_dual(
-        sentence,
-        embed_on=True,
-        provider=args.embed_provider,
-        model=args.embed_model,
-    )
-    fdet = dual["det"]
-    rows.provider_counts[fdet["provider"]] += 1
-    rows.fact_vector_rows.append({
-        "fact_hash": io._sha(sentence),
-        "fact_text": sentence,
-        "provider": fdet["provider"],
-        "dims": fdet["dims"],
-        "vector": fdet["vector"],
-        "fact_score": text._fact_score(sentence),
-        "chunk_kind": chunk_kind,
-        "tokenization_id": tok_id,   # #165: lineage tag (artifact_cid == fact_hash)
-    })
-    gate.ingest_fact(io._sha(sentence), sentence, chunk_kind, capability="ingest_fact_sentence", meta={"chunk_id": chunk_id}, run_id=run_id)
-
-    if dual["sem"]:
-        fsem = dual["sem"]
-        rows.provider_counts[fsem["provider"]] += 1
-        rows.semantic_vectors += 1
-        rows.fact_vector_rows.append({
-            "fact_hash": io._sha(sentence),
-            "fact_text": sentence,
-            "provider": fsem["provider"],
-            "dims": fsem["dims"],
-            "vector": fsem["vector"],
-            "fact_score": text._fact_score(sentence),
-            "chunk_kind": chunk_kind,
-            "tokenization_id": tok_id,   # #165
+            "source_id": source_id,
+            "source": doc["source"],
+            "title": doc["title"],
+            "discovered_by": doc["discovered_by"],
+            "depth": doc["depth"],
         })
-
-
-def _append_chunk_vectors(
-    rows: _BuildRows,
-    *,
-    vector_text: str,
-    chunk_id: str,
-    doc_id: str,
-    fact_score: float,
-    chunk_kind: str,
-    tok_id: str,
-    args: argparse.Namespace,
-) -> None:
-    dual = lgwks_run.embed_dual(
-        vector_text,
-        embed_on=True,
-        provider=args.embed_provider,
-        model=args.embed_model,
-    )
-    cdet = dual["det"]
-    rows.provider_counts[cdet["provider"]] += 1
-    rows.vector_rows.append({
-        "vector_id": f"vec-{io._sha(chunk_id + cdet['provider'])[:16]}",
-        "chunk_id": chunk_id,
-        "document_id": doc_id,
-        "provider": cdet["provider"],
-        "is_semantic": False,
-        "dims": cdet["dims"],
-        "vector_text": vector_text[:2000],
-        "vector": cdet["vector"],
-        "fact_score": fact_score,
-        "chunk_kind": chunk_kind,
-        "tokenization_id": tok_id,   # #165
-        "artifact_cid": chunk_id,    # #165
-    })
-    if dual["sem"]:
-        csem = dual["sem"]
-        rows.provider_counts[csem["provider"]] += 1
-        rows.semantic_vectors += 1
-        rows.vector_rows.append({
-            "vector_id": f"vec-{io._sha(chunk_id + csem['provider'])[:16]}",
-            "chunk_id": chunk_id,
+        doc_rows.append({
             "document_id": doc_id,
-            "provider": csem["provider"],
-            "is_semantic": True,
-            "dims": csem["dims"],
-            "vector_text": vector_text[:2000],
-            "vector": csem["vector"],
-            "fact_score": fact_score,
-            "chunk_kind": chunk_kind,
-            "tokenization_id": tok_id,   # #165
-            "artifact_cid": chunk_id,    # #165
+            "source_id": source_id,
+            "title": doc["title"],
+            "source": doc["source"],
+            "word_count": len(__import__("re").findall(r"\S+", doc["text"])),
         })
-
-
-def _ingest_text_chunks(
-    rows: _BuildRows,
-    *,
-    doc: dict[str, Any],
-    doc_id: str,
-    source_kind: str,
-    tok_id: str,
-    gate: Any,
-    args: argparse.Namespace,
-    run_id: str,
-) -> None:
-    for pos, piece in enumerate(text._chunk_text(doc["text"], size=args.chunk_words, overlap=args.chunk_overlap)):
-        content_hash = io._sha(piece)
-        chunk_id = f"chunk-{content_hash[:16]}"
-        chunk_url = doc["source"] if source_kind == "url" else ""
-        occurrence = {"document_id": doc_id, "position": pos, "url": chunk_url}
-        seen = rows.chunk_by_content.get(chunk_id)
-        if seen is not None:
-            seen["row"]["provenance"].append(occurrence)
-            rows.graph_input_rows.append({
+        for pos, piece in enumerate(text._chunk_text(doc["text"], size=args.chunk_words, overlap=args.chunk_overlap)):
+            # Content-addressed chunk identity: the chunk id IS its content hash, so
+            # identical content (re-crawl, or the same section/boilerplate across
+            # pages) resolves to ONE node in the run DAG. wget dedups by URL; we
+            # dedup by content — strictly stronger, and it matches the State
+            # Fabric's own content-address idempotency (which otherwise discards the
+            # duplicate AFTER we already paid to embed it). Every occurrence still
+            # emits a doc->content graph edge, so no provenance is lost.
+            content_hash = io._sha(piece)
+            chunk_id = f"chunk-{content_hash[:16]}"
+            chunk_url = doc["source"] if source_kind == "url" else ""
+            occurrence = {"document_id": doc_id, "position": pos, "url": chunk_url}
+            seen = chunk_by_content.get(chunk_id)
+            if seen is not None:
+                # Duplicate content within this run: record provenance, reuse the
+                # node + its embeddings, and skip the (expensive) re-embed entirely.
+                seen["row"]["provenance"].append(occurrence)
+                graph_input_rows.append({
+                    "chunk_id": chunk_id,
+                    # #275: per-row tape back-link. The chunk's tape fact cid IS its
+                    # chunk_id (gate.ingest_fact(chunk_id, …)), so graph rows derived
+                    # from it carry that cid as provenance rather than a single
+                    # last-writer cid for the whole batch.
+                    "artifact_cid": chunk_id,
+                    "document_id": doc_id,
+                    "url": chunk_url,
+                    "text": piece,
+                    "hash": content_hash,
+                    "schema": seen["chunk_kind"].upper(),
+                })
+                continue
+            fact_score = text._fact_score(piece)
+            stem = text._stem_text(piece, args.fact_threshold)
+            chunk_kind = text._chunk_kind(piece, fact_score)
+            chunk_row = {
                 "chunk_id": chunk_id,
-                "artifact_cid": chunk_id,
+                "document_id": doc_id,
+                "source": doc["source"],
+                "url": chunk_url,
+                "text": piece,
+                "stem_text": stem,
+                "hash": content_hash,
+                "fact_score": fact_score,
+                "chunk_kind": chunk_kind,
+                "position": pos,
+                "provenance": [occurrence],
+                "tokenization_id": tok_id,   # #165: lineage tag for the relational projection
+                "artifact_cid": chunk_id,    # #165: tape fact cid (chunk_id IS the chunk's tape cid)
+            }
+            chunk_rows.append(chunk_row)
+            chunk_by_content[chunk_id] = {"row": chunk_row, "chunk_kind": chunk_kind}
+            gate.ingest_fact(chunk_id, piece, chunk_kind, capability="ingest_chunk", meta={"doc_id": doc_id, "pos": pos}, run_id=run_id)
+            graph_input_rows.append({
+                "chunk_id": chunk_id,
+                "artifact_cid": chunk_id,  # #275: per-row tape back-link (cid == chunk_id)
                 "document_id": doc_id,
                 "url": chunk_url,
                 "text": piece,
                 "hash": content_hash,
-                "schema": seen["chunk_kind"].upper(),
+                "schema": chunk_kind.upper(),
             })
-            continue
+            if stem:
+                fact_rows.append({
+                    "fact_id": f"fact-{io._sha(chunk_id + stem)[:16]}",
+                    "chunk_id": chunk_id,
+                    "document_id": doc_id,
+                    "fact_text": stem,
+                    "fact_score": fact_score,
+                    "chunk_kind": chunk_kind,
+                    "tokenization_id": tok_id,   # #165
+                    "artifact_cid": chunk_id,    # #165: derived from the chunk's tape entry
+                })
+                for sentence in text._fact_sentences(stem, args.fact_threshold):
+                    dual = port.embed(
+                        sentence,
+                        provider=args.embed_provider,
+                        model=args.embed_model,
+                    )["value"]
+                    # deterministic fact vector (always present; audit trail)
+                    fdet = dual["det"]
+                    provider_counts[fdet["provider"]] += 1
+                    fact_vector_rows.append({
+                        "fact_hash": io._sha(sentence),
+                        "fact_text": sentence,
+                        "provider": fdet["provider"],
+                        "dims": fdet["dims"],
+                        "vector": fdet["vector"],
+                        "fact_score": text._fact_score(sentence),
+                        "chunk_kind": chunk_kind,
+                        "tokenization_id": tok_id,   # #165: lineage tag (artifact_cid == fact_hash)
+                    })
+                    gate.ingest_fact(io._sha(sentence), sentence, chunk_kind, capability="ingest_fact_sentence", meta={"chunk_id": chunk_id}, run_id=run_id)
 
-        fact_score = text._fact_score(piece)
-        stem = text._stem_text(piece, args.fact_threshold)
-        chunk_kind = text._chunk_kind(piece, fact_score)
-        chunk_row = {
-            "chunk_id": chunk_id,
-            "document_id": doc_id,
-            "source": doc["source"],
-            "url": chunk_url,
-            "text": piece,
-            "stem_text": stem,
-            "hash": content_hash,
-            "fact_score": fact_score,
-            "chunk_kind": chunk_kind,
-            "position": pos,
-            "provenance": [occurrence],
-            "tokenization_id": tok_id,   # #165: lineage tag for the relational projection
-            "artifact_cid": chunk_id,    # #165: tape fact cid (chunk_id IS the chunk's tape cid)
-        }
-        rows.chunk_rows.append(chunk_row)
-        rows.chunk_by_content[chunk_id] = {"row": chunk_row, "chunk_kind": chunk_kind}
-        gate.ingest_fact(chunk_id, piece, chunk_kind, capability="ingest_chunk", meta={"doc_id": doc_id, "pos": pos}, run_id=run_id)
-        rows.graph_input_rows.append({
-            "chunk_id": chunk_id,
-            "artifact_cid": chunk_id,  # #275: per-row tape back-link (cid == chunk_id)
-            "document_id": doc_id,
-            "url": chunk_url,
-            "text": piece,
-            "hash": content_hash,
-            "schema": chunk_kind.upper(),
-        })
-        if stem:
-            rows.fact_rows.append({
-                "fact_id": f"fact-{io._sha(chunk_id + stem)[:16]}",
+                    # semantic fact vector (primary; feeds NeoBERT / downstream ML)
+                    if dual["sem"]:
+                        fsem = dual["sem"]
+                        provider_counts[fsem["provider"]] += 1
+                        semantic_vectors += 1
+                        fact_vector_rows.append({
+                            "fact_hash": io._sha(sentence),
+                            "fact_text": sentence,
+                            "provider": fsem["provider"],
+                            "dims": fsem["dims"],
+                            "vector": fsem["vector"],
+                            "fact_score": text._fact_score(sentence),
+                            "chunk_kind": chunk_kind,
+                            "tokenization_id": tok_id,   # #165
+                        })
+
+            vector_text = stem or piece
+            dual = port.embed(
+                vector_text,
+                provider=args.embed_provider,
+                model=args.embed_model,
+            )["value"]
+            # deterministic chunk vector (always present)
+            cdet = dual["det"]
+            provider_counts[cdet["provider"]] += 1
+            vector_rows.append({
+                "vector_id": f"vec-{io._sha(chunk_id + cdet['provider'])[:16]}",
                 "chunk_id": chunk_id,
                 "document_id": doc_id,
-                "fact_text": stem,
+                "provider": cdet["provider"],
+                "is_semantic": False,
+                "dims": cdet["dims"],
+                "vector_text": vector_text[:2000],
+                "vector": cdet["vector"],
                 "fact_score": fact_score,
                 "chunk_kind": chunk_kind,
                 "tokenization_id": tok_id,   # #165
-                "artifact_cid": chunk_id,    # #165: derived from the chunk's tape entry
+                "artifact_cid": chunk_id,    # #165
             })
-            for sentence in text._fact_sentences(stem, args.fact_threshold):
-                _append_fact_vectors(rows, sentence=sentence, chunk_kind=chunk_kind, tok_id=tok_id,
-                                     gate=gate, args=args, run_id=run_id, chunk_id=chunk_id)
+            # semantic chunk vector (primary; feeds NeoBERT)
+            if dual["sem"]:
+                csem = dual["sem"]
+                provider_counts[csem["provider"]] += 1
+                semantic_vectors += 1
+                vector_rows.append({
+                    "vector_id": f"vec-{io._sha(chunk_id + csem['provider'])[:16]}",
+                    "chunk_id": chunk_id,
+                    "document_id": doc_id,
+                    "provider": csem["provider"],
+                    "is_semantic": True,
+                    "dims": csem["dims"],
+                    "vector_text": vector_text[:2000],
+                    "vector": csem["vector"],
+                    "fact_score": fact_score,
+                    "chunk_kind": chunk_kind,
+                    "tokenization_id": tok_id,   # #165
+                    "artifact_cid": chunk_id,    # #165
+                })
 
-        _append_chunk_vectors(rows, vector_text=stem or piece, chunk_id=chunk_id, doc_id=doc_id,
-                              fact_score=fact_score, chunk_kind=chunk_kind, tok_id=tok_id, args=args)
+        # ── Media items → media chunks (opt-in) ────────────────────────────────
+        # //why: first-class media support (ADR-068/INGESTION-LAYER §2).
+        # Both screenshot and harvested images/videos are processed here.
+        media_items = list(doc.get("media", []))
+        if screenshot_b64:
+            media_items.append({"url": doc["source"] + "#screenshot", "label": "[screenshot] " + doc["title"], "modality": "image"})
+        
+        if media_items:
+            import lgwks_multimodal
+            for media_item in media_items:
+                m_url = media_item["url"]
+                m_label = media_item["label"] or f"[{media_item['modality']}] {doc['title']}"
+                m_modality = media_item["modality"]
+                m_chunk_id = f"chunk-{io._sha(doc_id + m_url)[:16]}"
+                
+                # Best-effort fetch if not screenshot
+                m_b64 = screenshot_b64 if m_url.endswith("#screenshot") else None
+                m_mime = doc.get("screenshot_mime") or "image/png" if m_url.endswith("#screenshot") else ""
+                
+                # Fetch logic deferred to harvester; assume available if present in media list
+                # (Actual production fetch would happen here or in the crawler)
+                if not m_b64:
+                    continue # Skip for now until full harvester wiring is proven
+                
+                chunk_rows.append({
+                    "chunk_id": m_chunk_id,
+                    "document_id": doc_id,
+                    "source": doc["source"],
+                    "url": m_url,
+                    "text": m_label,
+                    "stem_text": "",
+                    "hash": io._sha(m_b64),
+                    "fact_score": 0.0,
+                    "chunk_kind": m_modality,
+                    "position": -1,
+                    "tokenization_id": tok_id,   # #165
+                    "artifact_cid": m_chunk_id,  # #165
+                })
+                
+                mm = lgwks_multimodal.embed_media(
+                    image_b64=m_b64 if m_modality == "image" else None,
+                    video_b64=m_b64 if m_modality == "video" else None,
+                    image_mime=m_mime if m_modality == "image" else "",
+                    video_mime=m_mime if m_modality == "video" else "",
+                    caption=m_label,
+                )
+                
+                idet = mm["det"]
+                provider_counts[idet["provider"]] += 1
+                vector_rows.append({
+                    "vector_id": f"vec-{io._sha(m_chunk_id + idet['provider'])[:16]}",
+                    "chunk_id": m_chunk_id, "document_id": doc_id,
+                    "provider": idet["provider"], "is_semantic": False,
+                    "dims": idet["dims"], "vector_text": m_label[:2000],
+                    "vector": idet["vector"], "fact_score": 0.0, "chunk_kind": m_modality,
+                    "tokenization_id": tok_id, "artifact_cid": m_chunk_id,  # #165
+                })
+                
+                if mm.get("sem"):
+                    isem = mm["sem"]
+                    provider_counts[isem["provider"]] += 1
+                    semantic_vectors += 1
+                    vector_rows.append({
+                        "vector_id": f"vec-{io._sha(m_chunk_id + isem['provider'])[:16]}",
+                        "chunk_id": m_chunk_id, "document_id": doc_id,
+                        "provider": isem["provider"], "is_semantic": True,
+                        "dims": isem["dims"], "vector_text": m_label[:2000],
+                        "vector": isem["vector"], "fact_score": 0.0, "chunk_kind": m_modality,
+                        "tokenization_id": tok_id, "artifact_cid": m_chunk_id,  # #165
+                    })
+                    # #275: no artifact_cid back-link here — unlike the text path,
+                    # the media chunk has no gate.ingest_fact tape entry yet (this
+                    # branch is dormant: `continue` above until the media harvester
+                    # is wired). Stamp the media's tape cid here once it lands.
+                    graph_input_rows.append({
+                        "chunk_id": m_chunk_id, "document_id": doc_id,
+                        "url": m_url, "text": m_label,
+                        "hash": isem.get("cid", ""),
+                        "schema": m_modality.upper(),
+                    })
+                    # Emit triples using the new first-class media relations
+                    fact_rows.append({
+                        "fact_id": f"fact-{io._sha(doc_id + m_chunk_id + m_modality)[:16]}",
+                        "i_cid": doc_id, "k": m_modality, "j_cid": m_chunk_id,
+                        "confidence_score": 1.0, "schema": "lgwks.score.record.v1"
+                    })
+    return _IngestBundle(
+        source_rows=source_rows, doc_rows=doc_rows, chunk_rows=chunk_rows,
+        fact_rows=fact_rows, fact_vector_rows=fact_vector_rows, vector_rows=vector_rows,
+        graph_input_rows=graph_input_rows, provider_counts=provider_counts,
+        semantic_vectors=semantic_vectors,
+    )
 
 
-def _ingest_media_items(rows: _BuildRows, *, doc: dict[str, Any], doc_id: str, tok_id: str) -> None:
-    media_items = list(doc.get("media", []))
-    screenshot_b64 = doc.get("screenshot_b64") or ""
-    if screenshot_b64:
-        media_items.append({"url": doc["source"] + "#screenshot", "label": "[screenshot] " + doc["title"], "modality": "image"})
-    if not media_items:
-        return
-
-    import lgwks_multimodal
-    for media_item in media_items:
-        m_url = media_item["url"]
-        m_label = media_item["label"] or f"[{media_item['modality']}] {doc['title']}"
-        m_modality = media_item["modality"]
-        m_chunk_id = f"chunk-{io._sha(doc_id + m_url)[:16]}"
-        m_b64 = screenshot_b64 if m_url.endswith("#screenshot") else None
-        m_mime = doc.get("screenshot_mime") or "image/png" if m_url.endswith("#screenshot") else ""
-        if not m_b64:
-            continue
-
-        rows.chunk_rows.append({
-            "chunk_id": m_chunk_id,
-            "document_id": doc_id,
-            "source": doc["source"],
-            "url": m_url,
-            "text": m_label,
-            "stem_text": "",
-            "hash": io._sha(m_b64),
-            "fact_score": 0.0,
-            "chunk_kind": m_modality,
-            "position": -1,
-            "tokenization_id": tok_id,   # #165
-            "artifact_cid": m_chunk_id,  # #165
-        })
-
-        mm = lgwks_multimodal.embed_media(
-            image_b64=m_b64 if m_modality == "image" else None,
-            video_b64=m_b64 if m_modality == "video" else None,
-            image_mime=m_mime if m_modality == "image" else "",
-            video_mime=m_mime if m_modality == "video" else "",
-            caption=m_label,
-        )
-        idet = mm["det"]
-        rows.provider_counts[idet["provider"]] += 1
-        rows.vector_rows.append({
-            "vector_id": f"vec-{io._sha(m_chunk_id + idet['provider'])[:16]}",
-            "chunk_id": m_chunk_id, "document_id": doc_id,
-            "provider": idet["provider"], "is_semantic": False,
-            "dims": idet["dims"], "vector_text": m_label[:2000],
-            "vector": idet["vector"], "fact_score": 0.0, "chunk_kind": m_modality,
-            "tokenization_id": tok_id, "artifact_cid": m_chunk_id,  # #165
-        })
-        if mm.get("sem"):
-            isem = mm["sem"]
-            rows.provider_counts[isem["provider"]] += 1
-            rows.semantic_vectors += 1
-            rows.vector_rows.append({
-                "vector_id": f"vec-{io._sha(m_chunk_id + isem['provider'])[:16]}",
-                "chunk_id": m_chunk_id, "document_id": doc_id,
-                "provider": isem["provider"], "is_semantic": True,
-                "dims": isem["dims"], "vector_text": m_label[:2000],
-                "vector": isem["vector"], "fact_score": 0.0, "chunk_kind": m_modality,
-                "tokenization_id": tok_id, "artifact_cid": m_chunk_id,  # #165
-            })
-            rows.graph_input_rows.append({
-                "chunk_id": m_chunk_id, "document_id": doc_id,
-                "url": m_url, "text": m_label,
-                "hash": isem.get("cid", ""),
-                "schema": m_modality.upper(),
-            })
-            rows.fact_rows.append({
-                "fact_id": f"fact-{io._sha(doc_id + m_chunk_id + m_modality)[:16]}",
-                "i_cid": doc_id, "k": m_modality, "j_cid": m_chunk_id,
-                "confidence_score": 1.0, "schema": "lgwks.score.record.v1"
-            })
-
-
-def _ingest_docs(
-    *,
-    docs: list[dict[str, Any]],
-    source_kind: str,
-    tok_id: str,
-    gate: Any,
-    args: argparse.Namespace,
-    run_id: str,
-) -> _BuildRows:
-    rows = _BuildRows()
-    for idx, doc in enumerate(docs, start=1):
-        _, doc_id = _append_source_doc_rows(rows, doc, idx)
-        _ingest_text_chunks(rows, doc=doc, doc_id=doc_id, source_kind=source_kind,
-                            tok_id=tok_id, gate=gate, args=args, run_id=run_id)
-        _ingest_media_items(rows, doc=doc, doc_id=doc_id, tok_id=tok_id)
-    return rows
-
-
-def _write_concepts(run_dir: Path, rows: _BuildRows, args: argparse.Namespace) -> None:
+def _extract_concepts(chunk_rows, run_dir, args) -> None:
     # ── Concept extraction (what things mean, not just what was said) ────────────
-    if rows.chunk_rows:
+    cg = None
+    if chunk_rows:
         import lgwks_concept as concept_mod
-        cg = concept_mod.extract_from_chunks(rows.chunk_rows, domain_hints=getattr(args, "concept_hints", None))
+        cg = concept_mod.extract_from_chunks(chunk_rows, domain_hints=getattr(args, "concept_hints", None))
         cg.export_json(run_dir / "concepts.json")
         concept_vector_rows = [
             {
@@ -511,18 +488,30 @@ def _write_concepts(run_dir: Path, rows: _BuildRows, args: argparse.Namespace) -
         io._emit_jsonl(run_dir / "concepts.jsonl", [])
 
 
-def _write_run_jsonl(run_dir: Path, rows: _BuildRows, frontier: list[dict[str, Any]]) -> None:
-    io._emit_jsonl(run_dir / "sources.jsonl", rows.source_rows)
-    io._emit_jsonl(run_dir / "documents.jsonl", rows.doc_rows)
-    io._emit_jsonl(run_dir / "chunks.jsonl", rows.chunk_rows)
-    io._emit_jsonl(run_dir / "facts.jsonl", rows.fact_rows)
-    io._emit_jsonl(run_dir / "vectors.jsonl", rows.vector_rows)
+def _emit_artifacts(run_dir, b: "_IngestBundle", frontier) -> None:
+    source_rows = b.source_rows
+    doc_rows = b.doc_rows
+    chunk_rows = b.chunk_rows
+    fact_rows = b.fact_rows
+    vector_rows = b.vector_rows
+    io._emit_jsonl(run_dir / "sources.jsonl", source_rows)
+    io._emit_jsonl(run_dir / "documents.jsonl", doc_rows)
+    io._emit_jsonl(run_dir / "chunks.jsonl", chunk_rows)
+    io._emit_jsonl(run_dir / "facts.jsonl", fact_rows)
+    io._emit_jsonl(run_dir / "vectors.jsonl", vector_rows)
     if frontier:
         io._emit_jsonl(run_dir / "frontier.jsonl", frontier)
         io._emit_json(run_dir / "crawl_map.json", crawl._crawl_map(frontier))
 
 
-def _project_gate_state(gate: Any, rows: _BuildRows, frontier: list[dict[str, Any]], run_dir: Path) -> dict[str, Any]:
+def _project_fabrics(gate, b: "_IngestBundle", frontier, run_dir) -> dict[str, Any]:
+    source_rows = b.source_rows
+    doc_rows = b.doc_rows
+    chunk_rows = b.chunk_rows
+    fact_rows = b.fact_rows
+    vector_rows = b.vector_rows
+    fact_vector_rows = b.fact_vector_rows
+    graph_input_rows = b.graph_input_rows
     # State Fabric: the entity graph is the gate-owned, cumulative GraphFabric
     # projection (the per-run graph.db was removed in #169). Exports + stats are
     # sourced from the cumulative graph; `query --neighbors` reads it via the gate.
@@ -532,7 +521,7 @@ def _project_gate_state(gate: Any, rows: _BuildRows, frontier: list[dict[str, An
     # tape provenance rather than one last-writer cid for the whole batch. The
     # batch-level tier is the gate's tenant; per-row artifact_cid wins via
     # ingest_chunk's `artifact_cid or chunk.get("artifact_cid")`.
-    gate.graph_fabric.ingest_chunks(rows.graph_input_rows, tier=gate.tenant_id)
+    gate.graph_fabric.ingest_chunks(graph_input_rows, tier=gate.tenant_id)
     graph_json = run_dir / "graph.json"
     graph_mmd = run_dir / "graph.mmd"
     gate.graph_fabric.export_json(graph_json)
@@ -542,26 +531,29 @@ def _project_gate_state(gate: Any, rows: _BuildRows, frontier: list[dict[str, An
     # State Fabric: fact embedding vectors accumulate in the gate's world-tier
     # VectorFabric (the cross-run GLOBAL_FACT_DB was removed in #170). Idempotent
     # by content-address, so re-ingesting an identical fact vector is a no-op.
-    gate.vector_fabric.ingest_fact_vectors(rows.fact_vector_rows)
+    gate.vector_fabric.ingest_fact_vectors(fact_vector_rows)
 
     # State Fabric: the relational surface is the gate-owned, cumulative
     # RelationalProjection (the per-run substrate.db / _build_index_db was deleted;
     # this is now the single relational store, parity-tested in
     # tests/test_substrate_gate_projection.py).
     gate.relational.project_run(
-        source_rows=rows.source_rows,
-        doc_rows=rows.doc_rows,
-        chunk_rows=rows.chunk_rows,
-        fact_rows=rows.fact_rows,
-        vector_rows=rows.vector_rows,
+        source_rows=source_rows,
+        doc_rows=doc_rows,
+        chunk_rows=chunk_rows,
+        fact_rows=fact_rows,
+        vector_rows=vector_rows,
         frontier=frontier,
     )
     return stats
 
 
-def _vector_space(args: argparse.Namespace, rows: _BuildRows) -> dict[str, Any]:
-    _unique_providers = dict(rows.provider_counts)
-    _unique_dims: set[int] = {row["dims"] for row in rows.vector_rows if row.get("dims")}
+def _compute_vector_space(b: "_IngestBundle", args) -> dict[str, Any]:
+    provider_counts = b.provider_counts
+    vector_rows = b.vector_rows
+    semantic_vectors = b.semantic_vectors
+    _unique_providers = dict(provider_counts)
+    _unique_dims: set[int] = {row["dims"] for row in vector_rows if row.get("dims")}
     # Dual-vector runs (det 256-d + sem 4096-d) are intentionally bilingual, not ambiguous.
     # Ambiguity means >1 semantic provider flapping OR >2 dims (model switching mid-run).
     _ambiguous_vs = len(_unique_providers) > 2 or len(_unique_dims) > 2
@@ -575,13 +567,13 @@ def _vector_space(args: argparse.Namespace, rows: _BuildRows) -> dict[str, Any]:
             next(iter(_unique_providers), "")
         )
         _canonical_dims = next(
-            (row["dims"] for row in rows.vector_rows if row.get("dims") and "deterministic" not in row.get("provider", "")),
+            (row["dims"] for row in vector_rows if row.get("dims") and "deterministic" not in row.get("provider", "")),
             next(iter(_unique_dims), 0)
         )
     _canonical_model = args.embed_model or ""
-    _is_semantic = rows.semantic_vectors > 0
+    _is_semantic = semantic_vectors > 0
 
-    return {
+    vector_space: dict[str, Any] = {
         "provider_requested": args.embed_provider,
         "model_requested": _canonical_model,
         "providers_used": _unique_providers,
@@ -591,34 +583,32 @@ def _vector_space(args: argparse.Namespace, rows: _BuildRows) -> dict[str, Any]:
         "semantic": _is_semantic,
         "ambiguous": _ambiguous_vs,
     }
+    return vector_space
 
 
-def _build_manifest(
-    *,
-    args: argparse.Namespace,
-    run_id: str,
-    run_dir: Path,
-    source_kind: str,
-    rows: _BuildRows,
-    frontier: list[dict[str, Any]],
-    stats: dict[str, Any],
-    gate: Any,
-) -> dict[str, Any]:
-    vector_space = _vector_space(args, rows)
-    return {
+def _assemble_manifest(args, source_kind, run_id, run_dir, b: "_IngestBundle", frontier, stats, vector_space, gate) -> dict[str, Any]:
+    provider_counts = b.provider_counts
+    semantic_vectors = b.semantic_vectors
+    vector_rows = b.vector_rows
+    fact_vector_rows = b.fact_vector_rows
+    source_rows = b.source_rows
+    doc_rows = b.doc_rows
+    chunk_rows = b.chunk_rows
+    fact_rows = b.fact_rows
+    manifest = {
         "schema": "lgwks.substrate.run.v0",
         "run_id": run_id,
         "target": args.target,
         "source_type": source_kind,
-        "project": _project_name(args),
+        "project": args.project or io._slug(Path(args.target).name),
         "created_at": _clock.now_iso(),  # canonical UTC ISO (#223; Z→+00:00, completes #151)
         "embedding": {
             "provider_requested": args.embed_provider,
             "model_requested": args.embed_model,
-            "providers_used": dict(rows.provider_counts),
-            "semantic_vectors": rows.semantic_vectors,
-            "total_vectors": len(rows.vector_rows),
-            "global_fact_vectors_written": len(rows.fact_vector_rows),
+            "providers_used": dict(provider_counts),
+            "semantic_vectors": semantic_vectors,
+            "total_vectors": len(vector_rows),
+            "global_fact_vectors_written": len(fact_vector_rows),
         },
         "vector_space": vector_space,
         "auth": {
@@ -635,10 +625,10 @@ def _build_manifest(
         },
         "click_telemetry": getattr(frontier, "click_telemetry", {}),
         "counts": {
-            "sources": len(rows.source_rows),
-            "documents": len(rows.doc_rows),
-            "chunks": len(rows.chunk_rows),
-            "facts": len(rows.fact_rows),
+            "sources": len(source_rows),
+            "documents": len(doc_rows),
+            "chunks": len(chunk_rows),
+            "facts": len(fact_rows),
             "frontier": len(frontier),
             "graph_nodes": stats["nodes"],
             "graph_edges": stats["edges"],
@@ -661,40 +651,38 @@ def _build_manifest(
             "fact_vector_db": str(gate.vector_fabric.path),  # gate world-tier vector store (#170)
         },
     }
+    return manifest
 
 
 def build_run(args: argparse.Namespace) -> dict[str, Any]:
     source_kind = _source_type(args.target, args.source_type)
-    run_id, run_dir = _new_run_dir(args)
-    docs, frontier = _load_build_docs(args, source_kind)
+    run_id = f"{io._slug(args.project or Path(args.target).name)}-{_clock.stamp_compact()}"  # canonical UTC stamp (#223; was local)
+    run_dir = RUN_ROOT / run_id
+    run_dir.mkdir(parents=True, exist_ok=True)
+
+    docs, frontier = _fetch_docs(args, source_kind)
 
     gate = lgwks_storage.get_gate(args.project or Path(args.target).name)
-    try:
-        # #165 Phase 2: every row that lands in a projection carries its tape provenance
-        # — tokenization_id (which analyzer named it) + artifact_cid (the tape fact cid
-        # it derives from). Chunks/facts are ingested via gate.ingest_fact, which uses the
-        # default word_regex tokenizer, so that id is the lineage tag for every derived
-        # vector. artifact_cid is the chunk/fact's own tape cid (== chunk_id / sha(text)),
-        # so a vector is content-addressed back to the exact tape entry it embeds.
-        tok_id = gate.tokenizers.default_word_regex_id()
-        rows = _ingest_docs(docs=docs, source_kind=source_kind, tok_id=tok_id, gate=gate, args=args, run_id=run_id)
-        _write_concepts(run_dir, rows, args)
-        _write_run_jsonl(run_dir, rows, frontier)
-        stats = _project_gate_state(gate, rows, frontier, run_dir)
-        manifest = _build_manifest(
-            args=args,
-            run_id=run_id,
-            run_dir=run_dir,
-            source_kind=source_kind,
-            rows=rows,
-            frontier=frontier,
-            stats=stats,
-            gate=gate,
-        )
-    finally:
-        gate.close()
+    # #165 Phase 2: every row that lands in a projection carries its tape provenance
+    # — tokenization_id (which analyzer named it) + artifact_cid (the tape fact cid
+    # it derives from). Chunks/facts are ingested via gate.ingest_fact, which uses the
+    # default word_regex tokenizer, so that id is the lineage tag for every derived
+    # vector. artifact_cid is the chunk/fact's own tape cid (== chunk_id / sha(text)),
+    # so a vector is content-addressed back to the exact tape entry it embeds.
+    tok_id = gate.tokenizers.default_word_regex_id()
+
+    b = _ingest_docs(docs, args, gate, tok_id, run_id, source_kind)
+
+    _extract_concepts(b.chunk_rows, run_dir, args)
+    _emit_artifacts(run_dir, b, frontier)
+    stats = _project_fabrics(gate, b, frontier, run_dir)
+    vector_space = _compute_vector_space(b, args)
+    manifest = _assemble_manifest(args, source_kind, run_id, run_dir, b, frontier, stats, vector_space, gate)
     (run_dir / "manifest.json").write_text(json.dumps(manifest, indent=2, sort_keys=True), encoding="utf-8")
+    gate.close()
     return manifest
+
+
 
 
 def query_run(args: argparse.Namespace) -> dict[str, Any]:

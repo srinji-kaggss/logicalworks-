@@ -25,8 +25,14 @@ from it.
 
 NEVER FABRICATE (INV-3 / fail-closed). If no tier can answer, the envelope is
 `mode="deferred"` with `value=None` — the harness defers to the human/agent
-rather than invent an answer. Honors the `LGWKS_NO_MODELS` kill-switch: with it
-set, only the deterministic tier runs; everything else degrades or defers.
+rather than invent an answer.
+
+TIER CEILING ("threshold, not chain"). A caller sets `escalate(..., ceiling=...)`
+to cap how high the ladder may climb for a request — the per-request codification
+of "don't reach the expensive, less-trustworthy tier until truly needed." The
+`LGWKS_NO_MODELS` kill-switch is the special case `ceiling="deterministic"` (only
+the deterministic tier runs); it is not a second control, just the most
+restrictive ceiling, so both flow through one suppression path.
 
 OUTPUT. Every call returns one uniform envelope (`lgwks.model.port.v1`) carrying
 the winning tier, the law model id, the trust class, the value, and a full
@@ -70,16 +76,21 @@ class Embedder(Protocol):
 # The escalation order is owned by the law (mesh), not re-stated here.
 TIER_ORDER = mesh.TIER_ORDER  # ("deterministic", "sensor", "generative")
 
-# Tiers that load weights / touch a model artifact. The kill-switch suppresses
-# exactly these; the deterministic tier is always pure code and always runs.
+# Tiers that load weights / touch a model artifact. These are the hang-class
+# rungs that must run under a wall-clock bound; the deterministic tier is always
+# pure code and runs uncapped. (Suppression is decided by the tier ceiling, not
+# by this set — see escalate().)
 _WEIGHT_TIERS = frozenset({"sensor", "generative"})
 
 
 def models_suppressed() -> bool:
-    """True when LGWKS_NO_MODELS is set — only the deterministic tier may run.
+    """True when LGWKS_NO_MODELS is set — the env form of `ceiling="deterministic"`.
 
     The one kill-switch for the whole layer (was honored only by the reasoning
-    port before). Any truthy value engages it; unset/empty disengages.
+    port before). `escalate` reads this as the most restrictive tier ceiling, so
+    the switch and the per-request `ceiling` param share a single suppression path
+    rather than being two parallel controls. Any truthy value engages it;
+    unset/empty disengages.
     """
     return bool(os.environ.get("LGWKS_NO_MODELS"))
 
@@ -287,6 +298,7 @@ def escalate(
     attempts: list[Attempt],
     *,
     threshold: float = 0.0,
+    ceiling: str = "generative",
     defer_why: str = "no tier could answer",
 ) -> dict[str, Any]:
     """Run the ladder for `role` and return one `lgwks.model.port.v1` envelope.
@@ -297,17 +309,59 @@ def escalate(
     below-threshold rung is held as a fallback: if no higher-confidence answer
     ever arrives, the best below-threshold result is returned as `mode=degraded`
     rather than fabricating or losing it. If nothing resolves at all → deferred.
+
+    `threshold` (how good must a rung be to win) and `ceiling` (how far up the
+    ladder we may climb) together are the full "set threshold, not chain" knob:
+    the caller declares intent; the law owns precedence; the harness obeys both.
+
+    `ceiling` is the highest trust tier this request may use — the caller's
+    codification of "don't reach the expensive, less-trustworthy tier until truly
+    needed." It must be one of the locked `trust_class` names
+    (`deterministic` | `sensor` | `generative`); the default `generative` is
+    today's behaviour (no rung is ever above it → zero change for existing
+    callers). A rung above the ceiling is skipped with `outcome="above_ceiling"`.
+    The `LGWKS_NO_MODELS` kill-switch is NOT a parallel control: it is exactly
+    `ceiling="deterministic"`, and both funnel through the one rank comparison
+    below — one mechanism, not two. An unknown ceiling raises (fail loud) rather
+    than silently permitting the LLM.
     """
+    if ceiling not in mesh.TIER_ORDER:
+        raise ValueError(
+            f"ceiling {ceiling!r} is not a trust_class; "
+            f"expected one of {mesh.TIER_ORDER}"
+        )
+    # Validate every rung's trust_class too (fail loud, same as ceiling). A miscatalogued
+    # class (e.g. a typo "llm") sorts last and, at the default ceiling, would otherwise RUN
+    # uncapped and be reported in the envelope under that bogus `trust` label — a caller
+    # reading `trust` for a downstream decision would trust an untrusted tier. Reject it.
+    for a in attempts:
+        if a.trust_class not in mesh.TIER_ORDER:
+            raise ValueError(
+                f"Attempt.trust_class {a.trust_class!r} is not a trust_class; "
+                f"expected one of {mesh.TIER_ORDER}"
+            )
     ordered = sorted(attempts, key=lambda a: mesh.tier_rank(a.trust_class))
-    suppressed = models_suppressed()
+    # The kill-switch collapses to the most restrictive ceiling. After this line
+    # there is a single notion of "how high may we climb": effective_ceiling.
+    effective_ceiling = "deterministic" if models_suppressed() else ceiling
+    ceiling_rank = mesh.tier_rank(effective_ceiling)
+    # Did the ceiling actually hold the ladder below its top? Only then do we
+    # annotate the deferred envelope — default generative leaves it untouched.
+    restricted = ceiling_rank < mesh.tier_rank("generative")
     trace: list[dict[str, Any]] = []
     best_fallback: tuple[float, Attempt, Any] | None = None
 
     for att in ordered:
-        if suppressed and att.trust_class in _WEIGHT_TIERS:
+        # Skip a rung above the ceiling — but only when the ceiling actually
+        # restricts (below generative). At the default top ceiling nothing is ever
+        # skipped, so an unknown/miscatalogued trust_class (which sorts last) keeps
+        # its pre-ceiling behaviour: default is a provable identity. When the caller
+        # DOES restrict, an unknown tier outranks the ceiling and is skipped —
+        # fail-closed, never silently let past.
+        if restricted and mesh.tier_rank(att.trust_class) > ceiling_rank:
             trace.append({"tier": att.trust_class, "model": att.model,
-                          "label": att.label, "outcome": "suppressed",
-                          "why": "LGWKS_NO_MODELS"})
+                          "label": att.label, "outcome": "above_ceiling",
+                          "why": f"ceiling={effective_ceiling}"})
             continue
         try:
             if att.trust_class in _WEIGHT_TIERS:
@@ -316,6 +370,14 @@ def escalate(
                 result = _run_bounded(att.run, _model_timeout())
             else:
                 result = att.run()  # deterministic tier is pure code; never capped
+        except TimeoutError as exc:  # the rung HUNG past its bound — fail-closed
+            # Distinct from a plain error so the training ledger can read "the model
+            # hung" vs "the model errored". Boundedness (R2) guarantees we reach
+            # here instead of blocking the CLI; the ladder escalates/defers.
+            trace.append({"tier": att.trust_class, "model": att.model,
+                          "label": att.label, "outcome": "timeout",
+                          "why": f"{exc}"})
+            continue
         except Exception as exc:  # a rung failing is an escalation, never a crash
             trace.append({"tier": att.trust_class, "model": att.model,
                           "label": att.label, "outcome": "error",
@@ -350,9 +412,12 @@ def escalate(
                 f"({att.trust_class}, conf={conf:.2f})",
         )
 
-    # Nothing answered — fail closed. Never fabricate (INV-3).
+    # Nothing answered — fail closed. Never fabricate (INV-3). When the ceiling
+    # held the ladder down (whether via the param or the NO_MODELS kill-switch),
+    # record WHY the upper tiers were never reached so the training ledger can read
+    # that the LLM was declined by policy, not merely unavailable.
     return _envelope(role, ok=False, mode="deferred", escalation=trace,
-                     why=defer_why + (" [LGWKS_NO_MODELS]" if suppressed else ""))
+                     why=defer_why + (f" [ceiling={effective_ceiling}]" if restricted else ""))
 
 
 # ── Role helpers — wire the existing backends into the ladder ──────────────────
@@ -425,8 +490,14 @@ def classify(text: str, *, threshold: float = 0.60) -> dict[str, Any]:
 
 
 def embed(text: str = "", *, modality: str = "text",
-          media: Any = None, locality: str | None = None) -> dict[str, Any]:
+          media: Any = None, locality: str | None = None,
+          provider: str | None = None, model: str | None = None) -> dict[str, Any]:
     """role=embed — one multimodal vector (text/image/video), as a port envelope.
+
+    `provider`/`model` are optional CLI-override passthroughs (e.g. `--embed-provider
+    apple-local`, `--embed-model <id>`): an explicit value wins, so the port is a true
+    superset of `lgwks_run.embed_dual` and every embed caller can route through it.
+    When omitted, `locality` alone picks the plane.
 
     Embedding is the role where the deterministic tier is ALWAYS present (the
     feature-hash / perceptual-fingerprint audit vector) and the sensor tier is the
@@ -445,10 +516,12 @@ def embed(text: str = "", *, modality: str = "text",
     sel = resolve_model("embed", locality=loc)
     eye = (sel["law_name"] if sel else
            mesh.model_name_for_role("embed", trust_class="sensor"))
-    provider = "openrouter-vl" if loc == CLOUD else "auto"
+    # Explicit provider/model (a caller's CLI override) wins; otherwise locality
+    # picks the plane (LOCAL → local Eye via "auto", CLOUD → remote VL).
+    eff_provider = provider or ("openrouter-vl" if loc == CLOUD else "auto")
     import lgwks_run
-    dual = lgwks_run.embed_dual(text, embed_on=True, provider=provider,
-                                modality=modality, media=media)
+    dual = lgwks_run.embed_dual(text, embed_on=True, provider=eff_provider,
+                                model=model or "", modality=modality, media=media)
     sem = dual.get("sem")
     if sem and sem.get("vector"):
         return _envelope(
@@ -477,7 +550,8 @@ def reason(prompt: str, **kw: Any) -> dict[str, Any]:
     """
     import lgwks_reasoning_port as rp
     r = rp.reason(prompt, **kw)
-    mode_map = {"local": "generative", "agent_handoff": "generative", "deferred": "deferred"}
+    mode_map = {"local": "generative", "cloud": "generative",
+                "agent_handoff": "generative", "deferred": "deferred"}
     mode = mode_map.get(r.get("mode", ""), "deferred")
     return _envelope(
         "proposal", ok=bool(r.get("ok")), mode=mode, tier=mode,

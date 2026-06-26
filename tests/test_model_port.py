@@ -3,8 +3,11 @@
 The contract this locks (Director's law):
   M1  the ladder prefers DETERMINISM — a deterministic rung that resolves wins
       and no model is ever touched (model is the last resort, not the default)
-  M2  LGWKS_NO_MODELS suppresses the weight tiers (sensor/generative); the
-      deterministic tier still runs
+  M2  LGWKS_NO_MODELS suppresses the weight tiers (sensor/generative) — it is the
+      env form of ceiling="deterministic", so skipped rungs trace as above_ceiling;
+      the deterministic tier still runs
+  R1  the tier ceiling caps how high the ladder may climb per-request; NO_MODELS
+      collapses to ceiling="deterministic" (equal envelopes); default is no-op
   M3  fail-closed — when nothing resolves the envelope is mode=deferred with
       value=None: the harness NEVER fabricates (INV-3)
   M4  LAW IS TRUTH — the model id in an envelope comes from MESH_LAW, not a literal
@@ -65,7 +68,7 @@ class TestEscalation(unittest.TestCase):
         self.assertFalse(ran["sensor"], "sensor ran under the kill-switch")
         self.assertEqual(env["mode"], "deferred")
         outcomes = [t["outcome"] for t in env["escalation"]]
-        self.assertIn("suppressed", outcomes)
+        self.assertIn("above_ceiling", outcomes)  # kill-switch == ceiling=deterministic
 
     def test_m3_fail_closed_never_fabricates(self):
         env = mp.escalate("extract", [
@@ -103,6 +106,179 @@ class TestEscalation(unittest.TestCase):
         self.assertEqual(env["value"], ["recovered"])
         outcomes = {t["outcome"] for t in env["escalation"]}
         self.assertIn("error", outcomes)
+
+
+class TestTierCeiling(unittest.TestCase):
+    """R1 — the caller-set tier ceiling ('threshold, not chain').
+
+    The ceiling caps how high the ladder may climb for a request; LGWKS_NO_MODELS
+    is collapsed to the special case ceiling="deterministic" (one mechanism).
+    """
+
+    def setUp(self):
+        self._saved = os.environ.get("LGWKS_NO_MODELS")
+        os.environ.pop("LGWKS_NO_MODELS", None)
+
+    def tearDown(self):
+        if self._saved is None:
+            os.environ.pop("LGWKS_NO_MODELS", None)
+        else:
+            os.environ["LGWKS_NO_MODELS"] = self._saved
+
+    def test_r1_ceiling_sensor_never_invokes_generative(self):
+        """ceiling='sensor' skips the generative rung as above_ceiling, runs sensor."""
+        ran = {"sensor": False, "generative": False}
+
+        def sensor():
+            ran["sensor"] = True
+            return None  # unavailable → would normally escalate to generative
+
+        def generative():
+            ran["generative"] = True
+            return {"v": "llm"}
+
+        env = mp.escalate("classify", [
+            mp.Attempt("sensor", sensor, model="s"),
+            mp.Attempt("generative", generative, model="g"),
+        ], ceiling="sensor")
+        self.assertTrue(ran["sensor"], "sensor should run under ceiling=sensor")
+        self.assertFalse(ran["generative"], "generative ran above the ceiling")
+        gen = [t for t in env["escalation"] if t["tier"] == "generative"]
+        self.assertTrue(gen and gen[0]["outcome"] == "above_ceiling")
+        self.assertEqual(env["mode"], "deferred")
+
+    def test_r1_ceiling_deterministic_equals_no_models(self):
+        """ceiling='deterministic' produces byte-equal envelopes to LGWKS_NO_MODELS=1."""
+        def build():
+            # fresh attempts each run — callables are single-use by intent
+            return [
+                mp.Attempt("deterministic", lambda: None),
+                mp.Attempt("sensor", lambda: {"v": 1}, model="s"),
+                mp.Attempt("generative", lambda: {"v": 2}, model="g"),
+            ]
+
+        env_ceiling = mp.escalate("classify", build(), ceiling="deterministic")
+
+        os.environ["LGWKS_NO_MODELS"] = "1"
+        try:
+            env_killswitch = mp.escalate("classify", build())  # default ceiling
+        finally:
+            os.environ.pop("LGWKS_NO_MODELS", None)
+
+        self.assertEqual(env_ceiling, env_killswitch,
+                         "ceiling=deterministic must equal the NO_MODELS envelope")
+        self.assertEqual(env_ceiling["mode"], "deferred")
+        self.assertIn("[ceiling=deterministic]", env_ceiling["why"])
+
+    def test_r1_default_ceiling_is_no_op(self):
+        """Default ceiling='generative' reproduces current envelopes exactly."""
+        def build():
+            return [mp.Attempt("generative", lambda: {"v": 9}, model="g")]
+
+        env_default = mp.escalate("extract", build())
+        env_explicit = mp.escalate("extract", build(), ceiling="generative")
+        self.assertEqual(env_default, env_explicit)
+        self.assertEqual(env_default["mode"], "generative")
+        self.assertEqual(env_default["value"], {"v": 9})
+        # no ceiling annotation leaks into an unrestricted run
+        self.assertNotIn("[ceiling=", env_default["why"])
+
+    def test_r1_unknown_ceiling_fails_loud_not_open(self):
+        """An invalid ceiling raises rather than silently permitting the LLM."""
+        with self.assertRaises(ValueError):
+            mp.escalate("classify", [mp.Attempt("deterministic", lambda: None)],
+                        ceiling="turbo")
+
+    def test_r1_default_ceiling_does_not_skip_valid_rungs(self):
+        """Default ceiling='generative' never skips a (valid) rung — a provable no-op."""
+        env = mp.escalate("classify", [
+            mp.Attempt("deterministic", lambda: None),
+            mp.Attempt("sensor", lambda: {"v": 1}, model="s"),
+        ])
+        self.assertEqual(env["mode"], "sensor")
+        self.assertNotIn("above_ceiling", [t["outcome"] for t in env["escalation"]])
+
+    def test_r1_miscatalogued_trust_class_raises_not_runs(self):
+        """M7 (hardening): an Attempt with a trust_class outside TIER_ORDER must RAISE,
+        never run uncapped and be reported under a bogus `trust` label. A typo'd
+        'llm'-class rung at the default ceiling used to execute and surface as trust='llm';
+        now it fails loud."""
+        ran = {"weird": False}
+
+        def weird():
+            ran["weird"] = True
+            return {"v": 1}
+
+        with self.assertRaises(ValueError):
+            mp.escalate("classify", [mp.Attempt("mystery-tier", weird, model="m")])
+        self.assertFalse(ran["weird"], "a miscatalogued-tier rung ran instead of raising")
+
+    def test_r1_no_models_kill_switch_cannot_be_raised_by_ceiling(self):
+        """Security: a caller-supplied ceiling can never talk PAST the env
+        kill-switch. NO_MODELS forces deterministic even if ceiling='generative'."""
+        ran = {"gen": False}
+
+        def gen():
+            ran["gen"] = True
+            return {"v": "llm"}
+
+        os.environ["LGWKS_NO_MODELS"] = "1"
+        try:
+            env = mp.escalate("classify",
+                              [mp.Attempt("generative", gen, model="g")],
+                              ceiling="generative")  # caller tries to lift the floor
+        finally:
+            os.environ.pop("LGWKS_NO_MODELS", None)
+        self.assertFalse(ran["gen"], "ceiling='generative' defeated the kill-switch")
+        self.assertEqual(env["mode"], "deferred")
+        self.assertIn("[ceiling=deterministic]", env["why"])
+
+
+class TestBoundedness(unittest.TestCase):
+    """R2 (port half) — a weight tier that HANGS is bounded and fails closed.
+
+    Proven at the port seam with a fake slow rung and a tiny timeout — A14: the
+    deterministic layer validates the nondeterministic path's SHAPE (bound +
+    defer + trace) without loading any real weights.
+    """
+
+    def setUp(self):
+        self._saved_to = os.environ.get("LGWKS_MODEL_TIMEOUT")
+        self._saved_nm = os.environ.get("LGWKS_NO_MODELS")
+        os.environ.pop("LGWKS_NO_MODELS", None)
+        os.environ["LGWKS_MODEL_TIMEOUT"] = "0.05"  # 50ms cap for the test
+
+    def tearDown(self):
+        for k, v in (("LGWKS_MODEL_TIMEOUT", self._saved_to),
+                     ("LGWKS_NO_MODELS", self._saved_nm)):
+            if v is None:
+                os.environ.pop(k, None)
+            else:
+                os.environ[k] = v
+
+    def test_r2_weight_tier_hang_defers_within_timeout(self):
+        import time
+
+        def hang():
+            time.sleep(5)  # far past the 50ms cap — simulates a stuck model load
+            return {"v": "never"}
+
+        start = time.monotonic()
+        env = mp.escalate("classify", [mp.Attempt("generative", hang, model="g")])
+        elapsed = time.monotonic() - start
+
+        self.assertEqual(env["mode"], "deferred", "a hung model must fail closed to deferred")
+        self.assertIsNone(env["value"])
+        self.assertLess(elapsed, 2.0, "escalate did not return within the bound — it hung")
+        outcomes = [t["outcome"] for t in env["escalation"]]
+        self.assertIn("timeout", outcomes, "the hang was not recorded in the trace")
+
+    def test_r2_deterministic_rung_is_never_capped(self):
+        """The bound applies to weight tiers only — pure-code rungs run uncapped
+        even under a tiny model timeout (they cannot hang on I/O)."""
+        env = mp.escalate("extract", [mp.Attempt("deterministic", lambda: [1, 2])])
+        self.assertEqual(env["mode"], "deterministic")
+        self.assertEqual(env["value"], [1, 2])
 
 
 class TestRoleHelpers(unittest.TestCase):
@@ -232,6 +408,43 @@ class TestRunEmbedRoutesThroughPort(unittest.TestCase):
         self.assertEqual(captured["model_name"], law_name.split("/")[-1],
                          "embed must use the law-resolved id, not a literal")
         self.assertTrue(is_sem)
+
+
+class TestEmbedPortRoutingParity(unittest.TestCase):
+    """R5.1 — the embed callers were routed off lgwks_run.embed_dual onto
+    lgwks_model_port.embed(...)["value"]. The envelope value IS the dual, so the
+    vectors must be byte-identical to a direct embed_dual call. Asserted under the
+    deterministic tier (LGWKS_NO_MODELS) so it is model-free, CI-stable, and exact.
+    """
+
+    def setUp(self):
+        self._saved = os.environ.get("LGWKS_NO_MODELS")
+        os.environ["LGWKS_NO_MODELS"] = "1"  # deterministic tier only — byte-stable
+
+    def tearDown(self):
+        if self._saved is None:
+            os.environ.pop("LGWKS_NO_MODELS", None)
+        else:
+            os.environ["LGWKS_NO_MODELS"] = self._saved
+
+    def test_port_value_equals_embed_dual_text(self):
+        import lgwks_run
+        text = "the quick brown fox routes through the one port"
+        direct = lgwks_run.embed_dual(text, embed_on=True, provider="auto", model="")
+        via_port = mp.embed(text)["value"]
+        self.assertEqual(via_port["det"]["vector"], direct["det"]["vector"],
+                         "port.embed value must carry the same deterministic vector as embed_dual")
+        self.assertEqual(via_port["det"]["dims"], direct["det"]["dims"])
+        self.assertIsNone(via_port["sem"], "NO_MODELS → no semantic vector (audit only)")
+
+    def test_port_passthrough_provider_model_parity(self):
+        """substrate_run passes --embed-provider/--embed-model; the port forwards
+        them verbatim, so the result equals the same embed_dual call (R5.1)."""
+        import lgwks_run
+        text = "carry the provider and model overrides through the port"
+        direct = lgwks_run.embed_dual(text, embed_on=True, provider="deterministic", model="")
+        via_port = mp.embed(text, provider="deterministic", model="")["value"]
+        self.assertEqual(via_port["det"]["vector"], direct["det"]["vector"])
 
 
 if __name__ == "__main__":

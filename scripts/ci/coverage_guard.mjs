@@ -24,7 +24,7 @@ const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..', '..');
 // pytest roots actually executed by the pytest.suite lane (dir prefixes).
 const COVERED_PYTEST_ROOTS = ['tests/', 'axiom/tests/'];
 // Rust crates actually executed by the rust.* lanes.
-const COVERED_CRATES = ['crawler/Cargo.toml', 'axiom/rust/Cargo.toml', 'tui/Cargo.toml'];
+const COVERED_CRATES = ['crawler/Cargo.toml', 'axiom/rust/Cargo.toml', 'tui/Cargo.toml', 'lgwks-human/Cargo.toml'];
 
 // Deliberate, stated exclusions. A surface here is NOT run — and that is on the record.
 const EXCLUDED = {

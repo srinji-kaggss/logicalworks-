@@ -234,17 +234,24 @@ class TestAssembleInboundCtx(unittest.TestCase):
 
 
 class TestDomainCoverage(unittest.TestCase):
-    """daemon and access are now in _DOMAINS — pre-existing gap closed."""
+    """daemon and access are reachable via the live dispatcher.
 
-    def test_daemon_in_domains(self):
-        import lgwks_home
-        all_verbs = sum(lgwks_home._DOMAINS.values(), [])
-        self.assertIn("daemon", all_verbs)
+    Retargeted to canonical reality: the #218/#255 collapse moved both off the
+    top level — `daemon` is now an `ops` subcommand and `access` a `gate` subcommand
+    (both verified against the live parser). DOMAINS classifies only TOP-LEVEL verbs,
+    so these no longer belong there; the R7.2 gate (test_domains_coverage.py) now owns
+    DOMAINS↔dispatcher consistency. These tests assert the features stay WIRED.
+    """
 
-    def test_access_in_domains(self):
-        import lgwks_home
-        all_verbs = sum(lgwks_home._DOMAINS.values(), [])
-        self.assertIn("access", all_verbs)
+    def test_daemon_wired_under_ops(self):
+        import lgwks_cli_introspect as ci
+        ops = ci.command_tree().get("ops", {}).get("subcommands", {})
+        self.assertIn("daemon", ops, "daemon must stay reachable as `lgwks ops daemon`")
+
+    def test_access_wired_under_gate(self):
+        import lgwks_cli_introspect as ci
+        gate = ci.command_tree().get("gate", {}).get("subcommands", {})
+        self.assertIn("access", gate, "access must stay reachable as `lgwks gate access`")
 
 
 class TestRunsGetCommand(unittest.TestCase):

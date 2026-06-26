@@ -65,6 +65,15 @@ Proof fixture: `~/ingestion_results/code_embeddings_v1.db` — 4100 rows migrate
 `lgwks_substrate_vector.py`, `lgwks_substrate_crawl.py`) · `lgwks.ingest.v1` (`lgwks_ingest.py:284`) ·
 SQLite DDL: `lgwks_substrate_db.py:43-98` (sources/documents/chunks/facts/vectors/frontier + FTS5),
 `lgwks_entity_graph.py:111-138` (nodes/edges/chunks).
+#### lgwks.translate.rag.v1 — landed Pristine M1–M4 (#350)
+| id | ver | status | defined in | validation |
+|----|-----|--------|-----------|------------|
+| `lgwks.translate.rag.v1` | 1 | **live** | `lgwks_translate_rag.py` | `TranslationPair` (frozen) + `make_cid` |
+
+Fields (`TranslationPair`): `cid` (blake2b-128 of `source_text+target_text+target_lang`) · `source_text` · `target_text` · `source_lang` · `target_lang` · `domain` · `component_type` · `glossary_terms` (dict) · `source_embedding` (float32 binary) · `provenance` (`human`/`model`/`post_edit`/`corpus`) · `quality_score` (f32) · `timestamp`.
+Invariants: idempotent ingest — same `source+target+lang` → same cid (zero duplication); different target text → different cid (translations coexist); domain/provenance/quality are metadata, NOT in the cid (a post-edit upgrades quality without changing identity). Embeddings stored via `lgwks.vector.record.v1` (space_id `translate-rag-v1`); RAG layer built ON the ingestion spine (`lgwks_vector` I1 + `lgwks_embed_port` I4), not a parallel store.
+**Authority:** `spec/second-harness/INGESTION-LAYER.md`, `INGESTION-PLAN.md`.
+
 #### lgwks.artifact.tokenized.v1 — landed Phase 1 (2026-06-15)
 | id | ver | status | defined in | validation |
 |----|-----|--------|-----------|------------|
@@ -167,6 +176,9 @@ side-database (the external `~/ingestion_results/*.db` stores are exactly the lo
 | `lgwks.manifest.v0` / `lgwks.intent.v0` / `lgwks.hooks.v0` / `lgwks.audit.v0` / `lgwks.gh.v0` / `lgwks.session.summary.v0` | 0 | live, research-grade | `lgwks_schema.py:66-133`, `lgwks_gh.py:82` |
 | `lgwks.agent.v1` | 1 | **live** — single-agent front-door envelope (world-view + compiled-workflow trigger): intent → capability selections + workflow plan | `lgwks_agent.py`, `lgwks_manifest.py` |
 | `lgwks.research.live.v0` | 0 | **live (2026-06-23), research-grade** — `research --live` single-shot grounding result: `{schema, query, has_evidence, sources[], findings}`; sources are verifiable citation URLs from the grounding pass (web floor + crawl), never model-claimed | `lgwks_research.py` (`research_command` --live path) |
+| `lgwks.research.v0` | 0 | **live, research-grade** — autonomous deep-research loop INDEX.json: `{schema, objective, purpose, stop_reason, spent, evidence_rounds, surviving, agenda, covered, contradicted, rounds}` | `lgwks_research.py` (`_write_index`) |
+| `lgwks.research.gather.v1` | 1 | **live** — parallel gather result per agenda front: `{schema, fanout, fronts, evidence_fronts, sources, items[{id,node,has_evidence,source_count,preview}]}` | `lgwks_research.py` (`run_auto` parallel gather) |
+| `lgwks.engine.run.v1` | 1 | **live** — engine run envelope from the Rust crawler substrate | `engine/engine.py` |
 | `lgwks.intent.centroids.v1` | 1 | live (cache) | `lgwks_intent_classifier.py:68` |
 | `lgwks.config.v1` | 1 | **live** (Issue 158) — validated YAML config | `lgwks_config.py` | jsonschema |
 | `lgwks.inbound.v1` | 1 | live (**I7**) — reflex pack: `handles[]`, `scores{}`, `budget{limit_tokens,used_tokens,truncated_count,truncated[]}` (count exact, cid list bounded ≤64), `depth_handles[{id,est_tokens,kind}]` | `lgwks_inbound.py` |
@@ -298,12 +310,24 @@ list; never calls `lgwks_do`/`lgwks_workflows`). The multi-event generalisation 
 `_workflow_for_intent` (left intact). **Repurpose when:** any cross-event/latent-workflow detection —
 add a trigger, do not hard-code a new classifier branch.
 
+**`lgwks.model.law.v1`** (model law SOURCE; `spec/second-harness/model-law.json`, generator
+`scripts/gen_model_law.py`; CI lane `model.law`): the ONE authored source of the model law.
+`{schema, describes, intent, sources, spec_divergences[], prose_table[], entries[]}` where each
+`entries[]` row = `{layer?, aetherius_row?, provenance, entry{…the lgwks.model.mesh.v1 fields…}}`.
+`lgwks_model_mesh.MESH_LAW` is GENERATED from `entries[]` (never hand-typed) and the
+`prose_table` is gated against `docs/AETHERIUS_SPEC_2026.md` §3 so the spec prose and the law
+cannot drift apart — the bug class (a hallucinated id like the `Qwen3.7-VL` embed) is killed at
+source. Provenance: the 8-component `current_law` stack is Aetherius §3; the embed Eye id is the
+FINALIZATION §3 correction (see `spec_divergences`). **Repurpose when:** any change to model
+inventory/law → edit THIS file + re-run the generator, never the generated block or the prose alone.
+
 **`lgwks.model.mesh.v1`** (**#119** — model law as data; `lgwks_model_mesh.py`, builder
 `scripts/build_model_mesh.py` → `.lgwks/model_mesh.json`; JSON-Schema:
-`docs/schemas/lgwks.model.mesh.v1.json`): single queryable manifest of the model-stack law
-(spec MODEL-RUNTIME-FINALIZATION §3.1 current law + §3.2 open slots). `{schema, generated_at,
-models[]}` where each entry = `{name, runtime, locality, role, input_schema, output_schema,
-trust_class, fallback, health{status,latency_ms_p50,last_checked}, eval_gate, status
+`docs/schemas/lgwks.model.mesh.v1.json`): single queryable manifest of the model-stack law,
+GENERATED from `lgwks.model.law.v1` (`spec/second-harness/model-law.json`) — current_law stack
+from `docs/AETHERIUS_SPEC_2026.md` §3, embed Eye from MODEL-RUNTIME-FINALIZATION §3. `{schema,
+generated_at, models[]}` where each entry = `{name, runtime, locality, role, input_schema,
+output_schema, trust_class, fallback, health{status,latency_ms_p50,last_checked}, eval_gate, status
 (current_law/open_slot/candidate_reference), notes?}`. **Records inventory; does not change it**
 — no new default, no selection, loads no model. `role`+`trust_class`+`input/output_schema`+
 `eval_gate` are the locked join keys for #120/#122 + the future LogicGPT-1 eval path. Doctor
@@ -322,6 +346,22 @@ Honors `LGWKS_NO_MODELS`; fail-closed — when no tier answers, `mode="deferred"
 existing backends (the parallel of, and runtime counterpart to, `lgwks.reasoning.result.v0`).
 **Repurpose when:** any new role-dispatch / resolve-degrade need → an escalate() ladder + this
 envelope, never a fresh per-caller try/except.
+
+**`lgwks.model.selection.v1`** (`lgwks_model_port.py`, `SELECTION_SCHEMA`): the locality-axis
+companion to `lgwks.model.port.v1` — the resolved *where* a role's model lives (LOCAL mesh / CLOUD
+models.dev / AETHERIUS reserved) for one request, orthogonal to the trust-tier ladder. `{schema,
+role, locality, law_name, runtime_id, card?}`. **Repurpose when:** any locality-resolution need →
+this shape, not a new per-caller dict.
+
+**`lgwks.model.catalog.v1`** (`lgwks_model_port.py`, also consumed by `tui/src/models.rs` over the
+Python↔Rust boundary): the read-only catalog the port exposes to surfaces — the per-role model
+roster pinned from `MESH_LAW`, so the TUI never resolves model ids itself. **Repurpose when:** any
+surface needs the model roster → read this catalog, never re-derive from the mesh.
+
+**`lgwks.models_dev.v1`** (`lgwks_models_dev.py`, `SCHEMA`): the normalized CLOUD model card from the
+`models.dev` catalog (the opt-in non-local locality). Offline-first cache; shape mirrors the local
+`_MODEL_CATALOG` fields so a caller treats local and cloud cards uniformly. **Repurpose when:** any
+cloud-catalog field need → extend this card, not a parallel cloud shape.
 
 ### 12. JEPA manifest-level ids (live, supplement family 7)
 | id | ver | status | defined in | validation |
