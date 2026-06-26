@@ -27,7 +27,8 @@ THRESHOLD = 200  # lines (inclusive def→end) above which a function needs a re
 # function shrank ≤ THRESHOLD or vanished). All tracked for decomposition in #351.
 ALLOWED: dict[tuple[str, str], int] = {
     ("lgwks_jarvis.py", "crawl_command"): 418,        # Pristine R6.2 — jarvis brain-graph sink
-    ("lgwks_research.py", "run_auto"): 385,           # Pristine R6.3 (next) — rolling-state extract
+    ("lgwks_research.py", "run_auto"): 213,           # R6.3 done — round body extracted (was 385); residual setup+report
+    ("lgwks_research.py", "_run_round"): 212,         # R6.3 — extracted round body w/ explicit _RoundState; 7 cohesive step-seams remain
     ("lgwks_substrate_run.py", "_ingest_docs"): 278,  # R6.1 residue — per-doc ingest loop
     ("lgwks_substrate_crawl.py", "_crawl_site"): 321,
     ("lgwks_home.py", "_browser_entryway"): 282,
