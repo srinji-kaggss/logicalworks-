@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import argparse
 import json
+from dataclasses import dataclass
 import lgwks_clock as _clock  # canonical timestamps (#223 foundation-bypass)
 from collections import Counter
 from datetime import date
@@ -144,12 +145,20 @@ def _policy_pack_gaps(
     return gaps
 
 
-def build_run(args: argparse.Namespace) -> dict[str, Any]:
-    source_kind = _source_type(args.target, args.source_type)
-    run_id = f"{io._slug(args.project or Path(args.target).name)}-{_clock.stamp_compact()}"  # canonical UTC stamp (#223; was local)
-    run_dir = RUN_ROOT / run_id
-    run_dir.mkdir(parents=True, exist_ok=True)
+@dataclass
+class _IngestBundle:
+    source_rows: list[dict[str, Any]]
+    doc_rows: list[dict[str, Any]]
+    chunk_rows: list[dict[str, Any]]
+    fact_rows: list[dict[str, Any]]
+    fact_vector_rows: list[dict[str, Any]]
+    vector_rows: list[dict[str, Any]]
+    graph_input_rows: list[dict[str, Any]]
+    provider_counts: Counter
+    semantic_vectors: int
 
+
+def _fetch_docs(args: argparse.Namespace, source_kind: str) -> tuple[list[dict[str, Any]], Any]:
     if source_kind == "url":
         docs, frontier = crawl._crawl_site(
             args.target,
@@ -169,7 +178,10 @@ def build_run(args: argparse.Namespace) -> dict[str, Any]:
     else:
         docs = _build_from_local(Path(args.target).resolve(), source_kind, args.max_files, args.max_chars)
         frontier = []
+    return docs, frontier
 
+
+def _ingest_docs(docs, args, gate, tok_id, run_id, source_kind) -> "_IngestBundle":
     source_rows: list[dict[str, Any]] = []
     doc_rows: list[dict[str, Any]] = []
     chunk_rows: list[dict[str, Any]] = []
@@ -183,16 +195,6 @@ def build_run(args: argparse.Namespace) -> dict[str, Any]:
     # Identical content (re-crawl, repeated boilerplate, shared sections) collapses
     # to ONE node + ONE embedding instead of N. See the chunk loop below.
     chunk_by_content: dict[str, dict[str, Any]] = {}
-
-    gate = lgwks_storage.get_gate(args.project or Path(args.target).name)
-    # #165 Phase 2: every row that lands in a projection carries its tape provenance
-    # — tokenization_id (which analyzer named it) + artifact_cid (the tape fact cid
-    # it derives from). Chunks/facts are ingested via gate.ingest_fact, which uses the
-    # default word_regex tokenizer, so that id is the lineage tag for every derived
-    # vector. artifact_cid is the chunk/fact's own tape cid (== chunk_id / sha(text)),
-    # so a vector is content-addressed back to the exact tape entry it embeds.
-    tok_id = gate.tokenizers.default_word_regex_id()
-
     for idx, doc in enumerate(docs, start=1):
         source_identity = f"{doc['source']}|{doc['discovered_by']}|{doc['depth']}|{idx}"
         source_id = f"src-{io._sha(source_identity)[:16]}"
@@ -451,7 +453,15 @@ def build_run(args: argparse.Namespace) -> dict[str, Any]:
                         "i_cid": doc_id, "k": m_modality, "j_cid": m_chunk_id,
                         "confidence_score": 1.0, "schema": "lgwks.score.record.v1"
                     })
+    return _IngestBundle(
+        source_rows=source_rows, doc_rows=doc_rows, chunk_rows=chunk_rows,
+        fact_rows=fact_rows, fact_vector_rows=fact_vector_rows, vector_rows=vector_rows,
+        graph_input_rows=graph_input_rows, provider_counts=provider_counts,
+        semantic_vectors=semantic_vectors,
+    )
 
+
+def _extract_concepts(chunk_rows, run_dir, args) -> None:
     # ── Concept extraction (what things mean, not just what was said) ────────────
     cg = None
     if chunk_rows:
@@ -477,6 +487,13 @@ def build_run(args: argparse.Namespace) -> dict[str, Any]:
     else:
         io._emit_jsonl(run_dir / "concepts.jsonl", [])
 
+
+def _emit_artifacts(run_dir, b: "_IngestBundle", frontier) -> None:
+    source_rows = b.source_rows
+    doc_rows = b.doc_rows
+    chunk_rows = b.chunk_rows
+    fact_rows = b.fact_rows
+    vector_rows = b.vector_rows
     io._emit_jsonl(run_dir / "sources.jsonl", source_rows)
     io._emit_jsonl(run_dir / "documents.jsonl", doc_rows)
     io._emit_jsonl(run_dir / "chunks.jsonl", chunk_rows)
@@ -486,6 +503,15 @@ def build_run(args: argparse.Namespace) -> dict[str, Any]:
         io._emit_jsonl(run_dir / "frontier.jsonl", frontier)
         io._emit_json(run_dir / "crawl_map.json", crawl._crawl_map(frontier))
 
+
+def _project_fabrics(gate, b: "_IngestBundle", frontier, run_dir) -> dict[str, Any]:
+    source_rows = b.source_rows
+    doc_rows = b.doc_rows
+    chunk_rows = b.chunk_rows
+    fact_rows = b.fact_rows
+    vector_rows = b.vector_rows
+    fact_vector_rows = b.fact_vector_rows
+    graph_input_rows = b.graph_input_rows
     # State Fabric: the entity graph is the gate-owned, cumulative GraphFabric
     # projection (the per-run graph.db was removed in #169). Exports + stats are
     # sourced from the cumulative graph; `query --neighbors` reads it via the gate.
@@ -519,7 +545,13 @@ def build_run(args: argparse.Namespace) -> dict[str, Any]:
         vector_rows=vector_rows,
         frontier=frontier,
     )
+    return stats
 
+
+def _compute_vector_space(b: "_IngestBundle", args) -> dict[str, Any]:
+    provider_counts = b.provider_counts
+    vector_rows = b.vector_rows
+    semantic_vectors = b.semantic_vectors
     _unique_providers = dict(provider_counts)
     _unique_dims: set[int] = {row["dims"] for row in vector_rows if row.get("dims")}
     # Dual-vector runs (det 256-d + sem 4096-d) are intentionally bilingual, not ambiguous.
@@ -551,7 +583,18 @@ def build_run(args: argparse.Namespace) -> dict[str, Any]:
         "semantic": _is_semantic,
         "ambiguous": _ambiguous_vs,
     }
+    return vector_space
 
+
+def _assemble_manifest(args, source_kind, run_id, run_dir, b: "_IngestBundle", frontier, stats, vector_space, gate) -> dict[str, Any]:
+    provider_counts = b.provider_counts
+    semantic_vectors = b.semantic_vectors
+    vector_rows = b.vector_rows
+    fact_vector_rows = b.fact_vector_rows
+    source_rows = b.source_rows
+    doc_rows = b.doc_rows
+    chunk_rows = b.chunk_rows
+    fact_rows = b.fact_rows
     manifest = {
         "schema": "lgwks.substrate.run.v0",
         "run_id": run_id,
@@ -608,9 +651,38 @@ def build_run(args: argparse.Namespace) -> dict[str, Any]:
             "fact_vector_db": str(gate.vector_fabric.path),  # gate world-tier vector store (#170)
         },
     }
+    return manifest
+
+
+def build_run(args: argparse.Namespace) -> dict[str, Any]:
+    source_kind = _source_type(args.target, args.source_type)
+    run_id = f"{io._slug(args.project or Path(args.target).name)}-{_clock.stamp_compact()}"  # canonical UTC stamp (#223; was local)
+    run_dir = RUN_ROOT / run_id
+    run_dir.mkdir(parents=True, exist_ok=True)
+
+    docs, frontier = _fetch_docs(args, source_kind)
+
+    gate = lgwks_storage.get_gate(args.project or Path(args.target).name)
+    # #165 Phase 2: every row that lands in a projection carries its tape provenance
+    # — tokenization_id (which analyzer named it) + artifact_cid (the tape fact cid
+    # it derives from). Chunks/facts are ingested via gate.ingest_fact, which uses the
+    # default word_regex tokenizer, so that id is the lineage tag for every derived
+    # vector. artifact_cid is the chunk/fact's own tape cid (== chunk_id / sha(text)),
+    # so a vector is content-addressed back to the exact tape entry it embeds.
+    tok_id = gate.tokenizers.default_word_regex_id()
+
+    b = _ingest_docs(docs, args, gate, tok_id, run_id, source_kind)
+
+    _extract_concepts(b.chunk_rows, run_dir, args)
+    _emit_artifacts(run_dir, b, frontier)
+    stats = _project_fabrics(gate, b, frontier, run_dir)
+    vector_space = _compute_vector_space(b, args)
+    manifest = _assemble_manifest(args, source_kind, run_id, run_dir, b, frontier, stats, vector_space, gate)
     (run_dir / "manifest.json").write_text(json.dumps(manifest, indent=2, sort_keys=True), encoding="utf-8")
     gate.close()
     return manifest
+
+
 
 
 def query_run(args: argparse.Namespace) -> dict[str, Any]:

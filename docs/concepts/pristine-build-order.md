@@ -304,14 +304,41 @@ Opus-decided — the agent executes the mechanical 80%, Opus owns the load-beari
 
 # Sequence at a glance
 
-| Milestone | Rot | Risk | Director-gated leaves | Checkpoint |
-|---|---|---|---|---|
-| M1 | R7.1 catalog parity + R7.4 provenance | 🟢 | — | |
-| M2 | R4 dup-utility collapse (+ R4.4 epoch after) | 🟢🟡 | — | ⛔ **CP1** → Opus rules R5.2, R5.3 |
-| M3 | R5 model-port stragglers | 🟡 | R5.2, R5.3 | |
-| M4 | R7.2 DOMAINS + R8 module-coverage gate | 🟢 | — | ⛔ **CP2** → Opus rules R3.3, R6.2 |
-| M5 | R3 front-door collapse + R9 absorb lgwks_do | 🔴 | R3.3 | |
-| M6 | R6 god-function decomposition | 🟡🔴 | (R6.2 per CP2) | ⛔ **CP3** → completeness critic |
+| Milestone | Rot | Risk | Director-gated leaves | Checkpoint | Status |
+|---|---|---|---|---|---|
+| M1 | R7.1 catalog parity + R7.4 provenance | 🟢 | — | | ✅ done (#350) |
+| M2 | R4 dup-utility collapse (+ R4.4 epoch after) | 🟢🟡 | — | ⛔ **CP1** → Opus rules R5.2, R5.3 | ✅ done (#350) |
+| M3 | R5 model-port stragglers | 🟡 | R5.2, R5.3 | | ✅ done (#350) |
+| M4 | R7.2 DOMAINS + R8 module-coverage gate | 🟢 | — | ⛔ **CP2** → Opus rules R3.3, R6.2 | ✅ done (#350) |
+| M5 | R3 front-door collapse + R9 absorb lgwks_do | 🔴 | R3.3 | | ⚠️ **blocked at root (G10)** — see below |
+| M6 | R6 god-function decomposition | 🟡🔴 | (R6.2 per CP2) | ⛔ **CP3** → completeness critic | ✅ done (#352) |
+
+# Final status & next-agent handoff (2026-06-26)
+
+The **de-slop executable scope is delivered**: M1–M4 (PR #350) and M6 (PR #352) landed;
+full suite green, local Keel CI GO modulo the pre-existing report-only `target.gate` (#304).
+
+**M5 was ruled blocked at the root, not skipped.** The front-door collapse is gated by
+**G10**: the daemon executor (`lgwks_daemon._dispatch_item`) runs only 5 kinds
+`{research_run, ingest_file, index_run, workflow, worktree_*}`; everything else is a logged
+no-op. The repo's own `engine/DAEMON-ABSORPTION-LOG.md` binds the order
+*make-daemon-execute → reroute → delete*, so the leaf framing runs ahead of the gate:
+- **R3.1** ✅ already satisfied (the doc names the live verb `agent`; `route` is retired).
+- **R3.2** (shim `route`) — `lgwks_route` has **zero live callers** and its `codebase_search`
+  kind is not daemon-executable; shimming it would route to a no-op. Leave frozen until G10.
+- **R3.3 / R9** — `lgwks_do`'s leaves are still the shared library for `lgwks_workflows`'
+  4 live verbs, so they cannot be deleted until absorbed + the daemon can execute their kinds.
+
+**What unblocks M5: closing G10** (make the daemon execute the remaining kinds) — daemon-**core**
+work, tracked under the orchestration-consolidation epic **#255**, not a de-slop leaf.
+
+**Decomposition debt** from M6 (the cohesive functions left ≥200 lines: `_run_round`,
+`crawl_command`, `_ingest_docs`, + 6 pre-existing) is allow-listed in the R6.4 size-ratchet
+gate and tracked in **#351**.
+
+**M5/M6 forks ruled by Opus** (CP2): R3.3 → enqueue write/network as a `workflow` item once
+G10 closes, keep reads inline; R6.2 → chunkers already converged (one `SlidingWindowChunking`
++ one hash seam), so it downgraded to a parity gate, not a risky merge.
 
 # See also
 
