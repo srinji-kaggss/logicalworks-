@@ -5,6 +5,7 @@
 * [BUILD — End-to-End Entry Point](BUILD.md) — 3.
 * [Frontier Program — End-to-End Map](MAP.md) — We are not building a better code generator — that road ends at the wall every frontier
 * [Gaps — Substrate Unification (2026-06-09)](gaps-2026-06-09.md) — 3.
+* [lgwks-human — daemon control surface (Rust TUI)](lgwks-human-control-surface.md) — The human→daemon control surface. A Rust TUI that observes daemon-events.db and steers the daemon via the canonical ops-daemon emit/enqueue write path. Documents the confirm-gate invariant, the WORK_KIND-vs-event-KIND split, and the affordance/input key routing.
 
 ## Spec
 
