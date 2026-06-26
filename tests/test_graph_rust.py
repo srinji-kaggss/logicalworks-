@@ -150,17 +150,22 @@ def test_local_branches_for_issue_finds_match():
     assert "number" in sig.parameters
 
 
-def test_compute_issue_next_shows_local_branch():
-    """L1: _compute_issue_next shows 'checkout existing branch' when local branch exists."""
+def test_compute_issue_next_shows_local_branch(monkeypatch):
+    """L1: _compute_issue_next routes to 'start' (create branch) when no PR, no
+    commit ref, and no local branch reference the issue."""
     import lgwks_gh as gh
-    # Use a synthetic issue number that can never appear in git history or as a
-    # real branch — otherwise _git_log_has_issue_ref / _local_branches_for_issue
-    # read live repo state and route to "verify"/"checkout", making this test
-    # depend on whatever commits/branches happen to exist (a real #352 commit on
-    # main broke it). The assertion below is unchanged; only the fixture is hermetic.
+    # Fully hermetic: _compute_issue_next consults live git via two readers
+    # (_git_log_has_issue_ref, _local_branches_for_issue). A real #352 commit on
+    # main once broke this test because it read live state. Stub both readers to
+    # the empty/no-match case so the routing — not the ambient repo — is what's
+    # under test. (Synthetic-number isolation alone left a residual collision
+    # surface and an OR-clause that would have passed even on a collision.)
+    monkeypatch.setattr(gh, "_git_log_has_issue_ref", lambda *_: False)
+    monkeypatch.setattr(gh, "_local_branches_for_issue", lambda *_: [])
     issue = gh.IssueView(number=99999999, title="test", state="open", labels=[], assignees=[])
     actions = gh._compute_issue_next(issue)
-    assert len(actions) > 0
-    # When no linked PR and no local branch, it suggests "create branch"
-    start_actions = [a for a in actions if a.verb == "start"]
-    assert len(start_actions) > 0 or any(a.verb in ("checkout", "push") for a in actions)
+    verbs = [a.verb for a in actions]
+    # No PR + no commit ref + no branch ⇒ the create-branch ("start") action MUST
+    # be present, and none of the live-state-dependent routes may appear.
+    assert "start" in verbs
+    assert not any(v in ("checkout", "push", "verify", "review_pr") for v in verbs)
