@@ -25,6 +25,12 @@ jobs:
       # node is preinstalled on ubuntu-latest; rust/cargo is preinstalled for the Rust lanes.
       # uv (above) backs the hermetic pytest.suite lane. A missing tool makes a lane fail-closed
       # (NO-GO), never a silent pass — the runner's own contract.
+      # poppler-utils supplies pdftotext/pdftoppm/pdfinfo — the primary PDF-extract path in
+      # lgwks_extract.py. It is present on the local Keel host, so the projection must supply it
+      # too; without it tests/test_realworld_extract_convert.py::...::test_text_layer_pdf_extracts
+      # fails-closed and takes pytest.suite → testability_falsifiability → lgwks_floor to NO-GO.
+      - name: install toolchain deps (poppler-utils for the PDF-extract lane)
+        run: sudo apt-get update -qq && sudo apt-get install -y -qq poppler-utils
       - name: node scripts/ci/run.mjs --tier commit
         run: node scripts/ci/run.mjs --tier commit
       - name: upload sealed run record
