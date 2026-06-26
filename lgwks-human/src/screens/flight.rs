@@ -335,16 +335,26 @@ impl Screen for FlightScreen {
                         }
                         return ScreenCmd::None;
                     }
-                    // Alt+1-9 or 1-9 in normal mode activates affordances
+                    // Alt+N fires affordance N from any mode (escape hatch from input
+                    // mode); bare N fires it only in normal mode. In input mode a bare
+                    // digit must be TYPED, not swallowed — so forward it to the input
+                    // handler at the end of this match.
                     KeyCode::Char(c @ '1'..='9') => {
                         let is_alt = key.modifiers.contains(crossterm::event::KeyModifiers::ALT);
-                        if !self.input_active || is_alt {
+                        if is_alt || !self.input_active {
                             let idx = (c as usize) - ('1' as usize);
                             if let Some(step) = state.packet.next_steps.get(idx) {
                                 return affordance_cmd(step);
                             }
                             return ScreenCmd::None;
                         }
+                        // input_active && !is_alt: type the digit. Break out of the
+                        // match so the input handler below runs. (The old code dropped
+                        // the key here, which made digits un-typeable in input mode.)
+                        if self.input_active {
+                            self.input.handle_event(&crossterm::event::Event::Key(*key));
+                        }
+                        return ScreenCmd::None;
                     }
                     // Enter submits free-text intent
                     KeyCode::Enter if self.input_active => {
@@ -518,5 +528,67 @@ mod tests {
         // A daemon that omits the approval field must still gate, never bypass.
         let s = step("worktree_close", Some("medium"), None);
         assert!(matches!(affordance_cmd(&s), ScreenCmd::Confirm { .. }));
+    }
+
+    // ── Integration: key dispatch reaches affordances ─────────────────────────
+    // These guard against a regression where the app-level global key handler
+    // hijacked bare `1`-`9` for screen switching, so FLIGHT's affordance-by-number
+    // (and typing digits in the input) silently broke. The handler below is the
+    // screen-local one; the app-level fix (removing the digit shortcuts) is what
+    // lets these events actually reach the screen.
+
+    fn key(code: KeyCode, mods: KeyModifiers) -> Event {
+        Event::Key(crossterm::event::KeyEvent::new(code, mods))
+    }
+
+    fn state_with_steps(steps: &[NextStep]) -> DaemonState {
+        let mut s = DaemonState::default();
+        s.packet.next_steps = steps.to_vec();
+        s
+    }
+
+    #[test]
+    fn bare_digit_in_normal_mode_fires_affordance_not_navigate() {
+        // Regression: pressing `1` on FLIGHT (normal mode) must pick affordance #0
+        // (EnqueueWork), not be swallowed as a screen-switch by the app-level
+        // global handler. The global digit shortcuts were removed so this event
+        // reaches the screen; this test guards the screen-local half.
+        let mut scr = FlightScreen::new();
+        scr.input_active = false; // normal mode
+        let st = state_with_steps(&[
+            step("research_run", Some("low"), Some("none")),
+            step("worktree_close", Some("medium"), Some("once")),
+        ]);
+        let cmd = scr.handle_event(&key(KeyCode::Char('1'), KeyModifiers::NONE), &st);
+        assert!(
+            matches!(cmd, ScreenCmd::EnqueueWork { ref kind, .. } if kind == "research_run"),
+            "bare `1` in normal mode must enqueue affordance #0, got {cmd:?}"
+        );
+    }
+
+    #[test]
+    fn alt_digit_fires_affordance_even_in_input_mode() {
+        // Alt+N must fire the affordance even while the input box is focused —
+        // the is_alt branch is the escape hatch that lets affordances work from
+        // input mode. The old global digit intercept ate Alt+1 too.
+        let mut scr = FlightScreen::new();
+        scr.input_active = true;
+        let st = state_with_steps(&[step("workflow", Some("medium"), Some("once"))]);
+        let cmd = scr.handle_event(&key(KeyCode::Char('1'), KeyModifiers::ALT), &st);
+        assert!(
+            matches!(cmd, ScreenCmd::Confirm { .. }),
+            "Alt+1 from input mode must still fire affordance #0 (confirm), got {cmd:?}"
+        );
+    }
+
+    #[test]
+    fn digit_in_input_mode_is_typed_not_an_affordance() {
+        // Regression: with input focused, bare `1` must go into the text buffer
+        // (so the user can type "1234"), not fire an affordance or switch screen.
+        let mut scr = FlightScreen::new();
+        scr.input_active = true;
+        let st = state_with_steps(&[step("research_run", Some("low"), Some("none"))]);
+        let _ = scr.handle_event(&key(KeyCode::Char('1'), KeyModifiers::NONE), &st);
+        assert_eq!(scr.input.value(), "1", "bare `1` in input mode must be typed, not treated as an affordance");
     }
 }

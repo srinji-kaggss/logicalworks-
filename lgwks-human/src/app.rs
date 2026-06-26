@@ -89,10 +89,11 @@ impl App {
                         }
                         return;
                     }
-                    KeyCode::Char('1') => { self.active_screen = ScreenId::Flight; return; }
-                    KeyCode::Char('2') => { self.active_screen = ScreenId::Runs; return; }
-                    KeyCode::Char('3') => { self.active_screen = ScreenId::Queue; return; }
-                    KeyCode::Char('4') => { self.active_screen = ScreenId::Wire; return; }
+                    // Bare digit shortcuts (1-4 → screen) removed: they collided with
+                    // FLIGHT's affordance hotkeys (Alt/normal `1`-`9` pick affordance N)
+                    // AND with typing digits 1-4 in the free-text input. Screen switching
+                    // is fully covered by Ctrl-F/R/W and Tab/BackTab, so the digits added
+                    // nothing and silently broke the affordance + input paths.
                     _ => {}
                 }
             }

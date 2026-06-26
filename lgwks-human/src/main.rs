@@ -87,7 +87,9 @@ async fn main() -> Result<()> {
         tokio::spawn(async move {
             // Seed the state with a standalone stub
             {
-                let mut st = state_clone.write().unwrap();
+                // Poison-recovery: if any other holder panicked, recover the inner
+                // guard rather than panicking the demo poll task.
+                let mut st = state_clone.write().unwrap_or_else(|p| p.into_inner());
                 st.status.alive = true;
                 st.status.status = "standalone".to_string();
                 st.packet = bridge::ContextPacket {
@@ -129,7 +131,7 @@ async fn main() -> Result<()> {
                 tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
                 tick_count += 1;
                 {
-                    let mut st = state_clone.write().unwrap();
+                    let mut st = state_clone.write().unwrap_or_else(|p| p.into_inner());
                     // Generate a noisy sine wave for entropy
                     let v = ((tick_count as f64 * 0.1).sin() * 50.0 + 50.0 + (rand::random::<f64>() * 20.0)) as u64;
                     st.packet.entropy_history.push(v);

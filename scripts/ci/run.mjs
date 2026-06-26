@@ -78,12 +78,17 @@ const COMMIT_LANES = [
   { id: 'pytest.suite', gate: 'commit', cmd: ['uv', 'run', '--python', '3.12',
       '--with', 'pytest', '--with', 'cryptography', '--with', 'pyyaml', '--with', 'networkx',
       'python', '-m', 'pytest', 'tests/', 'axiom/tests/', '-rs'] },
-  // Rust: all three first-party crates. crawler/ (core pillar, 34 tests) and tui/
+  // Rust: all first-party crates. crawler/ (core pillar, 34 tests) and tui/
   // were covered by NOTHING before this; the Makefile test-rust ran axiom/rust only.
   // tui currently has 0 tests, so its lane verifies the crate still COMPILES.
   { id: 'rust.crawler', gate: 'commit', cmd: ['cargo', 'test', '--manifest-path', 'crawler/Cargo.toml'] },
   { id: 'rust.axiom', gate: 'commit', cmd: ['cargo', 'test', '--manifest-path', 'axiom/rust/Cargo.toml'] },
   { id: 'rust.tui', gate: 'commit', cmd: ['cargo', 'test', '--manifest-path', 'tui/Cargo.toml'] },
+  // lgwks-human (the daemon control surface TUI). 16 behavioral tests: confirm-gate
+  // invariant, char-safe truncation, and the affordance/input key-dispatch integration
+  // cases that caught 4 real defects the unit tests on needs_confirm/affordance_cmd
+  // could not see. Owner-approved wiring (#323 merge): clears coverage.completeness.
+  { id: 'rust.human', gate: 'commit', cmd: ['cargo', 'test', '--manifest-path', 'lgwks-human/Cargo.toml'] },
   // Docs gate (Director: "documentation has to be updated before CI is run"). The
   // docs/ knowledge bundle must be OKF-conformant (§9: every concept has a non-empty
   // `type`) AND fresh (generated indexes/frontmatter current — a body changed without

@@ -106,7 +106,14 @@ impl Screen for WireScreen {
             for (sess, (count, last_ts, last_kind)) in stats_vec.into_iter().take(15) {
                 // char-safe slicing — session ids / timestamps come from event data.
                 let short_sess = crate::util::head(&sess, 15).to_string();
-                let short_ts = last_ts.get(11..19).map(str::to_string).unwrap_or(last_ts);
+                // RFC3339 ts "HH:MM:SS" lives at chars 11..19 when present. Use the
+                // canonical char-safe head (a multibyte ts can't land here in practice,
+                // but keep the floor consistent with the rest of the crate).
+                let short_ts = if last_ts.chars().count() >= 19 {
+                    crate::util::head(&last_ts, 19).get(11..).unwrap_or(&last_ts).to_string()
+                } else {
+                    last_ts.clone()
+                };
                 session_lines.push(Line::from(vec![
                     Span::styled(format!("  {:<15} │ ", short_sess), Style::default().fg(CREAM)),
                     Span::styled(format!("{:<6} │ ", count), Style::default().fg(EMERALD_DIM)),

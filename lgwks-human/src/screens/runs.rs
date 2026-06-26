@@ -105,7 +105,10 @@ impl Screen for RunsScreen {
                 ListItem::new(Line::from(vec![
                     Span::styled(format!(" {} ", crate::util::head(&r.run_id, 8)), Style::default().fg(SLATE_DIM)),
                     Span::styled(
-                        r.target_url.as_deref().unwrap_or("(no url)").get(..50).unwrap_or("").to_string(),
+                        // char-safe: a URL with multibyte chars near char 50 must not
+                        // vanish (naive `.get(..50).unwrap_or("")` returns empty on an
+                        // interior boundary). Route through the canonical head() helper.
+                        format!("{} ", crate::util::head(&r.target_url.as_deref().unwrap_or("(no url)"), 50)),
                         Style::default().fg(CREAM_DIM),
                     ),
                     Span::styled("  ", Style::default()),

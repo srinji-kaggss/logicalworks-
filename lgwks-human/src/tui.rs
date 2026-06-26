@@ -122,24 +122,28 @@ impl Tui {
                             Some(Ok(evt)) => match evt {
                                 CrosstermEvent::Key(key) => {
                                     if key.kind == KeyEventKind::Press {
-                                        _tx.send(Event::Key(key)).unwrap();
+                                        // Ignore send failure: on shutdown the receiver
+                                        // (owned by `run`'s `tui.next()`) drops first, so
+                                        // the next send would panic the poll task. Same
+                                        // class as the Drop unwrap we removed.
+                                        let _ = _tx.send(Event::Key(key));
                                     }
                                 }
                                 CrosstermEvent::Mouse(m) => { last_mouse = Some(m); }
-                                CrosstermEvent::Resize(x, y) => { _tx.send(Event::Resize(x, y)).unwrap(); }
-                                CrosstermEvent::FocusLost => { _tx.send(Event::FocusLost).unwrap(); }
-                                CrosstermEvent::FocusGained => { _tx.send(Event::FocusGained).unwrap(); }
-                                CrosstermEvent::Paste(s) => { _tx.send(Event::Paste(s)).unwrap(); }
+                                CrosstermEvent::Resize(x, y) => { let _ = _tx.send(Event::Resize(x, y)); }
+                                CrosstermEvent::FocusLost => { let _ = _tx.send(Event::FocusLost); }
+                                CrosstermEvent::FocusGained => { let _ = _tx.send(Event::FocusGained); }
+                                CrosstermEvent::Paste(s) => { let _ = _tx.send(Event::Paste(s)); }
                             }
-                            Some(Err(_)) => { _tx.send(Event::Error).unwrap(); }
+                            Some(Err(_)) => { let _ = _tx.send(Event::Error); }
                             None => {}
                         }
                     }
-                    _ = tick_delay => { _tx.send(Event::Tick).unwrap(); }
+                    _ = tick_delay => { let _ = _tx.send(Event::Tick); }
                     _ = render_delay => {
-                        _tx.send(Event::Render).unwrap();
+                        let _ = _tx.send(Event::Render);
                         if let Some(m) = last_mouse.take() {
-                            _tx.send(Event::Mouse(m)).unwrap();
+                            let _ = _tx.send(Event::Mouse(m));
                         }
                     }
                 }
