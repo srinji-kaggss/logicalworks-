@@ -850,61 +850,55 @@ def _lang_of(path: str) -> str:
     return "other"
 
 
-def extract_from_repo(repo: Path, previous: Graph | None = None) -> Graph:
-    """Build a Graph from a git repository using AST parsing.
+_FileData = tuple[str, Path, str, ast.AST | None, list[str], list[str], set[str], set[str], list[str]]
 
-    If *previous* is provided, only re-parse files whose sha256 changed (incremental).
-    Deleted files are removed. Untracked files are ignored (git ls-files boundary).
-    """
+
+def _git_ls_files(repo: Path) -> list[str]:
     import subprocess
-    g = Graph(repo=str(repo.resolve()))
-
-    # respect .gitignore via git ls-files
     p = subprocess.run(
         ["git", "-C", str(repo), "ls-files"],
         capture_output=True, text=True, timeout=30,
     )
     if p.returncode != 0:
-        return g
+        return []
+    return [ln for ln in p.stdout.splitlines() if ln.strip()]
 
-    paths = [ln for ln in p.stdout.splitlines() if ln.strip()]
 
-    # ── incremental setup ──────────────────────────────────────────────────────
-    prev_nodes: dict[str, Node] = {}
-    prev_by_def: dict[str, str] = {}  # def:name -> file path
-    if previous:
-        prev_nodes = dict(previous.nodes)
-        for nid, n in prev_nodes.items():
-            for d in n.defines:
-                if d.startswith("def:"):
-                    prev_by_def[d[4:]] = nid
+def _previous_nodes(previous: Graph | None) -> dict[str, Node]:
+    """Return cached nodes for incremental parsing."""
+    return dict(previous.nodes) if previous else {}
 
-    # First pass: gather all definitions for cross-file call-graph mapping
-    all_defs: dict[str, str] = {}  # def:name -> file path
-    file_data: list[tuple[str, Path, str, ast.AST | None, list[str], list[str], set[str], set[str], list[str]]] = []
-    # (rel_path, fpath, source, tree, imports, defines, variables, calls, config_keys)
+
+def _add_config_node(g: Graph, repo: Path, rel_path: str, fpath: Path, prev_nodes: dict[str, Node]) -> None:
+    keys = _config_keys(fpath)
+    try:
+        source = fpath.read_text(encoding="utf-8")
+    except Exception:
+        return
+    sha = _file_hash(source)
+    if rel_path in prev_nodes and prev_nodes[rel_path].sha256 == sha:
+        g.nodes[rel_path] = prev_nodes[rel_path]
+        return
+    kind = "config" if rel_path.endswith((".json", ".yaml", ".yml")) else "data"
+    g.nodes[rel_path] = Node(id=rel_path, kind=kind, config_keys=tuple(keys), sha256=sha)
+
+
+def _collect_file_data(
+    *,
+    repo: Path,
+    paths: list[str],
+    g: Graph,
+    prev_nodes: dict[str, Node],
+) -> tuple[list[_FileData], dict[str, str]]:
+    all_defs: dict[str, str] = {}
+    file_data: list[_FileData] = []
 
     for rel_path in paths:
         fpath = repo / rel_path
         if not fpath.exists():
             continue
-
-        # Config files: JSON, YAML, .env
         if rel_path.endswith((".json", ".yaml", ".yml", ".env")) or fpath.name == ".env":
-            keys = _config_keys(fpath)
-            try:
-                source = fpath.read_text(encoding="utf-8")
-            except Exception:
-                continue
-            sha = _file_hash(source)
-            # incremental: reuse previous node if sha matches
-            if previous and rel_path in prev_nodes and prev_nodes[rel_path].sha256 == sha:
-                g.nodes[rel_path] = prev_nodes[rel_path]
-                continue
-            kind = "config" if rel_path.endswith((".json", ".yaml", ".yml")) else "data"
-            g.nodes[rel_path] = Node(
-                id=rel_path, kind=kind, config_keys=tuple(keys), sha256=sha,
-            )
+            _add_config_node(g, repo, rel_path, fpath, prev_nodes)
             continue
 
         is_py = rel_path.endswith(".py")
@@ -912,17 +906,13 @@ def extract_from_repo(repo: Path, previous: Graph | None = None) -> Graph:
         is_cpp = rel_path.endswith((".cc", ".cpp", ".c", ".cxx", ".h", ".hpp", ".mm"))
         if not (is_py or is_rs or is_cpp):
             continue
-
         try:
             source = fpath.read_text(encoding="utf-8")
         except Exception:
             continue
         sha = _file_hash(source)
-
-        # incremental: reuse previous node if sha matches
-        if previous and rel_path in prev_nodes and prev_nodes[rel_path].sha256 == sha:
+        if rel_path in prev_nodes and prev_nodes[rel_path].sha256 == sha:
             g.nodes[rel_path] = prev_nodes[rel_path]
-            # still need its defs for call-graph mapping
             for d in prev_nodes[rel_path].defines:
                 if d.startswith("def:") or d.startswith("fn:"):
                     all_defs[d.split(":", 1)[1]] = rel_path
@@ -932,7 +922,6 @@ def extract_from_repo(repo: Path, previous: Graph | None = None) -> Graph:
         defines: list[str] = []
         variables: set[str] = set()
         calls: set[str] = set()
-
         if is_py:
             try:
                 tree = ast.parse(source)
@@ -953,58 +942,54 @@ def extract_from_repo(repo: Path, previous: Graph | None = None) -> Graph:
                     all_defs[node.name] = rel_path
             variables = _walk_variables(tree)
             calls = _walk_calls(tree)
-            file_data.append((rel_path, fpath, source, None, imports, defines, variables, calls, []))
-
         elif is_rs:
             imports, defines, variables, calls = _parse_rust_file(source, rel_path)
             for d in defines:
                 if d.startswith("fn:"):
                     all_defs[d[4:]] = rel_path
-            file_data.append((rel_path, fpath, source, None, imports, defines, variables, calls, []))
-
         elif is_cpp:
             imports, defines, variables, calls = _parse_cpp_file(source, rel_path)
             for d in defines:
                 if d.startswith("def:"):
                     all_defs[d[4:]] = rel_path
-            file_data.append((rel_path, fpath, source, None, imports, defines, variables, calls, []))
+        file_data.append((rel_path, fpath, source, None, imports, defines, variables, calls, []))
+    return file_data, all_defs
 
-    # Second pass: build nodes + import edges
-    for rel_path, fpath, source, tree, imports, defines, variables, calls, _ in file_data:
-        # map imports to likely internal modules
-        internal_imports: list[str] = []
-        is_rs = rel_path.endswith(".rs")
-        is_cpp = rel_path.endswith((".cc", ".cpp", ".c", ".cxx", ".h", ".hpp", ".mm"))
-        for imp in imports:
-            if is_rs:
-                mapped = _rust_import_to_path(imp, repo, rel_path)
-                if mapped:
-                    internal_imports.append(mapped)
-            elif is_cpp:
-                # Basic matching for C++ relative paths.
-                # imp is already the path string from #include "path" or <path>
-                if (repo / imp).exists():
-                    internal_imports.append(imp)
-                else:
-                    # also try relative to the current file
-                    rel_to_curr = (fpath.parent / imp).resolve()
-                    try:
-                        rel_mapped = rel_to_curr.relative_to(repo)
-                        if (repo / rel_mapped).exists():
-                            internal_imports.append(str(rel_mapped))
-                    except ValueError:
-                        pass
+
+def _internal_imports(repo: Path, rel_path: str, fpath: Path, imports: list[str]) -> list[str]:
+    internal_imports: list[str] = []
+    is_rs = rel_path.endswith(".rs")
+    is_cpp = rel_path.endswith((".cc", ".cpp", ".c", ".cxx", ".h", ".hpp", ".mm"))
+    for imp in imports:
+        if is_rs:
+            mapped = _rust_import_to_path(imp, repo, rel_path)
+            if mapped:
+                internal_imports.append(mapped)
+        elif is_cpp:
+            if (repo / imp).exists():
+                internal_imports.append(imp)
             else:
-                parts = imp.split(".")
-                candidate = "/".join(parts) + ".py"
-                if (repo / candidate).exists():
-                    internal_imports.append(candidate)
-                else:
-                    candidate_init = "/".join(parts) + "/__init__.py"
-                    if (repo / candidate_init).exists():
-                        internal_imports.append(candidate_init)
+                rel_to_curr = (fpath.parent / imp).resolve()
+                try:
+                    rel_mapped = rel_to_curr.relative_to(repo)
+                    if (repo / rel_mapped).exists():
+                        internal_imports.append(str(rel_mapped))
+                except ValueError:
+                    pass
+        else:
+            parts = imp.split(".")
+            candidate = "/".join(parts) + ".py"
+            if (repo / candidate).exists():
+                internal_imports.append(candidate)
+            else:
+                candidate_init = "/".join(parts) + "/__init__.py"
+                if (repo / candidate_init).exists():
+                    internal_imports.append(candidate_init)
+    return internal_imports
 
-        sha = _file_hash(source)
+
+def _emit_file_nodes_and_import_edges(g: Graph, repo: Path, file_data: list[_FileData]) -> None:
+    for rel_path, fpath, source, _tree, imports, defines, variables, calls, _ in file_data:
         g.nodes[rel_path] = Node(
             id=rel_path,
             kind="file",
@@ -1012,19 +997,13 @@ def extract_from_repo(repo: Path, previous: Graph | None = None) -> Graph:
             defines=tuple(defines),
             variables=tuple(sorted(variables)),
             calls=tuple(sorted(calls)),
-            sha256=sha,
+            sha256=_file_hash(source),
         )
-
-        for imp in internal_imports:
+        for imp in _internal_imports(repo, rel_path, fpath, imports):
             g.edges.append(Edge(source=rel_path, target=imp, kind="import", weight=1.0))
 
-    # Third pass: call-graph edges (cross-file)
-    # Build a name -> {defining files} map (not last-writer-wins). A bare call
-    # name only yields an edge when it resolves UNAMBIGUOUSLY to a single
-    # defining file in the SAME language. Resolving ubiquitous names
-    # (`run`, `to_dict`, `main`, `fetch`, …) to one arbitrary file fabricated a
-    # dense web of false edges that fused unrelated modules — and crossed the
-    # Python/Rust boundary — into one degenerate SCC. Honest-or-nothing.
+
+def _emit_call_edges(g: Graph, file_data: list[_FileData]) -> None:
     def_files: dict[str, set[str]] = {}
     for nid, n in g.nodes.items():
         if n.kind != "file":
@@ -1037,43 +1016,58 @@ def extract_from_repo(repo: Path, previous: Graph | None = None) -> Graph:
         src_lang = _lang_of(rel_path)
         for call_name in calls:
             candidates = {f for f in def_files.get(call_name, ()) if f != rel_path}
-            # same-language candidates only — a Python call cannot reach a Rust fn
             candidates = {f for f in candidates if _lang_of(f) == src_lang}
             if len(candidates) == 1:
                 g.edges.append(Edge(source=rel_path, target=next(iter(candidates)), kind="call", weight=1.0))
 
-    # Copy cached edges from unchanged files (they still hold). Without this,
-    # incremental (non-refresh) runs DROP every edge belonging to an unchanged
-    # file — and since most files are unchanged in steady state, the cached
-    # graph degenerates (e.g. zero import edges → broken circular-dep analysis,
-    # instability metrics, and import queries). Import edges depend only on the
-    # source file's content; call edges require both endpoints unchanged.
-    if previous:
-        def _src_unchanged(e: Edge) -> bool:
-            return (e.source in prev_nodes and e.source in g.nodes
-                    and g.nodes[e.source].sha256 == prev_nodes[e.source].sha256)
-        for e in previous.edges:
-            if e.source not in g.nodes or e.target not in g.nodes:
-                continue
-            if e.kind == "import":
-                # an import edge is a property of the (unchanged) source file
-                if _src_unchanged(e) and not any(
-                    x.source == e.source and x.target == e.target and x.kind == "import"
-                    for x in g.edges
-                ):
-                    g.edges.append(e)
-            elif e.kind == "call":
-                # defensive: never resurrect a cross-language call edge from cache
-                if _lang_of(e.source) != _lang_of(e.target):
-                    continue
-                dst_unchanged = (e.target in prev_nodes
-                                 and g.nodes[e.target].sha256 == prev_nodes[e.target].sha256)
-                if _src_unchanged(e) and dst_unchanged and not any(
-                    x.source == e.source and x.target == e.target and x.kind == "call"
-                    for x in g.edges
-                ):
-                    g.edges.append(e)
 
+def _restore_cached_edges(g: Graph, previous: Graph | None, prev_nodes: dict[str, Node]) -> None:
+    if not previous:
+        return
+
+    def src_unchanged(e: Edge) -> bool:
+        return (e.source in prev_nodes and e.source in g.nodes
+                and g.nodes[e.source].sha256 == prev_nodes[e.source].sha256)
+
+    for e in previous.edges:
+        if e.source not in g.nodes or e.target not in g.nodes:
+            continue
+        if e.kind == "import":
+            if src_unchanged(e) and not any(
+                x.source == e.source and x.target == e.target and x.kind == "import"
+                for x in g.edges
+            ):
+                g.edges.append(e)
+        elif e.kind == "call":
+            if _lang_of(e.source) != _lang_of(e.target):
+                continue
+            dst_unchanged = (e.target in prev_nodes
+                             and g.nodes[e.target].sha256 == prev_nodes[e.target].sha256)
+            if src_unchanged(e) and dst_unchanged and not any(
+                x.source == e.source and x.target == e.target and x.kind == "call"
+                for x in g.edges
+            ):
+                g.edges.append(e)
+
+
+def extract_from_repo(repo: Path, previous: Graph | None = None) -> Graph:
+    """Build a Graph from a git repository using AST parsing.
+
+    If *previous* is provided, only re-parse files whose sha256 changed (incremental).
+    Deleted files are removed. Untracked files are ignored (git ls-files boundary).
+    """
+    g = Graph(repo=str(repo.resolve()))
+    paths = _git_ls_files(repo)
+    if not paths:
+        return g
+
+    prev_nodes: dict[str, Node] = {}
+    if previous:
+        prev_nodes = _previous_nodes(previous)
+    file_data, _all_defs = _collect_file_data(repo=repo, paths=paths, g=g, prev_nodes=prev_nodes)
+    _emit_file_nodes_and_import_edges(g, repo, file_data)
+    _emit_call_edges(g, file_data)
+    _restore_cached_edges(g, previous, prev_nodes)
     return g
 
 
