@@ -410,5 +410,42 @@ class TestRunEmbedRoutesThroughPort(unittest.TestCase):
         self.assertTrue(is_sem)
 
 
+class TestEmbedPortRoutingParity(unittest.TestCase):
+    """R5.1 — the embed callers were routed off lgwks_run.embed_dual onto
+    lgwks_model_port.embed(...)["value"]. The envelope value IS the dual, so the
+    vectors must be byte-identical to a direct embed_dual call. Asserted under the
+    deterministic tier (LGWKS_NO_MODELS) so it is model-free, CI-stable, and exact.
+    """
+
+    def setUp(self):
+        self._saved = os.environ.get("LGWKS_NO_MODELS")
+        os.environ["LGWKS_NO_MODELS"] = "1"  # deterministic tier only — byte-stable
+
+    def tearDown(self):
+        if self._saved is None:
+            os.environ.pop("LGWKS_NO_MODELS", None)
+        else:
+            os.environ["LGWKS_NO_MODELS"] = self._saved
+
+    def test_port_value_equals_embed_dual_text(self):
+        import lgwks_run
+        text = "the quick brown fox routes through the one port"
+        direct = lgwks_run.embed_dual(text, embed_on=True, provider="auto", model="")
+        via_port = mp.embed(text)["value"]
+        self.assertEqual(via_port["det"]["vector"], direct["det"]["vector"],
+                         "port.embed value must carry the same deterministic vector as embed_dual")
+        self.assertEqual(via_port["det"]["dims"], direct["det"]["dims"])
+        self.assertIsNone(via_port["sem"], "NO_MODELS → no semantic vector (audit only)")
+
+    def test_port_passthrough_provider_model_parity(self):
+        """substrate_run passes --embed-provider/--embed-model; the port forwards
+        them verbatim, so the result equals the same embed_dual call (R5.1)."""
+        import lgwks_run
+        text = "carry the provider and model overrides through the port"
+        direct = lgwks_run.embed_dual(text, embed_on=True, provider="deterministic", model="")
+        via_port = mp.embed(text, provider="deterministic", model="")["value"]
+        self.assertEqual(via_port["det"]["vector"], direct["det"]["vector"])
+
+
 if __name__ == "__main__":
     unittest.main()

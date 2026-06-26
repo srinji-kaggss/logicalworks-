@@ -38,6 +38,8 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
+from lgwks_clock import now_iso as _now_iso
+
 import lgwks_substrate_config as _cfg  # canonical repo root — one source of truth
 
 SCHEMA = "lgwks.models_dev.v1"
@@ -95,7 +97,7 @@ def _fetch_remote(timeout: float) -> dict[str, Any]:
     return {
         "schema": SCHEMA,
         "source": API_URL,
-        "fetched_at": datetime.now(timezone.utc).isoformat(),
+        "fetched_at": _now_iso(),
         "providers": providers,
     }
 
