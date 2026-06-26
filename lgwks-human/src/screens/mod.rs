@@ -40,7 +40,10 @@ impl ScreenId {
 pub enum ScreenCmd {
     None,
     Navigate(ScreenId),
-    InjectIntent { kind: String, scope: String, payload: serde_json::Value },
+    /// Affordance picked: enqueue a daemon WORK item (kind ∈ WORK_KINDS).
+    EnqueueWork { kind: String, payload: serde_json::Value },
+    /// Free-text human intent: emit a human event (kind ∈ event KINDS, e.g. human_message).
+    EmitEvent { kind: String, payload: serde_json::Value },
     Confirm { prompt: String, on_confirm: Box<ScreenCmd> },
     Quit,
 }

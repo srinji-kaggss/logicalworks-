@@ -92,6 +92,9 @@ pub struct ContextPacket {
     pub entropy_history:    Vec<u64>,
     pub tps:                f32,
     pub steering_dials:     Vec<(String, f32)>, // Vector of (Name, Value [0-1])
+    /// True only for the `--standalone` demo stub, where telemetry is simulated
+    /// rather than measured. The FLIGHT screen labels such values "DEMO DATA".
+    pub simulated:          bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
@@ -99,6 +102,10 @@ pub struct NextStep {
     pub kind:       String,
     pub summary:    String,
     pub risk:       Option<String>,
+    /// PULSE approval class from the daemon: "none" | "once" | "force".
+    /// The confirm gate keys off THIS (effect+irreversibility-derived), not `risk`,
+    /// so an irreversible medium-risk op (worktree_close, workflow) still confirms.
+    pub approval:   Option<String>,
     pub args:       Option<serde_json::Value>,
     pub provenance: Option<serde_json::Value>,
 }
@@ -275,39 +282,97 @@ impl DaemonBridge {
         Ok(rows.flatten().collect())
     }
 
-    /// Emit an intent work item into the daemon via `lgwks daemon emit`.
-    /// This is the human→daemon write path. Fails silently to keep TUI alive.
-    pub fn emit_intent(
-        &self,
-        kind: &str,
-        scope: &str,
-        session_id: &str,
-        payload_json: &str,
-    ) -> Result<()> {
-        let python = self.venv_python();
-        let mut child = Command::new(&python)
-            .args([
-                self.script_path.to_str().unwrap_or("lgwks"),
-                "daemon", "emit",
-                "--lane", "human",
+    /// Emit a human EVENT (free-text intent) into the daemon via `lgwks daemon emit`.
+    /// Human input is the INGRESS lane / agent_local scope; `kind` must be a valid
+    /// event KIND (e.g. "human_message") — NOT a work kind. The reasoning tier
+    /// observes the event and decides what, if anything, to do.
+    pub fn emit_event(&self, kind: &str, session_id: &str, payload_json: &str) -> Result<()> {
+        self.run_daemon_write(
+            &[
+                // canonical path: the daemon command is wired under `ops` (lgwks
+                // ops daemon …), NOT `lgwks daemon` — the old path failed at the
+                // command level (exit 2), which is what made every action a no-op.
+                "ops", "daemon", "emit",
                 "--kind", kind,
-                "--scope", scope,
-                "--tenant", &self.tenant_id,
+                "--lane", "ingress",
+                "--scope", "agent_local",
+                "--actor", "human",
+                "--client", "human",
+                "--tenant", self.tenant_id.as_str(),
                 "--session-id", session_id,
                 "--agent-id", "lgwks-human",
-            ])
+            ],
+            payload_json,
+        )
+    }
+
+    /// Enqueue a WORK item into the daemon queue via `lgwks daemon enqueue`.
+    /// This is the affordance write path: an affordance IS a work kind (research_run,
+    /// worktree_close, workflow, …) — a WORK_KIND, not an event KIND — so it must be
+    /// enqueued, not emitted as an event. The daemon validates `kind ∈ WORK_KINDS`.
+    pub fn enqueue_work(&self, work_kind: &str, session_id: &str, payload_json: &str) -> Result<()> {
+        let payload: serde_json::Value =
+            serde_json::from_str(payload_json).unwrap_or(serde_json::Value::Null);
+        // item_id must be unique per submission (enqueue is idempotent on it).
+        // ns timestamp + random suffix is collision-safe; it's an identifier, not a
+        // measured value, so the calculator-test does not apply.
+        let nanos = chrono::Utc::now().timestamp_nanos_opt().unwrap_or(0);
+        let item_id = format!("human-{work_kind}-{nanos}-{:08x}", rand::random::<u32>());
+        let item = serde_json::json!({
+            "item_id":    item_id,
+            "tenant_id":  self.tenant_id,
+            "session_id": session_id,
+            "agent_id":   "lgwks-human",
+            "kind":       work_kind,
+            "priority":   0,
+            "payload":    payload,
+        });
+        let item_json = serde_json::to_string(&item).unwrap_or_default();
+        self.run_daemon_write(&["ops", "daemon", "enqueue"], &item_json)
+    }
+
+    /// Run an `lgwks daemon …` write subcommand, feeding `stdin_json` to its stdin.
+    /// Surfaces failure as `Err` instead of swallowing it (the old path dropped the
+    /// child's non-zero exit, so every TUI action was a silent no-op). Two failure
+    /// shapes are surfaced: a non-zero process exit (argparse/usage), and a JSON
+    /// `{"ok": false, …}` body (queue full / invalid item) that the command prints
+    /// while still exiting 0.
+    fn run_daemon_write(&self, sub_args: &[&str], stdin_json: &str) -> Result<()> {
+        let python = self.venv_python();
+        let mut child = Command::new(&python)
+            .arg(self.script_path.to_str().unwrap_or("lgwks"))
+            .args(sub_args)
             .current_dir(&self.repo_root)
             .stdin(std::process::Stdio::piped())
-            .stdout(std::process::Stdio::null())
-            .stderr(std::process::Stdio::null())
+            .stdout(std::process::Stdio::piped())
+            .stderr(std::process::Stdio::piped())
             .spawn()
-            .map_err(|e| anyhow!("emit spawn failed: {e}"))?;
+            .map_err(|e| anyhow!("daemon write spawn failed: {e}"))?;
 
         if let Some(mut stdin) = child.stdin.take() {
             use std::io::Write;
-            let _ = stdin.write_all(payload_json.as_bytes());
+            let _ = stdin.write_all(stdin_json.as_bytes());
         }
-        child.wait().ok();
+        let out = child
+            .wait_with_output()
+            .map_err(|e| anyhow!("daemon write wait failed: {e}"))?;
+
+        if !out.status.success() {
+            let code = out.status.code().unwrap_or(-1);
+            let stderr = String::from_utf8_lossy(&out.stderr);
+            let detail = stderr.lines().last().unwrap_or("").trim();
+            return Err(anyhow!("daemon write exit {code}: {detail}"));
+        }
+
+        // Command exited 0 but may still report a structured rejection in its body.
+        let stdout = String::from_utf8_lossy(&out.stdout);
+        if let Ok(v) = serde_json::from_str::<serde_json::Value>(stdout.trim()) {
+            if v.get("ok") == Some(&serde_json::Value::Bool(false)) {
+                let status = v.get("status").and_then(|s| s.as_str()).unwrap_or("rejected");
+                let detail = v.get("detail").and_then(|s| s.as_str()).unwrap_or("");
+                return Err(anyhow!("daemon rejected: {status} {detail}"));
+            }
+        }
         Ok(())
     }
 

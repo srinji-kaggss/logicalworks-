@@ -10,6 +10,7 @@ mod bridge;
 mod screens;
 mod tui;
 mod ui;
+mod util;
 
 use app::{App, run};
 use bridge::{DaemonBridge, DaemonState, spawn_poll_task};
@@ -90,12 +91,19 @@ async fn main() -> Result<()> {
                 st.status.alive = true;
                 st.status.status = "standalone".to_string();
                 st.packet = bridge::ContextPacket {
-                    active_task: Some("Standalone Mode".to_string()),
+                    // `--standalone` is an explicit, daemon-less DEMO mode. The
+                    // entropy/tps/dials seeded below are SIMULATED, not measured —
+                    // `simulated: true` makes the FLIGHT screen label them as such,
+                    // so this stub can't be mistaken for the real telemetry the
+                    // Python side deliberately refuses to fabricate (A12).
+                    simulated: true,
+                    active_task: Some("Standalone Mode (demo data)".to_string()),
                     next_steps: vec![
                         bridge::NextStep {
                             kind: "connect_models_dev".to_string(),
                             summary: "Configure models.dev API token".to_string(),
                             risk: Some("low".to_string()),
+                            approval: Some("none".to_string()),
                             args: None,
                             provenance: Some(serde_json::json!({
                                 "reason": "Standalone mode initialized without provider keys."
@@ -105,6 +113,7 @@ async fn main() -> Result<()> {
                             kind: "init_local_llm".to_string(),
                             summary: "Start a local model (Ollama/Llama.cpp)".to_string(),
                             risk: Some("low".to_string()),
+                            approval: Some("none".to_string()),
                             args: None,
                             provenance: Some(serde_json::json!({
                                 "reason": "Optionally use local resources."

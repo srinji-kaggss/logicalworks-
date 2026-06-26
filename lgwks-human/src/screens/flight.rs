@@ -11,10 +11,37 @@ use ratatui::{
 use tui_input::{Input, backend::crossterm::EventHandler};
 
 use crate::{
-    bridge::{DaemonState, DaemonEvent, palette::*},
+    bridge::{DaemonState, DaemonEvent, NextStep, palette::*},
     tui::Event,
 };
 use super::{Screen, ScreenCmd, ScreenId};
+
+/// Does this affordance require a human confirm before it fires?
+///
+/// Keys off the daemon's PULSE `approval` class, NOT `risk`: an irreversible
+/// medium-risk op (worktree_close, workflow) carries approval="once" and MUST
+/// confirm even though its risk is "medium". Fail-closed: any value other than
+/// the explicit "none" — including a missing/unknown class — requires confirm.
+fn needs_confirm(approval: Option<&str>) -> bool {
+    approval != Some("none")
+}
+
+/// Build the command for a picked affordance: enqueue the daemon WORK item, wrapped
+/// in a confirm gate when the approval class demands it. Single source of truth for
+/// both the keyboard and mouse affordance paths (they previously duplicated this).
+fn affordance_cmd(step: &NextStep) -> ScreenCmd {
+    let payload = step.args.clone().unwrap_or(serde_json::Value::Null);
+    let work = ScreenCmd::EnqueueWork { kind: step.kind.clone(), payload };
+    if needs_confirm(step.approval.as_deref()) {
+        let cls = step.approval.as_deref().unwrap_or("unknown");
+        ScreenCmd::Confirm {
+            prompt: format!("Confirm {} (approval: {cls})?", step.kind),
+            on_confirm: Box::new(work),
+        }
+    } else {
+        work
+    }
+}
 
 pub struct FlightScreen {
     scroll_offset: usize,
@@ -201,7 +228,12 @@ impl FlightScreen {
 
         // Telemetry Sparkline
         let entropy_data = &state.packet.entropy_history;
-        let title = format!(" TELEMETRY · TPS: {:.1} · ENTROPY ", state.packet.tps);
+        // simulated ⇒ honest DEMO label; the real daemon path never fabricates these.
+        let title = if state.packet.simulated {
+            format!(" TELEMETRY · DEMO DATA (simulated) · TPS {:.1} ", state.packet.tps)
+        } else {
+            format!(" TELEMETRY · TPS: {:.1} · ENTROPY ", state.packet.tps)
+        };
         let sparkline = ratatui::widgets::Sparkline::default()
             .block(
                 Block::default()
@@ -234,10 +266,11 @@ impl FlightScreen {
             }
         }
         
+        let dials_title = if state.packet.simulated { " STEERING DIALS · DEMO DATA " } else { " STEERING DIALS " };
         let dials_widget = Paragraph::new(Line::from(dial_spans))
             .block(
                 Block::default()
-                    .title(Span::styled(" STEERING DIALS ", Style::default().fg(MUTED)))
+                    .title(Span::styled(dials_title, Style::default().fg(MUTED)))
                     .borders(Borders::ALL)
                     .border_type(BorderType::Rounded)
                     .border_style(Style::default().fg(SLATE_DIM)),
@@ -308,24 +341,7 @@ impl Screen for FlightScreen {
                         if !self.input_active || is_alt {
                             let idx = (c as usize) - ('1' as usize);
                             if let Some(step) = state.packet.next_steps.get(idx) {
-                                let payload = step.args.clone().unwrap_or(serde_json::Value::Null);
-                                
-                                let is_high_risk = step.risk.as_deref() == Some("high");
-                                let inject_cmd = ScreenCmd::InjectIntent {
-                                    kind:    step.kind.clone(),
-                                    scope:   "human_affordance".to_string(),
-                                    payload,
-                                };
-
-                                if is_high_risk {
-                                    return ScreenCmd::Confirm {
-                                        prompt: format!("Execute high-risk affordance: {}?", step.kind),
-                                        on_confirm: Box::new(inject_cmd),
-                                    };
-                                } else {
-                                    self.status_msg = Some(format!("→ {}", step.kind));
-                                    return inject_cmd;
-                                }
+                                return affordance_cmd(step);
                             }
                             return ScreenCmd::None;
                         }
@@ -335,10 +351,8 @@ impl Screen for FlightScreen {
                         let text = self.input.value().trim().to_string();
                         if text.is_empty() { return ScreenCmd::None; }
                         self.input = Input::default();
-                        self.status_msg = Some(format!("→ intent queued: {}", &text[..text.len().min(40)]));
-                        return ScreenCmd::InjectIntent {
+                        return ScreenCmd::EmitEvent {
                             kind:    "human_message".to_string(),
-                            scope:   "human_intent".to_string(),
                             payload: serde_json::json!({ "message": text }),
                         };
                     }
@@ -379,22 +393,7 @@ impl Screen for FlightScreen {
                             if m.row >= list_start_y {
                                 let idx = (m.row - list_start_y) as usize;
                                 if let Some(step) = state.packet.next_steps.get(idx) {
-                                    let payload = step.args.clone().unwrap_or(serde_json::Value::Null);
-                                    let is_high_risk = step.risk.as_deref() == Some("high");
-                                    let inject_cmd = ScreenCmd::InjectIntent {
-                                        kind:    step.kind.clone(),
-                                        scope:   "human_affordance".to_string(),
-                                        payload,
-                                    };
-                                    if is_high_risk {
-                                        return ScreenCmd::Confirm {
-                                            prompt: format!("Execute high-risk affordance: {}?", step.kind),
-                                            on_confirm: Box::new(inject_cmd),
-                                        };
-                                    } else {
-                                        self.status_msg = Some(format!("→ {}", step.kind));
-                                        return inject_cmd;
-                                    }
+                                    return affordance_cmd(step);
                                 }
                             }
                         } else {
@@ -436,10 +435,10 @@ fn render_event_row(e: &DaemonEvent) -> ListItem<'static> {
     let agent = e.agent_id.as_deref().unwrap_or("?").to_string();
     let kind = e.kind.as_deref().unwrap_or("?").to_string();
     let lane = e.lane.as_deref().unwrap_or("").to_string();
-    let preview = e.payload.as_ref().map(|p| {
-        let s = p.to_string();
-        if s.len() > 60 { format!("{}…", &s[..60]) } else { s }
-    }).unwrap_or_default();
+    // char-safe: a crafted multibyte payload must not panic the render thread.
+    let preview = e.payload.as_ref()
+        .map(|p| crate::util::head_ellipsis(&p.to_string(), 60))
+        .unwrap_or_default();
 
     let lane_color = match lane.as_str() {
         "control"   => AMBER,
@@ -457,4 +456,67 @@ fn render_event_row(e: &DaemonEvent) -> ListItem<'static> {
         Span::styled("  ", Style::default()),
         Span::styled(preview, Style::default().fg(MUTED)),
     ]))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn step(kind: &str, risk: Option<&str>, approval: Option<&str>) -> NextStep {
+        NextStep {
+            kind: kind.into(),
+            summary: String::new(),
+            risk: risk.map(Into::into),
+            approval: approval.map(Into::into),
+            args: None,
+            provenance: None,
+        }
+    }
+
+    #[test]
+    fn none_approval_skips_confirm() {
+        assert!(!needs_confirm(Some("none")));
+    }
+
+    #[test]
+    fn once_and_force_require_confirm() {
+        assert!(needs_confirm(Some("once")));
+        assert!(needs_confirm(Some("force")));
+    }
+
+    #[test]
+    fn unknown_and_missing_fail_closed_to_confirm() {
+        assert!(needs_confirm(None));
+        assert!(needs_confirm(Some("")));
+        assert!(needs_confirm(Some("garbage")));
+    }
+
+    #[test]
+    fn irreversible_medium_risk_affordance_is_gated() {
+        // worktree_close: risk="medium" (NOT high) but approval="once". The old gate
+        // keyed on risk=="high" and let it fire un-confirmed; the new gate stops it.
+        let s = step("worktree_close", Some("medium"), Some("once"));
+        assert!(matches!(affordance_cmd(&s), ScreenCmd::Confirm { .. }));
+    }
+
+    #[test]
+    fn workflow_force_affordance_is_gated() {
+        let s = step("workflow", Some("medium"), Some("once"));
+        assert!(matches!(affordance_cmd(&s), ScreenCmd::Confirm { .. }));
+        let s2 = step("custom", Some("high"), Some("force"));
+        assert!(matches!(affordance_cmd(&s2), ScreenCmd::Confirm { .. }));
+    }
+
+    #[test]
+    fn low_risk_read_affordance_enqueues_directly() {
+        let s = step("index_run", Some("low"), Some("none"));
+        assert!(matches!(affordance_cmd(&s), ScreenCmd::EnqueueWork { .. }));
+    }
+
+    #[test]
+    fn affordance_without_approval_class_fails_closed() {
+        // A daemon that omits the approval field must still gate, never bypass.
+        let s = step("worktree_close", Some("medium"), None);
+        assert!(matches!(affordance_cmd(&s), ScreenCmd::Confirm { .. }));
+    }
 }

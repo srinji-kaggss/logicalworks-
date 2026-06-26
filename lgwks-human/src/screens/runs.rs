@@ -103,7 +103,7 @@ impl Screen for RunsScreen {
                     _         => AMBER,
                 };
                 ListItem::new(Line::from(vec![
-                    Span::styled(format!(" {} ", &r.run_id[..r.run_id.len().min(8)]), Style::default().fg(SLATE_DIM)),
+                    Span::styled(format!(" {} ", crate::util::head(&r.run_id, 8)), Style::default().fg(SLATE_DIM)),
                     Span::styled(
                         r.target_url.as_deref().unwrap_or("(no url)").get(..50).unwrap_or("").to_string(),
                         Style::default().fg(CREAM_DIM),

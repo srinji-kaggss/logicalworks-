@@ -77,15 +77,15 @@ impl Screen for WireScreen {
         // ── Active sessions / worktrees ───────────────────────────────────────
         let mut session_stats: std::collections::HashMap<String, (usize, String, String)> = std::collections::HashMap::new();
         
+        // events is a ring buffer, newest LAST (push_back). To show true "last
+        // activity" we must take the LAST event seen per session, so overwrite on
+        // each hit — the previous `if is_empty()` guard kept the FIRST (oldest) one.
         for e in &state.events {
             if let Some(session_id) = &e.session_id {
                 let entry = session_stats.entry(session_id.clone()).or_insert((0, String::new(), String::new()));
                 entry.0 += 1;
-                // Capture the latest event time and kind (assuming events are newest last, or vice versa; we'll just take the most recent we see)
-                if entry.1.is_empty() {
-                    entry.1 = e.ts.clone().unwrap_or_else(|| "unknown time".to_string());
-                    entry.2 = e.kind.clone().unwrap_or_else(|| "unknown".to_string());
-                }
+                entry.1 = e.ts.clone().unwrap_or_else(|| "unknown time".to_string());
+                entry.2 = e.kind.clone().unwrap_or_else(|| "unknown".to_string());
             }
         }
 
@@ -104,8 +104,9 @@ impl Screen for WireScreen {
             stats_vec.sort_by(|a, b| b.1.0.cmp(&a.1.0)); // Sort by event count descending
             
             for (sess, (count, last_ts, last_kind)) in stats_vec.into_iter().take(15) {
-                let short_sess = if sess.len() > 15 { sess[..15].to_string() } else { sess };
-                let short_ts = if last_ts.len() > 19 { last_ts[11..19].to_string() } else { last_ts };
+                // char-safe slicing — session ids / timestamps come from event data.
+                let short_sess = crate::util::head(&sess, 15).to_string();
+                let short_ts = last_ts.get(11..19).map(str::to_string).unwrap_or(last_ts);
                 session_lines.push(Line::from(vec![
                     Span::styled(format!("  {:<15} │ ", short_sess), Style::default().fg(CREAM)),
                     Span::styled(format!("{:<6} │ ", count), Style::default().fg(EMERALD_DIM)),

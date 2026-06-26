@@ -82,7 +82,7 @@ impl Screen for QueueScreen {
             state.queue.iter().map(|item| {
                 ListItem::new(Line::from(vec![
                     Span::styled(
-                        format!(" {} ", &item.item_id[..item.item_id.len().min(8)]),
+                        format!(" {} ", crate::util::head(&item.item_id, 8)),
                         Style::default().fg(SLATE_DIM),
                     ),
                     Span::styled(item.agent_id.clone(), Style::default().fg(CREAM_DIM)),

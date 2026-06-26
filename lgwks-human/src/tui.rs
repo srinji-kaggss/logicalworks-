@@ -200,5 +200,7 @@ impl DerefMut for Tui {
 }
 
 impl Drop for Tui {
-    fn drop(&mut self) { self.exit().unwrap(); }
+    // Never unwrap in Drop: if exit() errors during a panic unwind, unwrapping would
+    // double-panic and abort, leaving the terminal in raw mode. Best-effort restore.
+    fn drop(&mut self) { let _ = self.exit(); }
 }

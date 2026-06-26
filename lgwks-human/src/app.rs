@@ -149,15 +149,20 @@ impl App {
             ScreenCmd::None => {}
             ScreenCmd::Navigate(id) => { self.active_screen = id; }
             ScreenCmd::Quit => { self.should_quit = true; }
-            ScreenCmd::InjectIntent { kind, scope, payload } => {
-                let session_id = self.state.read().ok()
-                    .and_then(|s| s.status.pid.map(|p| format!("human-{}", p)))
-                    .unwrap_or_else(|| "human-anon".to_string());
+            ScreenCmd::EnqueueWork { kind, payload } => {
+                let session_id = self.human_session_id();
                 let payload_json = serde_json::to_string(&payload).unwrap_or_default();
-                if let Err(e) = self.bridge.emit_intent(&kind, &scope, &session_id, &payload_json) {
-                    self.set_status(format!("emit error: {e}"), 12);
-                } else {
-                    self.set_status(format!("→ {kind} injected"), 8);
+                match self.bridge.enqueue_work(&kind, &session_id, &payload_json) {
+                    Ok(()) => self.set_status(format!("→ {kind} enqueued"), 8),
+                    Err(e) => self.set_status(format!("enqueue failed: {e}"), 16),
+                }
+            }
+            ScreenCmd::EmitEvent { kind, payload } => {
+                let session_id = self.human_session_id();
+                let payload_json = serde_json::to_string(&payload).unwrap_or_default();
+                match self.bridge.emit_event(&kind, &session_id, &payload_json) {
+                    Ok(()) => self.set_status(format!("→ {kind} sent"), 8),
+                    Err(e) => self.set_status(format!("emit failed: {e}"), 16),
                 }
             }
             ScreenCmd::Confirm { prompt, on_confirm } => {
@@ -169,6 +174,13 @@ impl App {
     fn set_status(&mut self, msg: String, ttl: u8) {
         self.status_msg = Some(msg);
         self.status_ttl = ttl;
+    }
+
+    /// Stable session id for human-originated writes, derived from the daemon pid.
+    fn human_session_id(&self) -> String {
+        self.state.read().ok()
+            .and_then(|s| s.status.pid.map(|p| format!("human-{p}")))
+            .unwrap_or_else(|| "human-anon".to_string())
     }
 
     /// Render the full frame.
