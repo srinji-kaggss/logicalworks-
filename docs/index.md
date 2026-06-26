@@ -63,7 +63,7 @@ okf_version: "0.1"
 * [Concepts](concepts/) — 6 concept(s)
 * [Frontier](frontier/) — 9 concept(s)
 * [Handoff](handoff/) — 4 concept(s)
-* [Market Research](market-research/) — 2 concept(s)
+* [Market Research](market-research/) — 3 concept(s)
 * [Navmap](navmap/) — 2 concept(s)
 * [Prd](prd/) — 2 concept(s)
 * [Proofs](proofs/) — 2 concept(s)
