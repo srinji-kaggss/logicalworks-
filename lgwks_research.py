@@ -567,6 +567,280 @@ def _parallel_gather(cfg: AutoConfig, agenda: list[dict], fanout: int) -> list[d
         return list(ex.map(gather, items))
 
 
+def _build_research_agenda(cfg: AutoConfig, out_dir: Path, budget: Budget, emit) -> list[dict]:
+    agenda: list[dict] = []
+    if cfg.guide_text:
+        emit("    decomposing guide → research agenda …")
+        dg = lgwks_tongue.decompose_guide(cfg.guide_text, cfg.objective)
+        budget.charge()
+        if dg and dg.get("agenda"):
+            for a in dg["agenda"]:
+                ns = _agenda_node(a.get("node", ""))
+                if ns:
+                    agenda.append({"id": a["id"], "node": ns,
+                                   "question": _sanitize_carry(a["question"]),
+                                   "why": _sanitize_carry(a.get("why", ""))})
+            (out_dir / "agenda.json").write_text(_canon({"summary": dg.get("summary", ""),
+                                                         "agenda": agenda}))
+            dropped = len(dg["agenda"]) - len(agenda)
+            emit(f"    agenda: {len(agenda)} research questions"
+                 + (f" ({dropped} unsafe nodes dropped)" if dropped else ""))
+        else:
+            emit("    guide decomposition unavailable (Tongue offline / malformed) — "
+                 "falling back to seed-the-digest.")
+        return agenda
+
+    emit("    planning objective → research frontier …")
+    pl = lgwks_tongue.compile_research_plan(cfg.objective, cfg.purpose)
+    budget.charge()
+    if pl and pl.get("agenda"):
+        for a in pl["agenda"]:
+            ns = _agenda_node(a.get("node", ""))
+            if ns:
+                agenda.append({"id": a["id"], "node": ns,
+                               "question": _sanitize_carry(a["question"]),
+                               "why": _sanitize_carry(a.get("why", "")),
+                               "canonical": bool(a.get("canonical", False))})
+        (out_dir / "agenda.json").write_text(_canon({"summary": pl.get("summary", ""),
+                                                     "agenda": agenda}))
+        dropped = len(pl["agenda"]) - len(agenda)
+        emit(f"    plan: {len(agenda)} research fronts"
+             + (f" ({dropped} unsafe nodes dropped)" if dropped else "")
+             + f" · {sum(1 for a in agenda if a.get('canonical'))} canonical")
+    else:
+        agenda = _market_seed_agenda(cfg.objective, cfg.purpose)
+        if agenda:
+            emit(f"    planner offline — seeded market agenda: {len(agenda)} questions")
+            (out_dir / "agenda.json").write_text(_canon({"summary": "investment-style seed agenda",
+                                                         "agenda": agenda}))
+    return agenda
+
+
+def _initial_frontier(cfg: AutoConfig, agenda: list[dict]) -> tuple[dict | None, int, str]:
+    if agenda:
+        return agenda[0], 1, agenda[0]["node"]
+    return None, 0, cfg.start
+
+
+def _parallel_gather_digest(
+    cfg: AutoConfig,
+    out_dir: Path,
+    agenda: list[dict],
+    digest: str,
+    emit,
+) -> tuple[list[dict], str]:
+    pooled: list[dict] = []
+    if not agenda or cfg.crawl_mode not in ("ground", "live"):
+        return pooled, digest
+
+    emit(f"    parallel gather: {min(cfg.fanout, len(agenda))}/{len(agenda)} fronts "
+         f"(fanout={cfg.fanout}) …")
+    pooled = _parallel_gather(cfg, agenda, cfg.fanout)
+    ev = [p for p in pooled if p["has_evidence"]]
+    total_sources = sum(len(p["sources"]) for p in pooled)
+    emit(f"    gathered: {len(ev)}/{len(pooled)} fronts with evidence · {total_sources} sources")
+    (out_dir / "pooled_gather.json").write_text(_canon(
+        {"schema": "lgwks.research.gather.v1", "fanout": cfg.fanout,
+         "fronts": len(pooled), "evidence_fronts": len(ev),
+         "sources": total_sources,
+         "items": [{"id": p["id"], "node": p["node"], "has_evidence": p["has_evidence"],
+                    "source_count": len(p["sources"]),
+                    "preview": " ".join(p["findings"].split())[:200]} for p in pooled]}))
+    if pooled:
+        pool_text = "\n\n".join(f"[{p['id']}] {p['node']}:\n{p['findings'][:2000]}"
+                                for p in pooled if p["has_evidence"])
+        digest = (digest + "\n\nPOOLED EVIDENCE (parallel gather):\n" + pool_text)[-8000:]
+    return pooled, digest
+
+
+def _write_initial_progress(
+    out_dir: Path,
+    *,
+    run_id: str,
+    cfg: AutoConfig,
+    agenda: list[dict],
+    axiom_path: Path,
+) -> None:
+    _write_progress(out_dir, {
+        "schema": "lgwks.research-progress/1",
+        "run_id": run_id,
+        "status": "running",
+        "round": 0,
+        "objective": cfg.objective,
+        "frontier": cfg.start,
+        "spent": 0,
+        "budget": cfg.token_budget,
+        "agenda_total": len(agenda),
+        "agenda_covered": 0,
+        "stop_reason": "",
+        "axiom": str(axiom_path),
+        "frontier_preview": [],
+    })
+
+
+def _finalize_auto_run(
+    *,
+    cfg: AutoConfig,
+    run_id: str,
+    out_dir: Path,
+    ledger: Path,
+    key: str,
+    mode: str,
+    covered: list[dict],
+    agenda: list[dict],
+    stop: str,
+    n: int,
+    evidence_rounds: int,
+    surviving: list[str],
+    budget: Budget,
+    frontier: str,
+    axiom_path: Path,
+    emit,
+) -> AutoResult:
+    chain_ok = _verify_ledger(ledger, key)
+    tamper_evident = lgwks_sign.is_keyed(mode)
+    covered_ids = {c["id"] for c in covered}
+    uncovered = len(agenda) - len(covered_ids)
+    if agenda and uncovered > 0:
+        emit(f"  ! {uncovered}/{len(agenda)} agenda questions unresearched "
+             f"(stopped: {stop}) — NOT silently dropped")
+
+    contradicted = [c for c in covered if c.get("verdict") == "contradicted"]
+    verdicts = {v: sum(1 for c in covered if c.get("verdict") == v)
+                for v in ("supported", "contradicted", "unverified")}
+    plan_summary = (f"{verdicts['supported']} supported · {verdicts['contradicted']} contradicted · "
+                    f"{verdicts['unverified']} unverified  (of {len(agenda)} guide assumptions)"
+                    if agenda else "")
+    if contradicted:
+        emit(f"\n  ✗ {len(contradicted)} GUIDE ASSUMPTION(S) CONTRADICTED BY EVIDENCE:")
+        for c in contradicted:
+            cite = f"  [cite: {c['sources'][0]}]" if c.get("sources") else "  [cite: UNRESOLVED]"
+            emit(f"      [{c['id']}] {c['claim'][:100]}  ←  {c['why'][:110]}{cite}")
+
+    (out_dir / "result.json").write_text(_canon({
+        "run_id": run_id, "rounds": n, "evidence_rounds": evidence_rounds, "stop_reason": stop,
+        "surviving": surviving, "spent": budget.spent, "integrity_mode": mode,
+        "chain_consistent": chain_ok,
+        "agenda_total": len(agenda), "agenda_covered": len(covered_ids),
+        "guide_verdicts": verdicts, "plan_summary": plan_summary,
+        "contradicted": [{"id": c["id"], "claim": c["claim"], "evidence": c["why"],
+                          "sources": c.get("sources", [])} for c in contradicted],
+        "tamper_evident": tamper_evident and chain_ok,
+        "citations_verified": False, "eig_basis": "model-estimated-priority",
+        "objective": cfg.objective, "start": cfg.start}))
+    report_path = _write_report(out_dir, cfg, stop, surviving, budget.spent, evidence_rounds,
+                                contradicted, plan_summary)
+    _emit_reasoning_artifact(cfg, run_id, report_path)
+    index_path = _write_index(out_dir, cfg, stop, surviving, budget.spent, evidence_rounds,
+                              agenda, covered, contradicted, report_path)
+    try:
+        import lgwks_context
+        lgwks_context.write_pack(out_dir)
+    except Exception:
+        pass
+    _write_progress(out_dir, {
+        "schema": "lgwks.research-progress/1",
+        "run_id": run_id,
+        "status": "done",
+        "round": n,
+        "objective": cfg.objective,
+        "frontier": frontier,
+        "spent": budget.spent,
+        "budget": budget.cap,
+        "agenda_total": len(agenda),
+        "agenda_covered": len(covered_ids),
+        "stop_reason": stop,
+        "surviving": surviving,
+        "chain_consistent": chain_ok,
+        "integrity_mode": mode,
+        "axiom": str(axiom_path),
+        "frontier_preview": [],
+    })
+    integ = f"{mode}·{'tamper-evident' if tamper_evident else 'corruption-only'}"
+    emit(f"\n  ◆ done · {n} rounds ({evidence_rounds} evidence) · stop={stop} · "
+         f"surviving={surviving} · spent={budget.spent} tok")
+    emit(f"  ↳ artifacts: {out_dir}  (chain {'ok' if chain_ok else 'BROKEN'} · {integ})")
+    emit(f"  ↳ report: {report_path}")
+    emit(f"  ↳ index: {index_path}")
+    return AutoResult(run_id, n, stop, surviving, budget.spent, str(out_dir), chain_ok, mode)
+
+
+def _refresh_context_pack(out_dir: Path) -> None:
+    try:
+        import lgwks_context
+        lgwks_context.write_pack(out_dir)
+    except Exception:
+        pass
+
+
+def _append_round_ledger(
+    lf,
+    *,
+    key: str,
+    prev_hash: str,
+    n: int,
+    mode_tag: str,
+    has_evidence: bool,
+    frontier: str,
+    hyps: list[dict],
+    reason: dict,
+    surviving: list[str],
+    gv: dict,
+    cur_item: dict | None,
+    budget: Budget,
+) -> str:
+    rec = {"n": n, "mode": mode_tag, "evidence": has_evidence, "frontier_in": frontier,
+           "hyp_count": len(hyps), "citations_verified": False,
+           "falsifiers_hit": reason["falsifiers_hit"], "surviving": surviving,
+           "learnings": reason["learnings"], "digest": reason["digest"],
+           "guide_verdict": gv if cur_item else None,
+           "converged": reason["converged"], "spent": budget.spent, "prev": prev_hash}
+    rec["hash"] = lgwks_sign.mac(prev_hash + _canon(rec), key)
+    lf.write(_canon(rec) + "\n")
+    lf.flush()
+    return rec["hash"]
+
+
+def _write_round_progress(
+    out_dir: Path,
+    *,
+    run_id: str,
+    cfg: AutoConfig,
+    budget: Budget,
+    agenda: list[dict],
+    covered: list[dict],
+    cur_item: dict | None,
+    n: int,
+    frontier: str,
+    surviving: list[str],
+    gv: dict,
+    top: list[dict],
+    fanout_preview: list[dict],
+    axiom_path: Path,
+    mode_tag: str,
+) -> None:
+    agenda_covered_live = len(covered) + (1 if cur_item is not None else 0)
+    _write_progress(out_dir, {
+        "schema": "lgwks.research-progress/1",
+        "run_id": run_id,
+        "status": "running",
+        "round": n,
+        "objective": cfg.objective,
+        "frontier": frontier,
+        "spent": budget.spent,
+        "budget": budget.cap,
+        "agenda_total": len(agenda),
+        "agenda_covered": agenda_covered_live,
+        "last_mode": mode_tag,
+        "last_surviving": surviving,
+        "last_verdict": gv.get("verdict", "") if cur_item else "",
+        "top_frontier": top[0]["node"] if top else "",
+        "stop_reason": "",
+        "axiom": str(axiom_path),
+        "frontier_preview": fanout_preview,
+    })
+
+
 def run_auto(cfg: AutoConfig, emit=print) -> AutoResult:
     """Drive the autonomous loop. `emit` is the progress sink (live viz hooks here — Unit C)."""
     run_id = _run_id(cfg)
@@ -581,89 +855,9 @@ def run_auto(cfg: AutoConfig, emit=print) -> AutoResult:
     digest = (_sanitize_carry("IMPLEMENTATION GUIDE UNDER RESEARCH:\n" + cfg.guide_text)
               if cfg.guide_text else "")
 
-    # CO-PROCESSOR CORE (#9): decompose the guide into a research AGENDA — N concrete falsifiable
-    # questions, each a frontier node — instead of only seeding the digest with the guide's prose.
-    # The agenda drives the frontier walk; once it drains, EIG-proposed expansion takes over.
-    # Fail closed: no Tongue / malformed agenda → empty agenda → the old seed-the-digest behaviour.
-    agenda: list[dict] = []
-    if cfg.guide_text:
-        emit("    decomposing guide → research agenda …")
-        dg = lgwks_tongue.decompose_guide(cfg.guide_text, cfg.objective)
-        budget.charge()
-        if dg and dg.get("agenda"):
-            for a in dg["agenda"]:
-                ns = _agenda_node(a.get("node", ""))      # injection-guard the model-emitted node
-                if ns:
-                    agenda.append({"id": a["id"], "node": ns,
-                                   "question": _sanitize_carry(a["question"]),
-                                   "why": _sanitize_carry(a.get("why", ""))})
-            (out_dir / "agenda.json").write_text(_canon({"summary": dg.get("summary", ""),
-                                                         "agenda": agenda}))
-            dropped = len(dg["agenda"]) - len(agenda)
-            emit(f"    agenda: {len(agenda)} research questions"
-                 + (f" ({dropped} unsafe nodes dropped)" if dropped else ""))
-        else:
-            emit("    guide decomposition unavailable (Tongue offline / malformed) — "
-                 "falling back to seed-the-digest.")
-    else:
-        # BARE OBJECTIVE — bind the AI as the bounded planner (one call): turn the objective into a
-        # BROAD frontier of concrete search fronts the deterministic gather then crawls at scale.
-        # This is the correct min/max binding (Director 2026-06-23): AI directs, compute goes deep —
-        # not the old narrow deterministic market-seed (kept only as the fail-closed fallback).
-        emit("    planning objective → research frontier …")
-        pl = lgwks_tongue.compile_research_plan(cfg.objective, cfg.purpose)
-        budget.charge()
-        if pl and pl.get("agenda"):
-            for a in pl["agenda"]:
-                ns = _agenda_node(a.get("node", ""))      # injection-guard the model-emitted node
-                if ns:
-                    agenda.append({"id": a["id"], "node": ns,
-                                   "question": _sanitize_carry(a["question"]),
-                                   "why": _sanitize_carry(a.get("why", "")),
-                                   "canonical": bool(a.get("canonical", False))})
-            (out_dir / "agenda.json").write_text(_canon({"summary": pl.get("summary", ""),
-                                                         "agenda": agenda}))
-            dropped = len(pl["agenda"]) - len(agenda)
-            emit(f"    plan: {len(agenda)} research fronts"
-                 + (f" ({dropped} unsafe nodes dropped)" if dropped else "")
-                 + f" · {sum(1 for a in agenda if a.get('canonical'))} canonical")
-        else:
-            agenda = _market_seed_agenda(cfg.objective, cfg.purpose)
-            if agenda:
-                emit(f"    planner offline — seeded market agenda: {len(agenda)} questions")
-                (out_dir / "agenda.json").write_text(_canon({"summary": "investment-style seed agenda",
-                                                             "agenda": agenda}))
-
-    agenda_i = 0
-    if agenda:
-        cur_item = agenda[0]; agenda_i = 1; frontier = cur_item["node"]
-    else:
-        cur_item = None; frontier = cfg.start
-
-    # PARALLEL GATHER (Director 2026-06-24): fan out the agenda crawl concurrently — the "compute
-    # goes deep" half. The AI planned the fronts (agenda); this gathers them in parallel so a
-    # 20-front run finishes in ~1 wall-time pass instead of 20 sequential rounds. Pooled evidence
-    # is appended to the rolling digest so the reasoning rounds reason over ALL gathered evidence.
-    pooled: list[dict] = []
-    if agenda and cfg.crawl_mode in ("ground", "live"):
-        emit(f"    parallel gather: {min(cfg.fanout, len(agenda))}/{len(agenda)} fronts "
-             f"(fanout={cfg.fanout}) …")
-        pooled = _parallel_gather(cfg, agenda, cfg.fanout)
-        ev = [p for p in pooled if p["has_evidence"]]
-        total_sources = sum(len(p["sources"]) for p in pooled)
-        emit(f"    gathered: {len(ev)}/{len(pooled)} fronts with evidence · {total_sources} sources")
-        (out_dir / "pooled_gather.json").write_text(_canon(
-            {"schema": "lgwks.research.gather.v1", "fanout": cfg.fanout,
-             "fronts": len(pooled), "evidence_fronts": len(ev),
-             "sources": total_sources,
-             "items": [{"id": p["id"], "node": p["node"], "has_evidence": p["has_evidence"],
-                        "source_count": len(p["sources"]),
-                        "preview": " ".join(p["findings"].split())[:200]} for p in pooled]}))
-        # Append pooled findings to the rolling digest so reasoning rounds see ALL evidence.
-        if pooled:
-            pool_text = "\n\n".join(f"[{p['id']}] {p['node']}:\n{p['findings'][:2000]}"
-                                    for p in pooled if p["has_evidence"])
-            digest = (digest + "\n\nPOOLED EVIDENCE (parallel gather):\n" + pool_text)[-8000:]
+    agenda = _build_research_agenda(cfg, out_dir, budget, emit)
+    cur_item, agenda_i, frontier = _initial_frontier(cfg, agenda)
+    _pooled, digest = _parallel_gather_digest(cfg, out_dir, agenda, digest, emit)
 
     covered: list[dict] = []
     surviving: list[str] = []
@@ -682,21 +876,7 @@ def run_auto(cfg: AutoConfig, emit=print) -> AutoResult:
     emit(f"  ◆ autonomous research · {cfg.objective!r} · start={cfg.start!r}")
     emit(f"    functions={','.join(cfg.functions)} · budget={cfg.token_budget} tok · "
          f"crawl={cfg.crawl_mode} · max_rounds={cfg.max_rounds} · fanout={cfg.fanout}")
-    _write_progress(out_dir, {
-        "schema": "lgwks.research-progress/1",
-        "run_id": run_id,
-        "status": "running",
-        "round": 0,
-        "objective": cfg.objective,
-        "frontier": cfg.start,
-        "spent": 0,
-        "budget": cfg.token_budget,
-        "agenda_total": len(agenda),
-        "agenda_covered": 0,
-        "stop_reason": "",
-        "axiom": str(axiom_path),
-        "frontier_preview": [],
-    })
+    _write_initial_progress(out_dir, run_id=run_id, cfg=cfg, agenda=agenda, axiom_path=axiom_path)
 
     with ledger.open("w") as lf:
         for n in range(1, cfg.max_rounds + 1):
@@ -800,44 +980,20 @@ def run_auto(cfg: AutoConfig, emit=print) -> AutoResult:
                     "items": fanout_preview,
                 })
 
-            # 6. Hash-chain the round (L5) — tamper breaks the chain.
-            rec = {"n": n, "mode": mode_tag, "evidence": has_evidence, "frontier_in": frontier,
-                   "hyp_count": len(hyps), "citations_verified": False,
-                   "falsifiers_hit": reason["falsifiers_hit"], "surviving": surviving,
-                   "learnings": reason["learnings"], "digest": reason["digest"],
-                   "guide_verdict": gv if cur_item else None,
-                   "converged": reason["converged"], "spent": budget.spent, "prev": prev_hash}
-            rec["hash"] = lgwks_sign.mac(prev_hash + _canon(rec), key)
-            prev_hash = rec["hash"]
-            lf.write(_canon(rec) + "\n"); lf.flush()
-            # Refresh the LOD context pack EVERY round (#9 background-while-coding): a foreground
-            # coding agent polls runs/<id>/CONTEXT/CONTEXT.md and pulls artifacts as they land —
-            # it must not wait for the run to finish. Convenience, never fails the round.
-            try:
-                import lgwks_context
-                lgwks_context.write_pack(out_dir)
-            except Exception:
-                pass
-            agenda_covered_live = len(covered) + (1 if cur_item is not None else 0)
-            _write_progress(out_dir, {
-                "schema": "lgwks.research-progress/1",
-                "run_id": run_id,
-                "status": "running",
-                "round": n,
-                "objective": cfg.objective,
-                "frontier": frontier,
-                "spent": budget.spent,
-                "budget": budget.cap,
-                "agenda_total": len(agenda),
-                "agenda_covered": agenda_covered_live,
-                "last_mode": mode_tag,
-                "last_surviving": surviving,
-                "last_verdict": gv.get("verdict", "") if cur_item else "",
-                "top_frontier": top[0]["node"] if top else "",
-                "stop_reason": "",
-                "axiom": str(axiom_path),
-                "frontier_preview": fanout_preview,
-            })
+            prev_hash = _append_round_ledger(
+                lf, key=key, prev_hash=prev_hash, n=n, mode_tag=mode_tag,
+                has_evidence=has_evidence, frontier=frontier, hyps=hyps,
+                reason=reason, surviving=surviving, gv=gv, cur_item=cur_item,
+                budget=budget,
+            )
+            _refresh_context_pack(out_dir)
+            _write_round_progress(
+                out_dir, run_id=run_id, cfg=cfg, budget=budget, agenda=agenda,
+                covered=covered, cur_item=cur_item, n=n, frontier=frontier,
+                surviving=surviving, gv=gv, top=top,
+                fanout_preview=fanout_preview, axiom_path=axiom_path,
+                mode_tag=mode_tag,
+            )
             if _spent_break():
                 emit("    budget hit after contrarian — stopping."); break
 
@@ -875,77 +1031,12 @@ def run_auto(cfg: AutoConfig, emit=print) -> AutoResult:
                     dry_streak = 0
                     frontier = nxt
 
-    chain_ok = _verify_ledger(ledger, key)
-    tamper_evident = lgwks_sign.is_keyed(mode)        # honest: chain is tamper-EVIDENT only when keyed
-    covered_ids = {c["id"] for c in covered}
-    uncovered = len(agenda) - len(covered_ids)
-    # no silent truncation (doctrine): if the budget/rounds cap stopped us before the agenda drained,
-    # say so — an unresearched question must never read as covered.
-    if agenda and uncovered > 0:
-        emit(f"  ! {uncovered}/{len(agenda)} agenda questions unresearched "
-             f"(stopped: {stop}) — NOT silently dropped")
-    # THE PRODUCT SIGNAL: guide assumptions the evidence CONTRADICTED — the flaws the coding AI must
-    # see. Surface them loudly; this is why the co-processor exists (not to agree, to refute).
-    contradicted = [c for c in covered if c.get("verdict") == "contradicted"]
-    verdicts = {v: sum(1 for c in covered if c.get("verdict") == v)
-                for v in ("supported", "contradicted", "unverified")}
-    # aggregate-first summary (product review: a reader/poller wants the headline before the detail).
-    plan_summary = (f"{verdicts['supported']} supported · {verdicts['contradicted']} contradicted · "
-                    f"{verdicts['unverified']} unverified  (of {len(agenda)} guide assumptions)"
-                    if agenda else "")
-    if contradicted:
-        emit(f"\n  ✗ {len(contradicted)} GUIDE ASSUMPTION(S) CONTRADICTED BY EVIDENCE:")
-        for c in contradicted:
-            cite = f"  [cite: {c['sources'][0]}]" if c.get("sources") else "  [cite: UNRESOLVED]"
-            emit(f"      [{c['id']}] {c['claim'][:100]}  ←  {c['why'][:110]}{cite}")
-    (out_dir / "result.json").write_text(_canon({
-        "run_id": run_id, "rounds": n, "evidence_rounds": evidence_rounds, "stop_reason": stop,
-        "surviving": surviving, "spent": budget.spent, "integrity_mode": mode,
-        "chain_consistent": chain_ok,
-        "agenda_total": len(agenda), "agenda_covered": len(covered_ids),
-        "guide_verdicts": verdicts, "plan_summary": plan_summary,
-        "contradicted": [{"id": c["id"], "claim": c["claim"], "evidence": c["why"],
-                          "sources": c.get("sources", [])} for c in contradicted],
-        # do NOT claim tamper-evidence in unanchored mode (hacker F3 / epistemics 4b): the signer
-        # constant is in source, so an adversary can recompute the chain. Only keyed mode is evident.
-        "tamper_evident": tamper_evident and chain_ok,
-        "citations_verified": False, "eig_basis": "model-estimated-priority",
-        "objective": cfg.objective, "start": cfg.start}))
-    report_path = _write_report(out_dir, cfg, stop, surviving, budget.spent, evidence_rounds,
-                                contradicted, plan_summary)
-    _emit_reasoning_artifact(cfg, run_id, report_path)
-    index_path = _write_index(out_dir, cfg, stop, surviving, budget.spent, evidence_rounds,
-                              agenda, covered, contradicted, report_path)
-    try:
-        import lgwks_context           # LOD spawn-context pack — next spawn reads decaying-resolution context
-        lgwks_context.write_pack(out_dir)
-    except Exception:
-        pass                          # context pack is a convenience, never fails the run
-    _write_progress(out_dir, {
-        "schema": "lgwks.research-progress/1",
-        "run_id": run_id,
-        "status": "done",
-        "round": n,
-        "objective": cfg.objective,
-        "frontier": frontier,
-        "spent": budget.spent,
-        "budget": budget.cap,
-        "agenda_total": len(agenda),
-        "agenda_covered": len(covered_ids),
-        "stop_reason": stop,
-        "surviving": surviving,
-        "chain_consistent": chain_ok,
-        "integrity_mode": mode,
-        "axiom": str(axiom_path),
-        "frontier_preview": [],
-    })
-    integ = f"{mode}·{'tamper-evident' if tamper_evident else 'corruption-only'}"
-    emit(f"\n  ◆ done · {n} rounds ({evidence_rounds} evidence) · stop={stop} · "
-         f"surviving={surviving} · spent={budget.spent} tok")
-    emit(f"  ↳ artifacts: {out_dir}  (chain {'ok' if chain_ok else 'BROKEN'} · {integ})")
-    emit(f"  ↳ report: {report_path}")
-    emit(f"  ↳ index: {index_path}")
-    return AutoResult(run_id, n, stop, surviving, budget.spent, str(out_dir), chain_ok, mode)
+    return _finalize_auto_run(
+        cfg=cfg, run_id=run_id, out_dir=out_dir, ledger=ledger, key=key,
+        mode=mode, covered=covered, agenda=agenda, stop=stop, n=n,
+        evidence_rounds=evidence_rounds, surviving=surviving, budget=budget,
+        frontier=frontier, axiom_path=axiom_path, emit=emit,
+    )
 
 
 def _save_round(out_dir: Path, n: int, frontier: str, compiled: dict, reason: dict,

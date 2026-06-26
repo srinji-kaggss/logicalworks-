@@ -36,7 +36,7 @@ DOMAINS: dict[str, list[str]] = {
     "DevOps":    ["repo", "review", "project", "batch", "refactor", "hooks"],
     "System":    ["repl", "initialize", "auth", "keyvault", "foundation",
                   "aup", "schema", "codebase", "access", "daemon", "bulk-harvest",
-                  "gate", "ops", "human", "verify"],
+                  "gate", "ops", "human", "verify", "models"],
     # L0 substrate — ingestion, vector store, contracts (foundational, not the product)
     "Substrate": ["store", "memory", "embed", "axiom", "pipeline", "waste",
                   "entity-graph", "graph", "substrate", "score", "rank", "inbound",

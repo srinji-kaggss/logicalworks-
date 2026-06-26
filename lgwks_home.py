@@ -19,6 +19,7 @@ from __future__ import annotations
 import subprocess
 import sys
 import time
+from dataclasses import dataclass
 from pathlib import Path
 
 import lgwks_cli_introspect as _cli  # canonical parser introspection + verb→domain taxonomy
@@ -662,6 +663,314 @@ def _run_with_help(argv: list[str]) -> None:
     _run(argv + ["--help"])
 
 
+@dataclass
+class _BrowserState:
+    tree: dict[str, dict[str, Any]]
+    by_domain: dict[str, list[str]]
+    domains: list[str]
+    selected_repo: Path | None
+    nearby_repos: list[Path]
+    showing_no_repo: bool
+    stack: list[tuple[str, ...]]
+    on: bool
+
+
+def _fallback_intent_loop(on: bool) -> int:
+    print(ui.spine(fg("browser unavailable — parser introspection failed", AMBER, on=on), on=on))
+    print(ui.spine(fg("fallback: type an intent directly, or q to quit", CREAM_DIM, on=on), on=on))
+    while True:
+        choice = _ask("", on)
+        low = choice.lower()
+        if low in ("q", "quit", "exit", ""):
+            print(ui.spine(fg("← stay curious.", EMERALD_DIM, on=on), on=on))
+            return 0
+        _intent_flow(choice, on)
+        print(ui.spine(on=on))
+
+
+def _command_domains(tree: dict[str, dict[str, Any]]) -> tuple[dict[str, list[str]], list[str]]:
+    by_domain: dict[str, list[str]] = {}
+    for verb in sorted(tree.keys()):
+        domain = _domain_for(verb)
+        by_domain.setdefault(domain, []).append(verb)
+    domains = [d for d in list(_DOMAINS.keys()) + ["Other"] if d in by_domain]
+    return by_domain, domains
+
+
+def _new_browser_state(tree: dict[str, dict[str, Any]], on: bool) -> _BrowserState:
+    current_repo, nearby_repos = _detect_repo_context()
+    by_domain, domains = _command_domains(tree)
+    stack = [("no_repo",)] if current_repo is None else [("home",)]
+    return _BrowserState(
+        tree=tree,
+        by_domain=by_domain,
+        domains=domains,
+        selected_repo=current_repo,
+        nearby_repos=nearby_repos,
+        showing_no_repo=current_repo is None,
+        stack=stack,
+        on=on,
+    )
+
+
+def _render_browser_frame(state: _BrowserState) -> None:
+    frame = state.stack[-1]
+    if frame[0] == "home":
+        _render_home_browser(state.tree, state.on, repo=state.selected_repo)
+    elif frame[0] == "domain":
+        domain = frame[1]
+        verbs = state.by_domain.get(domain, [])
+        _render_domain_browser(domain, verbs, state.tree, state.on)
+    elif frame[0] == "command":
+        verb = frame[1]
+        node = state.tree.get(verb, {})
+        _render_command_detail(verb, node, state.on)
+    elif frame[0] == "picker":
+        _render_project_picker(state.nearby_repos, state.on)
+    elif frame[0] == "no_repo":
+        _render_no_repo_home(state.on, state.nearby_repos)
+
+
+def _resolve_browser_argv(state: _BrowserState, base_argv: list[str]) -> list[str]:
+    if not state.selected_repo or len(base_argv) < 2:
+        return base_argv
+    extra = _repo_for_command(base_argv[1], state.selected_repo)
+    if extra:
+        return base_argv + extra
+    return base_argv
+
+
+def _rerender(state: _BrowserState) -> None:
+    print(ui.spine(on=state.on))
+    _render_browser_frame(state)
+
+
+def _handle_back(state: _BrowserState) -> None:
+    if len(state.stack) > 1:
+        state.stack.pop()
+        _rerender(state)
+    else:
+        print(ui.spine(fg("already at home", CREAM_DIM, on=state.on), on=state.on))
+
+
+def _handle_no_repo_choice(state: _BrowserState, low: str) -> bool:
+    if low == "c":
+        cwd = Path.cwd().resolve()
+        try:
+            subprocess.run(["git", "init"], capture_output=True, text=True, timeout=10)
+            state.selected_repo = cwd
+            state.nearby_repos = []
+            state.showing_no_repo = False
+            print(ui.spine(fg(f"✓ git init in {cwd.name}", EMERALD, on=state.on), on=state.on))
+            state.stack[-1] = ("home",)
+            _render_browser_frame(state)
+        except Exception as e:
+            print(ui.spine(fg(f"git init failed: {type(e).__name__}", AMBER, on=state.on), on=state.on))
+        return True
+    if low == "i":
+        _run(["lgwks", "initialize"])
+        _pause(state.on)
+        _rerender(state)
+        return True
+    if low == "n":
+        state.stack[-1] = ("home",)
+        _rerender(state)
+        return True
+    if low.isdigit():
+        idx = int(low) - 1
+        if 0 <= idx < len(state.nearby_repos):
+            state.selected_repo = state.nearby_repos[idx]
+            state.showing_no_repo = False
+            state.stack[-1] = ("home",)
+            print(ui.spine(fg(f"▸ switched to {state.selected_repo.name}", EMERALD, on=state.on), on=state.on))
+            _render_browser_frame(state)
+            return True
+    if low:
+        _intent_flow(low, state.on)
+        _rerender(state)
+        return True
+    return True
+
+
+def _run_repl_quick_action(state: _BrowserState, quick_actions: list[tuple[str, str, str, list[str]]]) -> None:
+    try:
+        import lgwks_repl
+
+        hint_cmds: list[str] = []
+        for _k, lbl, _why, _argv in quick_actions:
+            if lbl not in ("repl",):
+                hint_cmds.append(f"{lbl}")
+        hint = f"commands: {', '.join(hint_cmds[:4])} … type .help for all" if hint_cmds else "type .help for commands"
+        lgwks_repl.run_repl(
+            repo_path=str(state.selected_repo) if state.selected_repo else ".",
+            welcome_hint=hint,
+        )
+    except Exception as e:
+        print(fg(f"  · repl error: {type(e).__name__}: {e}", AMBER, on=state.on), file=sys.stderr)
+
+
+def _run_viz_quick_action(state: _BrowserState) -> None:
+    try:
+        import lgwks_graph as gmod
+        import lgwks_graph_viz as viz
+
+        graph = gmod.get_graph(state.selected_repo)
+        browser = viz.GraphBrowser(graph, on=state.on)
+        browser.run()
+    except Exception as e:
+        print(fg(f"  · viz error: {type(e).__name__}: {e}", AMBER, on=state.on), file=sys.stderr)
+        _pause(state.on)
+
+
+def _run_tui_quick_action(state: _BrowserState) -> None:
+    try:
+        from pathlib import Path as _P
+
+        root = _P(__file__).resolve().parent
+        binary = root / "tui" / "target" / "debug" / "lgwks-tui"
+        if not binary.exists():
+            binary = root / "tui" / "target" / "release" / "lgwks-tui"
+        if not binary.exists():
+            print(ui.spine(fg("TUI binary not found. Build it with: cd tui && cargo build", AMBER, on=state.on), on=state.on))
+            _pause(state.on)
+        else:
+            subprocess.call([str(binary)])
+    except Exception as e:
+        print(fg(f"  · tui error: {type(e).__name__}: {e}", AMBER, on=state.on), file=sys.stderr)
+        _pause(state.on)
+
+
+def _handle_home_choice(state: _BrowserState, low: str) -> bool:
+    if low == "p":
+        if state.nearby_repos:
+            state.stack.append(("picker",))
+            _rerender(state)
+        else:
+            print(ui.spine(fg("no other projects found", CREAM_DIM, on=state.on), on=state.on))
+        return True
+
+    if low.isdigit():
+        idx = int(low) - 1
+        if 0 <= idx < len(state.domains):
+            state.stack.append(("domain", state.domains[idx]))
+            _rerender(state)
+            return True
+
+    quick_actions = _quick_actions_for_repo(state.selected_repo)
+    quick_map = {qa[0]: qa for qa in quick_actions}
+    if low in quick_map:
+        _, label, _why, argv = quick_map[low]
+        if label == "repl":
+            _run_repl_quick_action(state, quick_actions)
+        elif label == "doctor":
+            _print_doctor(state.on)
+            _pause(state.on)
+        elif label == "viz":
+            _run_viz_quick_action(state)
+        elif label == "tui":
+            _run_tui_quick_action(state)
+        elif argv:
+            _run(_resolve_browser_argv(state, argv))
+            _pause(state.on)
+        _rerender(state)
+        return True
+
+    if low:
+        _intent_flow(low, state.on)
+        _rerender(state)
+        return True
+    return False
+
+
+def _handle_picker_choice(state: _BrowserState, low: str) -> bool:
+    if low.isdigit():
+        idx = int(low) - 1
+        if 0 <= idx < len(state.nearby_repos):
+            state.selected_repo = state.nearby_repos[idx]
+            print(ui.spine(fg(f"▸ switched to {state.selected_repo.name}", EMERALD, on=state.on), on=state.on))
+            state.stack.pop()
+            _render_browser_frame(state)
+            return True
+    elif low == "b":
+        state.stack.pop()
+        _rerender(state)
+        return True
+    return True
+
+
+def _handle_domain_choice(state: _BrowserState, low: str) -> bool:
+    domain = state.stack[-1][1]
+    verbs = state.by_domain.get(domain, [])
+    if low.isdigit():
+        idx = int(low) - 1
+        if 0 <= idx < len(verbs):
+            verb = verbs[idx]
+            node = state.tree.get(verb, {})
+            if "subcommands" in node:
+                state.stack.append(("command", verb))
+            else:
+                _run(_resolve_browser_argv(state, ["lgwks", verb]))
+                _pause(state.on)
+            _rerender(state)
+            return True
+    return False
+
+
+def _handle_command_choice(state: _BrowserState, low: str) -> bool:
+    verb = state.stack[-1][1]
+    node = state.tree.get(verb, {})
+    subcommands = node.get("subcommands", {})
+    sc_list = sorted(subcommands.keys())
+
+    if low == "r":
+        _run(_resolve_browser_argv(state, ["lgwks", verb]))
+        _pause(state.on)
+        _rerender(state)
+        return True
+    if low == "h":
+        _run_with_help(_resolve_browser_argv(state, ["lgwks", verb]))
+        _pause(state.on)
+        _rerender(state)
+        return True
+    if low.isdigit() and subcommands:
+        idx = int(low) - 1
+        if 0 <= idx < len(sc_list):
+            sc_name = sc_list[idx]
+            _run(_resolve_browser_argv(state, ["lgwks", verb, sc_name]))
+            _pause(state.on)
+            _rerender(state)
+            return True
+    return False
+
+
+def _dispatch_browser_choice(state: _BrowserState, choice: str) -> bool:
+    low = choice.lower()
+    if low in ("q", "quit", "exit"):
+        print(ui.spine(fg("← stay curious.", EMERALD_DIM, on=state.on), on=state.on))
+        return False
+    if low in ("b", "back"):
+        _handle_back(state)
+        return True
+
+    frame_type = state.stack[-1][0]
+    handled = False
+    if frame_type == "no_repo":
+        handled = _handle_no_repo_choice(state, low)
+    elif frame_type == "home":
+        handled = _handle_home_choice(state, low)
+    elif frame_type == "picker":
+        handled = _handle_picker_choice(state, low)
+    elif frame_type == "domain":
+        handled = _handle_domain_choice(state, low)
+    elif frame_type == "command":
+        handled = _handle_command_choice(state, low)
+
+    if not handled:
+        print(ui.spine(fg(f"unknown choice: {choice!r}", AMBER, on=state.on), on=state.on))
+        _rerender(state)
+    return True
+
+
 # ── browser navigation loop ───────────────────────────────────────────────────
 
 def _browser_entryway(on: bool) -> int:
@@ -670,282 +979,14 @@ def _browser_entryway(on: bool) -> int:
 
     tree = _build_command_tree()
     if not tree:
-        print(ui.spine(fg("browser unavailable — parser introspection failed", AMBER, on=on), on=on))
-        print(ui.spine(fg("fallback: type an intent directly, or q to quit", CREAM_DIM, on=on), on=on))
-        while True:
-            choice = _ask("", on)
-            low = choice.lower()
-            if low in ("q", "quit", "exit", ""):
-                print(ui.spine(fg("← stay curious.", EMERALD_DIM, on=on), on=on))
-                return 0
-            _intent_flow(choice, on)
-            print(ui.spine(on=on))
+        return _fallback_intent_loop(on)
 
-    # Detect repo context on launch
-    current_repo, nearby_repos = _detect_repo_context()
-    selected_repo: Path | None = current_repo
-    showing_no_repo = current_repo is None
-
-    # Group by domain
-    by_domain: dict[str, list[str]] = {}
-    for verb in sorted(tree.keys()):
-        domain = _domain_for(verb)
-        by_domain.setdefault(domain, []).append(verb)
-    domains = [d for d in list(_DOMAINS.keys()) + ["Other"] if d in by_domain]
-
-    # Navigation stack supports:
-    #   ("home",) | ("domain", name) | ("command", verb) | ("picker",) | ("no_repo",)
-    stack: list[tuple[str, ...]] = []
-
-    def _render_current() -> None:
-        frame = stack[-1]
-        if frame[0] == "home":
-            _render_home_browser(tree, on, repo=selected_repo)
-        elif frame[0] == "domain":
-            domain = frame[1]
-            verbs = by_domain.get(domain, [])
-            _render_domain_browser(domain, verbs, tree, on)
-        elif frame[0] == "command":
-            verb = frame[1]
-            node = tree.get(verb, {})
-            _render_command_detail(verb, node, on)
-        elif frame[0] == "picker":
-            _render_project_picker(nearby_repos, on)
-        elif frame[0] == "no_repo":
-            _render_no_repo_home(on, nearby_repos)
-
-    def _resolve_argv(base_argv: list[str]) -> list[str]:
-        """Auto-inject --repo for commands that accept it when a repo is selected."""
-        if not selected_repo or len(base_argv) < 2:
-            return base_argv
-        verb = base_argv[1]
-        extra = _repo_for_command(verb, selected_repo)
-        if extra:
-            return base_argv + extra
-        return base_argv
-
-    # Initial screen: context-aware home, or no-repo screen if not in a repo
-    if showing_no_repo:
-        stack.append(("no_repo",))
-    else:
-        stack.append(("home",))
-
-    _render_current()
-
+    state = _new_browser_state(tree, on)
+    _render_browser_frame(state)
     while True:
         choice = _ask("", on)
-        low = choice.lower()
-
-        if low in ("q", "quit", "exit"):
-            print(ui.spine(fg("← stay curious.", EMERALD_DIM, on=on), on=on))
+        if not _dispatch_browser_choice(state, choice):
             return 0
-
-        if low == "b" or low == "back":
-            if len(stack) > 1:
-                stack.pop()
-                print(ui.spine(on=on))
-                _render_current()
-            else:
-                print(ui.spine(fg("already at home", CREAM_DIM, on=on), on=on))
-            continue
-
-        frame = stack[-1]
-        frame_type = frame[0]
-
-        # ── no-repo screen ──────────────────────────────────────────────────────
-        if frame_type == "no_repo":
-            if low == "c":
-                # Create repo here
-                cwd = Path.cwd().resolve()
-                try:
-                    subprocess.run(["git", "init"], capture_output=True, text=True, timeout=10)
-                    selected_repo = cwd
-                    nearby_repos = []
-                    showing_no_repo = False
-                    print(ui.spine(fg(f"✓ git init in {cwd.name}", EMERALD, on=on), on=on))
-                    stack[-1] = ("home",)
-                    _render_current()
-                except Exception as e:
-                    print(ui.spine(fg(f"git init failed: {type(e).__name__}", AMBER, on=on), on=on))
-                continue
-            elif low == "i":
-                _run(["lgwks", "initialize"])
-                _pause(on)
-                print(ui.spine(on=on))
-                _render_current()
-                continue
-            elif low == "n":
-                # Continue without a repo — show the full browser
-                stack[-1] = ("home",)
-                print(ui.spine(on=on))
-                _render_current()
-                continue
-            elif low.isdigit():
-                idx = int(low) - 1
-                if 0 <= idx < len(nearby_repos):
-                    selected_repo = nearby_repos[idx]
-                    showing_no_repo = False
-                    stack[-1] = ("home",)
-                    print(ui.spine(fg(f"▸ switched to {selected_repo.name}", EMERALD, on=on), on=on))
-                    _render_current()
-                    continue
-            elif low:
-                # Intent typed from no-repo screen
-                _intent_flow(low, on)
-                print(ui.spine(on=on))
-                _render_current()
-                continue
-            continue
-
-        # ── home screen ─────────────────────────────────────────────────────────
-        if frame_type == "home":
-            if low == "p":
-                if nearby_repos:
-                    stack.append(("picker",))
-                    print(ui.spine(on=on))
-                    _render_current()
-                else:
-                    print(ui.spine(fg("no other projects found", CREAM_DIM, on=on), on=on))
-                continue
-            if low.isdigit():
-                idx = int(low) - 1
-                if 0 <= idx < len(domains):
-                    stack.append(("domain", domains[idx]))
-                    print(ui.spine(on=on))
-                    _render_current()
-                    continue
-            # Quick action key?
-            quick_actions = _quick_actions_for_repo(selected_repo)
-            quick_map = {qa[0]: qa for qa in quick_actions}
-            if low in quick_map:
-                _, label, _why, argv = quick_map[low]
-                if label == "repl":
-                    try:
-                        import lgwks_repl
-                        # Build a welcome hint that bridges browser → REPL mental model:
-                        # show the same quick actions the user just saw, translated to REPL syntax.
-                        hint_cmds: list[str] = []
-                        for k, lbl, _why, _argv in quick_actions:
-                            if lbl in ("repl",):
-                                continue
-                            hint_cmds.append(f"{lbl}")
-                        hint = f"commands: {', '.join(hint_cmds[:4])} … type .help for all" if hint_cmds else "type .help for commands"
-                        lgwks_repl.run_repl(
-                            repo_path=str(selected_repo) if selected_repo else ".",
-                            welcome_hint=hint,
-                        )
-                    except Exception as e:
-                        print(fg(f"  · repl error: {type(e).__name__}: {e}", AMBER, on=on), file=sys.stderr)
-                elif label == "doctor":
-                    _print_doctor(on)
-                    _pause(on)
-                elif label == "viz":
-                    try:
-                        import lgwks_graph as gmod
-                        import lgwks_graph_viz as viz
-                        graph = gmod.get_graph(selected_repo)
-                        browser = viz.GraphBrowser(graph, on=on)
-                        browser.run()
-                    except Exception as e:
-                        print(fg(f"  · viz error: {type(e).__name__}: {e}", AMBER, on=on), file=sys.stderr)
-                        _pause(on)
-                elif label == "tui":
-                    try:
-                        from pathlib import Path as _P
-                        root = _P(__file__).resolve().parent
-                        binary = root / "tui" / "target" / "debug" / "lgwks-tui"
-                        if not binary.exists():
-                            binary = root / "tui" / "target" / "release" / "lgwks-tui"
-                        
-                        if not binary.exists():
-                            print(ui.spine(fg("TUI binary not found. Build it with: cd tui && cargo build", AMBER, on=on), on=on))
-                            _pause(on)
-                        else:
-                            subprocess.call([str(binary)])
-                    except Exception as e:
-                        print(fg(f"  · tui error: {type(e).__name__}: {e}", AMBER, on=on), file=sys.stderr)
-                        _pause(on)
-                elif argv:
-                    _run(_resolve_argv(argv))
-                    _pause(on)
-                print(ui.spine(on=on))
-                _render_current()
-                continue
-            # Anything else = intent
-            if low:
-                _intent_flow(low, on)
-                print(ui.spine(on=on))
-                _render_current()
-                continue
-
-        # ── picker screen ───────────────────────────────────────────────────────
-        if frame_type == "picker":
-            if low.isdigit():
-                idx = int(low) - 1
-                if 0 <= idx < len(nearby_repos):
-                    selected_repo = nearby_repos[idx]
-                    print(ui.spine(fg(f"▸ switched to {selected_repo.name}", EMERALD, on=on), on=on))
-                    stack.pop()
-                    _render_current()
-                    continue
-            elif low == "b":
-                stack.pop()
-                print(ui.spine(on=on))
-                _render_current()
-                continue
-            continue
-
-        # ── domain screen ───────────────────────────────────────────────────────
-        if frame_type == "domain":
-            domain = frame[1]
-            verbs = by_domain.get(domain, [])
-            if low.isdigit():
-                idx = int(low) - 1
-                if 0 <= idx < len(verbs):
-                    verb = verbs[idx]
-                    node = tree.get(verb, {})
-                    if "subcommands" in node:
-                        stack.append(("command", verb))
-                    else:
-                        _run(_resolve_argv(["lgwks", verb]))
-                        _pause(on)
-                    print(ui.spine(on=on))
-                    _render_current()
-                    continue
-
-        # ── command detail screen ───────────────────────────────────────────────
-        if frame_type == "command":
-            verb = frame[1]
-            node = tree.get(verb, {})
-            subcommands = node.get("subcommands", {})
-            sc_list = sorted(subcommands.keys())
-
-            if low == "r":
-                _run(_resolve_argv(["lgwks", verb]))
-                _pause(on)
-                print(ui.spine(on=on))
-                _render_current()
-                continue
-            elif low == "h":
-                _run_with_help(_resolve_argv(["lgwks", verb]))
-                _pause(on)
-                print(ui.spine(on=on))
-                _render_current()
-                continue
-            elif low.isdigit() and subcommands:
-                idx = int(low) - 1
-                if 0 <= idx < len(sc_list):
-                    sc_name = sc_list[idx]
-                    _run(_resolve_argv(["lgwks", verb, sc_name]))
-                    _pause(on)
-                    print(ui.spine(on=on))
-                    _render_current()
-                    continue
-
-        # Unknown input
-        print(ui.spine(fg(f"unknown choice: {choice!r}", AMBER, on=on), on=on))
-        print(ui.spine(on=on))
-        _render_current()
 
 
 def _print_doctor(on: bool) -> None:
