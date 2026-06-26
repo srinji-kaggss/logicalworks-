@@ -17,7 +17,7 @@ from datetime import date
 from pathlib import Path
 from typing import Any
 
-import lgwks_run
+import lgwks_model_port as port
 import lgwks_sqlite
 import lgwks_storage
 import lgwks_substrate_config as config
@@ -286,12 +286,11 @@ def build_run(args: argparse.Namespace) -> dict[str, Any]:
                     "artifact_cid": chunk_id,    # #165: derived from the chunk's tape entry
                 })
                 for sentence in text._fact_sentences(stem, args.fact_threshold):
-                    dual = lgwks_run.embed_dual(
+                    dual = port.embed(
                         sentence,
-                        embed_on=True,
                         provider=args.embed_provider,
                         model=args.embed_model,
-                    )
+                    )["value"]
                     # deterministic fact vector (always present; audit trail)
                     fdet = dual["det"]
                     provider_counts[fdet["provider"]] += 1
@@ -324,12 +323,11 @@ def build_run(args: argparse.Namespace) -> dict[str, Any]:
                         })
 
             vector_text = stem or piece
-            dual = lgwks_run.embed_dual(
+            dual = port.embed(
                 vector_text,
-                embed_on=True,
                 provider=args.embed_provider,
                 model=args.embed_model,
-            )
+            )["value"]
             # deterministic chunk vector (always present)
             cdet = dual["det"]
             provider_counts[cdet["provider"]] += 1

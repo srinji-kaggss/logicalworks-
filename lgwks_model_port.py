@@ -490,8 +490,14 @@ def classify(text: str, *, threshold: float = 0.60) -> dict[str, Any]:
 
 
 def embed(text: str = "", *, modality: str = "text",
-          media: Any = None, locality: str | None = None) -> dict[str, Any]:
+          media: Any = None, locality: str | None = None,
+          provider: str | None = None, model: str | None = None) -> dict[str, Any]:
     """role=embed — one multimodal vector (text/image/video), as a port envelope.
+
+    `provider`/`model` are optional CLI-override passthroughs (e.g. `--embed-provider
+    apple-local`, `--embed-model <id>`): an explicit value wins, so the port is a true
+    superset of `lgwks_run.embed_dual` and every embed caller can route through it.
+    When omitted, `locality` alone picks the plane.
 
     Embedding is the role where the deterministic tier is ALWAYS present (the
     feature-hash / perceptual-fingerprint audit vector) and the sensor tier is the
@@ -510,10 +516,12 @@ def embed(text: str = "", *, modality: str = "text",
     sel = resolve_model("embed", locality=loc)
     eye = (sel["law_name"] if sel else
            mesh.model_name_for_role("embed", trust_class="sensor"))
-    provider = "openrouter-vl" if loc == CLOUD else "auto"
+    # Explicit provider/model (a caller's CLI override) wins; otherwise locality
+    # picks the plane (LOCAL → local Eye via "auto", CLOUD → remote VL).
+    eff_provider = provider or ("openrouter-vl" if loc == CLOUD else "auto")
     import lgwks_run
-    dual = lgwks_run.embed_dual(text, embed_on=True, provider=provider,
-                                modality=modality, media=media)
+    dual = lgwks_run.embed_dual(text, embed_on=True, provider=eff_provider,
+                                model=model or "", modality=modality, media=media)
     sem = dual.get("sem")
     if sem and sem.get("vector"):
         return _envelope(
