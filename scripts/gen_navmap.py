@@ -277,6 +277,16 @@ def main() -> int:
 
     # ---- markdown ----
     L: list[str] = []
+    # OKF frontmatter (the navmap is a concept in the docs Knowledge Bundle — born
+    # conformant so `gen_okf.py --verify` stays green across a navmap regen). See
+    # docs/concepts/knowledge-format.md.
+    L.append("---")
+    L.append("type: Navmap")
+    L.append("title: NAVMAP — lgwks module atlas")
+    L.append(f"description: Generated module atlas — {totals['modules']} modules, {totals['loc']:,} LOC; the canonical code-side knowledge graph (deps/used_by/staleness).")
+    L.append("tags: [navmap, generated, code-graph]")
+    L.append("---")
+    L.append("")
     L.append("# NAVMAP — lgwks module atlas (generated; do not hand-edit)")
     L.append("")
     L.append(

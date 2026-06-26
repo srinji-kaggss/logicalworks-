@@ -1,3 +1,11 @@
+---
+type: Spec
+title: Seed Surface Spec (JEPA-001 / JEPA-002 / JEPA-003)
+description: Status: spec
+tags: [spec]
+timestamp: 2026-06-06T13:13:23-04:00
+---
+
 # Seed Surface Spec (JEPA-001 / JEPA-002 / JEPA-003)
 
 Status: spec

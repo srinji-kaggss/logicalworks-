@@ -1,3 +1,11 @@
+---
+type: Archive
+title: Handoff: Repo Cleanup — 2026-06-02
+description: 3.
+tags: [archive]
+timestamp: 2026-06-23T00:24:35-04:00
+---
+
 # Handoff: Repo Cleanup — 2026-06-02
 
 ## What happened (the full sequence)

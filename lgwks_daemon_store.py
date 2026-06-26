@@ -824,6 +824,28 @@ class DaemonEventStore:
             conn.execute("ROLLBACK")
             raise
 
+    def get_item(self, item_id: str) -> dict[str, Any] | None:
+        """Read one work item's status + terminal payload, or None if unknown.
+
+        The read side of the queue: a synchronous client (e.g. engine.dispatch_
+        and_await) enqueues then polls this until status is terminal. Under WAL a
+        fresh SELECT sees the daemon process's committed completion, so a separate
+        connection can observe out-of-band execution finish.
+        """
+        row = self._conn.execute(
+            "SELECT item_id, tenant_id, session_id, agent_id, kind, status, "
+            "result_json, error FROM daemon_work_queue WHERE item_id=?",
+            (item_id,),
+        ).fetchone()
+        if row is None:
+            return None
+        return {
+            "item_id": row[0], "tenant_id": row[1], "session_id": row[2],
+            "agent_id": row[3], "kind": row[4], "status": row[5],
+            "result": json.loads(row[6]) if row[6] else None,
+            "error": row[7],
+        }
+
     def queue_depth(self, tenant_id: str, conn=None) -> dict[str, Any]:
         rows = (conn or self._conn).execute(
             "SELECT status, COUNT(*) FROM daemon_work_queue WHERE tenant_id=? GROUP BY status",

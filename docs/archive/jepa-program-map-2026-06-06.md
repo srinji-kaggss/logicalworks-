@@ -1,3 +1,11 @@
+---
+type: Archive
+title: JEPA Program Map — 2026-06-06
+description: Purpose: give the project a high-level build-down map that can survive backlog churn.
+tags: [archive]
+timestamp: 2026-06-23T00:24:35-04:00
+---
+
 # JEPA Program Map — 2026-06-06
 
 Purpose: give the project a high-level build-down map that can survive backlog churn.

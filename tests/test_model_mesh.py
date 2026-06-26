@@ -18,7 +18,9 @@ import lgwks_model_mesh as mesh_mod
 REQUIRED_31_NAMES = {
     "mlx-community/ModernBERT-base-mlx-4bit",
     "Axiom-Byte-Framework",
-    "mlx-community/Qwen3.7-VL-8B-Instruct-4bit",
+    # Embed/Eye — source spec (MODEL-RUNTIME-FINALIZATION-2026-06-13 §92/§117) names the
+    # Qwen3-VL EMBEDDING model, not the VL-Instruct visual agent the law had transcribed.
+    "Qwen/Qwen3-VL-Embedding-8B",
     "meta-llama/Llama-Prompt-Guard-2-86M",
     "mlx-community/OLMo-2-0325-32B-Instruct-4bit",
     "logicalworks/had-fraud-engine-v1",

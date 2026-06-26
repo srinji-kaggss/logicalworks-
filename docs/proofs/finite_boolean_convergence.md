@@ -1,3 +1,11 @@
+---
+type: Proof
+title: Proof Sketch: Finite Boolean Graph Convergence & Intent Gauge-Fixing
+description: This document addresses Issue #173: "prove / falsify toy theorem in finite Boolean graph domain."
+tags: [proof, proofs]
+timestamp: 2026-06-21T07:40:18-04:00
+---
+
 # Proof Sketch: Finite Boolean Graph Convergence & Intent Gauge-Fixing
 
 This document addresses Issue #173: "prove / falsify toy theorem in finite Boolean graph domain."

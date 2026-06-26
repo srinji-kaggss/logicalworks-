@@ -1,5 +1,10 @@
 """lgwks_route — unified intent routing.
 Consolidates map, engine, route, and refine.
+
+⚠️ DEPRECATED HEAD (boilerplate). RETIRED — folded into the `agent` front door;
+no live CLI verb, only its own test imports it. Frozen pending removal once the
+front door routes through engine.dispatch → daemon (the single source of truth).
+See engine/deprecated_heads.py + engine/DAEMON-ABSORPTION-LOG.md.
 """
 
 from __future__ import annotations
@@ -11,6 +16,9 @@ import sys
 import json
 from pathlib import Path
 from typing import Any
+
+# Head killed — frozen boilerplate pending daemon absorption (engine/deprecated_heads.py).
+_DEPRECATED_HEAD = True
 
 SCHEMA_ACT = "lgwks.route.act.v1"
 

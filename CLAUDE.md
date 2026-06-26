@@ -29,18 +29,23 @@ Build-state truth lives in `spec/second-harness/BUILDLOG*.md`, not in spec prose
 
 ## Startup read order
 1. This file.
-2. `docs/navmap/README.md` — **the canonical "map" / "navmap" for this repo**: generated module atlas
-   (~46k LOC) showing what every file is, its subsystem, who calls it, and its staleness.
-   If the Director says "review the map", they mean this file unless they explicitly name a different one.
-   Read/query this BEFORE grepping the code surface.
-   Machine-readable + queryable: `docs/navmap/index.json` (`lgwks.navmap.v1`). Refresh: `python3 scripts/gen_navmap.py`.
-3. `docs/OPERATING-MODEL.md` — the comprehensive graph of the request lane, daemon lane, shared substrate, and security membrane.
-4. `docs/DAEMON-CORE-PLAN.md` — the current cohesive plan to finish the daemon core and the first website-research experience.
-5. `governance/README.md` — governance map.
-6. `spec/second-harness/HANDOFF.md` + `INGESTION-PLAN.md` — current work packets.
-7. `docs/AUTHORITY.md` — **NEW: The single, unified architectural rulebook and context stream.** Read this for the 15-layer model mesh, 3-tier escalation ladder, and ingestion details.
-8. `docs/ARCHITECTURE.md` — older system-shape doctrine; useful, but not the best entrypoint for the current whole.
-9. Assigned issue(s) — GitHub Issues are the work tracker.
+2. `docs/index.md` — **the OKF Knowledge Bundle map.** `docs/` is an Open Knowledge Format
+   bundle (Google-OKF-inspired): every doc is a typed concept with frontmatter, cross-linked,
+   with per-directory `index.md` for **progressive disclosure** — read the index, then open only
+   the concepts you need. Start here: [`docs/concepts/knowledge-format.md`](docs/concepts/knowledge-format.md)
+   explains the format + lineage. Generated/validated by `scripts/gen_okf.py` (`--verify` is a CI gate).
+3. `docs/navmap/README.md` — **the canonical code map / "navmap"**: generated module atlas
+   (deps/used_by/subsystem/staleness). If the Director says "review the map", they mean this unless
+   another is named. Read/query BEFORE grepping. Machine-readable: `docs/navmap/index.json`
+   (`lgwks.navmap.v1`). Refresh: `python3 scripts/gen_navmap.py`. (navmap = code graph; OKF = docs graph.)
+4. `docs/OPERATING-MODEL.md` — request lane, daemon lane, shared substrate, security membrane.
+5. `docs/concepts/model-layer.md` — the two-plane model layer (one port, locality axis).
+6. `docs/DAEMON-CORE-PLAN.md` — plan to finish the daemon core + first website-research experience.
+7. `governance/README.md` — governance map.
+8. `spec/second-harness/HANDOFF.md` + `INGESTION-PLAN.md` — current work packets.
+9. `docs/AUTHORITY.md` — unified architectural rulebook: model mesh, escalation ladder, ingestion.
+10. `docs/ARCHITECTURE.md` — older system-shape doctrine; useful, not the best entrypoint for the whole.
+11. Assigned issue(s) — GitHub Issues are the work tracker.
 
 ## Reserved load-bearing doc nouns
 - `navmap` = the repo-wide module atlas only. It lives under `docs/navmap/`.

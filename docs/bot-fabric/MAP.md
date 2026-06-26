@@ -1,3 +1,11 @@
+---
+type: Reference
+title: Bot Fabric Map
+description: Replace repeated LLM scoping work with:
+tags: [bot-fabric, reference]
+timestamp: 2026-06-06T10:24:49-04:00
+---
+
 # Bot Fabric Map
 
 ## North star

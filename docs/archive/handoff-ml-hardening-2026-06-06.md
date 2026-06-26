@@ -1,3 +1,11 @@
+---
+type: Archive
+title: ML Hardening Handoff — 2026-06-06
+description: Scope for this pass:
+tags: [archive]
+timestamp: 2026-06-23T00:24:35-04:00
+---
+
 # ML Hardening Handoff — 2026-06-06
 
 Scope for this pass:

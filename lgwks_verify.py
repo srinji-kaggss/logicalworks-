@@ -282,12 +282,17 @@ def verify_command(args: argparse.Namespace) -> int:
         ci_run = root / "scripts" / "ci" / "run.mjs"
         return subprocess.run(["node", str(ci_run), "--tier", tier]).returncode
 
+    profile_path = Path(args.profile)
+    if not profile_path.is_file():
+        print(f"error: profile not found: {args.profile}", file=__import__('sys').stderr)
+        return 2
+
     cmd = ["node", str(keel_run), "--profile", args.profile]
     if getattr(args, "concurrency", 0) > 0:
         cmd.extend(["--concurrency", str(args.concurrency)])
 
     is_machine = os.environ.get("LGWKS_MACHINE") == "1"
-    
+
     res = subprocess.run(cmd, capture_output=is_machine, text=True)
 
     if not is_machine:

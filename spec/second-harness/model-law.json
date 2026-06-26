@@ -1,0 +1,302 @@
+{
+  "schema": "lgwks.model.law.v1",
+  "describes": "lgwks.model.mesh.v1",
+  "intent": "Canonical SOURCE of the model law. lgwks_model_mesh.MESH_LAW is GENERATED from this file by scripts/gen_model_law.py (--verify is the CI gate). Records inventory; does not change it. Edit HERE, never the generated block, never the spec prose alone.",
+  "sources": {
+    "current_law_stack": "docs/AETHERIUS_SPEC_2026.md §3 (Authoritative 8-Component Stack, v1 Locked, 2026-06-14)",
+    "embed_correction": "spec/second-harness/MODEL-RUNTIME-FINALIZATION-2026-06-13.md §3/§3.1 (Universal semantic space)",
+    "candidate_open": "spec/second-harness/MODEL-RUNTIME-FINALIZATION-2026-06-13.md §3.2 (missing slots)"
+  },
+  "spec_divergences": [
+    {
+      "layer": "V. EYE",
+      "prose_name": "Qwen 3.7-VL-8B",
+      "prose_purpose": "GUI Agent. Operates terminal/GUI via screenshots.",
+      "resolution": "The v1-locked embed current_law is Qwen/Qwen3-VL-Embedding-8B — an EMBEDDER, sourced from FINALIZATION §3 — not the VL visual agent the Aetherius §3 prose names. The visual-agent reading is carried as a candidate_reference (mlx-community/Qwen3-VL-8B-Instruct-4bit), NOT promoted: embedding and GUI-operation are different capabilities. The prose version '3.7' is drift (no such release); the candidate id is the corrected MLX repo id. Recorded so the prose<->law gate PASSES on this known divergence and FAILS on any NEW one."
+    }
+  ],
+  "prose_table": [
+    {
+      "layer": "I. MATH",
+      "component": "Anchor",
+      "model": "Axiom ISA",
+      "trust": "Authority",
+      "purpose": "Deterministic BLAKE3 CIDs and CRDT Algebra."
+    },
+    {
+      "layer": "II. ML",
+      "component": "Membrane",
+      "model": "ModernBERT-base",
+      "trust": "Sensor",
+      "purpose": "8k Task-Salience Encoder. Maps 'slop' to tool intents."
+    },
+    {
+      "layer": "III. ML",
+      "component": "Ingestion",
+      "model": "Liquid AI LFM 2.5",
+      "trust": "Sensor",
+      "purpose": "Constant-RAM Trajectory Tailing (Recurrent Core)."
+    },
+    {
+      "layer": "IV. OMNI",
+      "component": "Voice",
+      "model": "Qwen 3.5-Omni-3B",
+      "trust": "Generative",
+      "purpose": "Native Speech-to-Speech. Direct Ear/Mouth."
+    },
+    {
+      "layer": "V. EYE",
+      "component": "Vision",
+      "model": "Qwen 3.7-VL-8B",
+      "trust": "Sensor",
+      "purpose": "GUI Agent. Operates terminal/GUI via screenshots."
+    },
+    {
+      "layer": "VI. BRAIN",
+      "component": "Reasoner",
+      "model": "OLMo-2-32B",
+      "trust": "Generative",
+      "purpose": "The Stay Model. Deep Architectural Resolve."
+    },
+    {
+      "layer": "VII. GUARD",
+      "component": "Security",
+      "model": "Prompt-Guard-2",
+      "trust": "Sensor",
+      "purpose": "<1ms Injection Blocking & Jailbreak Detection."
+    },
+    {
+      "layer": "VIII. FRAUD",
+      "component": "Anomaly",
+      "model": "LightGBM / HAD",
+      "trust": "Sensor",
+      "purpose": "Statistical Drift & Fraud Detection (Z-Score)."
+    }
+  ],
+  "entries": [
+    {
+      "layer": "I. THE ANCHOR (Mathematical Authority)",
+      "aetherius_row": 1,
+      "provenance": "docs/AETHERIUS_SPEC_2026.md §3 (Authoritative 8-Component Stack, v1 Locked, 2026-06-14)",
+      "entry": {
+        "name": "Axiom-Byte-Framework",
+        "runtime": "axiom",
+        "locality": "local",
+        "role": "identity",
+        "trust_class": "deterministic",
+        "status": "current_law",
+        "notes": "Zero-trust foundation; BLAKE3 CID and CRDT merge algebra."
+      }
+    },
+    {
+      "layer": "II. THE MEMBRANE (Task Salience Sensor)",
+      "aetherius_row": 2,
+      "provenance": "docs/AETHERIUS_SPEC_2026.md §3 (Authoritative 8-Component Stack, v1 Locked, 2026-06-14)",
+      "entry": {
+        "name": "mlx-community/ModernBERT-base-mlx-4bit",
+        "runtime": "mlx",
+        "locality": "local",
+        "role": "intent",
+        "trust_class": "sensor",
+        "status": "current_law",
+        "notes": "8k context Task Salience encoder. <2ms on ANE."
+      }
+    },
+    {
+      "layer": "III. THE HEART (Recurrent Ingestion)",
+      "aetherius_row": 3,
+      "provenance": "docs/AETHERIUS_SPEC_2026.md §3 (Authoritative 8-Component Stack, v1 Locked, 2026-06-14)",
+      "entry": {
+        "name": "mlx-community/liquid-lfm-2.5-1.2b-mlx-4bit",
+        "runtime": "mlx",
+        "locality": "local",
+        "role": "encode",
+        "trust_class": "sensor",
+        "status": "current_law",
+        "notes": "Liquid AI recurrent core. Constant-RAM tailing of trajectories."
+      }
+    },
+    {
+      "layer": "IV. THE OMNI (Native Voice Interaction)",
+      "aetherius_row": 4,
+      "provenance": "docs/AETHERIUS_SPEC_2026.md §3 (Authoritative 8-Component Stack, v1 Locked, 2026-06-14)",
+      "entry": {
+        "name": "mlx-community/Qwen2.5-Omni-3B-Instruct-4bit-mlx",
+        "runtime": "mlx",
+        "locality": "local",
+        "role": "asr",
+        "trust_class": "generative",
+        "status": "current_law",
+        "notes": "Truly Multimodal. Native speech-to-speech (Ear/Mouth). Wisprflow feel."
+      }
+    },
+    {
+      "layer": "V. THE EYE (Universal Multimodal Embedding Space)",
+      "aetherius_row": 5,
+      "provenance": "spec/second-harness/MODEL-RUNTIME-FINALIZATION-2026-06-13.md §3/§3.1 (Universal semantic space) — embed-law correction; Aetherius §3 V.EYE prose names a VL *visual agent*, see spec_divergences",
+      "entry": {
+        "name": "Qwen/Qwen3-VL-Embedding-8B",
+        "runtime": "mlx",
+        "locality": "local",
+        "role": "embed",
+        "trust_class": "sensor",
+        "status": "current_law",
+        "input_schema": "lgwks.modality.item.v1",
+        "output_schema": "lgwks.vector.record.v1",
+        "notes": "Shared text/image/video vector space via lgwks_embed_port; the ONE semantic embedder. Pinned by the source spec (MODEL-RUNTIME-FINALIZATION-2026-06-13 §92/§117) as Qwen/Qwen3-VL-Embedding-8B. Hub catalog key (the runtime id) is the name minus its org: Qwen3-VL-Embedding-8B."
+      }
+    },
+    {
+      "layer": "VI. THE BRAIN (Deep Reasoning)",
+      "aetherius_row": 6,
+      "provenance": "docs/AETHERIUS_SPEC_2026.md §3 (Authoritative 8-Component Stack, v1 Locked, 2026-06-14)",
+      "entry": {
+        "name": "mlx-community/OLMo-2-0325-32B-Instruct-4bit",
+        "runtime": "mlx",
+        "locality": "local",
+        "role": "proposal",
+        "trust_class": "generative",
+        "status": "current_law",
+        "notes": "The Stay Model. Deep architectural resolve."
+      }
+    },
+    {
+      "layer": "VII. THE GUARD (Injection Blocking)",
+      "aetherius_row": 7,
+      "provenance": "docs/AETHERIUS_SPEC_2026.md §3 (Authoritative 8-Component Stack, v1 Locked, 2026-06-14)",
+      "entry": {
+        "name": "meta-llama/Llama-Prompt-Guard-2-86M",
+        "runtime": "transformers",
+        "locality": "local",
+        "role": "classify",
+        "trust_class": "sensor",
+        "status": "current_law",
+        "notes": "<1ms injection blocking."
+      }
+    },
+    {
+      "layer": "VIII. THE FRAUD (Statistical Anomaly)",
+      "aetherius_row": 8,
+      "provenance": "docs/AETHERIUS_SPEC_2026.md §3 (Authoritative 8-Component Stack, v1 Locked, 2026-06-14)",
+      "entry": {
+        "name": "logicalworks/had-fraud-engine-v1",
+        "runtime": "custom",
+        "locality": "local",
+        "role": "classify",
+        "trust_class": "sensor",
+        "status": "current_law",
+        "notes": "Detects slop and intent drift in real-time streams."
+      }
+    },
+    {
+      "provenance": "candidate inventory — documented, NOT in force (Aetherius §5 transition / FINALIZATION §3.2 open architecture)",
+      "entry": {
+        "name": "WhisperKit/lg-v3-turbo",
+        "runtime": "mlx",
+        "locality": "local",
+        "role": "asr",
+        "trust_class": "sensor",
+        "status": "candidate_reference",
+        "notes": "Candidate ANE/MLX ASR path; does not replace the current Omni law."
+      }
+    },
+    {
+      "provenance": "candidate inventory — documented, NOT in force (Aetherius §5 transition / FINALIZATION §3.2 open architecture)",
+      "entry": {
+        "name": "mlx-community/Qwen3-VL-8B-Instruct-4bit",
+        "runtime": "mlx",
+        "locality": "local",
+        "role": "embed",
+        "trust_class": "sensor",
+        "status": "candidate_reference",
+        "input_schema": "lgwks.modality.item.v1",
+        "output_schema": "lgwks.vector.record.v1",
+        "notes": "Candidate VL-Instruct visual agent (GUI operation); does not replace the Qwen3-VL-Embedding-8B embed current law."
+      }
+    },
+    {
+      "provenance": "candidate inventory — documented, NOT in force (Aetherius §5 transition / FINALIZATION §3.2 open architecture)",
+      "entry": {
+        "name": "Qwen/Qwen3-Reranker-0.6B",
+        "runtime": "mlx",
+        "locality": "local",
+        "role": "rerank",
+        "trust_class": "sensor",
+        "status": "candidate_reference",
+        "notes": "Second-stage ranker for shared vector recall."
+      }
+    },
+    {
+      "provenance": "candidate inventory — documented, NOT in force (Aetherius §5 transition / FINALIZATION §3.2 open architecture)",
+      "entry": {
+        "name": "Qwen/Qwen3-Coder",
+        "runtime": "transformers",
+        "locality": "local",
+        "role": "code",
+        "trust_class": "sensor",
+        "status": "candidate_reference",
+        "notes": "Code explanation and proposal beyond static analysis."
+      }
+    },
+    {
+      "provenance": "candidate inventory — documented, NOT in force (Aetherius §5 transition / FINALIZATION §3.2 open architecture)",
+      "entry": {
+        "name": "neobert-base",
+        "runtime": "transformers",
+        "locality": "local",
+        "role": "salience",
+        "trust_class": "sensor",
+        "status": "candidate_reference",
+        "notes": "Research-grade encoder for transcript attention."
+      }
+    },
+    {
+      "provenance": "candidate inventory — documented, NOT in force (Aetherius §5 transition / FINALIZATION §3.2 open architecture)",
+      "entry": {
+        "name": "LiquidAI/LFM2-1.2B-Extract",
+        "runtime": "llama_cpp",
+        "locality": "local",
+        "role": "extract",
+        "trust_class": "sensor",
+        "status": "candidate_reference",
+        "notes": "GGUF local worker for schema-valid facts."
+      }
+    },
+    {
+      "provenance": "candidate inventory — documented, NOT in force (Aetherius §5 transition / FINALIZATION §3.2 open architecture)",
+      "entry": {
+        "name": "hexgrad/Kokoro-82M",
+        "runtime": "custom",
+        "locality": "local",
+        "role": "identity",
+        "trust_class": "sensor",
+        "status": "candidate_reference",
+        "notes": "Ultra-fast local TTS for voice interaction."
+      }
+    },
+    {
+      "provenance": "candidate inventory — documented, NOT in force (Aetherius §5 transition / FINALIZATION §3.2 open architecture)",
+      "entry": {
+        "name": "kyutai/moshika-v1",
+        "runtime": "custom",
+        "locality": "local",
+        "role": "proposal",
+        "trust_class": "generative",
+        "status": "candidate_reference",
+        "notes": "Real-time full-duplex voice interaction (Wisprflow)."
+      }
+    },
+    {
+      "provenance": "candidate inventory — documented, NOT in force (Aetherius §5 transition / FINALIZATION §3.2 open architecture)",
+      "entry": {
+        "name": "allenai/Molmo-2-Instruct",
+        "runtime": "mlx",
+        "locality": "local",
+        "role": "embed",
+        "trust_class": "generative",
+        "status": "candidate_reference",
+        "notes": "Frontier-tier multimodal reasoning and grounding."
+      }
+    }
+  ]
+}

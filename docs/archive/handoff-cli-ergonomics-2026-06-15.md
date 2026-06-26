@@ -1,3 +1,11 @@
+---
+type: Archive
+title: Handoff — CLI Ergonomics Sweep (Issues 157–159, 161–163)
+description: Issue #160 (daemon JSONL event bus) is partially started but not complete:
+tags: [archive]
+timestamp: 2026-06-23T00:24:35-04:00
+---
+
 # Handoff — CLI Ergonomics Sweep (Issues 157–159, 161–163)
 
 **Date:** 2026-06-15

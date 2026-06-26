@@ -1,5 +1,11 @@
 """lgwks_do — unified orchestrator: code, research, govern, cleanup, ship.
 
+⚠️ DEPRECATED HEAD (boilerplate). This orchestrator's head is KILLED — it is no
+longer a living peer orchestrator. The leaf logic below is retained as boilerplate
+for absorption into the daemon (the single source of truth). See
+engine/deprecated_heads.py + engine/DAEMON-ABSORPTION-LOG.md. Do not extend;
+route new work through engine.dispatch → daemon.
+
 Runs multi-phase workflows by composing existing verbs programmatically.
 No shell-outs: modules are imported and their command functions called directly.
 
@@ -23,6 +29,9 @@ import time
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
+
+# Head killed — frozen boilerplate pending daemon absorption (engine/deprecated_heads.py).
+_DEPRECATED_HEAD = True
 
 import lgwks_substrate_io as _io  # canonical filesystem slug (one source of truth)
 import lgwks_ui as ui

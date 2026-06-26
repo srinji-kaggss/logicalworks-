@@ -1,3 +1,11 @@
+---
+type: Archive
+title: lgwks Capture / Substrate / Portal Hardening
+description: This slice hardens the operator-facing ingress path and the durable SQLite spine.
+tags: [archive]
+timestamp: 2026-06-23T00:24:35-04:00
+---
+
 # lgwks Capture / Substrate / Portal Hardening
 
 ## What changed

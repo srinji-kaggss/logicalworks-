@@ -1,3 +1,11 @@
+---
+type: Spec
+title: SPEC-00 — The Coherence Engine (more than a compiler)
+description: AI code generation already compiles.
+tags: [frontier, spec]
+timestamp: 2026-06-02T16:48:56-04:00
+---
+
 # SPEC-00 — The Coherence Engine (more than a compiler)
 
 > The core contribution. Read MAP.md first. Audience: Kimi build agents + orchestrating AI.

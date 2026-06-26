@@ -1,3 +1,11 @@
+---
+type: Plan
+title: U2 — Bot Plan Schema
+description: Status: spec
+tags: [bot-fabric, plan]
+timestamp: 2026-06-06T10:26:16-04:00
+---
+
 # U2 — Bot Plan Schema
 
 Status: spec

@@ -1,3 +1,11 @@
+---
+type: Spec
+title: SPEC-02 — The Three Frontier Models + the AI-Lang Horizon
+description: Sort by how checkable an output is — that property is the line where ML becomes AI.
+tags: [frontier, spec]
+timestamp: 2026-06-02T16:48:56-04:00
+---
+
 # SPEC-02 — The Three Frontier Models + the AI-Lang Horizon
 
 > The research-track context for the build units. Read MAP.md first.

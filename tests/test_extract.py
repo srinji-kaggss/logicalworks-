@@ -118,7 +118,11 @@ class TestSiteAwareExtraction(unittest.TestCase):
             '<div class="gs_a">A Vaswani et al. - NeurIPS 2017</div>'
             '<div class="gs_rs">We propose...</div>'
         )
-        with unittest.mock.patch.object(extract, "_html", return_value=html):
+        # _sniff_url_kind neutralized so the ambiguous-URL path defers straight to
+        # _html without a network probe (global-engine refactor preserved the invariant:
+        # html/unknown → _html → site enrichment).
+        with unittest.mock.patch.object(extract, "_sniff_url_kind", return_value=("html", b"")), \
+             unittest.mock.patch.object(extract, "_html", return_value=html):
             r = extract.extract("https://scholar.google.com/scholar?q=attention", max_chars=4000)
         self.assertTrue(r["ok"])
         self.assertIn("site_data", r)
@@ -128,7 +132,8 @@ class TestSiteAwareExtraction(unittest.TestCase):
         self.assertEqual(r["text"], "We propose...")
 
     def test_unknown_url_no_site_data(self):
-        with unittest.mock.patch.object(extract, "_html", return_value="generic page content"):
+        with unittest.mock.patch.object(extract, "_sniff_url_kind", return_value=("html", b"")), \
+             unittest.mock.patch.object(extract, "_html", return_value="generic page content"):
             r = extract.extract("https://example.com/article", max_chars=4000)
         self.assertTrue(r["ok"])
         self.assertNotIn("site_data", r)

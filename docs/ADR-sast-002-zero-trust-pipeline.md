@@ -1,3 +1,11 @@
+---
+type: ADR
+title: ADR-sast-002: Zero-Trust Multi-Layer Execution Pipeline (Math-ML-LLM)
+description: We are building a system where LLMs are part of the "Subconscious" (Layer 3), but they are fundamentally untrusted and prone to injection.
+tags: [adr]
+timestamp: 2026-06-12T23:10:49-04:00
+---
+
 # ADR-sast-002: Zero-Trust Multi-Layer Execution Pipeline (Math-ML-LLM)
 
 **Status**: PROPOSED 2026-06-13

@@ -228,3 +228,99 @@ class TestSessionDaemon(unittest.TestCase):
         self.assertEqual(payload["counts"]["documents"], 1)
         self.assertEqual(payload["counts"]["chunks"], 2)
         self.assertNotIn("frontier_tail", payload)
+
+
+class TestDaemonExecutorClosesG10(unittest.TestCase):
+    """The daemon executor (_dispatch_item) must EXECUTE every non-escape-hatch
+    work kind it advertises in WORK_REGISTRY — not silently drop it to the
+    `{"dispatched": True}` no-op. This is the gap-analysis G10 fix that makes the
+    daemon a genuine single executor (the orchestration SoT) rather than a queue
+    that advertises capabilities it can't run. See engine/DAEMON-ABSORPTION-LOG.md.
+    """
+
+    def setUp(self):
+        from lgwks_daemon_store import DaemonEventStore
+        self.tmp = Path(tempfile.mkdtemp())
+        self.store = DaemonEventStore(self.tmp / "events.db")
+        self.tenant = "repo:executor-test"
+
+    def tearDown(self):
+        try:
+            self.store.close()
+        except Exception:
+            pass
+
+    def _item(self, kind: str, payload: dict) -> dict:
+        item = {
+            "item_id": f"{kind}-1", "tenant_id": self.tenant,
+            "session_id": "s", "agent_id": "a", "kind": kind, "payload": payload,
+        }
+        self.store.enqueue(item)
+        return item
+
+    def _row(self, item_id: str) -> tuple[str, dict]:
+        status, result_json = self.store._conn.execute(
+            "SELECT status, result_json FROM daemon_work_queue WHERE item_id=?",
+            (item_id,),
+        ).fetchone()
+        return status, json.loads(result_json or "{}")
+
+    def _manifest(self, run_dir: Path) -> dict:
+        return {
+            "run_id": "run-exec-1", "target": "https://example.invalid/",
+            "artifacts": {"root": str(run_dir)},
+            "counts": {"documents": 1, "chunks": 2},
+        }
+
+    def test_ingest_file_executes_via_substrate_primitive(self):
+        run_dir = self.tmp / "ingest-run"
+        run_dir.mkdir()
+        manifest = self._manifest(run_dir)
+        item = self._item("ingest_file", {"target": str(self.tmp / "some.txt")})
+        with mock.patch("lgwks_substrate_run.build_run", return_value=manifest):
+            daemon_mod._dispatch_item(self.store, item, self.tmp)
+        status, result = self._row(item["item_id"])
+        self.assertEqual(status, "done")
+        self.assertNotEqual(result, {"dispatched": True})  # not the no-op orphan
+        self.assertEqual(result["run_id"], "run-exec-1")
+        # register_run actually ran — the run is now in shared state.
+        self.assertTrue(any(r["run_id"] == "run-exec-1"
+                            for r in self.store.list_runs(self.tenant)))
+
+    def test_index_run_registers_on_disk_run(self):
+        run_dir = self.tmp / "ondisk-run"
+        run_dir.mkdir()
+        manifest = self._manifest(run_dir)
+        (run_dir / "manifest.json").write_text(json.dumps(manifest), encoding="utf-8")
+        item = self._item("index_run", {"run_id": "run-exec-1"})
+        with mock.patch("lgwks_substrate_io._resolve_run_dir", return_value=run_dir):
+            daemon_mod._dispatch_item(self.store, item, self.tmp)
+        status, result = self._row(item["item_id"])
+        self.assertEqual(status, "done")
+        self.assertNotEqual(result, {"dispatched": True})
+        self.assertTrue(result["newly_indexed"])
+        self.assertTrue(any(r["run_id"] == "run-exec-1"
+                            for r in self.store.list_runs(self.tenant)))
+
+    def test_workflow_executes_through_the_one_composer(self):
+        item = self._item("workflow", {"plan": {"steps": [{"verb": "review"}]}})
+        fake_phases = [{"name": "review", "ok": True, "exit_code": 0}]
+        with mock.patch("lgwks_agent.compose", return_value=(0, fake_phases)) as mc:
+            daemon_mod._dispatch_item(self.store, item, self.tmp)
+        mc.assert_called_once()  # routed through THE composer, not reimplemented
+        status, result = self._row(item["item_id"])
+        self.assertEqual(status, "done")
+        self.assertNotEqual(result, {"dispatched": True})
+        self.assertEqual(result["rc"], 0)
+        self.assertTrue(result["ok"])
+        self.assertEqual(result["phases"], fake_phases)
+
+    def test_no_advertised_kind_silently_noops(self):
+        """Guard: every WORK_REGISTRY kind except the `custom` escape-hatch has a
+        real executor branch (so re-adding a kind without a handler trips this)."""
+        import lgwks_daemon_store as ds
+        handled = {"research_run", "ingest_file", "index_run", "workflow",
+                   "worktree_open", "worktree_close"}
+        advertised = set(ds.WORK_KINDS) - {"custom"}
+        self.assertEqual(advertised, handled,
+                         "a work kind is advertised but has no _dispatch_item branch")

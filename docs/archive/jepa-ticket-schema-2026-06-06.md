@@ -1,3 +1,11 @@
+---
+type: Archive
+title: JEPA Ticket Schema — 2026-06-06
+description: Purpose: define a ticket ID scheme that survives reprioritization, regrouping, and future subprojects.
+tags: [archive]
+timestamp: 2026-06-23T00:24:35-04:00
+---
+
 # JEPA Ticket Schema — 2026-06-06
 
 Purpose: define a ticket ID scheme that survives reprioritization, regrouping, and future subprojects.

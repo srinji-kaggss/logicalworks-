@@ -1,3 +1,11 @@
+---
+type: Spec
+title: Aetherius Protocol: Proprietary Foundation Model Specification (2026-06-14)
+description: Aetherius is the proprietary foundation world-model of Logical Works.
+tags: [spec]
+timestamp: 2026-06-14T18:13:29-04:00
+---
+
 # Aetherius Protocol: Proprietary Foundation Model Specification (2026-06-14)
 
 ## 1. Vision and Identity

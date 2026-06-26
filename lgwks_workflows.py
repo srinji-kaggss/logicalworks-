@@ -1,5 +1,13 @@
 """lgwks_workflows — unified AI workflow harness.
 
+⚠️ DEPRECATED HEAD (boilerplate). This orchestrator's head is KILLED — it is no
+longer a living peer orchestrator. Its CLI registration is kept only as a
+deprecated shim (removing it would cascade into the manifest/verb-budget gates);
+the workflow bodies are frozen boilerplate pending absorption into the daemon
+(the single source of truth). See engine/deprecated_heads.py +
+engine/DAEMON-ABSORPTION-LOG.md. Do not add workflows; route new work through
+engine.dispatch → daemon.
+
 Maps natural intents to existing verb chains so an agent/machine caller does not need
 to know the exact 53+ command names. Instead:
   lgwks workflow <name> [args]              # exact
@@ -49,6 +57,9 @@ from typing import Any
 
 import lgwks_ui as ui
 from lgwks_phase import PhaseResult, verdict_from_phases  # canonical phase/verdict (one source of truth)
+
+# Head killed — frozen boilerplate pending daemon absorption (engine/deprecated_heads.py).
+_DEPRECATED_HEAD = True
 from lgwks_repo import _is_repo
 
 
@@ -64,12 +75,8 @@ USE_SESSION_DEFAULT = True       # always try saved sessions
 # ---------------------------------------------------------------------------
 
 _WORKFLOWS: dict[str, dict] = {
-    "aetherius": {
-        "description": "autonomous intelligence kernel (The Forge): Synthesis -> Dialectic -> Valuation -> Refinement -> Ingestion",
-        "args": {"goal": "str", "--json": "bool"},
-        "verbs": ["ops workflow aetherius"],
-        "tokens": "~5",
-    },
+    # NOTE: "aetherius" retired — folded into the Membrane Engine as a synthesis
+    # work-item plan (see engine/DEPRECATIONS.md, docs/membrane-engine-thesis.md §6).
     "research": {
         "description": "AUP gate → browser crawl (session-aware) → embed → synthesize",
         "args": {"query": "str", "--depth": "int", "--plan": "str", "--yes": "bool"},
@@ -796,7 +803,10 @@ def _do_onboard(args: argparse.Namespace) -> int:
 
     if not skip_browser:
         import subprocess as sp
-        p1 = _run_phase("onboard:browser", lambda: sp.run(["playwright", "install", "chromium"], capture_output=True).returncode)
+        # `playwright install chromium` downloads a browser over the network — bound it
+        # so a stalled download fails the phase instead of hanging onboarding forever
+        # (R2: every hang-class sink is time-bounded). 10 min is generous for a cold pull.
+        p1 = _run_phase("onboard:browser", lambda: sp.run(["playwright", "install", "chromium"], capture_output=True, timeout=600).returncode)
         run.phases.append(p1)
     else:
         run.phases.append(PhaseResult(name="onboard:browser", ok=True, exit_code=0, message="skipped"))
@@ -967,10 +977,7 @@ def workflow_command(args: argparse.Namespace) -> int:
         run = None
 
     # Dispatch
-    if wf == "aetherius":
-        import lgwks_workflow_aetherius
-        ret = lgwks_workflow_aetherius.workflow_command(args)
-    elif wf == "research":
+    if wf == "research":
         ret = _do_research_inline(args)
     elif wf == "deep-research":
         ret = _do_deep_research(args)
@@ -1076,11 +1083,7 @@ def add_parser(sub) -> None:
         parser.add_argument("--engine", choices=["chromium", "webkit"], default=DEFAULT_ENGINE,
                             help=f"browser engine (default: {DEFAULT_ENGINE})")
 
-    # aetherius
-    aeth = wf_sub.add_parser("aetherius", help="autonomous intelligence kernel (The Forge)")
-    aeth.add_argument("goal", help="the research objective or hypothesis to forge")
-    _common_flags(aeth)
-    aeth.set_defaults(func=workflow_command)
+    # aetherius retired (folded into the Membrane Engine synthesis plan)
 
     # research
     research = wf_sub.add_parser("research", help="AUP gate → crawl → embed → synthesize")

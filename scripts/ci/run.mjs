@@ -84,6 +84,28 @@ const COMMIT_LANES = [
   { id: 'rust.crawler', gate: 'commit', cmd: ['cargo', 'test', '--manifest-path', 'crawler/Cargo.toml'] },
   { id: 'rust.axiom', gate: 'commit', cmd: ['cargo', 'test', '--manifest-path', 'axiom/rust/Cargo.toml'] },
   { id: 'rust.tui', gate: 'commit', cmd: ['cargo', 'test', '--manifest-path', 'tui/Cargo.toml'] },
+  // Docs gate (Director: "documentation has to be updated before CI is run"). The
+  // docs/ knowledge bundle must be OKF-conformant (§9: every concept has a non-empty
+  // `type`) AND fresh (generated indexes/frontmatter current — a body changed without
+  // re-running gen_okf.py --write fails this). CI does not care WHO ran the generator
+  // (human, agent, or eventually the lgwks daemon); only that the bundle is current.
+  // See docs/concepts/knowledge-format.md.
+  { id: 'docs.okf', gate: 'commit', cmd: ['python3', 'scripts/gen_okf.py', '--verify'] },
+  // Model-law gate (same doctrine as docs.okf, for the model stack). MESH_LAW is GENERATED
+  // from the one authored source spec/second-harness/model-law.json; this lane proves the
+  // committed block is fresh (not hand-edited), every entry conforms to the mesh vocabulary,
+  // AND the Aetherius §3 prose stack table still matches the source — the last check is what
+  // catches a future re-introduction of a hallucinated model id (e.g. the Qwen3.7-VL embed
+  // drift). See lgwks_model_mesh.py + scripts/gen_model_law.py.
+  { id: 'model.law', gate: 'commit', cmd: ['python3', 'scripts/gen_model_law.py', '--verify'] },
+  // Boundedness gate (R2 of the Pristine Program #345). A no-model CI is correct but
+  // BLIND to whether a model/network/subprocess call is time-bounded — exactly how the
+  // `review` hang shipped green (#319/#320). This lane STATICALLY proves every hang-class
+  // I/O sink in the lgwks_*.py runtime (subprocess.* + urllib/requests/curl_cffi network)
+  // either carries a timeout= or is inventoried out-of-scope with a reason; a new unbounded
+  // model/network sink fails the lane. See docs/concepts/escalation-robustness.md (R2) +
+  // spec/second-harness/runtime-bounded-inventory.json.
+  { id: 'runtime.bounded', gate: 'commit', cmd: ['python3', 'scripts/check_runtime_bounded.py', '--verify'] },
 ];
 
 // Tier-specific Keel runners (now VENDORED at the pinned SHA — #241). Each runs over

@@ -203,7 +203,7 @@ def _embed_record(kind: str, item_id: str, text: str) -> dict:
         "text_sha256": _digest(text),
         "embedding_model": "deterministic-feature-hash-v1",
         "dimensions": EMBED_DIMS,
-        "embedding": lgwks_embed._embedding(text, EMBED_DIMS),
+        "embedding": lgwks_embed.audit_embedding(text, EMBED_DIMS),
         "local_only": True,
     }
 

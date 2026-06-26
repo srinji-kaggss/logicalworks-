@@ -1,3 +1,11 @@
+---
+type: ADR
+title: ADR-pipeline-001: Pipeline Parameter Tuning
+description: lgwks_pipeline.py introduces a multi-stage signal-driven ranking pipeline.
+tags: [adr]
+timestamp: 2026-06-08T07:20:19-04:00
+---
+
 # ADR-pipeline-001: Pipeline Parameter Tuning
 
 **Status:** PROVISIONAL — confirm after 3+ production runs  

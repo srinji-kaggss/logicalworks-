@@ -1,3 +1,11 @@
+---
+type: Reference
+title: U10 — Human Sitemap Report
+description: Status: spec
+tags: [bot-fabric, reference]
+timestamp: 2026-06-06T13:13:23-04:00
+---
+
 # U10 — Human Sitemap Report
 
 Status: spec

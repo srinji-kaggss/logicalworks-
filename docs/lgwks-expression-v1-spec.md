@@ -1,3 +1,11 @@
+---
+type: Spec
+title: lgwks-expression/1 Specification
+description: A foreign AI holding lgwks manifest has a capability surface but no composition
+tags: [spec]
+timestamp: 2026-06-06T02:26:14-04:00
+---
+
 # lgwks-expression/1 Specification
 
 ## L0 Intent

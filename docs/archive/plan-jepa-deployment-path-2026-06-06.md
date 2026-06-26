@@ -1,3 +1,11 @@
+---
+type: Archive
+title: JEPA Deployment Path — 2026-06-06
+description: Build down from thesis to working product without pretending the full JEPA learner already exists.
+tags: [archive]
+timestamp: 2026-06-23T00:24:35-04:00
+---
+
 # JEPA Deployment Path — 2026-06-06
 
 ## Goal

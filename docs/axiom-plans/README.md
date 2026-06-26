@@ -1,3 +1,11 @@
+---
+type: Plan
+title: Axiom Follow-On Plan Pack
+description: Purpose: give a cheaper coding agent small, self-contained tasks after PR 42.
+tags: [axiom-plans, plan]
+timestamp: 2026-06-06T20:59:55-04:00
+---
+
 # Axiom Follow-On Plan Pack
 
 Purpose: give a cheaper coding agent small, self-contained tasks after PR 42.
@@ -28,4 +36,3 @@ uv run --with pytest python -m pytest axiom/tests/ tests/test_axiom_cli.py tests
 ./lgwks --machine axiom doctor --repo . --json
 ./lgwks manifest --for-agent
 ```
-
