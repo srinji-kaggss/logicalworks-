@@ -153,9 +153,12 @@ def test_local_branches_for_issue_finds_match():
 def test_compute_issue_next_shows_local_branch():
     """L1: _compute_issue_next shows 'checkout existing branch' when local branch exists."""
     import lgwks_gh as gh
-    issue = gh.IssueView(number=352, title="test", state="open", labels=[], assignees=[])
-    # This test requires a real git repo with a matching branch; we verify the function
-    # structure instead
+    # Use a synthetic issue number that can never appear in git history or as a
+    # real branch — otherwise _git_log_has_issue_ref / _local_branches_for_issue
+    # read live repo state and route to "verify"/"checkout", making this test
+    # depend on whatever commits/branches happen to exist (a real #352 commit on
+    # main broke it). The assertion below is unchanged; only the fixture is hermetic.
+    issue = gh.IssueView(number=99999999, title="test", state="open", labels=[], assignees=[])
     actions = gh._compute_issue_next(issue)
     assert len(actions) > 0
     # When no linked PR and no local branch, it suggests "create branch"
