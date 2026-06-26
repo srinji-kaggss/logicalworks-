@@ -46,12 +46,29 @@ def _tokens(text: str) -> list[str]:
     return _lex.tokens(text, profile=_lex.TERM, min_len=3, stop=STOP)
 
 
-def _embedding(text: str, dims: int = DIMS) -> list[float]:
+def audit_embedding(text: str, dims: int = DIMS) -> list[float]:
+    """Public deterministic AUDIT vector — replayable feature-hash, NOT semantic.
+
+    The ONE public door for the deterministic-tier embedding: no model, no network,
+    is_semantic=False. Callers that need a replayable vector with zero model
+    dependency (the idiom gate, codebase audit vectors, geoexpr) call THIS rather
+    than reach the private name. Do not route these through model_port.embed — that
+    path prefers the semantic Eye and would make a deterministic gate model-dependent.
+
+    Featurization is byte-pinned by tests/test_hash_embed_canonical.py; changing it
+    re-spaces every persisted vault, so it belongs to the #223-family convergence
+    epic, not here.
+    """
     toks = _tokens(text)
     feats = toks[:]
     feats.extend(" ".join(toks[i:i + 2]) for i in range(max(0, len(toks) - 1)))
     # Canonical feature-hash MECHANISM (#223 family 2); byte-exact with prior copy.
     return _vm.hash_embed(feats, dims)
+
+
+# Back-compat private alias: the byte-pin test and in-module callers reference
+# _embedding; it is the SAME byte-exact function as the public audit_embedding.
+_embedding = audit_embedding
 
 
 def _files(root: Path, max_files: int) -> list[Path]:
@@ -91,7 +108,7 @@ def build_vault(root_path: str, project: str, keywords: list[str], cycles: int =
     stable_at = None
 
     for cycle in range(1, cycles + 1):
-        focus_vec = _embedding(" ".join(focus))
+        focus_vec = audit_embedding(" ".join(focus))
         cycle_terms: Counter[str] = Counter()
         for path in files:
             text = _io._read_text(path, max_chars)
@@ -99,7 +116,7 @@ def build_vault(root_path: str, project: str, keywords: list[str], cycles: int =
                 continue
             raw_hash = lgwks_hashing.digest(text)
             for idx, chunk in enumerate(_st._chunk_text(text, size=CHUNK_WORDS, overlap=CHUNK_OVERLAP)):
-                vec = _embedding(chunk)
+                vec = audit_embedding(chunk)
                 score = round(_vm.dot(focus_vec, vec), 6)
                 toks = _tokens(chunk)
                 if score > 0:

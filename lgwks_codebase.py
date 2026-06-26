@@ -549,7 +549,7 @@ def build_index(root: Path | None = None) -> CodebaseIndex:
     # Compute embeddings
     for e in entities:
         text_for_embed = f"{e.name} {e.signature} {e.docstring} {e.text[:500]}"
-        e.embedding = lgwks_embed._embedding(text_for_embed, dims=256)
+        e.embedding = lgwks_embed.audit_embedding(text_for_embed, dims=256)
 
     # Write entities
     entities_file = DB_DIR / "entities.jsonl"
@@ -653,7 +653,7 @@ def spine(entity_id: str, depth: int = 3) -> list[dict[str, Any]]:
 
 def search(query: str, top_k: int = 5, kind_filter: str | None = None) -> list[dict[str, Any]]:
     """Semantic search over the codebase."""
-    query_vec = lgwks_embed._embedding(query, dims=256)
+    query_vec = lgwks_embed.audit_embedding(query, dims=256)
     entities = load_entities()
 
     results: list[tuple[float, CodeEntity]] = []
