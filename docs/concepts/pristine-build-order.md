@@ -316,7 +316,23 @@ Opus-decided — the agent executes the mechanical 80%, Opus owns the load-beari
 # Final status & next-agent handoff (2026-06-26)
 
 The **de-slop executable scope is delivered**: M1–M4 (PR #350) and M6 (PR #352) landed;
-full suite green, local Keel CI GO modulo the pre-existing report-only `target.gate` (#304).
+local Keel CI is **GO** — all 13 lanes pass, merge gate `lgwks_floor` GO (4/4 axes), seal
+`7fa24625` on `a8ab3cb`. (The full-axis "Excellent" verdict reads BLOCKED at 4/20 evidenced;
+that is the **report-only maturity scream**, which never gates the merge — `target.gate`
+itself is the merge-gating lane and it passes.)
+
+Two real defects surfaced *after* the merges and were fixed on top of them (do not confuse
+with #304, which is **closed** and was about `security_by_construction`, a different axis):
+- **`pytest.suite`** — `test_compute_issue_next_shows_local_branch` hardcoded real issue #352
+  and asserted the no-PR/no-branch path; once the M6 merge put a commit referencing #352 on
+  main, `_compute_issue_next` correctly routed to "verify landed" and the test broke. The test
+  was non-hermetic (read live git state); fixed with a synthetic issue number, assertion intact.
+- **`target.gate` (`specification_fidelity`)** — #350 introduced `lgwks.translate.rag.v1` in
+  `lgwks_translate_rag.py` without the registry row REGISTRY.md minting rule #4 requires in the
+  same commit. `check_schema_registry.py` correctly flagged it; the row is now added (family 3).
+Also untracked 6 force-committed Cargo build-cache files under `tests/fixtures/crate/target/`
+that tagged every run `dirty-commit`. (Records may still read `-dirty` from unrelated untracked
+WIP from other in-flight PRs in the working tree — not from tracked changes.)
 
 **M5 was ruled blocked at the root, not skipped.** The front-door collapse is gated by
 **G10**: the daemon executor (`lgwks_daemon._dispatch_item`) runs only 5 kinds
