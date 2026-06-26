@@ -183,5 +183,52 @@ class TestPulseAffordanceHardening(unittest.TestCase):
             self.assertIn(key, step["semantics"])
 
 
+class TestTelemetryIsRealNotFabricated(unittest.TestCase):
+    """The flight-display metrics must be REAL, calculator-reconstructable values —
+    no payload-size proxies, no magic constants, no fabricated defaults (#323 harden)."""
+
+    def test_entropy_history_is_real_shannon_over_kinds(self):
+        from lgwks_daemon_store import _compute_entropy_history
+        # All one kind → zero entropy at every point.
+        same = [{"kind": "ping"} for _ in range(8)]
+        self.assertTrue(all(v == 0 for v in _compute_entropy_history(same)))
+        # A balanced mix of distinct kinds → high entropy in the trailing window.
+        mixed = [{"kind": f"k{i % 4}"} for i in range(20)]
+        self.assertGreaterEqual(max(_compute_entropy_history(mixed)), 90)
+        # Empty → a single honest zero, never a crash.
+        self.assertEqual(_compute_entropy_history([]), [0])
+
+    def test_tps_is_real_and_honest_zero_when_unknown(self):
+        from lgwks_daemon_store import _compute_tps
+        evs = [{"ts": f"2026-06-26T00:00:{s:02d}Z"} for s in range(0, 10)]  # 10 ev / 9s
+        self.assertAlmostEqual(_compute_tps(evs), round(10 / 9, 1))
+        self.assertEqual(_compute_tps([{"ts": "2026-06-26T00:00:00Z"}]), 0.0)  # <2 → 0
+        self.assertEqual(_compute_tps([{}, {}]), 0.0)  # no timestamps → honest 0, not 1.0
+
+    def test_telemetry_has_no_fabricated_latency(self):
+        from lgwks_daemon_store import _compute_telemetry
+        evs = [{"event_id": "e2", "kind": "tool_call", "ts": "2026-06-26T00:00:01Z",
+                "payload": {"a": 1}},
+               {"event_id": "e1", "kind": "human_message", "ts": "2026-06-26T00:00:00Z",
+                "payload": {"b": 2}}]  # newest-first
+        rows = _compute_telemetry(evs)
+        self.assertTrue(rows)
+        for r in rows:
+            self.assertNotIn("latency_ms", r)               # the fabricated metric is gone
+            self.assertIsInstance(r["payload_bytes"], int)  # real serialized size
+            self.assertIn("gap_ms", r)                      # real inter-event timing (or None)
+
+    def test_steering_dials_not_hardcoded_fakes(self):
+        store, _ = _store()
+        try:
+            _append(store, ts="2026-06-26T00:00:00+00:00")
+            pkt = store.get_packet(tenant_id=TENANT, session_id="s1", agent_id="claude")
+            # No fabricated Safety/Creativity/Accuracy constants; honest empty until
+            # wired to a real steering signal.
+            self.assertEqual(pkt["steering_dials"], [])
+        finally:
+            store.close()
+
+
 if __name__ == "__main__":
     unittest.main()

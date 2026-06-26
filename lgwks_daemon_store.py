@@ -484,41 +484,78 @@ def validate_context_packet(packet: dict[str, Any]) -> dict[str, Any]:
     return packet
 
 
-def _compute_telemetry(events: list[dict[str, Any]]) -> list[dict[str, Any]]:
-    return [
-        {
-            "event_id": ev.get("event_id"),
-            "latency_ms": round(len(str(ev.get("payload", ""))) * 0.1, 2),
-            "actor": ev.get("actor"),
-            "lane": ev.get("lane"),
-            "provenance_trace": f"Derived from {ev.get('kind')} payload"
-        } for ev in events[:5]
-    ]
-
-def _compute_entropy_history(events: list[dict[str, Any]]) -> list[int]:
-    # Compute pseudo-entropy based on payload size
-    hist = []
-    for ev in events[:50]:
-        size = len(str(ev.get("payload", "")))
-        hist.append(min(100, max(0, size // 10)))
-    hist.reverse()
-    if not hist:
-        hist = [0]
-    return hist
-
-def _compute_tps(events: list[dict[str, Any]]) -> float:
-    if len(events) < 2:
-        return 0.0
+def _parse_ts(ts: Any) -> float | None:
+    """Epoch seconds from an ISO-8601 timestamp, or None. Pure and deterministic."""
+    if not ts:
+        return None
     try:
         from datetime import datetime
-        t1 = datetime.fromisoformat(events[0].get("ts", "").replace("Z", "+00:00"))
-        t2 = datetime.fromisoformat(events[-1].get("ts", "").replace("Z", "+00:00"))
-        secs = abs((t1 - t2).total_seconds())
-        if secs > 0:
-            return round(len(events) / secs, 1)
+        return datetime.fromisoformat(str(ts).replace("Z", "+00:00")).timestamp()
     except Exception:
-        pass
-    return 1.0
+        return None
+
+
+def _compute_telemetry(events: list[dict[str, Any]], limit: int = 5) -> list[dict[str, Any]]:
+    """Per-event telemetry from ONLY real, reconstructable fields — no fabricated
+    metrics. `payload_bytes` is the real serialized payload size; `gap_ms` is the
+    real elapsed time since the previous event (None when a timestamp is missing).
+    Most recent `limit` events, newest first."""
+    import json
+    rows: list[dict[str, Any]] = []
+    prev_ts: float | None = None
+    for ev in reversed(events):  # store is newest-first; walk forward to measure gaps
+        ts = _parse_ts(ev.get("ts"))
+        gap_ms = round((ts - prev_ts) * 1000.0, 1) if (ts is not None and prev_ts is not None) else None
+        if ts is not None:
+            prev_ts = ts
+        try:
+            payload_bytes = len(json.dumps(ev.get("payload") or {}, default=str))
+        except Exception:
+            payload_bytes = len(str(ev.get("payload") or ""))
+        rows.append({
+            "event_id": ev.get("event_id"),
+            "kind": ev.get("kind"),
+            "actor": ev.get("actor"),
+            "lane": ev.get("lane"),
+            "payload_bytes": payload_bytes,
+            "gap_ms": gap_ms,
+            "provenance_trace": f"event {ev.get('event_id')} · kind={ev.get('kind')}",
+        })
+    rows.reverse()  # back to newest-first for display
+    return rows[:limit]
+
+
+def _compute_entropy_history(events: list[dict[str, Any]], window: int = 10,
+                             cap: int = 50) -> list[int]:
+    """Real Shannon entropy of the event-KIND distribution over a trailing window,
+    scaled to 0-100 for the sparkline. H = -Σ p·log2 p over the kinds in each window,
+    normalized by the window's maximum entropy. Deterministic and reconstructable
+    from the event kinds alone — NOT a payload-size proxy."""
+    import math
+    kinds = [str(ev.get("kind") or "?") for ev in reversed(events)]  # chronological
+    if not kinds:
+        return [0]
+    out: list[int] = []
+    for i in range(len(kinds)):
+        win = kinds[max(0, i - window + 1): i + 1]
+        counts: dict[str, int] = {}
+        for k in win:
+            counts[k] = counts.get(k, 0) + 1
+        total = len(win)
+        h = -sum((c / total) * math.log2(c / total) for c in counts.values())
+        max_h = math.log2(total) if total > 1 else 0.0
+        out.append(int(round(100 * h / max_h)) if max_h > 0 else 0)
+    return out[-cap:]
+
+
+def _compute_tps(events: list[dict[str, Any]]) -> float:
+    """Real throughput: events per second across the window's timestamp span.
+    Returns 0.0 when it cannot be computed — never a fabricated default."""
+    ts = [t for t in (_parse_ts(ev.get("ts")) for ev in events) if t is not None]
+    if len(ts) < 2:
+        return 0.0
+    span = abs(max(ts) - min(ts))
+    return round(len(ts) / span, 1) if span > 0 else 0.0
 
 
 class DaemonEventStore:
@@ -1020,11 +1057,11 @@ class DaemonEventStore:
             "telemetry": _compute_telemetry(events),
             "entropy_history": _compute_entropy_history(events),
             "tps": _compute_tps(events),
-            "steering_dials": [
-                ["Safety", 0.8],
-                ["Creativity", 0.5],
-                ["Accuracy", 0.9],
-            ],
+            # Steering dials reflect the agent steering/membrane signal, which does
+            # not live in the daemon event store — so we emit NO dials here rather
+            # than hardcode fabricated values. SEAM: wire to the real steering source
+            # (risk/abstention/membrane) when it is exposed per session. (#323 follow-up)
+            "steering_dials": [],
             "provenance": {
                 "watermark_event_id": events[0]["event_id"] if events else None,
                 "store_versions": {},
