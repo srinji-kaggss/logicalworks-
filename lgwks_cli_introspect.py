@@ -23,24 +23,19 @@ ROOT = Path(__file__).resolve().parent
 
 # Verb → domain taxonomy. Unknown verbs land in "Other" (never hidden). One source of
 # truth for both the home browser and the REPL palette.
+# NOTE: This lists only **top-level registered verbs** (result of `command_names()`), not
+# subcommands within grouped verbs (e.g. "run" is a subcommand of "state", so it is NOT listed;
+# instead "state" is listed). Updated 2026-06-25 to match the collapsed dispatcher (PR #218).
 DOMAINS: dict[str, list[str]] = {
-    # Primary product — the subconscious loop and operator surface
-    "Subconscious": ["agent", "map", "engine", "session", "solve", "debug", "intent", "doctor",
-                     "spawn", "portal", "agent-os", "tui"],
+    # Primary product — the agentic surfaces
+    "Subconscious": ["agent", "solve", "doctor"],
     # Research and knowledge work — the conscious-layer tools
-    "Research":  ["fetch", "refine", "preview", "extract", "convert",
-                  "manifest", "login", "cohere", "comprehend", "geo", "public",
-                  "akinator", "run", "context", "model-hub", "capture", "jepa",
-                  "workflow", "research", "crawl"],
-    "GitHub":    ["gh"],
-    "DevOps":    ["repo", "review", "project", "batch", "refactor", "hooks"],
-    "System":    ["repl", "initialize", "auth", "keyvault", "foundation",
-                  "aup", "schema", "codebase", "access", "daemon", "bulk-harvest",
-                  "gate", "ops", "human", "verify"],
+    "Research":  ["research", "crawl", "fetch", "manifest", "model-hub", "models", "extract", "convert"],
+    "GitHub":    [],  # no GitHub verbs in current dispatcher (gh was removed)
+    "DevOps":    ["repo", "review", "refactor"],
+    "System":    ["auth", "gate", "ops", "verify", "human"],
     # L0 substrate — ingestion, vector store, contracts (foundational, not the product)
-    "Substrate": ["store", "memory", "embed", "axiom", "pipeline", "waste",
-                  "entity-graph", "graph", "substrate", "score", "rank", "inbound",
-                  "admission", "capability", "crdt", "viz-project", "state"],
+    "Substrate": ["graph", "state"],
 }
 
 

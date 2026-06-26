@@ -1,3 +1,11 @@
+---
+type: Spec
+title: SPEC - Axiom test matrix IR
+description: Date: 2026-06-06
+tags: [spec]
+timestamp: 2026-06-06T20:27:23-04:00
+---
+
 # SPEC - Axiom test matrix IR
 
 Date: 2026-06-06

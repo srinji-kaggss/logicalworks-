@@ -1,3 +1,11 @@
+---
+type: Reference
+title: ML-001: Intent Classifier Model Sizing Decision Record
+description: The lgwks CLI membrane needs an on-device intent classifier that bins natural-language input to one of ~20–50 verb schema IDs.
+tags: [reference]
+timestamp: 2026-06-02T18:25:15-04:00
+---
+
 # ML-001: Intent Classifier Model Sizing Decision Record
 
 ## Status: PROPOSED — Director vet required

@@ -1,3 +1,11 @@
+---
+type: Reference
+title: Operating Model — daemon, ingest, nerves, adapters
+description: Status: active synthesis · audience: human + coding agents · purpose: describe the real runtime shape of lgwks from built modules first, then the remaining gaps.
+tags: [reference]
+timestamp: 2026-06-12T17:55:26-04:00
+---
+
 # Operating Model — daemon, ingest, nerves, adapters
 
 Status: active synthesis · audience: human + coding agents · purpose: describe the real runtime shape of `lgwks` from built modules first, then the remaining gaps.

@@ -1,3 +1,11 @@
+---
+type: Reference
+title: U6 — Slop Math Bot Set
+description: Status: spec
+tags: [bot-fabric, reference]
+timestamp: 2026-06-06T10:43:25-04:00
+---
+
 # U6 — Slop Math Bot Set
 
 Status: spec

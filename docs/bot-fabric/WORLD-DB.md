@@ -1,3 +1,11 @@
+---
+type: Reference
+title: World DB
+description: Create a machine-world database that captures the causal structure of computers, software, protocols, and internet systems without relying on human prose as the source of truth.
+tags: [bot-fabric, reference]
+timestamp: 2026-06-06T10:24:49-04:00
+---
+
 # World DB
 
 ## Purpose

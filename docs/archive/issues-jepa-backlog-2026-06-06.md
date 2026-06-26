@@ -1,3 +1,11 @@
+---
+type: Archive
+title: JEPA Backlog — 2026-06-06
+description: This is the working issue list for the JEPA/product-seed path.
+tags: [archive]
+timestamp: 2026-06-23T00:24:35-04:00
+---
+
 # JEPA Backlog — 2026-06-06
 
 This is the working issue list for the JEPA/product-seed path.

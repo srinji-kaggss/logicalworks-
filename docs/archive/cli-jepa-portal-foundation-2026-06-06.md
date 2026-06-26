@@ -1,3 +1,11 @@
+---
+type: Archive
+title: CLI JEPA Portal Foundation
+description: Date: 2026-06-06
+tags: [archive]
+timestamp: 2026-06-23T00:24:35-04:00
+---
+
 # CLI JEPA Portal Foundation
 
 Date: 2026-06-06  

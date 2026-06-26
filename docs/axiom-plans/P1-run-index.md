@@ -1,3 +1,11 @@
+---
+type: Plan
+title: P1 - Unified Axiom Run Index
+description: Create one index file per Axiom run so capture, matrix, narration, replay, and divergence artifacts are linked
+tags: [axiom-plans, plan]
+timestamp: 2026-06-06T20:59:55-04:00
+---
+
 # P1 - Unified Axiom Run Index
 
 ## Goal
@@ -55,4 +63,3 @@ Write `.lgwks/axiom/runs/<run>/index.json`:
 - Do not create a global database yet.
 - Do not rename existing artifact files.
 - Do not move run output outside `.lgwks/axiom/runs/` defaults.
-

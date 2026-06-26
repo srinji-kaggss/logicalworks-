@@ -1,3 +1,11 @@
+---
+type: Reference
+title: U11 — Artifact Strength Gate
+description: Status: spec
+tags: [bot-fabric, reference]
+timestamp: 2026-06-06T10:26:16-04:00
+---
+
 # U11 — Artifact Strength Gate
 
 Status: spec

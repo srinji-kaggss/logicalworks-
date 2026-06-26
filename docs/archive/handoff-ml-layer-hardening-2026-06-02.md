@@ -1,3 +1,11 @@
+---
+type: Archive
+title: Handoff: ML Layer Hardening + All-in-One CLI Roadmap
+description: Instead of building N separate compression tools, build ONE layer that every module calls:
+tags: [archive]
+timestamp: 2026-06-23T00:24:35-04:00
+---
+
 # Handoff: ML Layer Hardening + All-in-One CLI Roadmap
 
 **Date:** 2026-06-02

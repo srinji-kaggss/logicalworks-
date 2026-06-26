@@ -1,3 +1,11 @@
+---
+type: Archive
+title: lgwks AI-AI Harness — Session Summary
+description: Build AI-AI harness: wire all CLI stubs, enable deterministic composition, reduce token burn for AI successors.
+tags: [archive]
+timestamp: 2026-06-23T00:24:35-04:00
+---
+
 # lgwks AI-AI Harness — Session Summary
 
 ## Goal

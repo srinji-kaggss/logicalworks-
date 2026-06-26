@@ -803,7 +803,10 @@ def _do_onboard(args: argparse.Namespace) -> int:
 
     if not skip_browser:
         import subprocess as sp
-        p1 = _run_phase("onboard:browser", lambda: sp.run(["playwright", "install", "chromium"], capture_output=True).returncode)
+        # `playwright install chromium` downloads a browser over the network — bound it
+        # so a stalled download fails the phase instead of hanging onboarding forever
+        # (R2: every hang-class sink is time-bounded). 10 min is generous for a cold pull.
+        p1 = _run_phase("onboard:browser", lambda: sp.run(["playwright", "install", "chromium"], capture_output=True, timeout=600).returncode)
         run.phases.append(p1)
     else:
         run.phases.append(PhaseResult(name="onboard:browser", ok=True, exit_code=0, message="skipped"))

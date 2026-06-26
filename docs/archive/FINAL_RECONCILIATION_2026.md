@@ -1,3 +1,11 @@
+---
+type: Archive
+title: Forensic Codebase Reconciliation: The Shift to Aetherius Standalone (2026-06-14)
+description: The Logical Works ecosystem has undergone a fundamental architectural reconciliation to align with the "Personal Digital Overseer" vision.
+tags: [archive]
+timestamp: 2026-06-23T00:24:35-04:00
+---
+
 # Forensic Codebase Reconciliation: The Shift to Aetherius Standalone (2026-06-14)
 
 ## 1. Abstract

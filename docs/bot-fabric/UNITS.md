@@ -1,3 +1,11 @@
+---
+type: Reference
+title: Build Units
+description: Break the bot fabric into self-contained implementation chunks for cheaper coding agents.
+tags: [bot-fabric, reference]
+timestamp: 2026-06-06T10:24:49-04:00
+---
+
 # Build Units
 
 ## Goal

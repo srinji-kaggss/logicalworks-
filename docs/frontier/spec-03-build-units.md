@@ -1,3 +1,11 @@
+---
+type: Spec
+title: SPEC-03 — Build Units (the implementation plan)
+description: //why at every non-obvious decision; no shims/dead code; functions do one thing; comments say why.
+tags: [frontier, spec]
+timestamp: 2026-06-02T16:48:56-04:00
+---
+
 # SPEC-03 — Build Units (the implementation plan)
 
 > THE plan. Deterministic enough for a Kimi/lower agent to implement unit-by-unit.

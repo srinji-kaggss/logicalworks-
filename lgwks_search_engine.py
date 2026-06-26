@@ -18,7 +18,7 @@ from pathlib import Path
 from typing import Any
 
 import lgwks_browser
-import lgwks_run
+import lgwks_model_port as port
 import lgwks_model_mesh as mesh
 from lgwks_substrate_io import _sha
 
@@ -99,8 +99,8 @@ def _ground_visually(url: str, query: str) -> dict[str, Any]:
     import base64
     img_data = base64.b64decode(r["screenshot_b64"])
     
-    # lgwks_run.embed_dual handles the multimodal grounding
-    res = lgwks_run.embed_dual(query, embed_on=True, modality="image", media=img_data)
+    # the embed role-port handles the multimodal grounding (envelope value IS the dual)
+    res = port.embed(query, modality="image", media=img_data)["value"]
     
     # 3. Formulate Fact Record (The Standalone Trajectory)
     doc_id = f"doc-{_sha(url)[:16]}"

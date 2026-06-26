@@ -59,14 +59,6 @@ _MODEL_CATALOG: dict[str, dict[str, Any]] = {
         "arch": "qwen2_5_omni",
         "desc": "Qwen 3.5 Omni — native voice (Wisprflow feel).",
     },
-    "Qwen3-VL-8B-Instruct-4bit": {
-        "repo": "mlx-community/Qwen3-VL-8B-Instruct-4bit",
-        "license": "Apache-2.0",
-        "revision": "defcdea7cc7a4b0858fea563cbbce171d328e457",
-        "size_mb": 8000,
-        "arch": "qwen3_vl",
-        "desc": "Qwen 3 VL — visual agent and GUI operator.",
-    },
     "OLMo-2-0325-32B-Instruct-4bit": {
         "repo": "mlx-community/OLMo-2-0325-32B-Instruct-4bit",
         "license": "Apache-2.0",

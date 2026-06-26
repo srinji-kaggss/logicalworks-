@@ -1,3 +1,11 @@
+---
+type: Archive
+title: LOGICALWORKS- 24H RECONSTRUCTION
+description: Three phases in 24h:
+tags: [archive]
+timestamp: 2026-06-23T00:24:35-04:00
+---
+
 # LOGICALWORKS- 24H RECONSTRUCTION
 **Window:** 2026-06-08 16:38 → 2026-06-09 15:03 EDT  
 **Commits:** 32 | **Merges:** 0 | **Branches:** `main` only (linear)  

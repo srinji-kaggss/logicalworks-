@@ -148,9 +148,10 @@ class FabricReader:
         return None
 
     def _vector_arm(self, text: str, *, limit: int) -> list[dict[str, Any]]:
-        import lgwks_run
+        import lgwks_model_port as port
         import lgwks_vector as vec_mod
-        dual = lgwks_run.embed_dual(text, embed_on=True, provider="auto", model="")
+        # One door: the embed role-port (envelope value IS the det/sem dual).
+        dual = port.embed(text)["value"]
         det = dual.get("det") or {}
         floats = det.get("vector") or []
         if not floats:

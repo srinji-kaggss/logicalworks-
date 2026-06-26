@@ -19,7 +19,7 @@ use std::path::{Path, PathBuf};
 use std::collections::HashMap;
 use tui_input::Input;
 use tui_input::backend::crossterm::EventHandler;
-use crate::models::{DaemonEvent, WorkItem, DaemonStatus, NavModule, WorkflowDef, HarvestMetrics};
+use crate::models::{DaemonEvent, WorkItem, DaemonStatus, NavModule, WorkflowDef, HarvestMetrics, ModelCatalog};
 use crate::db::Db;
 
 use clap::Parser;
@@ -37,6 +37,7 @@ enum Mode {
     Normal,
     Insert,
     Setup,
+    Models,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -65,6 +66,8 @@ struct App {
     thoughts: Vec<serde_json::Value>,
     harvest: Option<HarvestMetrics>,
     terminal_output: Vec<String>,
+    model_catalog: Option<ModelCatalog>,
+    model_list_state: ratatui::widgets::ListState,
 }
 
 impl App {
@@ -98,7 +101,68 @@ impl App {
             thoughts: Vec::new(),
             harvest: None,
             terminal_output: Vec::new(),
+            model_catalog: None,
+            model_list_state: ratatui::widgets::ListState::default(),
         }
+    }
+
+    /// Pull the unified two-plane catalog from the Python selector (projection only).
+    fn load_model_catalog(&mut self, db: &Option<Db>) {
+        if let Some(db) = db {
+            match db.get_model_catalog() {
+                Ok(c) => {
+                    if self.model_list_state.selected().is_none() && !c.local.is_empty() {
+                        self.model_list_state.select(Some(0));
+                    }
+                    self.model_catalog = Some(c);
+                }
+                Err(e) => self.status_msg = Some(format!("models list failed: {}", e)),
+            }
+        }
+    }
+
+    /// Write the active plane back through the selector (`lgwks models locality`).
+    fn set_model_locality(&mut self, db: &Option<Db>, locality: &str) {
+        let (script_path, repo_root) = match (&self.script_path, &self.repo_root) {
+            (Some(s), Some(r)) => (s.clone(), r.clone()),
+            _ => return,
+        };
+        let py = self.get_python_cmd();
+        let _ = Command::new(py)
+            .args([script_path.to_str().unwrap_or("lgwks"), "models", "locality", locality])
+            .current_dir(&repo_root)
+            .output();
+        self.status_msg = Some(format!("Locality → {}", locality));
+        self.load_model_catalog(db);
+    }
+
+    /// Persist the highlighted local model for its role (`lgwks models use`).
+    fn select_model(&mut self, db: &Option<Db>) {
+        let chosen = self.model_catalog.as_ref().and_then(|c| {
+            self.model_list_state.selected().and_then(|i| c.local.get(i))
+        }).map(|m| (m.law_name.clone(), m.role.clone()));
+        if let Some((law_name, role)) = chosen {
+            let (script_path, repo_root) = match (&self.script_path, &self.repo_root) {
+                (Some(s), Some(r)) => (s.clone(), r.clone()),
+                _ => return,
+            };
+            let py = self.get_python_cmd();
+            let _ = Command::new(py)
+                .args([script_path.to_str().unwrap_or("lgwks"), "models", "use",
+                       &law_name, "--role", &role, "--locality", "local"])
+                .current_dir(&repo_root)
+                .output();
+            self.status_msg = Some(format!("Selected {} for role {}", law_name, role));
+            self.load_model_catalog(db);
+        }
+    }
+
+    fn model_cursor_move(&mut self, delta: i32) {
+        let n = self.model_catalog.as_ref().map(|c| c.local.len()).unwrap_or(0);
+        if n == 0 { return; }
+        let cur = self.model_list_state.selected().unwrap_or(0) as i32;
+        let next = (cur + delta).rem_euclid(n as i32) as usize;
+        self.model_list_state.select(Some(next));
     }
 
     fn set_repo_root(&mut self, root: PathBuf) {
@@ -345,6 +409,19 @@ fn run_app(terminal: &mut DefaultTerminal, mut app: App, db: &mut Option<Db>) ->
                                 KeyCode::Char('s') => app.start_daemon(db),
                                 KeyCode::Char('x') => app.stop_daemon(db),
                                 KeyCode::Char('r') => app.mode = Mode::Setup,
+                                KeyCode::Char('m') => {
+                                    app.mode = Mode::Models;
+                                    app.load_model_catalog(db);
+                                }
+                                _ => {}
+                            },
+                            Mode::Models => match key.code {
+                                KeyCode::Esc | KeyCode::Char('q') => app.mode = Mode::Normal,
+                                KeyCode::Char('j') | KeyCode::Down => app.model_cursor_move(1),
+                                KeyCode::Char('k') | KeyCode::Up => app.model_cursor_move(-1),
+                                KeyCode::Char('l') => app.set_model_locality(db, "local"),
+                                KeyCode::Char('c') => app.set_model_locality(db, "cloud"),
+                                KeyCode::Enter => app.select_model(db),
                                 _ => {}
                             },
                             Mode::Insert => match key.code {
@@ -507,7 +584,78 @@ fn render_workflow_sidebar(f: &mut Frame, area: Rect, app: &App) {
     f.render_stateful_widget(list, area, &mut state);
 }
 
+fn render_models_screen(f: &mut Frame, area: Rect, app: &App) {
+    let chunks = Layout::default()
+        .direction(Direction::Vertical)
+        .constraints([Constraint::Length(3), Constraint::Min(3), Constraint::Length(9)])
+        .margin(1)
+        .split(area);
+
+    let (active, default_loc) = app.model_catalog.as_ref()
+        .map(|c| (c.active_locality.clone(), c.default_locality.clone()))
+        .unwrap_or_else(|| ("?".into(), "local".into()));
+    let active_color = if active == "cloud" { AMBER } else { EMERALD };
+    let header = Paragraph::new(Line::from(vec![
+        Span::styled("◆ MODEL SELECTOR   ", Style::default().fg(EMERALD).add_modifier(Modifier::BOLD)),
+        Span::styled(format!("active: {}   ", active), Style::default().fg(active_color).add_modifier(Modifier::BOLD)),
+        Span::styled(format!("(default: {})", default_loc), Style::default().fg(MUTED)),
+    ])).block(Block::default().borders(Borders::ALL).border_style(Style::default().fg(SLATE_DIM)));
+    f.render_widget(header, chunks[0]);
+
+    // LOCAL plane — the selectable Model Mesh (privacy-first default)
+    let items: Vec<ListItem> = app.model_catalog.as_ref().map(|c| {
+        c.local.iter().map(|m| {
+            let tier = m.trust_class.clone().unwrap_or_default();
+            ListItem::new(Line::from(vec![
+                Span::styled(format!("{:<10}", m.role), Style::default().fg(EMERALD_DIM)),
+                Span::styled(m.law_name.clone(), Style::default().fg(CREAM)),
+                Span::styled(format!("  → {}", m.runtime_id), Style::default().fg(MUTED)),
+                Span::styled(if tier.is_empty() { String::new() } else { format!("  [{}]", tier) },
+                             Style::default().fg(SLATE)),
+            ]))
+        }).collect()
+    }).unwrap_or_default();
+    let list = List::new(items)
+        .block(Block::default()
+            .title(" LOCAL · Model Mesh (default, private) ")
+            .borders(Borders::ALL)
+            .border_style(Style::default().fg(EMERALD_DIM))
+            .title_style(Style::default().fg(EMERALD)))
+        .highlight_style(Style::default().bg(SLATE_DIM).fg(CREAM).add_modifier(Modifier::BOLD))
+        .highlight_symbol(">> ");
+    let mut st = app.model_list_state.clone();
+    f.render_stateful_widget(list, chunks[1], &mut st);
+
+    // CLOUD plane — models.dev, explicitly opt-in, offline-safe
+    let mut cloud_lines: Vec<Line> = Vec::new();
+    if let Some(c) = app.model_catalog.as_ref() {
+        let suffix = if c.cloud.degraded { "  (offline — cached/unavailable)" } else { "" };
+        let gate = if c.cloud.opt_in { "opt-in" } else { "enabled" };
+        cloud_lines.push(Line::from(Span::styled(
+            format!("{} · {} providers{}", gate, c.cloud.providers.len(), suffix),
+            Style::default().fg(AMBER).add_modifier(Modifier::BOLD))));
+        for p in c.cloud.providers.iter().take(5) {
+            cloud_lines.push(Line::from(Span::styled(
+                format!("  {}  ({} models)", p.id, p.models), Style::default().fg(CREAM_DIM))));
+        }
+        cloud_lines.push(Line::from(Span::styled(
+            "  [c] switch to cloud   [l] back to local   [Enter] pick local model   [Esc] back",
+            Style::default().fg(MUTED))));
+    }
+    let cloud = Paragraph::new(cloud_lines)
+        .block(Block::default()
+            .title(" CLOUD · models.dev (opt-in) ")
+            .borders(Borders::ALL)
+            .border_style(Style::default().fg(AMBER))
+            .title_style(Style::default().fg(AMBER)));
+    f.render_widget(cloud, chunks[2]);
+}
+
 fn render_main_area(f: &mut Frame, area: Rect, app: &App) {
+    if app.mode == Mode::Models {
+        render_models_screen(f, area, app);
+        return;
+    }
     if app.mode == Mode::Setup {
         let chunks = Layout::default()
             .direction(Direction::Vertical)
@@ -726,11 +874,13 @@ fn render_footer(f: &mut Frame, area: Rect, app: &App) {
         Mode::Normal => " NORMAL ",
         Mode::Insert => " INSERT ",
         Mode::Setup => " SETUP ",
+        Mode::Models => " MODELS ",
     };
     let mode_color = match app.mode {
         Mode::Normal => SLATE,
         Mode::Insert => EMERALD,
         Mode::Setup => AMBER,
+        Mode::Models => EMERALD,
     };
 
     let msg = app.status_msg.as_deref().unwrap_or("Ready.");
@@ -748,6 +898,8 @@ fn render_footer(f: &mut Frame, area: Rect, app: &App) {
         Span::styled("input  ", Style::default().fg(CREAM_DIM)),
         Span::styled(" ENTER ", Style::default().fg(EMERALD).add_modifier(Modifier::BOLD)),
         Span::styled("run  ", Style::default().fg(CREAM_DIM)),
+        Span::styled(" M ", Style::default().fg(EMERALD).add_modifier(Modifier::BOLD)),
+        Span::styled("models  ", Style::default().fg(CREAM_DIM)),
     ]);
     f.render_widget(Paragraph::new(footer_text).style(Style::default().bg(SLATE_DIM).fg(CREAM)), area);
 }

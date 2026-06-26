@@ -1,3 +1,11 @@
+---
+type: Reference
+title: U9A — Apple-Native Small Model Seam
+description: Status: spec
+tags: [bot-fabric, reference]
+timestamp: 2026-06-06T13:13:23-04:00
+---
+
 # U9A — Apple-Native Small Model Seam
 
 Status: spec

@@ -571,27 +571,34 @@ def embed(
     dims: int | None = None,
 ) -> tuple[list[float] | None, str, bool]:
     """Returns (vector, provider, is_semantic). is_semantic gates L2 edge labelling.
-    provider 'auto'|'mlx' tries the real local Eye (Qwen3-VL-Embedding-8B via MLX) → semantic vector.
-    provider 'openrouter-vl' tries the remote multimodal Eye through OpenRouter.
-    Falls back to deterministic feature-hash (NOT semantic)."""
+    provider 'auto'|'mlx' tries the law-pinned local Eye (the Qwen3-VL embedding
+    space via MLX) → semantic vector. The Eye's id is resolved through the model
+    port from MESH_LAW — never a literal here (#222). provider 'openrouter-vl'
+    tries the remote multimodal Eye. Falls back to deterministic feature-hash."""
     if not embed_on:
         return None, "none", False
     if provider in ("auto", "mlx", "ollama"):
-        # //why: The 2026 stack uses MLX-native Qwen3-VL-Embedding-8B as the primary Eye.
-        # It replaces the legacy Ollama path to achieve sub-millisecond ANE latency.
+        # //why: the local MLX Eye is the primary embedder (sub-ms ANE latency).
+        # Its id comes from the law via the port, so the runtime cannot drift from
+        # the model law. The ollama tag is a separate runtime namespace, not a law id.
         try:
             import lgwks_model_hub as hub
-            # The Eye is our universal multimodal embedding space
-            eye_model = model or ("qwen3-embedding:8b" if provider == "ollama" else "Qwen3-VL-Embedding-8B")
-            res = hub.mlx_embed(text, model_name=eye_model)
-            if res["ok"]:
-                vec = res["vector"]
-                target_dims = len(vec) if provider == "ollama" and dims is None else (DIMS if dims is None else dims)
-                # MRL (Matryoshka Representation Learning) allows safe truncation
-                if len(vec) > target_dims:
-                    vec = vec[:target_dims]
-                label = f"ollama:{eye_model}" if provider == "ollama" else f"mlx:{eye_model}"
-                return vec, label, res.get("is_semantic", True)
+            if provider == "ollama":
+                eye_model = model or "qwen3-embedding:8b"
+            else:
+                import lgwks_model_port as port
+                sel = port.resolve_model("embed", locality=port.LOCAL)
+                eye_model = model or (sel["runtime_id"] if sel else None)
+            if eye_model:
+                res = hub.mlx_embed(text, model_name=eye_model)
+                if res["ok"]:
+                    vec = res["vector"]
+                    target_dims = len(vec) if provider == "ollama" and dims is None else (DIMS if dims is None else dims)
+                    # MRL (Matryoshka Representation Learning) allows safe truncation
+                    if len(vec) > target_dims:
+                        vec = vec[:target_dims]
+                    label = f"ollama:{eye_model}" if provider == "ollama" else f"mlx:{eye_model}"
+                    return vec, label, res.get("is_semantic", True)
         except Exception:
             pass # fallback to deterministic
     if provider == "openrouter-vl":
@@ -661,8 +668,9 @@ def embed_dual(
 
     Truly multimodal: `modality` ∈ {"text","image","video"} selects the input.
     Text comes from `text`; image/video bytes (or a path) come from `media`. All
-    three embed through the SAME Eye (Qwen3-VL-Embedding-8B via EmbedPort) into one
-    shared vector space — so a screenshot, a clip, and a paragraph are comparable.
+    three embed through the SAME law-pinned Eye (the Qwen3-VL embedding space via
+    EmbedPort) into one shared vector space — so a screenshot, a clip, and a
+    paragraph are comparable. The Eye's id is resolved from the law, not hardcoded.
 
     Returns:
       { "det": { "vector": [...], "provider": "...", "dims": 256 },
@@ -707,8 +715,12 @@ def embed_dual(
                     sem = {"vector": vec, "provider": label, "dims": len(vec), "is_semantic": True}
             elif provider in {"auto", "mlx"}:
                 import lgwks_model_hub as hub
-                eye_model = "Qwen3-VL-Embedding-8B"
-                res = hub.mlx_embed(text, model_name=eye_model)
+                import lgwks_model_port as port
+                # Same canonical text seam as lgwks_run.embed; id from the law via
+                # the port — never a literal (#222).
+                sel = port.resolve_model("embed", locality=port.LOCAL)
+                eye_model = sel["runtime_id"] if sel else None
+                res = hub.mlx_embed(text, model_name=eye_model) if eye_model else {"ok": False}
                 if res.get("ok"):
                     vec = res["vector"]
                     sem = {"vector": vec, "provider": f"mlx:{eye_model}",

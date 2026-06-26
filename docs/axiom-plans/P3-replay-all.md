@@ -1,3 +1,11 @@
+---
+type: Plan
+title: P3 - Replay All Axiom Artifacts
+description: Extend replay to cover both capture emissions and narration emissions.
+tags: [axiom-plans, plan]
+timestamp: 2026-06-06T20:59:55-04:00
+---
+
 # P3 - Replay All Axiom Artifacts
 
 ## Goal
@@ -52,4 +60,3 @@ Returns:
 
 - Do not combine capture and narration into one fabric yet.
 - Do not delete or rewrite old emission files.
-

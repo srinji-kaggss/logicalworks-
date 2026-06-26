@@ -1,3 +1,11 @@
+---
+type: Archive
+title: Understanding the LogicalWorks Codebase
+description: This document serves as a comprehensive synthesis of the lgwks architecture, proving a thorough understanding of the existing native components, the recent "Canonical-primitive dedup" (PR #225), and t
+tags: [archive]
+timestamp: 2026-06-23T00:24:35-04:00
+---
+
 # Understanding the LogicalWorks Codebase
 
 This document serves as a comprehensive synthesis of the `lgwks` architecture, proving a thorough understanding of the existing native components, the recent "Canonical-primitive dedup" (PR #225), and the strict "no external dependencies" hardware-first mandate. 

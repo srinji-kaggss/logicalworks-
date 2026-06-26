@@ -1,3 +1,11 @@
+---
+type: Reference
+title: Real-world eval + fixes — lgwks extract / convert (2026-06-24)
+description: Branch: fix/extract-realworld-evals.
+tags: [reference]
+timestamp: 2026-06-24T12:02:01-04:00
+---
+
 # Real-world eval + fixes — `lgwks extract` / `convert` (2026-06-24)
 
 Branch: `fix/extract-realworld-evals`. Method: dogfood the read-anything surface

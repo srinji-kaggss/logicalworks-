@@ -2,14 +2,22 @@
 
 A "mesh" is not code and not a model. It is the **model law as data** — the way
 `docs/navmap/index.json` renders the module atlas, this renders the model-stack
-law (`spec/second-harness/MODEL-RUNTIME-FINALIZATION-2026-06-13.md` §3/§3.1/§3.2)
-into one artifact so doctor / routing / reporting read a single source of truth.
+law into one artifact so doctor / routing / reporting read a single source of truth.
 
-CRITICAL CONSTRAINT (spec §3 lines 10-12, acceptance bullet): this contract
-**records inventory; it does not change it.** No new default, no new selection,
-no model load. `MESH_LAW` below is transcribed verbatim from §3.1 (current law)
-and §3.2 (open slots); building/reading the mesh imports no model package and
-touches no `store/models/` weights.
+`MESH_LAW` below is GENERATED, never hand-edited. Its one authored source is
+`spec/second-harness/model-law.json` (`lgwks.model.law.v1`); regenerate the block
+with `python3 scripts/gen_model_law.py --write` (the `model.law` CI lane runs
+`--verify`). Provenance of the in-force `current_law` stack: the 8-component
+"Authoritative Stack" of `docs/AETHERIUS_SPEC_2026.md` §3 — EXCEPT the embed Eye,
+whose id is the FINALIZATION §3 correction (`Qwen/Qwen3-VL-Embedding-8B`, an
+embedder) of the Aetherius §3 V.EYE prose (which names a VL *visual agent*); see
+`spec_divergences` in the source. Older docs that cite §3.1 of
+MODEL-RUNTIME-FINALIZATION as the source predate this and are wrong.
+
+CRITICAL CONSTRAINT: this contract **records inventory; it does not change it.**
+No new default, no new selection, no model load. Building/reading the mesh imports
+no model package and touches no `store/models/` weights — MESH_LAW is a pure
+in-memory literal (the source JSON is read only by the generator, never at import).
 
 Locked public join keys (read by #120/#122 and the future LogicGPT-1 promotion
 path, spec §5): `role`, `trust_class`, `input_schema`, `output_schema`,
@@ -70,115 +78,177 @@ def _entry(
     return entry
 
 
-# ── The Authoritative Model Law: Approved 8-Component Stack (2026-06-14) ──
-# This is a descriptive contract. Candidate references may be listed below, but
-# `current_law` must remain the pinned §3.1 surface until the spec changes.
+# === BEGIN GENERATED MESH_LAW — DO NOT EDIT. Source: spec/second-harness/model-law.json ===
+# Regenerate: python3 scripts/gen_model_law.py --write   (CI gate: --verify)
 MESH_LAW: list[dict[str, Any]] = [
-    # I. THE ANCHOR (Mathematical Authority)
+    # I. THE ANCHOR (Mathematical Authority) — current_law · docs/AETHERIUS_SPEC_2026.md §3 (Authoritative 8-Component Stack, v1 Locked, 2026-06-14)
     _entry(
-        name="Axiom-Byte-Framework", runtime="axiom", locality="local", role="identity",
-        trust_class="deterministic", status="current_law",
+        name="Axiom-Byte-Framework",
+        runtime="axiom",
+        locality="local",
+        role="identity",
+        trust_class="deterministic",
+        status="current_law",
         notes="Zero-trust foundation; BLAKE3 CID and CRDT merge algebra.",
     ),
-
-    # II. THE MEMBRANE (Task Salience Sensor)
+    # II. THE MEMBRANE (Task Salience Sensor) — current_law · docs/AETHERIUS_SPEC_2026.md §3 (Authoritative 8-Component Stack, v1 Locked, 2026-06-14)
     _entry(
-        name="mlx-community/ModernBERT-base-mlx-4bit", runtime="mlx", locality="local", role="intent",
-        trust_class="sensor", status="current_law",
+        name="mlx-community/ModernBERT-base-mlx-4bit",
+        runtime="mlx",
+        locality="local",
+        role="intent",
+        trust_class="sensor",
+        status="current_law",
         notes="8k context Task Salience encoder. <2ms on ANE.",
     ),
-
-    # III. THE HEART (Recurrent Ingestion)
+    # III. THE HEART (Recurrent Ingestion) — current_law · docs/AETHERIUS_SPEC_2026.md §3 (Authoritative 8-Component Stack, v1 Locked, 2026-06-14)
     _entry(
-        name="mlx-community/liquid-lfm-2.5-1.2b-mlx-4bit", runtime="mlx", locality="local", role="encode",
-        trust_class="sensor", status="current_law",
+        name="mlx-community/liquid-lfm-2.5-1.2b-mlx-4bit",
+        runtime="mlx",
+        locality="local",
+        role="encode",
+        trust_class="sensor",
+        status="current_law",
         notes="Liquid AI recurrent core. Constant-RAM tailing of trajectories.",
     ),
-
-    # IV. THE OMNI (Native Voice Interaction)
+    # IV. THE OMNI (Native Voice Interaction) — current_law · docs/AETHERIUS_SPEC_2026.md §3 (Authoritative 8-Component Stack, v1 Locked, 2026-06-14)
     _entry(
-        name="mlx-community/Qwen2.5-Omni-3B-Instruct-4bit-mlx", runtime="mlx", locality="local", role="asr",
-        trust_class="generative", status="current_law",
+        name="mlx-community/Qwen2.5-Omni-3B-Instruct-4bit-mlx",
+        runtime="mlx",
+        locality="local",
+        role="asr",
+        trust_class="generative",
+        status="current_law",
         notes="Truly Multimodal. Native speech-to-speech (Ear/Mouth). Wisprflow feel.",
     ),
-
-    # V. THE EYE (Visual Agent)
+    # V. THE EYE (Universal Multimodal Embedding Space) — current_law · spec/second-harness/MODEL-RUNTIME-FINALIZATION-2026-06-13.md §3/§3.1 (Universal semantic space) — embed-law correction; Aetherius §3 V.EYE prose names a VL *visual agent*, see spec_divergences
     _entry(
-        name="mlx-community/Qwen3.7-VL-8B-Instruct-4bit", runtime="mlx", locality="local", role="embed",
-        input_schema="lgwks.modality.item.v1", output_schema="lgwks.vector.record.v1",
-        trust_class="sensor", status="current_law",
-        notes="Visual Agent. Operates terminal/GUI via screenshots. Everything is VL.",
+        name="Qwen/Qwen3-VL-Embedding-8B",
+        runtime="mlx",
+        locality="local",
+        role="embed",
+        trust_class="sensor",
+        status="current_law",
+        input_schema="lgwks.modality.item.v1",
+        output_schema="lgwks.vector.record.v1",
+        notes="Shared text/image/video vector space via lgwks_embed_port; the ONE semantic embedder. Pinned by the source spec (MODEL-RUNTIME-FINALIZATION-2026-06-13 §92/§117) as Qwen/Qwen3-VL-Embedding-8B. Hub catalog key (the runtime id) is the name minus its org: Qwen3-VL-Embedding-8B.",
     ),
-
-    # VI. THE BRAIN (Deep Reasoning)
+    # VI. THE BRAIN (Deep Reasoning) — current_law · docs/AETHERIUS_SPEC_2026.md §3 (Authoritative 8-Component Stack, v1 Locked, 2026-06-14)
     _entry(
-        name="mlx-community/OLMo-2-0325-32B-Instruct-4bit", runtime="mlx", locality="local", role="proposal",
-        trust_class="generative", status="current_law",
+        name="mlx-community/OLMo-2-0325-32B-Instruct-4bit",
+        runtime="mlx",
+        locality="local",
+        role="proposal",
+        trust_class="generative",
+        status="current_law",
         notes="The Stay Model. Deep architectural resolve.",
     ),
-
-    # VII. THE GUARD (Injection Blocking)
+    # VII. THE GUARD (Injection Blocking) — current_law · docs/AETHERIUS_SPEC_2026.md §3 (Authoritative 8-Component Stack, v1 Locked, 2026-06-14)
     _entry(
-        name="meta-llama/Llama-Prompt-Guard-2-86M", runtime="transformers", locality="local", role="classify",
-        trust_class="sensor", status="current_law",
+        name="meta-llama/Llama-Prompt-Guard-2-86M",
+        runtime="transformers",
+        locality="local",
+        role="classify",
+        trust_class="sensor",
+        status="current_law",
         notes="<1ms injection blocking.",
     ),
-
-    # VIII. THE FRAUD (Statistical Anomaly)
+    # VIII. THE FRAUD (Statistical Anomaly) — current_law · docs/AETHERIUS_SPEC_2026.md §3 (Authoritative 8-Component Stack, v1 Locked, 2026-06-14)
     _entry(
-        name="logicalworks/had-fraud-engine-v1", runtime="custom", locality="local", role="classify",
-        trust_class="sensor", status="current_law",
+        name="logicalworks/had-fraud-engine-v1",
+        runtime="custom",
+        locality="local",
+        role="classify",
+        trust_class="sensor",
+        status="current_law",
         notes="Detects slop and intent drift in real-time streams.",
     ),
-
     # Candidate references: documented inventory, not runtime law.
     _entry(
-        name="WhisperKit/lg-v3-turbo", runtime="mlx", locality="local", role="asr",
-        trust_class="sensor", status="candidate_reference",
+        name="WhisperKit/lg-v3-turbo",
+        runtime="mlx",
+        locality="local",
+        role="asr",
+        trust_class="sensor",
+        status="candidate_reference",
         notes="Candidate ANE/MLX ASR path; does not replace the current Omni law.",
     ),
     _entry(
-        name="mlx-community/Qwen3-VL-8B-Instruct-4bit", runtime="mlx", locality="local", role="embed",
-        input_schema="lgwks.modality.item.v1", output_schema="lgwks.vector.record.v1",
-        trust_class="sensor", status="candidate_reference",
-        notes="Candidate shared text/image/video space; does not replace Qwen3.7-VL current law.",
+        name="mlx-community/Qwen3-VL-8B-Instruct-4bit",
+        runtime="mlx",
+        locality="local",
+        role="embed",
+        trust_class="sensor",
+        status="candidate_reference",
+        input_schema="lgwks.modality.item.v1",
+        output_schema="lgwks.vector.record.v1",
+        notes="Candidate VL-Instruct visual agent (GUI operation); does not replace the Qwen3-VL-Embedding-8B embed current law.",
     ),
     _entry(
-        name="Qwen/Qwen3-Reranker-0.6B", runtime="mlx", locality="local", role="rerank",
-        trust_class="sensor", status="candidate_reference",
+        name="Qwen/Qwen3-Reranker-0.6B",
+        runtime="mlx",
+        locality="local",
+        role="rerank",
+        trust_class="sensor",
+        status="candidate_reference",
         notes="Second-stage ranker for shared vector recall.",
     ),
     _entry(
-        name="Qwen/Qwen3-Coder", runtime="transformers", locality="local", role="code",
-        trust_class="sensor", status="candidate_reference",
+        name="Qwen/Qwen3-Coder",
+        runtime="transformers",
+        locality="local",
+        role="code",
+        trust_class="sensor",
+        status="candidate_reference",
         notes="Code explanation and proposal beyond static analysis.",
     ),
     _entry(
-        name="neobert-base", runtime="transformers", locality="local", role="salience",
-        trust_class="sensor", status="candidate_reference",
+        name="neobert-base",
+        runtime="transformers",
+        locality="local",
+        role="salience",
+        trust_class="sensor",
+        status="candidate_reference",
         notes="Research-grade encoder for transcript attention.",
     ),
     _entry(
-        name="LiquidAI/LFM2-1.2B-Extract", runtime="llama_cpp", locality="local", role="extract",
-        trust_class="sensor", status="candidate_reference",
+        name="LiquidAI/LFM2-1.2B-Extract",
+        runtime="llama_cpp",
+        locality="local",
+        role="extract",
+        trust_class="sensor",
+        status="candidate_reference",
         notes="GGUF local worker for schema-valid facts.",
     ),
     _entry(
-        name="hexgrad/Kokoro-82M", runtime="custom", locality="local", role="identity",
-        trust_class="sensor", status="candidate_reference",
+        name="hexgrad/Kokoro-82M",
+        runtime="custom",
+        locality="local",
+        role="identity",
+        trust_class="sensor",
+        status="candidate_reference",
         notes="Ultra-fast local TTS for voice interaction.",
     ),
     _entry(
-        name="kyutai/moshika-v1", runtime="custom", locality="local", role="proposal",
-        trust_class="generative", status="candidate_reference",
+        name="kyutai/moshika-v1",
+        runtime="custom",
+        locality="local",
+        role="proposal",
+        trust_class="generative",
+        status="candidate_reference",
         notes="Real-time full-duplex voice interaction (Wisprflow).",
     ),
     _entry(
-        name="allenai/Molmo-2-Instruct", runtime="mlx", locality="local", role="embed",
-        trust_class="generative", status="candidate_reference",
+        name="allenai/Molmo-2-Instruct",
+        runtime="mlx",
+        locality="local",
+        role="embed",
+        trust_class="generative",
+        status="candidate_reference",
         notes="Frontier-tier multimodal reasoning and grounding.",
     ),
 ]
+# === END GENERATED MESH_LAW ===
 
 
 def build_mesh(*, generated_at: str | None = None) -> dict[str, Any]:

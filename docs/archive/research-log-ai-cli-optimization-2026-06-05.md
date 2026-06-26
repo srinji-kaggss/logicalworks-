@@ -1,3 +1,11 @@
+---
+type: Archive
+title: Research Log: AI-First CLI Optimization — lgwks Machine Mode
+description: 3.
+tags: [archive]
+timestamp: 2026-06-23T00:24:35-04:00
+---
+
 # Research Log: AI-First CLI Optimization — lgwks Machine Mode
 
 **Date:** 2026-06-05  

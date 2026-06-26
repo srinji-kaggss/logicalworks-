@@ -1,3 +1,11 @@
+---
+type: Archive
+title: JEPA Alignment with Logic OS Kernel — 2026-06-06
+description: Purpose: translate the end-state process and governance ideas in logic-os-kernel/laws into the lgwks JEPA/product-seed roadmap.
+tags: [archive]
+timestamp: 2026-06-23T00:24:35-04:00
+---
+
 # JEPA Alignment with Logic OS Kernel — 2026-06-06
 
 Purpose: translate the end-state process and governance ideas in `logic-os-kernel/laws` into the `lgwks` JEPA/product-seed roadmap.

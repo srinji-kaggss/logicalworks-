@@ -335,14 +335,27 @@ def render(url: str, max_chars: int = 8000, *, use_session: bool = False,
         try:
             import asyncio
             import nodriver
+            # Bound EVERY blocking await so a stalled browser cannot hang the CLI — the
+            # sibling playwright paths cap page.goto at 30s; nodriver had NO bound (R2).
+            # start() and stop() are bounded too: launch/attach can hang, and stop() on a
+            # wedged browser can hang in `finally` and mask the very timeout we raise.
+            # Caveat: asyncio cancellation of a CDP call is best-effort — a truly wedged
+            # Chrome subprocess may still need OS-level cleanup; this prevents the CLI
+            # hang, it does not guarantee the child process is killed.
+            _nav_timeout = 30.0  # seconds — matches page.goto(timeout=30000)
             async def _nodriver_render():
-                browser = await nodriver.start()
-                page = await browser.get(url)
-                await asyncio.sleep(wait_ms / 1000.0)
-                html = await page.get_content()
-                text = _text_from(html, max_chars)
-                await browser.stop()
-                return {"ok": True, "text": text, "html": html, "reason": "rendered:nodriver"}
+                browser = await asyncio.wait_for(nodriver.start(), _nav_timeout)
+                try:
+                    page = await asyncio.wait_for(browser.get(url), _nav_timeout)
+                    await asyncio.sleep(wait_ms / 1000.0)
+                    html = await asyncio.wait_for(page.get_content(), _nav_timeout)
+                    text = _text_from(html, max_chars)
+                    return {"ok": True, "text": text, "html": html, "reason": "rendered:nodriver"}
+                finally:
+                    try:
+                        await asyncio.wait_for(browser.stop(), 10.0)
+                    except Exception:
+                        pass  # best-effort cleanup; never mask the original result/error
             return asyncio.run(_nodriver_render())
         except Exception as e:
             return {"ok": False, "text": "", "reason": f"nodriver failed: {type(e).__name__}"}

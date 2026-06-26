@@ -1,3 +1,11 @@
+---
+type: Plan
+title: P4 - Rust Boundary Plan
+description: Define when and how Axiom moves from Python to Rust without prematurely slowing CLI iteration.
+tags: [axiom-plans, plan]
+timestamp: 2026-06-06T20:59:55-04:00
+---
+
 # P4 - Rust Boundary Plan
 
 ## Goal
@@ -79,4 +87,3 @@ Avoid first:
 - Rust binary verifies all current `axiom/tests` fixture bytes.
 - Python and Rust produce identical CIDs for the same capsules.
 - Existing Python tests still pass.
-

@@ -1,3 +1,11 @@
+---
+type: Reference
+title: FRONTIER INTERPRETABILITY + OBSERVABILITY CHECKLIST + COMPETITOR MAP
+description: Each item: what it is, why it matters for a "Bloomberg terminal for code," how lgwks scores
+tags: [reference]
+timestamp: 2026-06-24T20:18:37-04:00
+---
+
 # FRONTIER INTERPRETABILITY + OBSERVABILITY CHECKLIST + COMPETITOR MAP
 
 > **Method:** every source is cited with a verifiable URL. Every claim about a competitor's
