@@ -6,12 +6,19 @@ rung is present, and falls to `agent_handoff` (the working agent) when it isn't.
 
   1. olmo_mlx     — the mesh-law deep-reasoning model under store/models/ (id from
                      lgwks_model_mesh, never hardcoded) + mlx_lm importable (owned, Mac only)
-  2. agent_handoff — hand the request to the WORKING AGENT (Claude / Codex /
+  2. cloud_tongue — OPT-IN cloud plane (LGWKS_MODEL_LOCALITY=cloud). The model is
+                     SELECTED through the models.dev catalog (lgwks_model_port.resolve_model
+                     on the CLOUD plane) and EXECUTED through the OpenRouter Tongue
+                     (lgwks_openrouter). Cloud providers (incl. Anthropic) are reached
+                     ONLY through this canonical seam — never a direct provider/api call.
+                     Defers (→ agent_handoff) when unconfigured; never silently chosen.
+  3. agent_handoff — hand the request to the WORKING AGENT (Claude / Codex /
                      Gemini — operator's pick). This IS the frontier path (INV-5).
-  3. deferred     — no local model AND no agent → defer to human. NEVER fabricate.
+  4. deferred     — no model AND no agent → defer to human. NEVER fabricate.
 
-No network calls. The port returns a proposal (local text) or a handoff/deferral
-envelope. The daemon/gate decides; the human authorizes.
+No network calls on the LOCAL plane (the default). The cloud_tongue tier is the only
+networked path and is opt-in. The port returns a proposal (synchronous text) or a
+handoff/deferral envelope. The daemon/gate decides; the human authorizes.
 """
 
 from __future__ import annotations
@@ -58,10 +65,22 @@ def _olmo_available() -> bool:
     return importlib.util.find_spec("mlx_lm") is not None
 
 
+def _cloud_available() -> bool:
+    """Cloud reasoning is OPT-IN and must be configured end to end: a cloud model
+    SELECTED through the models.dev catalog (resolve_model on the CLOUD plane returns
+    a card, else None) AND a reachable OpenRouter Tongue key. Cloud providers are
+    reached ONLY through this canonical seam — never a direct provider/api call."""
+    from lgwks_model_port import CLOUD, resolve_model
+    if resolve_model("proposal", locality=CLOUD) is None:
+        return False
+    import lgwks_openrouter
+    return lgwks_openrouter.is_configured()
+
+
 def resolve_backend() -> str:
-    """Thin selector — the kill-switch and forcing belong to the canonical port,
-    not a reimplemented ladder. One check, one env-var, one availability probe."""
-    from lgwks_model_port import models_suppressed
+    """Thin selector — the kill-switch, locality (opt-in cloud), and forcing belong
+    to the canonical port, not a reimplemented ladder."""
+    from lgwks_model_port import CLOUD, active_locality, models_suppressed
     if models_suppressed():
         return "agent_handoff"
     forced = os.environ.get("LGWKS_REASONING_BACKEND", "auto").lower()
@@ -69,7 +88,39 @@ def resolve_backend() -> str:
         return "agent_handoff"
     if forced == "olmo":
         return "olmo_mlx" if _olmo_available() else "agent_handoff"
+    if forced == "cloud":
+        return "cloud_tongue" if _cloud_available() else "agent_handoff"
+    # auto: the locality axis picks the plane (LOCAL default ⊕ CLOUD opt-in). When
+    # the user opts into cloud, route there — but never silently fall back to a local
+    # model; hand off if the cloud seam isn't configured.
+    if active_locality() == CLOUD:
+        return "cloud_tongue" if _cloud_available() else "agent_handoff"
     return "olmo_mlx" if _olmo_available() else "agent_handoff"
+
+
+def _run_cloud(prompt: str, framing: str, context: str | None) -> tuple[str, str] | None:
+    """Deep reasoning on the CLOUD plane via the canonical seam: the model id comes
+    from the models.dev card (never hardcoded here), execution goes through the
+    OpenRouter Tongue (lgwks_openrouter). Returns (text, model_ref) or None to fall
+    back to agent_handoff. Never raises."""
+    from lgwks_model_port import CLOUD, resolve_model
+    sel = resolve_model("proposal", locality=CLOUD)
+    if not sel:
+        return None
+    model_ref = sel["runtime_id"]  # models.dev-selected slug; never a literal here
+    try:
+        import lgwks_openrouter
+        parts = [framing]
+        if context:
+            parts.append(f"\nContext:\n{context}")
+        parts.append(f"\nTask:\n{prompt}")
+        schema_hint = '{"reasoning": "<full analysis and proposal as one string>"}'
+        out = lgwks_openrouter.generate_json("\n".join(parts), schema_hint, model=model_ref)
+    except Exception:
+        return None
+    if out and isinstance(out.get("reasoning"), str) and out["reasoning"].strip():
+        return out["reasoning"], model_ref
+    return None
 
 
 def _framing(persona: str) -> str:
@@ -111,6 +162,13 @@ def reason(
             return {**base, "ok": True, "mode": "local",
                     "model": Path(_OLMO_MODEL_DIR).name, "text": text}
         backend = base["backend"] = "agent_handoff"
+
+    if backend == "cloud_tongue":
+        out = _run_cloud(prompt, framing, context)
+        if out is not None:
+            text, model_ref = out
+            return {**base, "ok": True, "mode": "cloud", "model": model_ref, "text": text}
+        backend = base["backend"] = "agent_handoff"  # cloud unreachable → hand off
 
     target = agent or os.environ.get("LGWKS_AGENT") or "working_agent"
     if target and target != "none":
