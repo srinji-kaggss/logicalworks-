@@ -550,7 +550,8 @@ def reason(prompt: str, **kw: Any) -> dict[str, Any]:
     """
     import lgwks_reasoning_port as rp
     r = rp.reason(prompt, **kw)
-    mode_map = {"local": "generative", "agent_handoff": "generative", "deferred": "deferred"}
+    mode_map = {"local": "generative", "cloud": "generative",
+                "agent_handoff": "generative", "deferred": "deferred"}
     mode = mode_map.get(r.get("mode", ""), "deferred")
     return _envelope(
         "proposal", ok=bool(r.get("ok")), mode=mode, tier=mode,
