@@ -65,6 +65,15 @@ Proof fixture: `~/ingestion_results/code_embeddings_v1.db` — 4100 rows migrate
 `lgwks_substrate_vector.py`, `lgwks_substrate_crawl.py`) · `lgwks.ingest.v1` (`lgwks_ingest.py:284`) ·
 SQLite DDL: `lgwks_substrate_db.py:43-98` (sources/documents/chunks/facts/vectors/frontier + FTS5),
 `lgwks_entity_graph.py:111-138` (nodes/edges/chunks).
+#### lgwks.translate.rag.v1 — landed Pristine M1–M4 (#350)
+| id | ver | status | defined in | validation |
+|----|-----|--------|-----------|------------|
+| `lgwks.translate.rag.v1` | 1 | **live** | `lgwks_translate_rag.py` | `TranslationPair` (frozen) + `make_cid` |
+
+Fields (`TranslationPair`): `cid` (blake2b-128 of `source_text+target_text+target_lang`) · `source_text` · `target_text` · `source_lang` · `target_lang` · `domain` · `component_type` · `glossary_terms` (dict) · `source_embedding` (float32 binary) · `provenance` (`human`/`model`/`post_edit`/`corpus`) · `quality_score` (f32) · `timestamp`.
+Invariants: idempotent ingest — same `source+target+lang` → same cid (zero duplication); different target text → different cid (translations coexist); domain/provenance/quality are metadata, NOT in the cid (a post-edit upgrades quality without changing identity). Embeddings stored via `lgwks.vector.record.v1` (space_id `translate-rag-v1`); RAG layer built ON the ingestion spine (`lgwks_vector` I1 + `lgwks_embed_port` I4), not a parallel store.
+**Authority:** `spec/second-harness/INGESTION-LAYER.md`, `INGESTION-PLAN.md`.
+
 #### lgwks.artifact.tokenized.v1 — landed Phase 1 (2026-06-15)
 | id | ver | status | defined in | validation |
 |----|-----|--------|-----------|------------|
