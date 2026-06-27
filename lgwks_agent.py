@@ -376,7 +376,7 @@ def agent_command(args: argparse.Namespace) -> int:
     repo = Path(args.repo).resolve() if getattr(args, "repo", None) else None
     result = act(
         args.intent, repo=repo, top=getattr(args, "top", 5),
-        execute=getattr(args, "act", False),
+        execute=not getattr(args, "explain", False),
         approve=getattr(args, "yes", False), force=getattr(args, "force", False),
     )
     print(json.dumps(result, indent=2, default=str))
@@ -388,7 +388,8 @@ def agent_command(args: argparse.Namespace) -> int:
 def add_parser(sub) -> None:
     p = sub.add_parser("agent", help="single agent front door: world view, then trigger a workflow")
     p.add_argument("intent", help="natural-language intent")
-    p.add_argument("--act", action="store_true", help="execute the compiled workflow (else: world view only)")
+    p.add_argument("--act", action="store_true", help="accepted no-op alias (execution is now the default)")
+    p.add_argument("--explain", action="store_true", help="world view only; do not execute")
     p.add_argument("--yes", action="store_true", help="approve a write/mutation plan (approval:once)")
     p.add_argument("--force", action="store_true", help="approve a destructive plan")
     p.add_argument("--top", type=int, default=5, help="max capability selections/results")
