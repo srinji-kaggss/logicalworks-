@@ -191,7 +191,7 @@ def test_manifest_shortcut_is_parseable_json():
 def test_agent_worldview_ranks_pathways():
     """`route map` ranking folded into the agent worldview (perceive): the
     top pathway for a research intent is the daemon research path."""
-    proc = _run("agent", "research a website and build graph", "--top", "3")
+    proc = _run("agent", "research a website and build graph", "--explain", "--top", "3")
     assert proc.returncode == 0, proc.stderr
     payload = json.loads(proc.stdout)
     assert payload["schema"] == "lgwks.agent.v1"
@@ -201,7 +201,7 @@ def test_agent_worldview_ranks_pathways():
 def test_agent_worldview_carries_subconscious_schema():
     """`route engine` (subconscious schema) folded into the agent worldview:
     C/G/P scores + pathways are present in the perceive payload."""
-    proc = _run("agent", "research a website and build graph", "--top", "3")
+    proc = _run("agent", "research a website and build graph", "--explain", "--top", "3")
     assert proc.returncode == 0, proc.stderr
     payload = json.loads(proc.stdout)
     wv = payload["worldview"]
