@@ -10,6 +10,16 @@ office → html with browser escalation, honest failure). These verbs expose it 
 
 Both are read-only and cost no tokens. Default output is the text itself (pipe-friendly); --json gives
 the structured envelope. Failure is loud and structured (ok:false), never a silent empty.
+
+Contract note (path safety): the real, load-bearing invariant is
+"absolute_local_paths_are_allowed_by_default_for_extract_convert". `_is_safe_path`'s own
+`allow_absolute: bool = False` parameter default reads as safety-oriented, but every caller
+(extract_command, convert_command) and the CLI parser (`--allow-absolute`, default=True) override
+it to True. So in practice absolute local paths ARE permitted unless a caller explicitly opts out.
+Security note: this is read-only convenience for a local CLI tool, not a sandbox boundary — it does
+not stop a user/agent from pointing extract/convert at any path readable by the host process; do not
+rely on `_is_safe_path` to confine reads to the repo when `allow_absolute` is left at its effective
+(True) default.
 """
 
 from __future__ import annotations
