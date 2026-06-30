@@ -748,6 +748,48 @@ class _RoundState:
     stop: str
 
 
+def _persist_round(out_dir, n, mode_tag, has_evidence, frontier, hyps, reason, surviving, gv, cur_item, budget, prev_hash, key, lf, run_id, cfg, agenda, covered, top, fanout_preview, axiom_path) -> str:
+    # 6. Hash-chain the round (L5) — tamper breaks the chain.
+    rec = {"n": n, "mode": mode_tag, "evidence": has_evidence, "frontier_in": frontier,
+           "hyp_count": len(hyps), "citations_verified": False,
+           "falsifiers_hit": reason["falsifiers_hit"], "surviving": surviving,
+           "learnings": reason["learnings"], "digest": reason["digest"],
+           "guide_verdict": gv if cur_item else None,
+           "converged": reason["converged"], "spent": budget.spent, "prev": prev_hash}
+    rec["hash"] = lgwks_sign.mac(prev_hash + _canon(rec), key)
+    prev_hash = rec["hash"]
+    lf.write(_canon(rec) + "\n"); lf.flush()
+    # Refresh the LOD context pack EVERY round (#9 background-while-coding): a foreground
+    # coding agent polls runs/<id>/CONTEXT/CONTEXT.md and pulls artifacts as they land —
+    # it must not wait for the run to finish. Convenience, never fails the round.
+    try:
+        import lgwks_context
+        lgwks_context.write_pack(out_dir)
+    except Exception:
+        pass
+    agenda_covered_live = len(covered) + (1 if cur_item is not None else 0)
+    _write_progress(out_dir, {
+        "schema": "lgwks.research-progress/1",
+        "run_id": run_id,
+        "status": "running",
+        "round": n,
+        "objective": cfg.objective,
+        "frontier": frontier,
+        "spent": budget.spent,
+        "budget": budget.cap,
+        "agenda_total": len(agenda),
+        "agenda_covered": agenda_covered_live,
+        "last_mode": mode_tag,
+        "last_surviving": surviving,
+        "last_verdict": gv.get("verdict", "") if cur_item else "",
+        "top_frontier": top[0]["node"] if top else "",
+        "stop_reason": "",
+        "axiom": str(axiom_path),
+        "frontier_preview": fanout_preview,
+    })
+    return prev_hash
+
+
 def _run_round(st: "_RoundState", n, cfg, emit, out_dir, run_id, axiom_path, agenda, key, mode, lf) -> bool:
     """One autonomous-research round. Returns True to stop the loop (st.stop set)."""
     budget = st.budget
@@ -885,44 +927,7 @@ def _run_round(st: "_RoundState", n, cfg, emit, out_dir, run_id, axiom_path, age
             "items": fanout_preview,
         })
 
-    # 6. Hash-chain the round (L5) — tamper breaks the chain.
-    rec = {"n": n, "mode": mode_tag, "evidence": has_evidence, "frontier_in": frontier,
-           "hyp_count": len(hyps), "citations_verified": False,
-           "falsifiers_hit": reason["falsifiers_hit"], "surviving": surviving,
-           "learnings": reason["learnings"], "digest": reason["digest"],
-           "guide_verdict": gv if cur_item else None,
-           "converged": reason["converged"], "spent": budget.spent, "prev": prev_hash}
-    rec["hash"] = lgwks_sign.mac(prev_hash + _canon(rec), key)
-    prev_hash = rec["hash"]
-    lf.write(_canon(rec) + "\n"); lf.flush()
-    # Refresh the LOD context pack EVERY round (#9 background-while-coding): a foreground
-    # coding agent polls runs/<id>/CONTEXT/CONTEXT.md and pulls artifacts as they land —
-    # it must not wait for the run to finish. Convenience, never fails the round.
-    try:
-        import lgwks_context
-        lgwks_context.write_pack(out_dir)
-    except Exception:
-        pass
-    agenda_covered_live = len(covered) + (1 if cur_item is not None else 0)
-    _write_progress(out_dir, {
-        "schema": "lgwks.research-progress/1",
-        "run_id": run_id,
-        "status": "running",
-        "round": n,
-        "objective": cfg.objective,
-        "frontier": frontier,
-        "spent": budget.spent,
-        "budget": budget.cap,
-        "agenda_total": len(agenda),
-        "agenda_covered": agenda_covered_live,
-        "last_mode": mode_tag,
-        "last_surviving": surviving,
-        "last_verdict": gv.get("verdict", "") if cur_item else "",
-        "top_frontier": top[0]["node"] if top else "",
-        "stop_reason": "",
-        "axiom": str(axiom_path),
-        "frontier_preview": fanout_preview,
-    })
+    prev_hash = _persist_round(out_dir, n, mode_tag, has_evidence, frontier, hyps, reason, surviving, gv, cur_item, budget, prev_hash, key, lf, run_id, cfg, agenda, covered, top, fanout_preview, axiom_path)
     if _spent_break():
         emit("    budget hit after contrarian — stopping."); return _pack(True)
 

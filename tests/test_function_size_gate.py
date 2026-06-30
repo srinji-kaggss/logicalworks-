@@ -27,7 +27,7 @@ THRESHOLD = 200  # lines (inclusive def→end) above which a function needs a re
 # function shrank ≤ THRESHOLD or vanished). All tracked for decomposition in #351.
 ALLOWED: dict[tuple[str, str], int] = {
     ("lgwks_research.py", "run_auto"): 213,           # R6.3 done — round body extracted (was 385); residual setup+report
-    ("lgwks_research.py", "_run_round"): 212,         # R6.3 — extracted round body w/ explicit _RoundState; 7 cohesive step-seams remain
+    # _run_round decomposed 212→175 (#351): step-6 persist seam extracted to _persist_round; de-listed (now ≤THRESHOLD).
     ("lgwks_substrate_run.py", "_ingest_docs"): 278,  # R6.1 residue — per-doc ingest loop
     # NOTE: the 8 entries formerly here (jarvis.crawl_command, substrate_crawl._crawl_site,
     # home._browser_entryway, bot_stress.run, review.review_command, pipeline.run_pipeline,
