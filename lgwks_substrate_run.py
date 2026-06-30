@@ -181,6 +181,96 @@ def _fetch_docs(args: argparse.Namespace, source_kind: str) -> tuple[list[dict[s
     return docs, frontier
 
 
+def _ingest_media_items(doc, doc_id, screenshot_b64, tok_id, chunk_rows, vector_rows, graph_input_rows, fact_rows, provider_counts) -> int:
+    semantic_vectors = 0
+    # ── Media items → media chunks (opt-in) ────────────────────────────────
+    # //why: first-class media support (ADR-068/INGESTION-LAYER §2).
+    # Both screenshot and harvested images/videos are processed here.
+    media_items = list(doc.get("media", []))
+    if screenshot_b64:
+        media_items.append({"url": doc["source"] + "#screenshot", "label": "[screenshot] " + doc["title"], "modality": "image"})
+    
+    if media_items:
+        import lgwks_multimodal
+        for media_item in media_items:
+            m_url = media_item["url"]
+            m_label = media_item["label"] or f"[{media_item['modality']}] {doc['title']}"
+            m_modality = media_item["modality"]
+            m_chunk_id = f"chunk-{io._sha(doc_id + m_url)[:16]}"
+            
+            # Best-effort fetch if not screenshot
+            m_b64 = screenshot_b64 if m_url.endswith("#screenshot") else None
+            m_mime = doc.get("screenshot_mime") or "image/png" if m_url.endswith("#screenshot") else ""
+            
+            # Fetch logic deferred to harvester; assume available if present in media list
+            # (Actual production fetch would happen here or in the crawler)
+            if not m_b64:
+                continue # Skip for now until full harvester wiring is proven
+            
+            chunk_rows.append({
+                "chunk_id": m_chunk_id,
+                "document_id": doc_id,
+                "source": doc["source"],
+                "url": m_url,
+                "text": m_label,
+                "stem_text": "",
+                "hash": io._sha(m_b64),
+                "fact_score": 0.0,
+                "chunk_kind": m_modality,
+                "position": -1,
+                "tokenization_id": tok_id,   # #165
+                "artifact_cid": m_chunk_id,  # #165
+            })
+            
+            mm = lgwks_multimodal.embed_media(
+                image_b64=m_b64 if m_modality == "image" else None,
+                video_b64=m_b64 if m_modality == "video" else None,
+                image_mime=m_mime if m_modality == "image" else "",
+                video_mime=m_mime if m_modality == "video" else "",
+                caption=m_label,
+            )
+            
+            idet = mm["det"]
+            provider_counts[idet["provider"]] += 1
+            vector_rows.append({
+                "vector_id": f"vec-{io._sha(m_chunk_id + idet['provider'])[:16]}",
+                "chunk_id": m_chunk_id, "document_id": doc_id,
+                "provider": idet["provider"], "is_semantic": False,
+                "dims": idet["dims"], "vector_text": m_label[:2000],
+                "vector": idet["vector"], "fact_score": 0.0, "chunk_kind": m_modality,
+                "tokenization_id": tok_id, "artifact_cid": m_chunk_id,  # #165
+            })
+            
+            if mm.get("sem"):
+                isem = mm["sem"]
+                provider_counts[isem["provider"]] += 1
+                semantic_vectors += 1
+                vector_rows.append({
+                    "vector_id": f"vec-{io._sha(m_chunk_id + isem['provider'])[:16]}",
+                    "chunk_id": m_chunk_id, "document_id": doc_id,
+                    "provider": isem["provider"], "is_semantic": True,
+                    "dims": isem["dims"], "vector_text": m_label[:2000],
+                    "vector": isem["vector"], "fact_score": 0.0, "chunk_kind": m_modality,
+                    "tokenization_id": tok_id, "artifact_cid": m_chunk_id,  # #165
+                })
+                # #275: no artifact_cid back-link here — unlike the text path,
+                # the media chunk has no gate.ingest_fact tape entry yet (this
+                # branch is dormant: `continue` above until the media harvester
+                # is wired). Stamp the media's tape cid here once it lands.
+                graph_input_rows.append({
+                    "chunk_id": m_chunk_id, "document_id": doc_id,
+                    "url": m_url, "text": m_label,
+                    "hash": isem.get("cid", ""),
+                    "schema": m_modality.upper(),
+                })
+                # Emit triples using the new first-class media relations
+                fact_rows.append({
+                    "fact_id": f"fact-{io._sha(doc_id + m_chunk_id + m_modality)[:16]}",
+                    "i_cid": doc_id, "k": m_modality, "j_cid": m_chunk_id,
+                    "confidence_score": 1.0, "schema": "lgwks.score.record.v1"
+                })
+    return semantic_vectors
+
 def _ingest_docs(docs, args, gate, tok_id, run_id, source_kind) -> "_IngestBundle":
     source_rows: list[dict[str, Any]] = []
     doc_rows: list[dict[str, Any]] = []
@@ -367,92 +457,7 @@ def _ingest_docs(docs, args, gate, tok_id, run_id, source_kind) -> "_IngestBundl
                     "artifact_cid": chunk_id,    # #165
                 })
 
-        # ── Media items → media chunks (opt-in) ────────────────────────────────
-        # //why: first-class media support (ADR-068/INGESTION-LAYER §2).
-        # Both screenshot and harvested images/videos are processed here.
-        media_items = list(doc.get("media", []))
-        if screenshot_b64:
-            media_items.append({"url": doc["source"] + "#screenshot", "label": "[screenshot] " + doc["title"], "modality": "image"})
-        
-        if media_items:
-            import lgwks_multimodal
-            for media_item in media_items:
-                m_url = media_item["url"]
-                m_label = media_item["label"] or f"[{media_item['modality']}] {doc['title']}"
-                m_modality = media_item["modality"]
-                m_chunk_id = f"chunk-{io._sha(doc_id + m_url)[:16]}"
-                
-                # Best-effort fetch if not screenshot
-                m_b64 = screenshot_b64 if m_url.endswith("#screenshot") else None
-                m_mime = doc.get("screenshot_mime") or "image/png" if m_url.endswith("#screenshot") else ""
-                
-                # Fetch logic deferred to harvester; assume available if present in media list
-                # (Actual production fetch would happen here or in the crawler)
-                if not m_b64:
-                    continue # Skip for now until full harvester wiring is proven
-                
-                chunk_rows.append({
-                    "chunk_id": m_chunk_id,
-                    "document_id": doc_id,
-                    "source": doc["source"],
-                    "url": m_url,
-                    "text": m_label,
-                    "stem_text": "",
-                    "hash": io._sha(m_b64),
-                    "fact_score": 0.0,
-                    "chunk_kind": m_modality,
-                    "position": -1,
-                    "tokenization_id": tok_id,   # #165
-                    "artifact_cid": m_chunk_id,  # #165
-                })
-                
-                mm = lgwks_multimodal.embed_media(
-                    image_b64=m_b64 if m_modality == "image" else None,
-                    video_b64=m_b64 if m_modality == "video" else None,
-                    image_mime=m_mime if m_modality == "image" else "",
-                    video_mime=m_mime if m_modality == "video" else "",
-                    caption=m_label,
-                )
-                
-                idet = mm["det"]
-                provider_counts[idet["provider"]] += 1
-                vector_rows.append({
-                    "vector_id": f"vec-{io._sha(m_chunk_id + idet['provider'])[:16]}",
-                    "chunk_id": m_chunk_id, "document_id": doc_id,
-                    "provider": idet["provider"], "is_semantic": False,
-                    "dims": idet["dims"], "vector_text": m_label[:2000],
-                    "vector": idet["vector"], "fact_score": 0.0, "chunk_kind": m_modality,
-                    "tokenization_id": tok_id, "artifact_cid": m_chunk_id,  # #165
-                })
-                
-                if mm.get("sem"):
-                    isem = mm["sem"]
-                    provider_counts[isem["provider"]] += 1
-                    semantic_vectors += 1
-                    vector_rows.append({
-                        "vector_id": f"vec-{io._sha(m_chunk_id + isem['provider'])[:16]}",
-                        "chunk_id": m_chunk_id, "document_id": doc_id,
-                        "provider": isem["provider"], "is_semantic": True,
-                        "dims": isem["dims"], "vector_text": m_label[:2000],
-                        "vector": isem["vector"], "fact_score": 0.0, "chunk_kind": m_modality,
-                        "tokenization_id": tok_id, "artifact_cid": m_chunk_id,  # #165
-                    })
-                    # #275: no artifact_cid back-link here — unlike the text path,
-                    # the media chunk has no gate.ingest_fact tape entry yet (this
-                    # branch is dormant: `continue` above until the media harvester
-                    # is wired). Stamp the media's tape cid here once it lands.
-                    graph_input_rows.append({
-                        "chunk_id": m_chunk_id, "document_id": doc_id,
-                        "url": m_url, "text": m_label,
-                        "hash": isem.get("cid", ""),
-                        "schema": m_modality.upper(),
-                    })
-                    # Emit triples using the new first-class media relations
-                    fact_rows.append({
-                        "fact_id": f"fact-{io._sha(doc_id + m_chunk_id + m_modality)[:16]}",
-                        "i_cid": doc_id, "k": m_modality, "j_cid": m_chunk_id,
-                        "confidence_score": 1.0, "schema": "lgwks.score.record.v1"
-                    })
+        semantic_vectors += _ingest_media_items(doc, doc_id, screenshot_b64, tok_id, chunk_rows, vector_rows, graph_input_rows, fact_rows, provider_counts)
     return _IngestBundle(
         source_rows=source_rows, doc_rows=doc_rows, chunk_rows=chunk_rows,
         fact_rows=fact_rows, fact_vector_rows=fact_vector_rows, vector_rows=vector_rows,
