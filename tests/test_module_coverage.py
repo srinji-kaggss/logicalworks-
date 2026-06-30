@@ -42,7 +42,6 @@ REPO = Path(__file__).resolve().parent.parent
 # its test lands. A NEW untested-but-called module is NOT here → it fails the gate.
 _DEBT_REASON = "pre-existing: live callers but no test imports it yet; backfill tracked in #349"
 EXCLUDED = {m: _DEBT_REASON for m in (
-    "lgwks_coreml",
     "lgwks_do",
     "lgwks_fabric_projection",
     "lgwks_foundation",
