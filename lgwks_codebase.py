@@ -7,6 +7,12 @@ Builds a structured, searchable, versioned representation of the codebase:
   - Embeddings: deterministic hash-based vectors for semantic search
   - Graph: adjacency lists for impact analysis and navigation
 
+Parser Precision Contract:
+  - Python parsing = AST-backed (precise)
+  - Rust and other language parsing = regex-backed heuristic (approximate)
+  Consumers MUST treat Rust and other non-Python extraction as approximate,
+  not authoritative. Only Python extraction is guaranteed to be accurate.
+
 Storage is plain JSONL + flat vectors — no SQLite, no pickle, no blob.
 Everything is deterministic, reproducible, and human-auditable.
 
@@ -212,7 +218,11 @@ def _parse_python(file: Path, root: Path) -> list[CodeEntity]:
 
 
 def _parse_rust(file: Path, root: Path) -> list[CodeEntity]:
-    """Parse a Rust file into entities (structs, enums, functions, traits)."""
+    """Parse a Rust file into entities (structs, enums, functions, traits).
+    
+    NOTE: This is a regex-based heuristic parser, not a full AST parser.
+    Results may be approximate and should not be treated as authoritative.
+    """
     try:
         source = file.read_text(encoding="utf-8")
     except Exception:
@@ -442,7 +452,11 @@ def index_stale(root: Path | None = None) -> bool:
 
 
 def _parse_generic_code(file: Path, root: Path) -> list[CodeEntity]:
-    """Generic regex-based parser for most programming languages."""
+    """Generic regex-based parser for most programming languages.
+    
+    NOTE: This is a heuristic parser using regular expressions, not a full AST parser.
+    Results may be approximate and should not be treated as authoritative.
+    """
     try:
         source = file.read_text(encoding="utf-8")
     except Exception:
