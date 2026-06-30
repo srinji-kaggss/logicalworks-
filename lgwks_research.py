@@ -967,24 +967,7 @@ def _run_round(st: "_RoundState", n, cfg, emit, out_dir, run_id, axiom_path, age
     return _pack(False)
 
 
-def run_auto(cfg: AutoConfig, emit=print) -> AutoResult:
-    """Drive the autonomous loop. `emit` is the progress sink (live viz hooks here — Unit C)."""
-    run_id = _run_id(cfg)
-    out_dir = ROOT / "runs" / run_id
-    out_dir.mkdir(parents=True, exist_ok=True)
-    axiom_path = _write_axiom_envelope(out_dir, cfg)
-    key, mode = lgwks_sign.signing_key()
-    budget = Budget(cap=cfg.token_budget)
-    ledger = out_dir / "rounds.ledger.jsonl"
-    prev_hash = "genesis"
-    # seed the rolling memory with the implementation guide (sanitized) so round-1 hypotheses target it.
-    digest = (_sanitize_carry("IMPLEMENTATION GUIDE UNDER RESEARCH:\n" + cfg.guide_text)
-              if cfg.guide_text else "")
-
-    # CO-PROCESSOR CORE (#9): decompose the guide into a research AGENDA — N concrete falsifiable
-    # questions, each a frontier node — instead of only seeding the digest with the guide's prose.
-    # The agenda drives the frontier walk; once it drains, EIG-proposed expansion takes over.
-    # Fail closed: no Tongue / malformed agenda → empty agenda → the old seed-the-digest behaviour.
+def _build_agenda(cfg, out_dir, budget, emit) -> list:
     agenda: list[dict] = []
     if cfg.guide_text:
         emit("    decomposing guide → research agenda …")
@@ -1035,6 +1018,27 @@ def run_auto(cfg: AutoConfig, emit=print) -> AutoResult:
                 emit(f"    planner offline — deterministic agenda: {len(agenda)} fronts")
                 (out_dir / "agenda.json").write_text(_canon({"summary": "deterministic seed agenda",
                                                               "agenda": agenda}))
+    return agenda
+
+def run_auto(cfg: AutoConfig, emit=print) -> AutoResult:
+    """Drive the autonomous loop. `emit` is the progress sink (live viz hooks here — Unit C)."""
+    run_id = _run_id(cfg)
+    out_dir = ROOT / "runs" / run_id
+    out_dir.mkdir(parents=True, exist_ok=True)
+    axiom_path = _write_axiom_envelope(out_dir, cfg)
+    key, mode = lgwks_sign.signing_key()
+    budget = Budget(cap=cfg.token_budget)
+    ledger = out_dir / "rounds.ledger.jsonl"
+    prev_hash = "genesis"
+    # seed the rolling memory with the implementation guide (sanitized) so round-1 hypotheses target it.
+    digest = (_sanitize_carry("IMPLEMENTATION GUIDE UNDER RESEARCH:\n" + cfg.guide_text)
+              if cfg.guide_text else "")
+
+    # CO-PROCESSOR CORE (#9): decompose the guide into a research AGENDA — N concrete falsifiable
+    # questions, each a frontier node — instead of only seeding the digest with the guide's prose.
+    # The agenda drives the frontier walk; once it drains, EIG-proposed expansion takes over.
+    # Fail closed: no Tongue / malformed agenda → empty agenda → the old seed-the-digest behaviour.
+    agenda = _build_agenda(cfg, out_dir, budget, emit)
 
     agenda_i = 0
     if agenda:

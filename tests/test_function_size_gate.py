@@ -26,7 +26,7 @@ THRESHOLD = 200  # lines (inclusive def→end) above which a function needs a re
 # gate fails if the live size exceeds it (growth) or if the entry is stale (the
 # function shrank ≤ THRESHOLD or vanished). All tracked for decomposition in #351.
 ALLOWED: dict[tuple[str, str], int] = {
-    ("lgwks_research.py", "run_auto"): 213,           # R6.3 done — round body extracted (was 385); residual setup+report
+    # run_auto decomposed 211→162 (#351): agenda-construction extracted to _build_agenda; de-listed (now ≤THRESHOLD).
     # _run_round decomposed 212→175 (#351): step-6 persist seam extracted to _persist_round; de-listed (now ≤THRESHOLD).
     ("lgwks_substrate_run.py", "_ingest_docs"): 278,  # R6.1 residue — per-doc ingest loop
     # NOTE: the 8 entries formerly here (jarvis.crawl_command, substrate_crawl._crawl_site,
