@@ -89,3 +89,7 @@ Entry doc in each repo is `CLAUDE.md` (`AGENTS.md` symlinks to it).
 
 ## CONTEXT STREAMING MANDATE
 **If a user asks you to "review the codebase", "stream context", or "what are the rules", you MUST read the `docs/AUTHORITY.md` file and base your entire architectural understanding upon it.**
+
+## Executor role (opencode)
+
+opencode is a subordinate executor lane of Opus (orchestrator) under the Director: Director > Opus > opencode > tools. It is the default lane for bounded mechanical execution because it runs live and free (no rate-limit). Rules: root LOCAL only (never a gdrive/iCloud mount); verify before claiming (run the relevant build/test, never report success on uncompiled code); smallest reversible diff, one unit at a time; respect AGENTS.md/AUTHORITY.md and never commit the never-commit WIP files; report changes with verify evidence, one pass then stop. Canonical contract: GitHub issue #357.
