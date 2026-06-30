@@ -6,7 +6,7 @@ use ratatui::{
     layout::{Constraint, Direction, Layout, Rect},
     style::{Modifier, Style},
     text::{Line, Span},
-    widgets::{Block, Borders, BorderType, Padding, List, ListItem, Paragraph, Wrap},
+    widgets::{Block, Borders, BorderType, Padding, List, ListItem, Paragraph},
 };
 use tui_input::{Input, backend::crossterm::EventHandler};
 
@@ -14,7 +14,7 @@ use crate::{
     bridge::{DaemonState, DaemonEvent, NextStep, palette::*},
     tui::Event,
 };
-use super::{Screen, ScreenCmd, ScreenId};
+use super::{Screen, ScreenCmd};
 
 /// Does this affordance require a human confirm before it fires?
 ///
@@ -47,7 +47,6 @@ pub struct FlightScreen {
     scroll_offset: usize,
     input: Input,
     input_active: bool,
-    voice_active: bool,
     status_msg: Option<String>,
     last_event_count: usize,
     last_area: std::cell::Cell<Rect>,
@@ -59,7 +58,6 @@ impl FlightScreen {
             scroll_offset: 0,
             input: Input::default(),
             input_active: true,
-            voice_active: false,
             status_msg: None,
             last_event_count: 0,
             last_area: std::cell::Cell::new(Rect::default()),
@@ -171,37 +169,31 @@ impl FlightScreen {
         // Input box (Smart Search & Tool Chainer)
         let input_val = self.input.value();
         let hint = if input_val.is_empty() {
-            if self.voice_active {
-                "🔴 Listening... (wispr active) · press [Ctrl+V] to stop"
-            } else {
-                "search context · chain tools · type intent · [Ctrl+V] voice (wispr)"
-            }
+            "search context · chain tools · type intent"
         } else {
             ""
         };
-        
+
         let input_span = if input_val.is_empty() {
             Span::styled("", Style::default())
         } else {
             Span::styled(input_val, Style::default().fg(CREAM))
         };
-        
+
         let hint_style = if input_val.is_empty() {
-            if self.voice_active { Style::default().fg(ratatui::style::Color::Red) } else { Style::default().fg(MUTED) }
+            Style::default().fg(MUTED)
         } else {
             Style::default()
         };
 
-        let input_border_style = if self.voice_active {
-            Style::default().fg(ratatui::style::Color::Red)
-        } else if self.input_active { 
-            Style::default().fg(EMERALD) 
-        } else { 
-            Style::default().fg(SLATE_DIM) 
+        let input_border_style = if self.input_active {
+            Style::default().fg(EMERALD)
+        } else {
+            Style::default().fg(SLATE_DIM)
         };
 
-        let icon = if self.voice_active { " 🎙  " } else { " 🔍 " };
-        let icon_style = if self.voice_active { Style::default().fg(ratatui::style::Color::Red) } else { Style::default().fg(if self.input_active { EMERALD } else { MUTED }) };
+        let icon = " 🔍 ";
+        let icon_style = Style::default().fg(if self.input_active { EMERALD } else { MUTED });
 
         let input_widget = Paragraph::new(Line::from(vec![
             Span::styled(icon, icon_style),
@@ -280,8 +272,6 @@ impl FlightScreen {
 }
 
 impl Screen for FlightScreen {
-    fn id(&self) -> ScreenId { ScreenId::Flight }
-
     fn on_daemon_tick(&mut self, state: &DaemonState) {
         // If new events arrived and we're pinned to bottom, stay there
         if self.scroll_offset == 0 {
@@ -325,14 +315,6 @@ impl Screen for FlightScreen {
                     // Enter input mode
                     KeyCode::Char('i') | KeyCode::Char('/') if !self.input_active => {
                         self.input_active = true;
-                        return ScreenCmd::None;
-                    }
-                    // Voice activation toggle (Ctrl+V)
-                    KeyCode::Char('v') if key.modifiers.contains(KeyModifiers::CONTROL) => {
-                        self.voice_active = !self.voice_active;
-                        if self.voice_active {
-                            self.input_active = true;
-                        }
                         return ScreenCmd::None;
                     }
                     // Alt+N fires affordance N from any mode (escape hatch from input
@@ -408,11 +390,8 @@ impl Screen for FlightScreen {
                             }
                         } else {
                             // Clicked somewhere else (like stream or input bar), focus input if bottom right
-                            if m.row >= area.height.saturating_sub(3) && m.column >= area.width * 60 / 100 {
-                                self.input_active = true;
-                            } else {
-                                self.input_active = false;
-                            }
+                            self.input_active = m.row >= area.height.saturating_sub(3)
+                                && m.column >= area.width * 60 / 100;
                         }
                     }
                     _ => {}
@@ -439,16 +418,31 @@ impl Screen for FlightScreen {
 }
 
 /// Render one daemon event as a list row.
-/// Format: [HH:MM:SS] agent_id · kind · payload_preview
+/// Format: [HH:MM:SS] ★? [badge] · kind · payload_preview
 fn render_event_row(e: &DaemonEvent) -> ListItem<'static> {
     let ts = e.ts.as_deref().unwrap_or("").get(11..19).unwrap_or("").to_string();
-    let agent = e.agent_id.as_deref().unwrap_or("?").to_string();
     let kind = e.kind.as_deref().unwrap_or("?").to_string();
     let lane = e.lane.as_deref().unwrap_or("").to_string();
     // char-safe: a crafted multibyte payload must not panic the render thread.
     let preview = e.payload.as_ref()
         .map(|p| crate::util::head_ellipsis(&p.to_string(), 60))
         .unwrap_or_default();
+
+    let (badge_text, badge_color) = if e.agent_id.as_deref() == Some("opus") {
+        ("[opus]".to_string(), EMERALD)
+    } else if e.agent_id.as_deref() == Some("codex") {
+        ("[codex]".to_string(), EMERALD)
+    } else if e.actor.as_deref() == Some("human") {
+        ("[human]".to_string(), SLATE)
+    } else if matches!(e.actor.as_deref(), Some("system") | Some("daemon")) {
+        ("[sys]".to_string(), SLATE)
+    } else if let Some(actor) = e.actor.as_deref() {
+        (format!("[{actor}]"), SLATE)
+    } else if let Some(agent) = e.agent_id.as_deref() {
+        (format!("[{agent}]"), EMERALD)
+    } else {
+        ("[?]".to_string(), MUTED)
+    };
 
     let lane_color = match lane.as_str() {
         "control"   => AMBER,
@@ -458,14 +452,23 @@ fn render_event_row(e: &DaemonEvent) -> ListItem<'static> {
         _           => MUTED,
     };
 
-    ListItem::new(Line::from(vec![
+    let shared = e.scope.as_deref() == Some("shared_referee");
+
+    let mut spans = vec![
         Span::styled(format!(" {} ", ts), Style::default().fg(SLATE_DIM)),
-        Span::styled(format!("{} ", agent), Style::default().fg(CREAM_DIM)),
+    ];
+    if shared {
+        spans.push(Span::styled("★ ", Style::default().fg(AMBER)));
+    }
+    spans.extend([
+        Span::styled(format!("{badge_text} "), Style::default().fg(badge_color)),
         Span::styled("· ", Style::default().fg(SLATE_DIM)),
         Span::styled(kind, Style::default().fg(lane_color).add_modifier(Modifier::BOLD)),
         Span::styled("  ", Style::default()),
         Span::styled(preview, Style::default().fg(MUTED)),
-    ]))
+    ]);
+
+    ListItem::new(Line::from(spans))
 }
 
 #[cfg(test)]

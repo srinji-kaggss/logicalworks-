@@ -1,0 +1,354 @@
+{
+  "schema": "lgwks.context.packet.v1",
+  "tenant_id": "repo:logicalworks-",
+  "session_id": "system-boot",
+  "agent_id": "lgwks-human",
+  "session_head": {
+    "tenant_id": "repo:logicalworks-",
+    "agent_id": "lgwks-human",
+    "session_id": "system-boot",
+    "first_event_id": "evt-c73e7c4e0b2f5ea250fed6d2eb1a9556",
+    "last_event_id": "evt-1a97db069e179d004d56016d3b7c3c1f",
+    "event_count": 2,
+    "last_ts": "2026-06-30T15:08:24+00:00",
+    "last_lane": "control",
+    "last_kind": "workflow_event",
+    "last_scope": "shared_referee"
+  },
+  "queue": {
+    "schema": "lgwks.daemon.queue.v0",
+    "tenant_id": "repo:logicalworks-",
+    "queued": 0,
+    "running": 0,
+    "done": 0,
+    "failed": 0,
+    "total": 0
+  },
+  "recent_events": [
+    {
+      "actor": "system",
+      "agent_id": "lgwks-human",
+      "client": "system",
+      "event_id": "evt-1a97db069e179d004d56016d3b7c3c1f",
+      "kind": "workflow_event",
+      "lane": "control",
+      "payload": {
+        "msg": "cockpit_boot"
+      },
+      "schema": "lgwks.daemon.event.v2",
+      "scope": "shared_referee",
+      "session_id": "system-boot",
+      "tenant_id": "repo:logicalworks-",
+      "ts": "2026-06-30T15:08:24+00:00"
+    },
+    {
+      "actor": "system",
+      "agent_id": "lgwks-human",
+      "client": "system",
+      "event_id": "evt-c73e7c4e0b2f5ea250fed6d2eb1a9556",
+      "kind": "workflow_event",
+      "lane": "control",
+      "payload": {
+        "msg": "cockpit_boot"
+      },
+      "schema": "lgwks.daemon.event.v2",
+      "scope": "shared_referee",
+      "session_id": "system-boot",
+      "tenant_id": "repo:logicalworks-",
+      "ts": "2026-06-30T13:28:23+00:00"
+    }
+  ],
+  "event_count": 2,
+  "active_task": {
+    "session_id": "system-boot",
+    "agent_id": "lgwks-human",
+    "head_event_id": "evt-1a97db069e179d004d56016d3b7c3c1f",
+    "last_kind": "workflow_event",
+    "last_ts": "2026-06-30T15:08:24+00:00"
+  },
+  "retrieval": [],
+  "known_failures": [],
+  "commitments": [],
+  "constraints": [],
+  "allowed_capabilities": [],
+  "next_steps": [
+    {
+      "kind": "research_run",
+      "mode": "do",
+      "modes": [
+        "do"
+      ],
+      "summary": "crawl a target into a complete research substrate (chunks + STEM facts + vectors + graph)",
+      "args_schema": {
+        "target": {
+          "type": "string",
+          "required": true,
+          "help": "URL or path to research"
+        },
+        "project": {
+          "type": "string",
+          "required": false,
+          "help": "slug (default: derived from target)"
+        },
+        "max_pages": {
+          "type": "int",
+          "required": false,
+          "help": "crawl budget (default 12)"
+        }
+      },
+      "effect_class": "network",
+      "approval": "none",
+      "risk": "low",
+      "requires_confirmation": false,
+      "semantics": {
+        "side_effect": "writes_state",
+        "reversible": true,
+        "idempotent": true,
+        "retry_safe": true
+      },
+      "produces": [
+        "substrate_run"
+      ],
+      "fallbacks": [],
+      "preconditions": [],
+      "preconditions_met": true,
+      "blocked_by": [],
+      "repair": [],
+      "why": "ready: crawl a target into a complete research substrate (chunks + STEM facts + vectors + graph)"
+    },
+    {
+      "kind": "ingest_file",
+      "mode": "do",
+      "modes": [
+        "do"
+      ],
+      "summary": "ingest one local file/dir into the substrate (no network fetch)",
+      "args_schema": {
+        "target": {
+          "type": "string",
+          "required": true,
+          "help": "file or directory path"
+        }
+      },
+      "effect_class": "network",
+      "approval": "none",
+      "risk": "low",
+      "requires_confirmation": false,
+      "semantics": {
+        "side_effect": "writes_state",
+        "reversible": true,
+        "idempotent": true,
+        "retry_safe": true
+      },
+      "produces": [
+        "substrate_run"
+      ],
+      "fallbacks": [],
+      "preconditions": [],
+      "preconditions_met": true,
+      "blocked_by": [],
+      "repair": [],
+      "why": "ready: ingest one local file/dir into the substrate (no network fetch)"
+    },
+    {
+      "kind": "worktree_open",
+      "mode": "do",
+      "modes": [
+        "do"
+      ],
+      "summary": "create a daemon-refereed git worktree for this session",
+      "args_schema": {},
+      "effect_class": "write",
+      "approval": "once",
+      "risk": "medium",
+      "requires_confirmation": false,
+      "semantics": {
+        "side_effect": "writes_state",
+        "reversible": true,
+        "idempotent": false,
+        "retry_safe": false
+      },
+      "produces": [
+        "worktree"
+      ],
+      "fallbacks": [],
+      "preconditions": [
+        "no_active_worktree"
+      ],
+      "preconditions_met": true,
+      "blocked_by": [],
+      "repair": [],
+      "why": "ready: create a daemon-refereed git worktree for this session"
+    },
+    {
+      "kind": "workflow",
+      "mode": "do",
+      "modes": [
+        "do"
+      ],
+      "summary": "run a typed multi-phase workflow plan",
+      "args_schema": {
+        "plan": {
+          "type": "object",
+          "required": true,
+          "help": "workflow plan"
+        }
+      },
+      "effect_class": "write",
+      "approval": "once",
+      "risk": "medium",
+      "requires_confirmation": true,
+      "semantics": {
+        "side_effect": "writes_state",
+        "reversible": false,
+        "idempotent": false,
+        "retry_safe": false
+      },
+      "produces": [],
+      "fallbacks": [],
+      "preconditions": [],
+      "preconditions_met": true,
+      "blocked_by": [],
+      "repair": [],
+      "why": "ready: run a typed multi-phase workflow plan"
+    },
+    {
+      "kind": "custom",
+      "mode": "do",
+      "modes": [
+        "do"
+      ],
+      "summary": "generic escape-hatch work item (fail-closed: treated as high-risk write)",
+      "args_schema": {
+        "payload": {
+          "type": "object",
+          "required": false,
+          "help": "free-form payload"
+        }
+      },
+      "effect_class": "write",
+      "approval": "force",
+      "risk": "high",
+      "requires_confirmation": true,
+      "semantics": {
+        "side_effect": "writes_state",
+        "reversible": false,
+        "idempotent": false,
+        "retry_safe": false
+      },
+      "produces": [],
+      "fallbacks": [],
+      "preconditions": [],
+      "preconditions_met": true,
+      "blocked_by": [],
+      "repair": [],
+      "why": "ready: generic escape-hatch work item (fail-closed: treated as high-risk write)"
+    },
+    {
+      "kind": "index_run",
+      "mode": "do",
+      "modes": [
+        "do"
+      ],
+      "summary": "register a completed substrate run into long-lived shared daemon state",
+      "args_schema": {
+        "run_id": {
+          "type": "string",
+          "required": true,
+          "help": "run to index"
+        }
+      },
+      "effect_class": "read",
+      "approval": "none",
+      "risk": "low",
+      "requires_confirmation": false,
+      "semantics": {
+        "side_effect": "writes_state",
+        "reversible": true,
+        "idempotent": true,
+        "retry_safe": true
+      },
+      "produces": [
+        "indexed_run"
+      ],
+      "fallbacks": [],
+      "preconditions": [
+        "has_unindexed_run"
+      ],
+      "preconditions_met": false,
+      "blocked_by": [
+        "has_unindexed_run"
+      ],
+      "repair": [
+        "do research_run (no unindexed run exists \u2014 produce one first)"
+      ],
+      "why": "blocked: needs has_unindexed_run"
+    },
+    {
+      "kind": "worktree_close",
+      "mode": "do",
+      "modes": [
+        "do"
+      ],
+      "summary": "close this session's active worktree and reconverge its CRDT sidecar",
+      "args_schema": {
+        "worktree_id": {
+          "type": "string",
+          "required": true,
+          "help": "worktree to close"
+        }
+      },
+      "effect_class": "write",
+      "approval": "once",
+      "risk": "medium",
+      "requires_confirmation": false,
+      "semantics": {
+        "side_effect": "writes_state",
+        "reversible": false,
+        "idempotent": true,
+        "retry_safe": true
+      },
+      "produces": [],
+      "fallbacks": [],
+      "preconditions": [
+        "has_active_worktree"
+      ],
+      "preconditions_met": false,
+      "blocked_by": [
+        "has_active_worktree"
+      ],
+      "repair": [],
+      "why": "blocked: needs has_active_worktree"
+    }
+  ],
+  "telemetry": [
+    {
+      "event_id": "evt-1a97db069e179d004d56016d3b7c3c1f",
+      "kind": "workflow_event",
+      "actor": "system",
+      "lane": "control",
+      "payload_bytes": 23,
+      "gap_ms": 6001000.0,
+      "provenance_trace": "event evt-1a97db069e179d004d56016d3b7c3c1f \u00b7 kind=workflow_event"
+    },
+    {
+      "event_id": "evt-c73e7c4e0b2f5ea250fed6d2eb1a9556",
+      "kind": "workflow_event",
+      "actor": "system",
+      "lane": "control",
+      "payload_bytes": 23,
+      "gap_ms": null,
+      "provenance_trace": "event evt-c73e7c4e0b2f5ea250fed6d2eb1a9556 \u00b7 kind=workflow_event"
+    }
+  ],
+  "entropy_history": [
+    0,
+    0
+  ],
+  "tps": 0.0,
+  "steering_dials": [],
+  "provenance": {
+    "watermark_event_id": "evt-1a97db069e179d004d56016d3b7c3c1f",
+    "store_versions": {}
+  }
+}

@@ -1,7 +1,7 @@
 // src/main.rs — lgwks-human entry point
 use std::{path::PathBuf, sync::{Arc, RwLock}};
 
-use color_eyre::{eyre::{ContextCompat, WrapErr}, Result};
+use color_eyre::{eyre::WrapErr, Result};
 use clap::Parser;
 use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
 
@@ -36,7 +36,8 @@ struct Cli {
     #[arg(short, long)]
     debug: bool,
 
-    /// Run in standalone mode without a daemon (connects to local LLMs or models.dev API)
+    /// Run without auto-managing a daemon (read-only against existing daemon state;
+    /// the CHAT pane still composes through the event bus). No separate model client.
     #[arg(long)]
     standalone: bool,
 }
@@ -57,19 +58,46 @@ async fn main() -> Result<()> {
     }
 
     // ── Repo root resolution ────────────────────────────────────────────────
-    let repo_root = if cli.standalone {
-        std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."))
-    } else if let Some(r) = cli.repo {
+    let repo_root = if let Some(r) = cli.repo {
+        r.canonicalize().unwrap_or(r)
+    } else if let Some(r) = find_repo_root() {
         r
     } else {
-        find_repo_root().context(
-            "could not find lgwks repo root. pass --repo /path/to/logicalworks- or cd into it"
-        )?
+        std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."))
     };
     tracing::info!("Using repo root: {:?}", repo_root);
 
     // ── Bridge + shared state ───────────────────────────────────────────────
     let bridge = Arc::new(DaemonBridge::new(&repo_root));
+    
+    let event_count = if bridge.db_path.exists() {
+        bridge.poll_events(0, 999999).map(|(evts, _)| evts.len()).unwrap_or(0)
+    } else {
+        0
+    };
+
+    eprintln!(
+        "lgwks-human cockpit · daemon={} · db={} · events={}",
+        bridge.read_status().status,
+        bridge.db_path.display(),
+        event_count
+    );
+
+    if !cli.standalone {
+        let payload = serde_json::json!({ "msg": "cockpit_boot" }).to_string();
+        let _ = bridge.run_daemon_write(&[
+            "ops", "daemon", "emit",
+            "--kind", "workflow_event",
+            "--lane", "control",
+            "--scope", "shared_referee",
+            "--actor", "system",
+            "--client", "system",
+            "--tenant", bridge.tenant_id.as_str(),
+            "--session-id", "system-boot",
+            "--agent-id", "lgwks-human",
+        ], &payload);
+    }
+
     let state  = Arc::new(RwLock::new(DaemonState::default()));
 
     // ── TUI setup ──────────────────────────────────────────────────────────
@@ -81,80 +109,11 @@ async fn main() -> Result<()> {
     let event_tx = tui.event_tx.clone();
 
     // ── Spawn background poll task (U-08) ───────────────────────────────────
-    if cli.standalone {
-        tracing::info!("Running in STANDALONE mode");
-        let state_clone = Arc::clone(&state);
-        tokio::spawn(async move {
-            // Seed the state with a standalone stub
-            {
-                // Poison-recovery: if any other holder panicked, recover the inner
-                // guard rather than panicking the demo poll task.
-                let mut st = state_clone.write().unwrap_or_else(|p| p.into_inner());
-                st.status.alive = true;
-                st.status.status = "standalone".to_string();
-                st.packet = bridge::ContextPacket {
-                    // `--standalone` is an explicit, daemon-less DEMO mode. The
-                    // entropy/tps/dials seeded below are SIMULATED, not measured —
-                    // `simulated: true` makes the FLIGHT screen label them as such,
-                    // so this stub can't be mistaken for the real telemetry the
-                    // Python side deliberately refuses to fabricate (A12).
-                    simulated: true,
-                    active_task: Some("Standalone Mode (demo data)".to_string()),
-                    next_steps: vec![
-                        bridge::NextStep {
-                            kind: "connect_models_dev".to_string(),
-                            summary: "Configure models.dev API token".to_string(),
-                            risk: Some("low".to_string()),
-                            approval: Some("none".to_string()),
-                            args: None,
-                            provenance: Some(serde_json::json!({
-                                "reason": "Standalone mode initialized without provider keys."
-                            })),
-                        },
-                        bridge::NextStep {
-                            kind: "init_local_llm".to_string(),
-                            summary: "Start a local model (Ollama/Llama.cpp)".to_string(),
-                            risk: Some("low".to_string()),
-                            approval: Some("none".to_string()),
-                            args: None,
-                            provenance: Some(serde_json::json!({
-                                "reason": "Optionally use local resources."
-                            })),
-                        }
-                    ],
-                    ..Default::default()
-                };
-            }
-            // Just periodically send ticks to refresh UI
-            let mut tick_count = 0;
-            loop {
-                tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
-                tick_count += 1;
-                {
-                    let mut st = state_clone.write().unwrap_or_else(|p| p.into_inner());
-                    // Generate a noisy sine wave for entropy
-                    let v = ((tick_count as f64 * 0.1).sin() * 50.0 + 50.0 + (rand::random::<f64>() * 20.0)) as u64;
-                    st.packet.entropy_history.push(v);
-                    if st.packet.entropy_history.len() > 100 {
-                        st.packet.entropy_history.remove(0);
-                    }
-                    st.packet.tps = 45.0 + (rand::random::<f32>() * 10.0);
-                    
-                    // Simulate steering dials drift
-                    let dials = vec![
-                        ("safety".to_string(), 0.8 + (rand::random::<f32>() * 0.1)),
-                        ("creativity".to_string(), 0.4 + (rand::random::<f32>() * 0.2)),
-                        ("formality".to_string(), 0.9),
-                        ("deception".to_string(), rand::random::<f32>() * 0.05),
-                    ];
-                    st.packet.steering_dials = dials;
-                }
-                let _ = event_tx.send(tui::Event::DaemonTick);
-            }
-        });
-    } else {
-        let _poll_task = spawn_poll_task(Arc::clone(&bridge), Arc::clone(&state), event_tx);
-    }
+    // The cockpit is a projection of the daemon bus — always run the live poll task so
+    // the TUI is genuinely interactive. `--standalone` only means "don't auto-manage a
+    // daemon" (it skips the boot emit above); it still reads whatever daemon state exists
+    // and the CHAT pane composes through the bus. There is no separate in-TUI model client.
+    let _poll_task = spawn_poll_task(Arc::clone(&bridge), Arc::clone(&state), event_tx);
 
     // ── App + run loop ──────────────────────────────────────────────────────
     let app = App::new(bridge, state);

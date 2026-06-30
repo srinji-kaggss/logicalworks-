@@ -26,15 +26,14 @@ pub type IO = std::io::Stdout;
 pub fn io() -> IO {
     std::io::stdout()
 }
-pub type Frame<'a> = ratatui::Frame<'a>;
 
 /// All events flowing through the TUI event loop.
 /// Tick = daemon poll cadence; Render = redraw; DaemonTick = fresh data from bridge.
 #[derive(Clone, Debug)]
 pub enum Event {
     Init,
-    Quit,
     Error,
+    /// The input stream ended (terminal/stdin closed) — the app must quit.
     Closed,
     Tick,
     Render,
@@ -43,7 +42,9 @@ pub enum Event {
     Paste(String),
     Key(KeyEvent),
     Mouse(MouseEvent),
-    Resize(u16, u16),
+    /// Terminal was resized. Carries no payload: ratatui re-queries the backend
+    /// size on every `draw`, so the redraw at the top of the run loop is the fix.
+    Resize,
     /// Fired every 250ms from the bridge poll task — carries new daemon events
     DaemonTick,
 }
@@ -130,13 +131,16 @@ impl Tui {
                                     }
                                 }
                                 CrosstermEvent::Mouse(m) => { last_mouse = Some(m); }
-                                CrosstermEvent::Resize(x, y) => { let _ = _tx.send(Event::Resize(x, y)); }
+                                CrosstermEvent::Resize(_, _) => { let _ = _tx.send(Event::Resize); }
                                 CrosstermEvent::FocusLost => { let _ = _tx.send(Event::FocusLost); }
                                 CrosstermEvent::FocusGained => { let _ = _tx.send(Event::FocusGained); }
                                 CrosstermEvent::Paste(s) => { let _ = _tx.send(Event::Paste(s)); }
                             }
                             Some(Err(_)) => { let _ = _tx.send(Event::Error); }
-                            None => {}
+                            // Input stream ended (terminal/stdin closed). Without this
+                            // the run loop would spin forever on ticks, never exiting on
+                            // disconnect. Signal Closed so the app quits cleanly.
+                            None => { let _ = _tx.send(Event::Closed); break; }
                         }
                     }
                     _ = tick_delay => { let _ = _tx.send(Event::Tick); }
@@ -169,8 +173,12 @@ impl Tui {
             crossterm::execute!(io(), SetTitle(t))?;
         }
         crossterm::execute!(io(), EnterAlternateScreen, cursor::Hide)?;
-        crossterm::execute!(io(), EnableMouseCapture)?;
-        crossterm::execute!(io(), EnableBracketedPaste)?;
+        if self.mouse {
+            crossterm::execute!(io(), EnableMouseCapture)?;
+        }
+        if self.paste {
+            crossterm::execute!(io(), EnableBracketedPaste)?;
+        }
         self.start();
         Ok(())
     }

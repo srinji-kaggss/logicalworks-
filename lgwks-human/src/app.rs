@@ -3,7 +3,7 @@
 use std::collections::HashMap;
 use std::sync::{Arc, RwLock};
 
-use color_eyre::{eyre::eyre, Result};
+use color_eyre::Result;
 use crossterm::event::KeyCode;
 use ratatui::{
     Frame,
@@ -16,11 +16,14 @@ use ratatui::{
 use crate::bridge::{DaemonBridge, DaemonState, palette::*};
 use crate::screens::{Screen, ScreenCmd, ScreenId};
 use crate::screens::{
+    chat::ChatScreen,
     flight::FlightScreen,
     runs::RunsScreen,
     queue::QueueScreen,
     wire::WireScreen,
 };
+use crate::ui::command_palette::{CommandPalette, PaletteItem, PaletteOutcome};
+use crate::ui::help_overlay::HelpOverlay;
 use crate::tui::{Event, Tui};
 
 pub struct App {
@@ -32,6 +35,32 @@ pub struct App {
     status_msg:      Option<String>,
     status_ttl:      u8,    // clear status_msg after N ticks
     confirm_overlay: crate::ui::confirm_overlay::ConfirmOverlay,
+    palette:         CommandPalette,
+    help:            HelpOverlay,
+}
+
+/// The static command-palette catalogue: every screen jump + the global actions.
+/// Kept honest — each entry maps to a real outcome the app already performs.
+fn palette_items() -> Vec<PaletteItem> {
+    let mut items: Vec<PaletteItem> = ScreenId::all()
+        .iter()
+        .map(|id| PaletteItem {
+            label: format!("Go: {}", id.label().split('·').last().unwrap_or(id.label())),
+            hint:  "switch pane".to_string(),
+            outcome: PaletteOutcome::Navigate(*id),
+        })
+        .collect();
+    items.push(PaletteItem {
+        label: "Help: Keybindings".to_string(),
+        hint:  "F1 / ?".to_string(),
+        outcome: PaletteOutcome::Help,
+    });
+    items.push(PaletteItem {
+        label: "Quit".to_string(),
+        hint:  "Ctrl-Q".to_string(),
+        outcome: PaletteOutcome::Quit,
+    });
+    items
 }
 
 impl App {
@@ -41,6 +70,7 @@ impl App {
         screens.insert(ScreenId::Runs,   Box::new(RunsScreen::new()));
         screens.insert(ScreenId::Queue,  Box::new(QueueScreen::new()));
         screens.insert(ScreenId::Wire,   Box::new(WireScreen::new()));
+        screens.insert(ScreenId::Chat,   Box::new(ChatScreen::new()));
 
         Self {
             should_quit: false,
@@ -51,6 +81,8 @@ impl App {
             status_msg: None,
             status_ttl: 0,
             confirm_overlay: crate::ui::confirm_overlay::ConfirmOverlay::new(),
+            palette: CommandPalette::new(palette_items()),
+            help: HelpOverlay::new(),
         }
     }
 
@@ -63,6 +95,20 @@ impl App {
             return;
         }
 
+        // Keymap overlay: modal, eats every event while open.
+        if self.help.active {
+            self.help.handle_event(&event);
+            return;
+        }
+
+        // Command palette: modal. Resolve its outcome into an app action.
+        if self.palette.active {
+            if let Some(outcome) = self.palette.handle_event(&event) {
+                self.apply_palette_outcome(outcome);
+            }
+            return;
+        }
+
         match &event {
             // ── Global key bindings ──────────────────────────────────────────
             Event::Key(key) => {
@@ -71,10 +117,18 @@ impl App {
                         self.should_quit = true;
                         return;
                     }
+                    // Command palette (IDE Ctrl-P / Cmd-P): fuzzy-find any action or pane.
+                    KeyCode::Char('p') if key.modifiers.contains(crossterm::event::KeyModifiers::CONTROL) => {
+                        self.palette.toggle();
+                        return;
+                    }
+                    // Keymap reference (F1 — never a typed char, so it can't clash with input).
+                    KeyCode::F(1) => { self.help.toggle(); return; }
                     // Tab switching
                     KeyCode::Char('f') if key.modifiers.contains(crossterm::event::KeyModifiers::CONTROL) => { self.active_screen = ScreenId::Flight; return; }
                     KeyCode::Char('r') if key.modifiers.contains(crossterm::event::KeyModifiers::CONTROL) => { self.active_screen = ScreenId::Runs;   return; }
                     KeyCode::Char('w') if key.modifiers.contains(crossterm::event::KeyModifiers::CONTROL) => { self.active_screen = ScreenId::Wire;   return; }
+                    KeyCode::Char('t') if key.modifiers.contains(crossterm::event::KeyModifiers::CONTROL) => { self.active_screen = ScreenId::Chat;   return; }
                     KeyCode::Tab | KeyCode::Right => {
                         let all = ScreenId::all();
                         if let Some(pos) = all.iter().position(|id| *id == self.active_screen) {
@@ -128,7 +182,8 @@ impl App {
                 }
                 return;
             }
-            Event::Quit => { self.should_quit = true; return; }
+            // Terminal/stdin closed (emitted by the tui poll task on stream end).
+            Event::Closed => { self.should_quit = true; return; }
             _ => {}
         }
 
@@ -148,8 +203,6 @@ impl App {
     fn execute_cmd(&mut self, cmd: ScreenCmd) {
         match cmd {
             ScreenCmd::None => {}
-            ScreenCmd::Navigate(id) => { self.active_screen = id; }
-            ScreenCmd::Quit => { self.should_quit = true; }
             ScreenCmd::EnqueueWork { kind, payload } => {
                 let session_id = self.human_session_id();
                 let payload_json = serde_json::to_string(&payload).unwrap_or_default();
@@ -169,6 +222,16 @@ impl App {
             ScreenCmd::Confirm { prompt, on_confirm } => {
                 self.confirm_overlay.show(prompt, on_confirm);
             }
+        }
+    }
+
+    /// Resolve a command-palette selection into a concrete app action.
+    fn apply_palette_outcome(&mut self, outcome: PaletteOutcome) {
+        match outcome {
+            PaletteOutcome::Navigate(id) => self.active_screen = id,
+            PaletteOutcome::Help => self.help.active = true,
+            PaletteOutcome::Quit => self.should_quit = true,
+            PaletteOutcome::None => {}
         }
     }
 
@@ -206,6 +269,9 @@ impl App {
         self.render_screen(frame, chunks[1]);
         self.render_status_bar(frame, chunks[2]);
 
+        // Overlays paint last (top of the z-order).
+        self.palette.render(frame, area);
+        self.help.render(frame, area);
         self.confirm_overlay.render(frame, area);
     }
 
@@ -260,7 +326,7 @@ impl App {
             Span::styled(format!("  {}", msg), Style::default().fg(AMBER))
         } else {
             Span::styled(
-                format!("  {} events · ^Q quit · ^F/^R/^W switch", state_guard.events.len()),
+                format!("  {} events · ^P palette · F1 help · Tab switch · ^Q quit", state_guard.events.len()),
                 Style::default().fg(MUTED),
             )
         };
