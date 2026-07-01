@@ -43,7 +43,6 @@ REPO = Path(__file__).resolve().parent.parent
 _DEBT_REASON = "pre-existing: live callers but no test imports it yet; backfill tracked in #349"
 EXCLUDED = {m: _DEBT_REASON for m in (
     "lgwks_do",
-    "lgwks_fabric_projection",
     "lgwks_multimodal",
     "lgwks_project_deploy",
     "lgwks_project_review",
