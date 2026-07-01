@@ -52,7 +52,6 @@ EXCLUDED = {m: _DEBT_REASON for m in (
     "lgwks_phase",
     "lgwks_proc",
     "lgwks_project_deploy",
-    "lgwks_project_plan",
     "lgwks_project_review",
     "lgwks_redact",
     "lgwks_search_engine",
