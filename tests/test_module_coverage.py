@@ -60,7 +60,6 @@ EXCLUDED = {m: _DEBT_REASON for m in (
     "lgwks_substrate_crawl",
     "lgwks_substrate_run",
     "lgwks_substrate_vector",
-    "lgwks_ui",
 )}
 
 # ── Source file collector (mirrors test_primitive_regrowth.py) ──────────────────
