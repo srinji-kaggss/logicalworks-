@@ -150,5 +150,125 @@ class TestUnwrap(unittest.TestCase):
         assert search._unwrap("https://example.com/path") == "https://example.com/path"
 
 
+class TestEmptyResultContract(unittest.TestCase):
+    """[] from search()/sweep() means 'no usable results from attempted providers', NOT 'no evidence
+    exists'. Every empty result must carry a provider_attempt_trace explaining why (issue: harden the
+    empty-result contract)."""
+
+    def test_search_empty_carries_provider_attempt_trace(self):
+        # All providers fail/return nothing -> search() still returns [], but last_search_trace()
+        # must explain which providers were attempted and why each yielded nothing.
+        orig = search._PROVIDERS
+        search._PROVIDERS = [
+            ("cli", lambda q, k: []),
+            ("open", lambda q, k: []),
+        ]
+        try:
+            out = search.search("no such evidence anywhere", k=3)
+            trace = search.last_search_trace()
+        finally:
+            search._PROVIDERS = orig
+        self.assertEqual(out, [])
+        self.assertTrue(trace, "empty search() result must carry a non-empty provider_attempt_trace")
+        self.assertEqual({t["provider"] for t in trace}, {"cli", "open"})
+        for entry in trace:
+            self.assertTrue(entry["attempted"])
+            self.assertTrue(entry["error_or_reason"], f"{entry['provider']} must explain why it yielded nothing")
+
+    def test_search_trace_records_provider_exceptions_not_just_empties(self):
+        # A provider that raises must still appear in the trace (never silently vanish).
+        def boom(q, k):
+            raise RuntimeError("provider transport failure")
+        orig = search._PROVIDERS
+        search._PROVIDERS = [("cli", boom), ("open", lambda q, k: [])]
+        try:
+            out = search.search("anything", k=3)
+            trace = search.last_search_trace()
+        finally:
+            search._PROVIDERS = orig
+        self.assertEqual(out, [])
+        cli_entry = next(t for t in trace if t["provider"] == "cli")
+        self.assertIn("RuntimeError", cli_entry["error_or_reason"])
+        self.assertIn("provider transport failure", cli_entry["error_or_reason"])
+
+    def test_search_nonempty_result_still_populates_trace(self):
+        # The trace contract holds even on the happy path — never silently stale.
+        hit = {"title": "Found", "url": "https://example.com/x", "snippet": "", "via": "open"}
+        orig = search._PROVIDERS
+        search._PROVIDERS = [("cli", lambda q, k: []), ("open", lambda q, k: [hit])]
+        try:
+            out = search.search("Canada Life", k=3)
+            trace = search.last_search_trace()
+        finally:
+            search._PROVIDERS = orig
+        self.assertEqual(len(out), 1)
+        self.assertEqual(len(trace), 2)
+        self.assertEqual(trace[0]["error_or_reason"], "returned no results")
+        self.assertEqual(trace[1]["error_or_reason"], "")  # the winning provider
+
+    def test_sweep_empty_carries_provider_attempt_trace(self):
+        # When every arm's underlying providers fail/return nothing, sweep() must still report
+        # has_evidence=False AND a non-empty provider_attempt_trace naming every empty arm.
+        orig_providers = search._PROVIDERS
+        orig_scholar = search.scholar
+        search._PROVIDERS = [("cli", lambda q, k: []), ("open", lambda q, k: [])]
+        search.scholar = lambda q, k=6: []
+        try:
+            result = search.sweep("no evidence query", k_per_arm=2)
+        finally:
+            search._PROVIDERS = orig_providers
+            search.scholar = orig_scholar
+        self.assertFalse(result["has_evidence"])
+        self.assertEqual(result["results"], [])
+        self.assertTrue(result.get("arms_empty"), "every arm must be reported empty")
+        trace = result.get("provider_attempt_trace")
+        self.assertTrue(trace, "sweep() with no evidence must carry a non-empty provider_attempt_trace")
+        traced_arms = {entry["arm"] for entry in trace}
+        self.assertEqual(traced_arms, set(result["arms_empty"]))
+        for entry in trace:
+            self.assertIn("provider", entry)
+            self.assertTrue(entry.get("error_or_reason"), f"arm {entry['arm']} trace entry missing a reason")
+
+    def test_sweep_does_not_change_existing_keys_or_types(self):
+        # Additive-only contract: existing consumers (lgwks_search_engine.resolve_fact) read
+        # has_evidence / results / arms_hit / arms_empty as before — those must be unaffected.
+        orig_providers = search._PROVIDERS
+        orig_scholar = search.scholar
+        hit = {"title": "Found", "url": "https://example.com/x", "snippet": "", "via": "open"}
+        search._PROVIDERS = [("cli", lambda q, k: []), ("open", lambda q, k: [hit])]
+        search.scholar = lambda q, k=6: []
+        try:
+            result = search.sweep("Canada Life", k_per_arm=2)
+        finally:
+            search._PROVIDERS = orig_providers
+            search.scholar = orig_scholar
+        self.assertIsInstance(result["results"], list)
+        self.assertIsInstance(result["arms_hit"], dict)
+        self.assertIsInstance(result["arms_empty"], list)
+        self.assertIsInstance(result["has_evidence"], bool)
+        self.assertTrue(result["has_evidence"])
+        self.assertIsInstance(result["provider_attempt_trace"], list)  # new key, additive only
+
+    def test_research_queue_propagates_provider_attempt_trace_per_subquery(self):
+        # The temporal multi-subquery path must not drop the trace the single-sweep path carries.
+        orig_sweep = search.sweep
+        def fake_sweep(query, k_per_arm=4):
+            return {
+                "query": query, "results": [], "arms_hit": {"general": 0},
+                "arms_empty": ["general"], "has_evidence": False,
+                "provider_attempt_trace": [
+                    {"arm": "general", "provider": "open", "attempted": True,
+                     "error_or_reason": "returned no results"},
+                ],
+            }
+        search.sweep = fake_sweep
+        try:
+            pack = search.research_queue("Canada Life annual reports and MD&A (2022-2024)")
+        finally:
+            search.sweep = orig_sweep
+        self.assertTrue(pack["provider_attempt_trace"], "multi-subquery path must not drop the trace")
+        self.assertTrue(all("subquery" in e for e in pack["provider_attempt_trace"]))
+
+
 if __name__ == "__main__":
     unittest.main()

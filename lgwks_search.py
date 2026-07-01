@@ -15,6 +15,10 @@ Degrade chain is honest: a free HTTP search floor (curl) is primary; if curl/crw
 blocked we return [] and say so — never fabricate a result. Provider seam: any keyed backend plugs
 in behind the same contract without changing callers (the engine model, SPEC §2). This codebase
 ships no external/metered search dependency.
+
+EMPTY-RESULT CONTRACT: [] means no usable results from attempted providers. [] does NOT mean the
+web/codebase contains no evidence. Every empty result carries a provider_attempt_trace — see
+last_search_trace() for search(), or the "provider_attempt_trace" key for sweep()/research_queue().
 """
 
 from __future__ import annotations
@@ -265,6 +269,25 @@ if os.environ.get("LGWKS_SEARCH_NO_RENDERED") != "1":
     _PROVIDERS.append(("rendered", _rendered))
 
 
+# search() returning [] is ambiguous on its own — see the module docstring's empty-result contract.
+# _SEARCH_TRACE is a side-channel (NOT part of the list return, so it can never break a caller that
+# does len()/indexing/iteration on search()'s result): a record of which providers were attempted
+# and why each yielded nothing, refreshed on every search() call. THREAD-LOCAL because sweep() runs
+# several search() calls concurrently (one per arm) — a single shared list would let one arm's
+# trace clobber another's between the search() return and the trace read (a real race, not
+# hypothetical: sweep()'s ThreadPoolExecutor fires _ARMS in parallel). last_search_trace() is the
+# read accessor for the calling thread's most recent search() call.
+_SEARCH_TRACE = threading.local()
+
+
+def last_search_trace() -> list[dict]:
+    """[{provider, attempted, error_or_reason}] for the most recent search() call made by the
+    CURRENT thread. Populated even when search() found a result on the first provider
+    (attempted=True, error_or_reason="") so the trace is never silently stale; always non-empty
+    when search() returned []."""
+    return list(getattr(_SEARCH_TRACE, "entries", []))
+
+
 def active_provider() -> str:
     """The provider tried FIRST given what's present — the HONEST label (liveness still decided at call
     time: an empty result falls through open→rendered). Not the capability resolver's presence guess,
@@ -367,12 +390,25 @@ def scholar(query: str, k: int = 6) -> list[dict]:
 
 def search(query: str, k: int = 6) -> list[dict]:
     """Best present provider, FALLING THROUGH on empty (robust to broken/absent providers), then
-    deduped-by-URL and relevance-ranked against the query. Reports which provider (`via`) won."""
+    deduped-by-URL and relevance-ranked against the query. Reports which provider (`via`) won.
+
+    NOTE on []: an empty return means no usable results from the providers attempted THIS call —
+    it is not a claim that no evidence exists anywhere. Call last_search_trace() right after for
+    the per-provider attempt record (which providers ran, and why each yielded nothing)."""
     raw: list[dict] = []
+    trace: list[dict] = []
     for _id, fn in _PROVIDERS:
-        raw = fn(query, k)
+        try:
+            raw = fn(query, k)
+        except Exception as exc:  # a provider must never silently vanish from the trace
+            trace.append({"provider": _id, "attempted": True, "error_or_reason": f"raised {exc!r}"})
+            raw = []
+            continue
         if raw:
+            trace.append({"provider": _id, "attempted": True, "error_or_reason": ""})
             break
+        trace.append({"provider": _id, "attempted": True, "error_or_reason": "returned no results"})
+    _SEARCH_TRACE.entries = trace
     terms = [t for t in re.findall(r"[a-z0-9]+", query.lower()) if len(t) > 2]
     seen, deduped = set(), []
     for r in raw:
@@ -401,19 +437,28 @@ _SCHOLAR_ARMS = {
 
 def sweep(query: str, k_per_arm: int = 4) -> dict:
     """Blind multi-modal sweep → merged, deduped-by-URL results + which arms found each. The completeness
-    surface: every arm runs, and we report which arms returned nothing (no silent coverage gap)."""
+    surface: every arm runs, and we report which arms returned nothing (no silent coverage gap).
+
+    NOTE on has_evidence=False / results=[]: that means no usable results from the arms attempted
+    THIS call, not that no evidence exists. provider_attempt_trace below names every arm tried and,
+    for empty arms, the per-provider reason (sourced from search()'s last_search_trace())."""
     def run(name: str) -> tuple[str, list[dict]]:
-        return name, search(_ARMS[name](query), k=k_per_arm)
+        rows = search(_ARMS[name](query), k=k_per_arm)
+        return name, rows, list(last_search_trace())
 
     def run_scholar(name: str) -> tuple[str, list[dict]]:
-        return name, scholar(_SCHOLAR_ARMS[name](query), k=k_per_arm)
+        rows = scholar(_SCHOLAR_ARMS[name](query), k=k_per_arm)
+        reason = "" if rows else "returned no results"
+        return name, rows, [{"provider": "scholar", "attempted": True, "error_or_reason": reason}]
 
     found: dict[str, dict] = {}
     arms_hit: dict[str, int] = {}
+    arm_traces: dict[str, list[dict]] = {}
     all_runs = [(n, run) for n in _ARMS] + [(n, run_scholar) for n in _SCHOLAR_ARMS]
     with concurrent.futures.ThreadPoolExecutor(max_workers=len(all_runs)) as ex:
-        for name, results in ex.map(lambda item: item[1](item[0]), all_runs):
+        for name, results, provider_trace in ex.map(lambda item: item[1](item[0]), all_runs):
             arms_hit[name] = len(results)
+            arm_traces[name] = provider_trace
             for r in results:
                 key = r["url"].split("?")[0].rstrip("/")
                 if key in found:
@@ -421,9 +466,14 @@ def sweep(query: str, k_per_arm: int = 4) -> dict:
                 else:
                     found[key] = {**r, "arms": [name]}
     empty = [n for n, c in arms_hit.items() if c == 0]
+    provider_attempt_trace = [
+        {"arm": arm, **entry} for arm in empty for entry in (arm_traces.get(arm) or
+            [{"provider": "unknown", "attempted": True, "error_or_reason": "no trace recorded"}])
+    ]
     return {"query": query, "results": list(found.values()),
             "arms_hit": arms_hit, "arms_empty": empty,
-            "has_evidence": bool(found)}
+            "has_evidence": bool(found),
+            "provider_attempt_trace": provider_attempt_trace}
 
 
 def research_queue(query: str, k_per_arm: int = 4) -> dict:
@@ -438,6 +488,7 @@ def research_queue(query: str, k_per_arm: int = 4) -> dict:
     found: dict[str, dict] = {}
     arms_hit: dict[str, int] = {}
     arms_empty: set[str] = set()
+    provider_attempt_trace: list[dict] = []
     for subq in subqueries:
         year_match = _YEAR.search(subq)
         qyear = int(year_match.group(1)) if year_match else 0
@@ -445,6 +496,8 @@ def research_queue(query: str, k_per_arm: int = 4) -> dict:
         for arm, count in (pack.get("arms_hit") or {}).items():
             arms_hit[arm] = arms_hit.get(arm, 0) + int(count)
         arms_empty.update(pack.get("arms_empty") or [])
+        for entry in pack.get("provider_attempt_trace") or []:
+            provider_attempt_trace.append({"subquery": subq, **entry})
         for r in pack.get("results", []):
             key = r["url"].split("?")[0].rstrip("/")
             enriched = {**r, "query": subq, "query_year": qyear}
@@ -463,6 +516,7 @@ def research_queue(query: str, k_per_arm: int = 4) -> dict:
         "arms_empty": sorted(arms_empty),
         "has_evidence": bool(ordered),
         "subqueries": subqueries,
+        "provider_attempt_trace": provider_attempt_trace,
     }
 
 
