@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import argparse
 import ast
+import re
 import sys
 from pathlib import Path
 from typing import Any
@@ -105,6 +106,23 @@ class RefactorEngine:
                 self._annotate_args(node)
                 return self.generic_visit(node)
 
+            @staticmethod
+            def _is_safe_type_node(n: ast.AST) -> bool:
+                # Allow: int, str, List[int], dict[str, Any], int | str
+                if isinstance(n, ast.Name): return True
+                if isinstance(n, ast.Attribute): return AnnotationTransformer._is_safe_type_node(n.value)
+                if isinstance(n, ast.Subscript):
+                    return AnnotationTransformer._is_safe_type_node(n.value) and AnnotationTransformer._is_safe_type_node(n.slice)
+                if isinstance(n, ast.Constant) and n.value is None: return True
+                if isinstance(n, ast.Constant) and isinstance(n.value, str): return True
+                if isinstance(n, ast.BinOp) and isinstance(n.op, ast.BitOr):
+                    return AnnotationTransformer._is_safe_type_node(n.left) and AnnotationTransformer._is_safe_type_node(n.right)
+                if isinstance(n, ast.Tuple):
+                    return all(AnnotationTransformer._is_safe_type_node(elt) for elt in n.elts)
+                if isinstance(n, ast.List):
+                    return all(AnnotationTransformer._is_safe_type_node(elt) for elt in n.elts)
+                return False
+
             def _annotate_args(self, node: ast.FunctionDef | ast.AsyncFunctionDef):
                 for argument in node.args.args:
                     if argument.arg in type_map and argument.annotation is None:
@@ -112,24 +130,8 @@ class RefactorEngine:
                         try:
                             # HARDEN: Validate type_str AST to prevent code execution (H12)
                             parsed_expr = ast.parse(type_str, mode="eval").body
-                            
-                            def _is_safe_type_node(n: ast.AST) -> bool:
-                                # Allow: int, str, List[int], dict[str, Any], int | str
-                                if isinstance(n, ast.Name): return True
-                                if isinstance(n, ast.Attribute): return _is_safe_type_node(n.value)
-                                if isinstance(n, ast.Subscript):
-                                    return _is_safe_type_node(n.value) and _is_safe_type_node(n.slice)
-                                if isinstance(n, ast.Constant) and n.value is None: return True
-                                if isinstance(n, ast.Constant) and isinstance(n.value, str): return True
-                                if isinstance(n, ast.BinOp) and isinstance(n.op, ast.BitOr):
-                                    return _is_safe_type_node(n.left) and _is_safe_type_node(n.right)
-                                if isinstance(n, ast.Tuple):
-                                    return all(_is_safe_type_node(elt) for n in n.elts)
-                                if isinstance(n, ast.List):
-                                    return all(_is_safe_type_node(elt) for n in n.elts)
-                                return False
 
-                            if not _is_safe_type_node(parsed_expr):
+                            if not self._is_safe_type_node(parsed_expr):
                                 raise ValueError(f"dangerous type annotation: {type_str}")
 
                             argument.annotation = parsed_expr
@@ -140,11 +142,25 @@ class RefactorEngine:
                                 "line": getattr(argument, "lineno", node.lineno)
                             })
                         except Exception:
-                            # Fallback to simple name node (which is safe as it's just a string name)
-                            # or just skip if it was marked dangerous
+                            # Fallback: only reached when the first ast.parse raised (malformed
+                            # syntax) or _is_safe_type_node rejected the parsed expression as
+                            # dangerous. Never build ast.Name(id=type_str) here -- type_str may be
+                            # a composite annotation like "list[str]" or "dict[str, Any]", which is
+                            # not a valid identifier and would silently produce a malformed AST.
+                            # Re-parse defensively and re-validate with the same safety check;
+                            # only accept a real expression node, and only if it is provably safe.
                             if not re.fullmatch(r"[a-zA-Z0-9_\[\],\. |]+", type_str):
-                                continue # too risky to even try Name(id=...)
-                            argument.annotation = ast.Name(id=type_str, ctx=ast.Load())
+                                continue  # too risky to even try parsing again
+
+                            try:
+                                fallback_expr = ast.parse(type_str, mode="eval").body
+                            except SyntaxError:
+                                continue
+
+                            if not self._is_safe_type_node(fallback_expr):
+                                continue  # confirmed dangerous (or unparseable) -- skip entirely
+
+                            argument.annotation = fallback_expr
 
         AnnotationTransformer(self).visit(self.tree)
         ast.fix_missing_locations(self.tree)
